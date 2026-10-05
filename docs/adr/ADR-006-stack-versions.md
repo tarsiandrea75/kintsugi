@@ -31,7 +31,7 @@ Runtime defaults in `agent/src/main/resources/application.yaml`:
 - `spring.ai.ollama.chat.num-ctx: 8192`. The default 2048 is too small once tool schemas are included.
 - Properties use the Spring AI 2.0 form `spring.ai.ollama.chat.*`; the `chat.options.*` form is deprecated.
 
-Model: `granite4.1:8b` is in use, pending change B (the tool-calling smoke test). The final choice will be recorded in ADR-003.
+Model: `granite4.1:8b`. The choice was made after the tool-calling smoke test and is recorded in [ADR-003](ADR-003-local-models-default.md).
 
 ## Alternatives considered
 

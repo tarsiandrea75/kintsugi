@@ -40,12 +40,12 @@ The repo MUST contain `CLAUDE.md`, `README.md`, and `.gitignore` at the root.
 
 ### Requirement: Setup checklist
 
-`docs/setup.md` MUST list Windows 11 verify/install steps for Java 21, Maven, Docker, Ollama, and Python 3, and MUST name model `granite4.1:8b` with alternatives `qwen3:8b` and `qwen3.5:9b`, marked pending smoke test.
+`docs/setup.md` MUST list Windows 11 verify/install steps for Java 21, Maven, Docker, Ollama, and Python 3, and MUST name `granite4.1:8b` as the chosen model per ADR-003, with `qwen3:8b` as the documented alternative.
 
 #### Scenario: Tools and model listed
 - GIVEN `docs/setup.md` exists
 - WHEN it is read
-- THEN all five tools, the primary model, both alternatives, and the pending status appear
+- THEN all five tools, the chosen model, the documented alternative, and a link to ADR-003 appear
 
 ### Requirement: ADR-001
 

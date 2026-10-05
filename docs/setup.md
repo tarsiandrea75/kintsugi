@@ -30,15 +30,24 @@ Hardware: laptop with 32 GB RAM and no GPU, so quantized ~8B models.
 
 | Role | Model | Notes |
 |------|-------|-------|
-| Recommended | `granite4.1:8b` | Built for tool calling and RAG, 128K context, Apache 2.0 |
-| Alternative | `qwen3:8b` | Well documented with Spring AI; thinking mode is slow on CPU unless disabled |
-| Alternative | `qwen3.5:9b` | Newer and larger; less proven for tool calling |
+| Default | `granite4.1:8b` | Built for tool calling and RAG, 128K context, Apache 2.0 |
+| Alternative | `qwen3:8b` | Practically tied in the smoke test; needs thinking disabled to stay fast on CPU |
+| Not chosen | `qwen3.5:9b` | Passed the smoke test but more than twice as slow |
 
-Status: **pending smoke test**. The choice is confirmed only after running about 10 tool-calling prompts against each candidate.
+Status: **chosen**. All three candidates passed the 10-prompt tool-calling smoke test; see [ADR-003](adr/ADR-003-local-models-default.md) and the [reports](evidence/smoke-test/).
 
-- [ ] Pull the recommended model: `ollama pull granite4.1:8b`
+- [ ] Pull the default model: `ollama pull granite4.1:8b`
 - [ ] Pull alternatives when testing: `ollama pull qwen3:8b`, `ollama pull qwen3.5:9b`
-- [ ] Run the ~10-prompt tool-calling smoke test and record the result
+- [x] Run the 10-prompt tool-calling smoke test and record the result
+
+Smoke test for one model (from `agent/`):
+
+```bash
+./mvnw test -Plive -Dtest=LiveToolCallingSmokeTest -Dkintsugi.model=<model>
+```
+
+- qwen models also need `-Dspring.ai.ollama.chat.think=false`.
+- The report is written to `agent/target/smoke-test/`.
 
 ## Build and run
 
@@ -47,7 +56,7 @@ Run from `agent/` (use `mvnw.cmd` on PowerShell):
 | Goal | Command | Needs |
 |------|---------|-------|
 | Unit tests | `./mvnw test` | Nothing (offline, no Ollama) |
-| Live test | `./mvnw test -Plive` | Ollama running with `granite4.1:8b` (about 30–45 s) |
+| Live tests | `./mvnw test -Plive` | Ollama running with `granite4.1:8b`; includes the smoke test, about 3–7 min per model |
 | Demo | `./mvnw spring-boot:run -Dspring-boot.run.profiles=demo` | Ollama running with `granite4.1:8b` |
 
 If Ollama is down, the demo prints `Ollama not reachable at <url>. Start it with: ollama serve` and exits with code 1, without a stack trace.
