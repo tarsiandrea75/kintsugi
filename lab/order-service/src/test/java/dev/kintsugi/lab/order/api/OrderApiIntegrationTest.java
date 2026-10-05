@@ -12,6 +12,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -87,6 +89,43 @@ class OrderApiIntegrationTest {
 			.andExpect(status().isBadRequest());
 
 		assertThat(countOrders()).isEqualTo(before);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {
+			"""
+			{"customerId": "\u2003", "items": [{"sku": "SKU-1", "quantity": 1}]}""",
+			"""
+			{"customerId": "\u3000", "items": [{"sku": "SKU-1", "quantity": 1}]}""",
+			"""
+			{"customerId": "customer-e2e", "items": [{"sku": "\u2003", "quantity": 1}]}""",
+			"""
+			{"customerId": "customer-e2e", "items": [{"sku": "\u3000", "quantity": 1}]}""" })
+	void unicodeWhitespaceIdIsRejectedAndNotStored(String body) throws Exception {
+		long before = countOrders();
+
+		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body))
+			.andExpect(status().isBadRequest());
+
+		assertThat(countOrders()).isEqualTo(before);
+	}
+
+	@Test
+	void idsAtMaxLengthFitTheColumns() throws Exception {
+		String customerId = "c".repeat(64);
+		String sku = "s".repeat(64);
+
+		String body = mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content("""
+				{"customerId": "%s", "items": [{"sku": "%s", "quantity": 1}]}
+				""".formatted(customerId, sku)))
+			.andExpect(status().isCreated())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		UUID id = UUID.fromString(JsonPath.read(body, "$.id"));
+		assertThat(jdbc.sql("select customer_id from orders where id = ?").param(id).query(String.class).single())
+			.isEqualTo(customerId);
 	}
 
 	@Test

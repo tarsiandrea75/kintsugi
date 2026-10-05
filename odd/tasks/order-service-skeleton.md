@@ -37,6 +37,7 @@ PostgreSQL 18.6 (`postgres:18.6`), Testcontainers 2.0.5 (`testcontainers-postgre
 - The domain rejects an invalid state transition, for example `PAID` → `PAYMENT_PENDING`.
 - The Flyway migration creates the schema; the tests run against a real PostgreSQL 18.6 through Testcontainers.
 - `./mvnw test` passes from `lab/order-service`.
+- (T6) Unicode-whitespace-only `customerId`/`sku`, more than 64 characters, more than 100 items, a null quantity or item, malformed JSON, or a non-UUID path id return 400 and nothing is stored. A stale save throws `OptimisticLockingFailureException`; `updatedAt` is persisted on a transition.
 
 ## Delivery
 
@@ -52,6 +53,7 @@ PostgreSQL 18.6 (`postgres:18.6`), Testcontainers 2.0.5 (`testcontainers-postgre
 - [x] **T3 — Domain and persistence.** `Order`, `OrderStatus` with transition rules, the Flyway `V1__create_orders.sql`, and the repository. Unit tests for transitions; repository tests with Testcontainers (RED first). Route: delegated writer.
 - [x] **T4 — REST API.** `POST /orders` and `GET /orders/{id}` with validation and errors. MockMvc tests plus one end-to-end test with Testcontainers (RED first). Route: delegated writer.
 - [x] **T5 — Docs.** `docs/setup.md`: how to build and test order-service. Route: with T4.
+- [x] **T6 — Hardening from review findings (accepted 2026-10-05).** (1) One "blank" rule shared by API and domain, so Unicode-whitespace-only `customerId`/`sku` is a 400, not a 500. (2) Tests for null quantity, a null item element, malformed JSON, and a non-UUID path id (all 400). (3) An optimistic-locking test: saving a stale copy throws `OptimisticLockingFailureException`. (4) Size limits: `customerId` and `sku` at most 64 characters, at most 100 items; `VARCHAR(64)` columns (V1 edited in place, because no environment has applied it yet). (5) A test that the new `updatedAt` is persisted after a transition. Update the living spec. Route: delegated writer. Branch: `feat/order-service-skeleton-02-api`.
 
 ## Checks
 
@@ -64,7 +66,9 @@ PostgreSQL 18.6 (`postgres:18.6`), Testcontainers 2.0.5 (`testcontainers-postgre
 - 2026-10-05: T2 done: Spring Initializr (Boot 4.1.1, ids data-jdbc, flyway, postgresql, web, validation, testcontainers, actuator). Only deviation: Testcontainers image pinned from `postgres:latest` to `postgres:18.6`. The wrapper matches `agent/` (3.3.4, Maven 3.9.16). Testcontainers 2.x package: `org.testcontainers.postgresql.PostgreSQLContainer`, not generic (closes the ADR-007 open point). `./mvnw test`: 1 test, 0 failures, against a real PostgreSQL 18.6. No meaningful RED for generated scaffolding.
 - 2026-10-05: T3 done by the delegated writer (tests first). RED: compile failure, then 15 assertion failures in `OrderTest` from a deliberately permissive transition switch. GREEN after the fix. Writer decisions kept: Spring Data JDBC annotations on the domain (needs a `version` column, because a domain-assigned UUID would otherwise be saved as an update); timestamps cut to microseconds to match `timestamptz`; Hikari `maximum-pool-size=10`, explicit; generated `TestcontainersConfiguration` made public for subpackage tests.
 - 2026-10-05: T4 + T5 done by the delegated writer (tests first). RED: 7 errors in `OrderControllerTest` and 1 in `OrderApiIntegrationTest` with `@Valid` deliberately missing. GREEN: `./mvnw clean test` 44 tests, 0 failures (parent re-run). Slice A verified alone: 31 tests green. Writer decisions kept: the controller calls the repository directly (an application service comes with the payment call); 400s use Spring's default error body. ADR-007 open point closed (`org.testcontainers.postgresql.PostgreSQLContainer`, not generic). Commits: `1119b76` (T3, PR 1). RDD assess on `1119b76`: medium, under_budget.
+- 2026-10-05: review of `179035d..7ca2205` (reliability): approved, lineage `review-fe85c009583b2407`. Cumulative review from the stop hook (4 lenses, high risk because of the `mvnw` mode): approved, lineage `review-b5d79a367dfc8ccb`. Findings for order-service accepted into T6. Smoke-test findings go to the STATE follow-ups.
+- 2026-10-05: T6 done by a delegated writer. The review's WARNING premise was wrong: Hibernate Validator 9.1.3's `@NotBlank` already uses `String.isBlank()` (checked in the bytecode), so the Unicode case was already a 400. Those tests, the malformed-request tests, optimistic locking and `updatedAt` are characterization tests. Real RED: only the size limits (3 controller errors and 4 domain failures before the fix). GREEN: `./mvnw clean test` 74 tests, 0 failures (parent re-run). One shared `Order.requireId` rule (blank and at most 64 characters); `MAX_ITEMS = 100`; `@Size` uses the domain constants; V1 changed to `VARCHAR(64)` in place. Kept: a scoped 400 safety net in `OrderController.toOrder`, untested because no HTTP input can reach it now. Known: `@Size` counts UTF-16 units and `VARCHAR` counts code points (stricter, never overflows). About 308 authored lines.
 
 ## Next step
 
-All tasks done. Review is due when the slice budget is reached; then close the session. Push and PRs are human decisions.
+Close the session. Push and PRs are human decisions.

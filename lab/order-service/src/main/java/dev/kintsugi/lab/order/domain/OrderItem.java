@@ -7,9 +7,7 @@ import org.springframework.data.relational.core.mapping.Table;
 public record OrderItem(String sku, int quantity) {
 
 	public OrderItem {
-		if (sku == null || sku.isBlank()) {
-			throw new IllegalArgumentException("SKU must not be blank");
-		}
+		Order.requireId(sku, "SKU");
 		if (quantity <= 0) {
 			throw new IllegalArgumentException("Quantity must be greater than 0, was " + quantity);
 		}

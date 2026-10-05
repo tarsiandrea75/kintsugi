@@ -3,6 +3,7 @@ package dev.kintsugi.lab.order.domain;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.springframework.data.annotation.Id;
@@ -19,6 +20,12 @@ import org.springframework.data.relational.core.mapping.Table;
  */
 @Table("orders")
 public class Order {
+
+	/** Longest customer id or SKU, in characters; matches the {@code VARCHAR(64)} columns. */
+	public static final int MAX_ID_LENGTH = 64;
+
+	/** Most items one order may hold. */
+	public static final int MAX_ITEMS = 100;
 
 	@Id
 	private final UUID id;
@@ -51,11 +58,15 @@ public class Order {
 
 	/** Creates a new order in {@link OrderStatus#CREATED}. */
 	public static Order create(String customerId, List<OrderItem> items) {
-		if (customerId == null || customerId.isBlank()) {
-			throw new IllegalArgumentException("Customer id must not be blank");
-		}
+		requireId(customerId, "Customer id");
 		if (items == null || items.isEmpty()) {
 			throw new IllegalArgumentException("An order needs at least one item");
+		}
+		if (items.size() > MAX_ITEMS) {
+			throw new IllegalArgumentException("An order holds at most " + MAX_ITEMS + " items, got " + items.size());
+		}
+		if (items.stream().anyMatch(Objects::isNull)) {
+			throw new IllegalArgumentException("Order items must not be null");
 		}
 		Instant now = now();
 		return new Order(UUID.randomUUID(), customerId, items, OrderStatus.CREATED, null, now, now);
@@ -71,6 +82,19 @@ public class Order {
 		}
 		status = target;
 		updatedAt = now();
+	}
+
+	/**
+	 * The single "blank" and length rule for customer ids and SKUs. {@code isBlank()} also catches Unicode
+	 * whitespace such as U+2003; the API's {@code @NotBlank} (Hibernate Validator 9) uses the same predicate.
+	 */
+	static void requireId(String value, String name) {
+		if (value == null || value.isBlank()) {
+			throw new IllegalArgumentException(name + " must not be blank");
+		}
+		if (value.length() > MAX_ID_LENGTH) {
+			throw new IllegalArgumentException(name + " holds at most " + MAX_ID_LENGTH + " characters");
+		}
 	}
 
 	// PostgreSQL stores microseconds, so a value read back equals the value written.

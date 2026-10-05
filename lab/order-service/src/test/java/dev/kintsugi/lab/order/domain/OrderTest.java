@@ -8,6 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -90,7 +92,7 @@ class OrderTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = { "", "   " })
+	@ValueSource(strings = { "", "   ", "\u2003", "\u3000" })
 	void blankCustomerIdIsRejected(String customerId) {
 		assertThatIllegalArgumentException().isThrownBy(() -> Order.create(customerId, ONE_ITEM));
 	}
@@ -106,9 +108,38 @@ class OrderTest {
 		assertThatIllegalArgumentException().isThrownBy(() -> new OrderItem("SKU-1", quantity));
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = { "", " ", "\u2003", "\u3000" })
+	void blankSkuIsRejected(String sku) {
+		assertThatIllegalArgumentException().isThrownBy(() -> new OrderItem(sku, 1));
+	}
+
 	@Test
-	void blankSkuIsRejected() {
-		assertThatIllegalArgumentException().isThrownBy(() -> new OrderItem(" ", 1));
+	void customerIdHoldsAtMost64Characters() {
+		assertThat(Order.create("c".repeat(64), ONE_ITEM).getCustomerId()).hasSize(64);
+		assertThatIllegalArgumentException().isThrownBy(() -> Order.create("c".repeat(65), ONE_ITEM));
+	}
+
+	@Test
+	void skuHoldsAtMost64Characters() {
+		assertThat(new OrderItem("s".repeat(64), 1).sku()).hasSize(64);
+		assertThatIllegalArgumentException().isThrownBy(() -> new OrderItem("s".repeat(65), 1));
+	}
+
+	@Test
+	void orderHoldsAtMost100Items() {
+		OrderItem item = new OrderItem("SKU-1", 1);
+
+		assertThat(Order.create("customer-1", Collections.nCopies(100, item)).getItems()).hasSize(100);
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> Order.create("customer-1", Collections.nCopies(101, item)));
+	}
+
+	@Test
+	void nullItemIsRejected() {
+		List<OrderItem> items = Arrays.asList(new OrderItem("SKU-1", 1), null);
+
+		assertThatIllegalArgumentException().isThrownBy(() -> Order.create("customer-1", items));
 	}
 
 }

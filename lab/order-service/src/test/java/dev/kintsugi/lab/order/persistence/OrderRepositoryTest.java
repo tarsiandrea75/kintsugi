@@ -1,6 +1,7 @@
 package dev.kintsugi.lab.order.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 import java.util.List;
 
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jdbc.test.autoconfigure.DataJdbcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import dev.kintsugi.lab.order.TestcontainersConfiguration;
@@ -70,6 +72,32 @@ class OrderRepositoryTest {
 			.param(order.getId())
 			.query(Integer.class)
 			.single()).isEqualTo(1);
+	}
+
+	@Test
+	void savingAStaleCopyFailsWithOptimisticLocking() {
+		Order order = repository.save(Order.create("customer-1", List.of(new OrderItem("SKU-1", 1))));
+		Order first = repository.findById(order.getId()).orElseThrow();
+		Order stale = repository.findById(order.getId()).orElseThrow();
+
+		first.transitionTo(OrderStatus.PAYMENT_PENDING);
+		repository.save(first);
+		stale.transitionTo(OrderStatus.PAYMENT_PENDING);
+
+		assertThatExceptionOfType(OptimisticLockingFailureException.class).isThrownBy(() -> repository.save(stale));
+		assertThat(repository.findById(order.getId()).orElseThrow().getStatus())
+			.isEqualTo(OrderStatus.PAYMENT_PENDING);
+	}
+
+	@Test
+	void updatedAtIsPersistedAfterATransition() {
+		Order order = repository.save(Order.create("customer-1", List.of(new OrderItem("SKU-1", 1))));
+
+		order.transitionTo(OrderStatus.PAYMENT_PENDING);
+		repository.save(order);
+		Order found = repository.findById(order.getId()).orElseThrow();
+
+		assertThat(found.getUpdatedAt()).isEqualTo(order.getUpdatedAt()).isAfter(found.getCreatedAt());
 	}
 
 }
