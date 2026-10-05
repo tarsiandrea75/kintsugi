@@ -1,6 +1,6 @@
 # Kintsugi — Project Vision and Plan
 
-> Source of truth for *what* we are building and *why*. Written on 2026-10-03 during the planning sessions (ChatGPT for the conceptual guide, Claude for the project design). Specs produced by SDD refine this document; they do not replace it. If a spec contradicts this file, raise it with the human before proceeding.
+> Source of truth for *what* we are building and *why*. Written on 2026-10-03 during the planning sessions (ChatGPT for the conceptual guide, Claude for the project design). Specs in `openspec/specs/` refine this document; they do not replace it. If a spec contradicts this file, raise it with the human before proceeding.
 
 ## 1. Vision and positioning
 

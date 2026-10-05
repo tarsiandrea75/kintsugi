@@ -29,7 +29,11 @@ End of session, or when the human says "chiudiamo":
 
 ## Working conventions
 
-- Use SDD for every feature, in small changes (400-line review budget).
+- Use ODD with living specs for every feature, in small changes (400-line review budget):
+  - Track each feature in `odd/tasks/<feature>.md` with acceptance criteria written before the code, and write tests first.
+  - Every feature that adds or changes behavior includes a task to create or update its living spec in `openspec/specs/<capability>/spec.md` (requirements plus GIVEN/WHEN/THEN scenarios). The spec is the readable contract of what the system does; tests prove it.
+  - A new service or component gets a short design section in the feature document before any code, or an ADR when the choice is significant.
+  - Why: ODD keeps the workflow light; the living specs keep the contracts the evals depend on (fault catalog, fault-injector, service APIs) readable and reviewable.
 - Explain the "why" of each AI-engineering concept and step, not only the "how".
 - Before choosing a library or model, check its current version and record the decision in an ADR (copy the headings of `docs/adr/ADR-001-java-spring-system-python-evals.md`).
 - Core rule: the LLM proposes, deterministic code verifies, policy authorizes.

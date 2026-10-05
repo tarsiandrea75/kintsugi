@@ -17,7 +17,7 @@ The repo MUST contain `CLAUDE.md`, `README.md`, and `.gitignore` at the root.
 
 ### Requirement: CLAUDE.md content
 
-`CLAUDE.md` MUST link to `docs/vision.md`, `docs/concepts.md`, and `docs/setup.md`, and MUST state: Markdown is the record and Engram is convenience; SDD in small changes; explain the AI-engineering "why"; check current versions and record them in an ADR; conversation in Italian, files in English. It MUST NOT duplicate global user rules.
+`CLAUDE.md` MUST link to `docs/vision.md`, `docs/concepts.md`, and `docs/setup.md`, and MUST state: Markdown is the record and Engram is convenience; ODD with living specs in `openspec/specs/`, in small changes; explain the AI-engineering "why"; check current versions and record them in an ADR; conversation in Italian, files in English. It MUST NOT duplicate global user rules.
 
 #### Scenario: Links resolve
 - GIVEN `CLAUDE.md` exists

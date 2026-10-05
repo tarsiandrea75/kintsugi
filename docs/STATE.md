@@ -16,12 +16,16 @@ Change B done (ODD feature `model-smoke-test`, [feature document](../odd/tasks/m
 
 ## Next action
 
-Decide on pushing the chain and opening the PRs: a draft tracker PR `feat/model-smoke-test` and the children `-01-recorder` → `-02-harness` → `-03-adr`. Then take the next M1 step from the vision: install Docker Desktop and start the lab (Docker Compose).
+Decide on pushing the chain and opening the PRs: a draft tracker PR `feat/model-smoke-test` and the children `-01-recorder` → `-02-harness` → `-03-adr`. Then take the next M1 step from the vision: the `order-service` skeleton with PostgreSQL, as an ODD feature with a living spec.
+
+## Decisions since the last session
+
+- Workflow: ODD with mandatory living specs in `openspec/specs/` (`CLAUDE.md`, Working conventions). Decided 2026-10-05.
+- Docker is available: Docker Engine 29.4.0 and Compose v5.1.3 inside WSL. The earlier "Docker Desktop is not installed" note was wrong.
 
 ## Open questions
 
 - When to make the GitHub repository public (private for now; the vision assumes public from week 1).
-- Project `CLAUDE.md` says "Use SDD for every feature", but change B used ODD at the human's choice. Decide which workflow is the default going forward.
 
 ## Follow-ups
 
@@ -35,7 +39,6 @@ Carried over:
 - Automated test for the `demo` profile activation (verified manually only).
 - `DemoRunner` does not treat `HttpConnectTimeoutException` (blackholed host) as a connection failure.
 - Windows console prints `?` for non-ASCII model output; try `-Dstdout.encoding=UTF-8`.
-- Docker Desktop is not installed; it is needed for the M1 lab.
 
 ## Blockers
 
