@@ -20,7 +20,7 @@ Monday: Spring AI hello-world calling one tool with the local model
 
 ## Open questions
 
-- Number of the versions ADR is undecided (the vision reserves ADR-002 for pgvector); decide when it is written.
+- Resolved: the versions ADR is `docs/adr/ADR-006-stack-versions.md` (ADR-002 to ADR-005 stay reserved by the vision).
 - Local model choice (`granite4.1:8b` vs `qwen3:8b` vs `qwen3.5:9b`) is pending the tool-calling smoke test.
 
 ## Blockers
