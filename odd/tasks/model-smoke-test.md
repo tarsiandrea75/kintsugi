@@ -72,6 +72,13 @@ Confirm which local model reliably calls tools, using a 10-prompt tool-calling s
 
 - 2026-10-05: T1+T2 done by one delegated writer (trigger: 2+ non-trivial files). RED: compile failure, then `recordsAnErrorResultAsError` failed because `MethodToolCallback` JSON-quotes String results (`"\"Error: ...\""`); fixed by stripping the leading quote. GREEN: `./mvnw test` 32 tests, 0 failures (parent re-run with `clean`); `./mvnw test-compile -Plive` OK. Live smoke test not run yet (T3). `pom.xml` unchanged: surefire already forwards `-Dkintsugi.model`.
 
+- 2026-10-05: commits on chain branches: `b1ab041` (feature doc, tracker), `053bbd4` (T1, PR 1), `7969aad` and `29a471d` (T2, PR 2). Slice 1 verified alone: 21 offline tests green.
+- 2026-10-05: RDD assess on `053bbd4`: medium, under_budget (pending). On `29a471d`: medium, slice_budget_reached, review due. Consent granted; one lens (reliability); approved and acknowledged (lineage `review-84179ab48b9e02e7`, authority burned). Reviewed boundary is now `29a471d`.
+- Non-blocking review findings (open, not yet accepted into scope):
+  - R3-latency-trigger-unscored (WARNING): `SmokeReport.verdict()` ignores latency, so a model slower than 1 min median can still get ADOPT.
+  - R3-p7-two-calls-not-gated (SUGGESTION): P7 passes with a single call; the two-call expectation is informational only.
+  - R3-tool-index-order (SUGGESTION): `RecordingToolCallbackTest` picks the first callback by array index; select it by name instead.
+
 ## Next step
 
 T3: run the live smoke test against the three candidates (needs Ollama and the models pulled).
