@@ -10,16 +10,16 @@ context: |
   Rule: LLM proposes, deterministic code verifies, policy authorizes.
   docs/vision.md is the source of truth; contradictions go to the human. Conventional commits.
 
-strict_tdd: false  # no test runner yet; the first code change must bootstrap test tooling, then switch to true
+strict_tdd: true  # runner bootstrapped by change spring-ai-hello-tool (Maven Wrapper + JUnit Jupiter 6)
 
 testing:
   strict_tdd_requested: true
   runner:
-    command: null
-    framework: null  # planned: JUnit 5 (Java), pytest (evals)
+    command: ./mvnw test  # run from agent/
+    framework: JUnit Jupiter 6  # Java; planned: pytest (evals)
   layers:
-    unit: false
-    integration: false
+    unit: true
+    integration: true
     e2e: false
   coverage:
     available: false
@@ -38,7 +38,7 @@ rules:
     - Respect "LLM proposes, deterministic code verifies, policy authorizes".
   tasks:
     - Keep each work unit within the review budget (400 lines).
-    - The first code change must include test tooling bootstrap (JUnit 5, pytest). Docs-only changes are exempt.
+    - The first Java code change must bootstrap JUnit; the first evals/ change must bootstrap pytest. Docs-only changes are exempt.
   apply:
     - Follow TDD once a test runner exists.
   verify:
