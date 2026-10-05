@@ -28,6 +28,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.env.Environment;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.convention.TestBean;
@@ -36,7 +37,8 @@ import org.springframework.test.context.bean.override.convention.TestBean;
  * Tool-calling smoke test over 10 fixed prompts. It scores the recorded tool calls, writes
  * {@code target/smoke-test/<model>.md} and fails when the adoption bar is not met. Needs a local
  * Ollama. Run with {@code ./mvnw test -Plive -Dkintsugi.model=<model>}; without the property it
- * uses the configured model. If Ollama is down, the prompts fail; they are never skipped.
+ * uses the configured model. A prompt that throws counts as failed and its error goes in the report.
+ * If Ollama is down, every prompt fails and so does the adoption bar; nothing is skipped.
  */
 @Tag("live")
 @SpringBootTest
@@ -52,7 +54,8 @@ class LiveToolCallingSmokeTest {
 			PromptCase.positive("P4", "Is it already evening in Tokyo?", "yes"),
 			PromptCase.positive("P5", "Would a shop in Rome that opens at 9am be open right now?", "yes"),
 			PromptCase.positive("P6", "What time is it in Portland?"),
-			PromptCase.positive("P7", "What time is it in London and in Los Angeles?", "13:00", "05:00"),
+			PromptCase.positive("P7", "What time is it in London and in Los Angeles?", "13:00", "05:00")
+				.withMinCalls(2),
 			PromptCase.positive("P8", "How many hours ahead of New York is Tokyo right now?", "13"),
 			PromptCase.negative("N1", "What is the capital of Japan?", "Tokyo"),
 			PromptCase.negative("N2", "How many minutes are in a day?", "1440"));
@@ -65,6 +68,9 @@ class LiveToolCallingSmokeTest {
 
 	@Autowired
 	TimeTools timeTools;
+
+	@Autowired
+	Environment environment;
 
 	@Value("${spring.ai.ollama.chat.model}")
 	String model;
@@ -104,21 +110,33 @@ class LiveToolCallingSmokeTest {
 	void ask(PromptCase prompt) {
 		recorder.clear();
 		long start = System.nanoTime();
-		String answer = chatClient.prompt().user(prompt.prompt()).call().content();
-		Duration latency = Duration.ofNanos(System.nanoTime() - start);
-		results.add(new PromptResult(prompt, recorder.calls(), answer, latency));
+		try {
+			String answer = chatClient.prompt().user(prompt.prompt()).call().content();
+			results.add(new PromptResult(prompt, recorder.calls(), answer, elapsedSince(start)));
+		}
+		catch (RuntimeException ex) {
+			results.add(PromptResult.failed(prompt, recorder.calls(), ex, elapsedSince(start)));
+		}
+	}
+
+	private static Duration elapsedSince(long startNanos) {
+		return Duration.ofNanos(System.nanoTime() - startNanos);
 	}
 
 	@AfterAll
 	void reportAndAssertAdoptionBar() throws IOException {
 		assertThat(results).as("prompts answered (is Ollama running with %s?)", model).hasSize(PROMPTS.size());
 
-		SmokeReport report = new SmokeReport(model, results);
+		String temperature = environment.getProperty("spring.ai.ollama.chat.temperature", "unset");
+		SmokeReport report = new SmokeReport(model, temperature, results);
 		Path path = Path.of("target", "smoke-test", SmokeReport.fileName(model));
 		Files.createDirectories(path.getParent());
 		Files.writeString(path, report.toMarkdown());
 
-		assertThat(report.verdict()).as("adoption bar for %s, see %s", model, path.toAbsolutePath())
+		long threw = results.stream().filter(r -> r.error() != null).count();
+		assertThat(report.verdict())
+			.as("adoption bar for %s (%d of %d prompts threw; is Ollama running?), see %s", model, threw,
+					results.size(), path.toAbsolutePath())
 			.isEqualTo(Verdict.ADOPT);
 	}
 

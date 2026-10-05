@@ -12,18 +12,36 @@ import java.util.Optional;
  * @param calls the tool calls, in order
  * @param answer the final answer text
  * @param latency end-to-end time for the prompt
+ * @param error {@code Type: message} of the exception the call threw, or {@code null} when it
+ * returned an answer
  */
-record PromptResult(PromptCase prompt, List<ToolCall> calls, String answer, Duration latency) {
+record PromptResult(PromptCase prompt, List<ToolCall> calls, String answer, Duration latency, String error) {
+
+	PromptResult(PromptCase prompt, List<ToolCall> calls, String answer, Duration latency) {
+		this(prompt, calls, answer, latency, null);
+	}
 
 	/**
-	 * Positive: at least one call and every call valid. Negative: no call at all. This is the
-	 * gating rule of the adoption bar.
+	 * A prompt whose call threw: unknown tool, timeout, malformed output, unreachable model. It
+	 * keeps the calls recorded before the failure.
+	 */
+	static PromptResult failed(PromptCase prompt, List<ToolCall> calls, Throwable error, Duration latency) {
+		return new PromptResult(prompt, calls, null, latency,
+				error.getClass().getSimpleName() + ": " + error.getMessage());
+	}
+
+	/**
+	 * Never passes when the call threw. Positive: at least {@link PromptCase#minCalls()} calls and
+	 * every call valid. Negative: no call at all. This is the gating rule of the adoption bar.
 	 */
 	boolean passed() {
+		if (error != null) {
+			return false;
+		}
 		if (!prompt.positive()) {
 			return calls.isEmpty();
 		}
-		return !calls.isEmpty() && calls.stream().noneMatch(ToolCall::error);
+		return calls.size() >= prompt.minCalls() && !calls.isEmpty() && calls.stream().noneMatch(ToolCall::error);
 	}
 
 	/** Whether the first call had valid arguments. Informational. */

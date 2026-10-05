@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.Map;
 
 import dev.kintsugi.agent.tools.TimeTools;
@@ -18,8 +19,11 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 
 class RecordingToolCallbackTest {
 
-	private final ToolCallback timeTool = ToolCallbacks
-		.from(new TimeTools(Clock.fixed(Instant.parse("2026-10-05T12:00:00Z"), ZoneOffset.UTC)))[0];
+	private final ToolCallback timeTool = Arrays
+		.stream(ToolCallbacks.from(new TimeTools(Clock.fixed(Instant.parse("2026-10-05T12:00:00Z"), ZoneOffset.UTC))))
+		.filter(callback -> "currentTime".equals(callback.getToolDefinition().name()))
+		.findFirst()
+		.orElseThrow();
 
 	private final ToolCallRecorder recorder = new ToolCallRecorder();
 

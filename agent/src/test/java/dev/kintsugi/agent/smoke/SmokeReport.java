@@ -18,7 +18,10 @@ final class SmokeReport {
 		/** Neither ADOPT nor PLAN_B. */
 		REJECT,
 
-		/** Under 50% of positives valid ({@code docs/vision.md}, plan B trigger). */
+		/**
+		 * Under 50% of positives valid, or a median latency over {@link #MAX_MEDIAN_LATENCY}
+		 * ({@code docs/vision.md}, plan B triggers).
+		 */
 		PLAN_B
 
 	}
@@ -29,12 +32,25 @@ final class SmokeReport {
 
 	static final int MIN_NEGATIVES_PASSED = 1;
 
+	/** A median latency per prompt above this triggers plan B ({@code docs/vision.md}). */
+	static final Duration MAX_MEDIAN_LATENCY = Duration.ofSeconds(60);
+
 	private final String model;
+
+	private final String temperature;
 
 	private final List<PromptResult> results;
 
 	SmokeReport(String model, List<PromptResult> results) {
+		this(model, "unknown", results);
+	}
+
+	/**
+	 * @param temperature the sampling temperature as configured, printed in the report header
+	 */
+	SmokeReport(String model, String temperature, List<PromptResult> results) {
 		this.model = model;
+		this.temperature = temperature;
 		this.results = List.copyOf(results);
 	}
 
@@ -45,7 +61,7 @@ final class SmokeReport {
 
 	Verdict verdict() {
 		double valid = validPositiveRate();
-		if (valid < PLAN_B_THRESHOLD) {
+		if (valid < PLAN_B_THRESHOLD || medianLatency().compareTo(MAX_MEDIAN_LATENCY) > 0) {
 			return Verdict.PLAN_B;
 		}
 		if (valid >= ADOPT_THRESHOLD && negativesPassed() >= MIN_NEGATIVES_PASSED) {
@@ -85,6 +101,7 @@ final class SmokeReport {
 	String toMarkdown() {
 		StringBuilder md = new StringBuilder();
 		md.append("# Tool-calling smoke test: ").append(model).append("\n\n");
+		md.append("Model: `").append(model).append("` · Temperature: `").append(temperature).append("`\n\n");
 		md.append("**Verdict: ").append(verdict()).append("**\n\n");
 		md.append("| Metric | Value |\n|---|---|\n");
 		md.append("| Valid positives (gating, adopt at >= 80%) | ")
@@ -100,10 +117,16 @@ final class SmokeReport {
 		md.append("| First-attempt argument validity | ")
 			.append(count(positives().stream().filter(PromptResult::firstCallValid).count(), positives().size()))
 			.append(" |\n");
-		md.append("| Median latency per prompt | ").append(seconds(medianLatency())).append(" |\n");
-		md.append("| Max latency per prompt | ").append(seconds(maxLatency())).append(" |\n\n");
-		md.append("| ID | Kind | Passed | Calls | Expected in answer | Latency | Prompt | Answer |\n");
-		md.append("|---|---|---|---|---|---|---|---|\n");
+		md.append("| Median latency per prompt (plan B above ")
+			.append(seconds(MAX_MEDIAN_LATENCY))
+			.append(") | ")
+			.append(seconds(medianLatency()))
+			.append(" |\n");
+		md.append("| Max latency per prompt | ").append(seconds(maxLatency())).append(" |\n");
+		md.append("| Prompts that threw | ").append(results.stream().filter(r -> r.error() != null).count())
+			.append(" |\n\n");
+		md.append("| ID | Kind | Passed | Calls | Expected in answer | Latency | Prompt | Answer | Error |\n");
+		md.append("|---|---|---|---|---|---|---|---|---|\n");
 		for (PromptResult r : results) {
 			md.append("| ")
 				.append(r.prompt().id())
@@ -121,6 +144,8 @@ final class SmokeReport {
 				.append(cell(r.prompt().prompt()))
 				.append(" | ")
 				.append(cell(r.answer()))
+				.append(" | ")
+				.append(cell(r.error()))
 				.append(" |\n");
 		}
 		return md.toString();

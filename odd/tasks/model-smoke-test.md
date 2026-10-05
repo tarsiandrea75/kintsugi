@@ -58,6 +58,7 @@ Confirm which local model reliably calls tools, using a 10-prompt tool-calling s
 
 - [x] **T1 — Recording tool wrapper.** A `ToolCallback` decorator that records the tool name, the arguments, whether the result is an error, and the latency. Offline unit tests (RED first). Route: delegated (writer, with T2).
 - [x] **T2 — Smoke test harness and report.** Pure scoring and report logic, with offline tests (RED first). A parameterized `@Tag("live")` test over the 10 prompts, with the model chosen by `-Dkintsugi.model`. It writes a Markdown report to `agent/target/smoke-test/<model>.md` and asserts the adoption bar. Route: delegated (writer, 2+ non-trivial files).
+- [x] **T2b — Harness hardening (from review findings, accepted 2026-10-05).** (1) A prompt that throws counts as a failed prompt with the error in the report, instead of aborting the report. (2) A median latency over 60 s gives PLAN_B (`docs/vision.md:236`). (3) P7 is valid only with at least 2 tool calls (per-prompt minimum call count). (4) `RecordingToolCallbackTest` selects the tool callback by name. Also print the model and sampling settings (temperature) in the report. Route: delegated (writer, 2+ non-trivial files). Branch: `feat/model-smoke-test-02-harness` (fixes the harness in PR 2).
 - [ ] **T3 — Run the candidates.** Run against `granite4.1:8b`, `qwen3:8b` and `qwen3.5:9b`. qwen3 needs `spring.ai.ollama.chat.think=false`. Copy the reports to `docs/evidence/smoke-test/`. Route: per-action worker (live runs).
 - [ ] **T4 — ADR-003 and docs.** Write ADR-003 with the ADR-001 headings. Update ADR-006:34, `docs/setup.md` (smoke-test checkbox and command) and the model line in the `repo-structure` spec. Route: inline or delegated, depending on the results.
 
@@ -74,10 +75,12 @@ Confirm which local model reliably calls tools, using a 10-prompt tool-calling s
 
 - 2026-10-05: commits on chain branches: `b1ab041` (feature doc, tracker), `053bbd4` (T1, PR 1), `7969aad` and `29a471d` (T2, PR 2). Slice 1 verified alone: 21 offline tests green.
 - 2026-10-05: RDD assess on `053bbd4`: medium, under_budget (pending). On `29a471d`: medium, slice_budget_reached, review due. Consent granted; one lens (reliability); approved and acknowledged (lineage `review-84179ab48b9e02e7`, authority burned). Reviewed boundary is now `29a471d`.
-- Non-blocking review findings (open, not yet accepted into scope):
+- 2026-10-05: second review required by the stop hook (candidate including doc commit `1955d86`): consent granted, reliability lens, approved and acknowledged (lineage `review-52268a38f32425a6`, authority burned). Findings: R3-report-lost-on-prompt-exception (WARNING, accepted into T2b); R3-nondeterministic-single-run-verdict (SUGGESTION, mostly refuted: `application.yaml:8` already sets temperature 0; the report will print sampling settings).
+- Review findings from the first review (accepted into T2b on 2026-10-05):
   - R3-latency-trigger-unscored (WARNING): `SmokeReport.verdict()` ignores latency, so a model slower than 1 min median can still get ADOPT.
   - R3-p7-two-calls-not-gated (SUGGESTION): P7 passes with a single call; the two-call expectation is informational only.
   - R3-tool-index-order (SUGGESTION): `RecordingToolCallbackTest` picks the first callback by array index; select it by name instead.
+- 2026-10-05: T2b done by one delegated writer. RED: compile failure, then 3 assertion failures (allPromptsFailingIsPlanB, medianLatencyOverSixtySecondsIsPlanB, reportShowsModelTemperatureAndErrors). GREEN: `./mvnw clean test` 37 tests, 0 failures (parent re-run); `./mvnw test-compile -Plive` OK. About 184 authored lines. Decision: a throwing prompt is recorded and not rethrown, so the per-prompt JUnit case stays green and the failure surfaces in the report and the `@AfterAll` verdict; rethrowing would fail a run that still meets the adoption bar (7 of 8). Exactly 60 s median is not PLAN_B.
 
 ## Next step
 

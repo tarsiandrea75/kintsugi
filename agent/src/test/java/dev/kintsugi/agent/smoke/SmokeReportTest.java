@@ -129,6 +129,74 @@ class SmokeReportTest {
 	}
 
 	@Test
+	void positiveNeedsAtLeastItsMinimumCallCount() {
+		PromptCase twoZones = PromptCase.positive("P7", "q", "13:00", "05:00").withMinCalls(2);
+
+		assertThat(PromptCase.positive("P1", "q").minCalls()).isEqualTo(1);
+		assertThat(PromptCase.negative("N1", "q").minCalls()).isZero();
+		assertThat(new PromptResult(twoZones, List.of(OK), "13:00", Duration.ZERO).passed()).isFalse();
+		assertThat(new PromptResult(twoZones, List.of(OK, OK), "13:00 05:00", Duration.ZERO).passed()).isTrue();
+		assertThat(new PromptResult(twoZones, List.of(OK, ERR), "13:00 05:00", Duration.ZERO).passed()).isFalse();
+	}
+
+	@Test
+	void aPromptThatThrewNeverPasses() {
+		RuntimeException boom = new IllegalStateException("No tool named 'weather'");
+		PromptResult positive = PromptResult.failed(PromptCase.positive("P1", "q"), List.of(OK), boom,
+				Duration.ofSeconds(3));
+		PromptResult negative = PromptResult.failed(PromptCase.negative("N1", "q"), List.of(), boom,
+				Duration.ofSeconds(1));
+
+		assertThat(positive.passed()).isFalse();
+		assertThat(negative.passed()).isFalse();
+		assertThat(positive.error()).isEqualTo("IllegalStateException: No tool named 'weather'");
+		assertThat(positive.calls()).containsExactly(OK);
+		assertThat(positive.latency()).isEqualTo(Duration.ofSeconds(3));
+		assertThat(positive.answer()).isNull();
+		assertThat(positive("P2", List.of(OK)).error()).isNull();
+	}
+
+	@Test
+	void allPromptsFailingIsPlanB() {
+		RuntimeException refused = new IllegalStateException("Connection refused");
+		List<PromptResult> results = results(8, 2).stream()
+			.map(r -> PromptResult.failed(r.prompt(), List.of(), refused, Duration.ofMillis(5)))
+			.toList();
+		SmokeReport report = new SmokeReport("m", results);
+
+		assertThat(report.verdict()).isEqualTo(Verdict.PLAN_B);
+		assertThat(report.toMarkdown()).contains("IllegalStateException: Connection refused");
+	}
+
+	@Test
+	void medianLatencyOverSixtySecondsIsPlanB() {
+		assertThat(SmokeReport.MAX_MEDIAN_LATENCY).isEqualTo(Duration.ofSeconds(60));
+		assertThat(new SmokeReport("m", withLatency(results(8, 2), Duration.ofSeconds(60))).verdict())
+			.isEqualTo(Verdict.ADOPT);
+		assertThat(new SmokeReport("m", withLatency(results(8, 2), Duration.ofSeconds(60).plusMillis(1)))
+			.verdict()).isEqualTo(Verdict.PLAN_B);
+	}
+
+	@Test
+	void reportShowsModelTemperatureAndErrors() {
+		List<PromptResult> results = new ArrayList<>(results(8, 2));
+		results.set(1, PromptResult.failed(results.get(1).prompt(), List.of(OK),
+				new IllegalArgumentException("bad | output\nmore"), Duration.ofSeconds(4)));
+		String markdown = new SmokeReport("qwen3:8b", "0", results).toMarkdown();
+
+		assertThat(markdown).contains("Model: `qwen3:8b`")
+			.contains("Temperature: `0`")
+			.contains("| Error |")
+			.contains("IllegalArgumentException: bad \\| output more");
+	}
+
+	private static List<PromptResult> withLatency(List<PromptResult> results, Duration latency) {
+		return results.stream()
+			.map(r -> new PromptResult(r.prompt(), r.calls(), r.answer(), latency))
+			.toList();
+	}
+
+	@Test
 	void sanitizesModelNamesForFileNames() {
 		assertThat(SmokeReport.fileName("granite4.1:8b")).isEqualTo("granite4.1_8b.md");
 		assertThat(SmokeReport.fileName("library/qwen3:8b")).isEqualTo("library_qwen3_8b.md");
