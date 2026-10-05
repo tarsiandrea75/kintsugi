@@ -65,7 +65,7 @@ Chain strategy: pending
 
 ## Phase 5: Final verification
 
-- [ ] 5.1 `./mvnw test` green with Ollama stopped; no live test run.
-- [ ] 5.2 `./mvnw test -Plive` green with Ollama up.
-- [ ] 5.3 Demo under `demo` profile prints a tool-backed answer.
-- [ ] 5.4 Demo with wrong base-url: clear message, non-zero exit, fails fast (<15s, else `spring.ai.retry.max-attempts: 1`).
+- [x] 5.1 `./mvnw test` green with Ollama stopped; no live test run.
+- [x] 5.2 `./mvnw test -Plive` green with Ollama up.
+- [x] 5.3 Demo under `demo` profile prints a tool-backed answer.
+- [x] 5.4 Demo with wrong base-url: clear message, non-zero exit, fails fast (<15s, else `spring.ai.retry.max-attempts: 1`).

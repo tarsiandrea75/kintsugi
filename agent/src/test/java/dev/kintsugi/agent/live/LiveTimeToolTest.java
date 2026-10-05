@@ -32,7 +32,6 @@ class LiveTimeToolTest {
 	void modelCallsTheToolAndAnswersFromTheFixedClock() {
 		String answer = chatClient.prompt().user("What time is it in Buenos Aires?").call().content();
 
-		System.out.println("LIVE ANSWER: " + answer);
 		assertThat(answer).contains("09:00");
 	}
 

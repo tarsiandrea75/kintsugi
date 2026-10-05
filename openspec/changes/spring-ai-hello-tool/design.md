@@ -105,3 +105,14 @@ No migration required. Rollback is described in the proposal.
 - [ ] REQ-7 wording (`chat.options`) should become `spring.ai.ollama.chat.*`. Spec phase to align.
 - [ ] The `config.yaml` tasks rule asks the first code change to bootstrap pytest as well. Proposed change: pytest bootstraps with the first `evals/` change. Needs human approval.
 - [ ] Line forecast is about 350 to 390 authored lines, over the 300 to 345 target. If needed, `sdd-tasks` can split the docs (ADR-006, setup.md) into a follow-up slice.
+
+## Deviations Found During Apply
+
+Recorded on 2026-10-05; the code and ADR-006 are authoritative where they differ from the sections above.
+
+1. `ClockConfig` was created in Phase 2, not 3.4: once `TimeTools` became a `@Component`, the context test failed for lack of a `Clock` bean.
+2. `ToolCallbacks` lives in `org.springframework.ai.support`, not `org.springframework.ai.tool`.
+3. In Spring AI 2.0.1, `ChatClient` reads `ChatModel.getOptions()`, not `getDefaultOptions()`; the wiring test mocks `getOptions()`.
+4. `connect-timeout` is `2s`, not `5s`: on localhost a refused or slow connect means the server is down.
+5. `spring-boot-restclient` was already on the dependency tree; no starter was added.
+6. `spring.ai.retry.max-attempts: 0` is required, not a fallback: the default retries connection refused 10 times with backoff up to 180 s.
