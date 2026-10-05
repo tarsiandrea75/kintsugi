@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: agent
+  ai:
+    ollama:
+      chat:
+        model: granite4.1:8b
+        temperature: 0
+        num-ctx: 8192
+    retry:
+      # Connection refused on localhost means the server is down; retrying only delays the error.
+      max-attempts: 0
+  http:
+    clients:
+      # CPU inference with an 8B model can take minutes; this is a cap, not an expectation.
+      read-timeout: 5m
+      connect-timeout: 2s
