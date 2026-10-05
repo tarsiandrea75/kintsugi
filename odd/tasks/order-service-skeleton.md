@@ -50,8 +50,8 @@ PostgreSQL 18.6 (`postgres:18.6`), Testcontainers 2.0.5 (`testcontainers-postgre
 - [x] **T1 — ADR-007 and living spec.** `docs/adr/ADR-007-lab-persistence-stack.md` (ADR-001 headings) and `openspec/specs/order-service/spec.md` (requirements plus GIVEN/WHEN/THEN scenarios, from the acceptance criteria). Also add an addendum to `docs/journal/2026-10-05-03.md` correcting the SDD and Docker notes (review finding). Route: delegated writer (2+ non-trivial files).
 - [x] **T2 — Generated skeleton.** Spring Initializr project in `lab/order-service` with the starters above, plus the Maven Wrapper. Compiles; the context-load test passes against Testcontainers. Route: delegated with T3–T4.
 - [x] **T3 — Domain and persistence.** `Order`, `OrderStatus` with transition rules, the Flyway `V1__create_orders.sql`, and the repository. Unit tests for transitions; repository tests with Testcontainers (RED first). Route: delegated writer.
-- [ ] **T4 — REST API.** `POST /orders` and `GET /orders/{id}` with validation and errors. MockMvc tests plus one end-to-end test with Testcontainers (RED first). Route: delegated writer.
-- [ ] **T5 — Docs.** `docs/setup.md`: how to build and test order-service. Route: with T4.
+- [x] **T4 — REST API.** `POST /orders` and `GET /orders/{id}` with validation and errors. MockMvc tests plus one end-to-end test with Testcontainers (RED first). Route: delegated writer.
+- [x] **T5 — Docs.** `docs/setup.md`: how to build and test order-service. Route: with T4.
 
 ## Checks
 
@@ -63,7 +63,8 @@ PostgreSQL 18.6 (`postgres:18.6`), Testcontainers 2.0.5 (`testcontainers-postgre
 - 2026-10-05: T1 done by one delegated writer (trigger: 2+ non-trivial files). ADR-007 (67 lines), living spec with 5 requirements and 13 scenarios (112 lines), journal addendum (+5). Passive docs: the structural checks passed (headings match ADR-001, 11 links resolve, every acceptance criterion maps to a scenario).
 - 2026-10-05: T2 done: Spring Initializr (Boot 4.1.1, ids data-jdbc, flyway, postgresql, web, validation, testcontainers, actuator). Only deviation: Testcontainers image pinned from `postgres:latest` to `postgres:18.6`. The wrapper matches `agent/` (3.3.4, Maven 3.9.16). Testcontainers 2.x package: `org.testcontainers.postgresql.PostgreSQLContainer`, not generic (closes the ADR-007 open point). `./mvnw test`: 1 test, 0 failures, against a real PostgreSQL 18.6. No meaningful RED for generated scaffolding.
 - 2026-10-05: T3 done by the delegated writer (tests first). RED: compile failure, then 15 assertion failures in `OrderTest` from a deliberately permissive transition switch. GREEN after the fix. Writer decisions kept: Spring Data JDBC annotations on the domain (needs a `version` column, because a domain-assigned UUID would otherwise be saved as an update); timestamps cut to microseconds to match `timestamptz`; Hikari `maximum-pool-size=10`, explicit; generated `TestcontainersConfiguration` made public for subpackage tests.
+- 2026-10-05: T4 + T5 done by the delegated writer (tests first). RED: 7 errors in `OrderControllerTest` and 1 in `OrderApiIntegrationTest` with `@Valid` deliberately missing. GREEN: `./mvnw clean test` 44 tests, 0 failures (parent re-run). Slice A verified alone: 31 tests green. Writer decisions kept: the controller calls the repository directly (an application service comes with the payment call); 400s use Spring's default error body. ADR-007 open point closed (`org.testcontainers.postgresql.PostgreSQLContainer`, not generic). Commits: `1119b76` (T3, PR 1). RDD assess on `1119b76`: medium, under_budget.
 
 ## Next step
 
-T2–T5 via one delegated writer (generated skeleton in its own commit).
+All tasks done. Review is due when the slice budget is reached; then close the session. Push and PRs are human decisions.

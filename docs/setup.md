@@ -60,3 +60,14 @@ Run from `agent/` (use `mvnw.cmd` on PowerShell):
 | Demo | `./mvnw spring-boot:run -Dspring-boot.run.profiles=demo` | Ollama running with `granite4.1:8b` |
 
 If Ollama is down, the demo prints `Ollama not reachable at <url>. Start it with: ollama serve` and exits with code 1, without a stack trace.
+
+## order-service
+
+`lab/order-service` is a standalone Maven project with its own wrapper. Build and test it with:
+
+```bash
+cd lab/order-service && ./mvnw test
+```
+
+- Docker must be running: the persistence and end-to-end tests start `postgres:18.6` through Testcontainers.
+- The stack and versions are recorded in [ADR-007](adr/ADR-007-lab-persistence-stack.md), and the behavior in the [living spec](../openspec/specs/order-service/spec.md).

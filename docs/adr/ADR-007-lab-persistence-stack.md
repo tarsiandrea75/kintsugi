@@ -44,7 +44,7 @@ Versions (verified 2026-10-05; all except the image are managed by Spring Boot 4
 
 Boot 4 starters: `spring-boot-starter-data-jdbc`, `spring-boot-starter-flyway`, `spring-boot-starter-webmvc`, `spring-boot-starter-validation`, `spring-boot-testcontainers`.
 
-Open point: the Java package of `PostgreSQLContainer` in Testcontainers 2.x is to be confirmed on the first build.
+Confirmed on the first build: in Testcontainers 2.x the container class is `org.testcontainers.postgresql.PostgreSQLContainer`, and it is no longer generic (`PostgreSQLContainer`, not `PostgreSQLContainer<?>`).
 
 ## Alternatives considered
 
