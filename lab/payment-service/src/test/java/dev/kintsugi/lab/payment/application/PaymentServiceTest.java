@@ -1,13 +1,16 @@
 package dev.kintsugi.lab.payment.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.UUID;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
@@ -40,6 +43,15 @@ class PaymentServiceTest {
 		assertThat(saved.getValue().getOrderId()).isEqualTo(ORDER_ID);
 		assertThat(saved.getValue().getStatus()).isEqualTo(outcome);
 		assertThat(payment).isSameAs(saved.getValue());
+	}
+
+	@Test
+	void gatewayFailurePropagatesAndStoresNothing() {
+		IllegalStateException failure = new IllegalStateException("gateway down");
+		given(gateway.authorize(ORDER_ID)).willThrow(failure);
+
+		assertThatThrownBy(() -> service.pay(ORDER_ID)).isSameAs(failure);
+		verify(repository, never()).save(any());
 	}
 
 }

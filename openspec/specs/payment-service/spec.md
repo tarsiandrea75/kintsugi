@@ -17,16 +17,22 @@ A payment has an id (UUID), an order id (UUID), a status (`AUTHORIZED` or `DECLI
 - WHEN `POST /payments` is called
 - THEN the response status is 201
 - AND the `Location` header ends with `/payments/{id}` for the new payment id
-- AND the body contains the payment with the same `orderId`, status `AUTHORIZED`, a UUID id and a created timestamp
+- AND the body contains the payment with the same `orderId`, the gateway's outcome as its status (`AUTHORIZED` with the current fake gateway), a UUID id and a created timestamp
 
 #### Scenario: Created payment is stored
 - GIVEN a payment created through `POST /payments`
 - WHEN the payments table in PostgreSQL is queried by its id
-- THEN one row exists with the same order id and status `AUTHORIZED`
+- THEN one row exists with the same order id and the status returned in the response
 
 ### Requirement: Payment outcome comes from the gateway
 
 The payment status MUST be the outcome that the `PaymentGateway` returns for the order id; the service MUST NOT decide it on its own. Until the HTTP client to `gateway-mock` exists, the gateway is a fake that always returns `AUTHORIZED`.
+
+#### Scenario: Gateway failure
+- GIVEN a gateway that throws while deciding the outcome
+- WHEN a payment is created
+- THEN the failure propagates to the caller
+- AND no payment is stored
 
 #### Scenario: Declined by the gateway
 - GIVEN a gateway that declines the order
@@ -82,13 +88,18 @@ The payment status MUST be the outcome that the `PaymentGateway` returns for the
 
 ### Requirement: Schema and persistence tests
 
-The database schema MUST be created by a Flyway migration. The status column MUST accept only `AUTHORIZED` and `DECLINED`. Timestamps MUST be cut to microseconds, so a payment read back equals the payment written. Persistence and end-to-end tests MUST run against a real PostgreSQL 18.6 started by Testcontainers (`postgres:18.6` with `@ServiceConnection`), not an in-memory database. `./mvnw test` from `lab/payment-service` MUST pass.
+The database schema MUST be created by a Flyway migration. The status column MUST accept only `AUTHORIZED` and `DECLINED`. Timestamps MUST be cut to microseconds, so a payment read back equals the payment written. The service listens on port 8081, so it can run next to order-service (8080) locally. Persistence and end-to-end tests MUST run against a real PostgreSQL 18.6 started by Testcontainers (`postgres:18.6` with `@ServiceConnection`), not an in-memory database. `./mvnw test` from `lab/payment-service` MUST pass.
 
 #### Scenario: Flyway creates the schema
 - GIVEN an empty PostgreSQL 18.6 database started by Testcontainers
 - WHEN the application context starts
 - THEN Flyway applies the migrations
 - AND the payments table exists
+
+#### Scenario: Timestamp precision
+- GIVEN a clock reading `2026-10-06T10:15:30.123456789Z`
+- WHEN a payment is created
+- THEN its created timestamp is `2026-10-06T10:15:30.123456Z`
 
 #### Scenario: Payment round trip
 - GIVEN a new payment

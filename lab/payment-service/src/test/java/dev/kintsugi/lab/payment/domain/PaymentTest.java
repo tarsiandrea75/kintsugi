@@ -3,7 +3,9 @@ package dev.kintsugi.lab.payment.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
-import java.time.temporal.ChronoUnit;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -32,10 +34,11 @@ class PaymentTest {
 
 	@Test
 	void createdAtIsCutToMicroseconds() {
-		Payment payment = Payment.create(ORDER_ID, PaymentStatus.AUTHORIZED);
+		Clock nanosecondClock = Clock.fixed(Instant.parse("2026-10-06T10:15:30.123456789Z"), ZoneOffset.UTC);
 
-		assertThat(payment.getCreatedAt()).isNotNull()
-			.isEqualTo(payment.getCreatedAt().truncatedTo(ChronoUnit.MICROS));
+		Payment payment = Payment.create(ORDER_ID, PaymentStatus.AUTHORIZED, nanosecondClock);
+
+		assertThat(payment.getCreatedAt()).isEqualTo(Instant.parse("2026-10-06T10:15:30.123456Z"));
 	}
 
 	@Test

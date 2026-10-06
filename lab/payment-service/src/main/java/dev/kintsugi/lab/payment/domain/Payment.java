@@ -1,5 +1,6 @@
 package dev.kintsugi.lab.payment.domain;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -41,6 +42,11 @@ public class Payment {
 
 	/** Creates a new payment for {@code orderId} with the gateway's {@code outcome}. */
 	public static Payment create(UUID orderId, PaymentStatus outcome) {
+		return create(orderId, outcome, Clock.systemUTC());
+	}
+
+	/** As {@link #create(UUID, PaymentStatus)}, with the creation time read from {@code clock}. */
+	static Payment create(UUID orderId, PaymentStatus outcome, Clock clock) {
 		if (orderId == null) {
 			throw new IllegalArgumentException("Order id must not be null");
 		}
@@ -48,7 +54,7 @@ public class Payment {
 			throw new IllegalArgumentException("Payment outcome must not be null");
 		}
 		// PostgreSQL stores microseconds, so a value read back equals the value written.
-		Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+		Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
 		return new Payment(UUID.randomUUID(), orderId, outcome, null, now);
 	}
 
