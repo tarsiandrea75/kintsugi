@@ -46,6 +46,7 @@ Lab services:
 - The manual run guide and the "Reproduce F1 by hand" recipe in `docs/setup.md` have not been run.
 - gateway-mock: a reset does not shorten in-flight requests, and the admin API is open on all interfaces on purpose (see its spec, "Known limitations").
 - The order-service 400 safety net is untested by design.
+- No test proves that the `gateway.authorize.inflight` gauge keeps its counter after a GC (`strongReference(true)`).
 
 Smoke-test harness (non-blocking review findings):
 - The report is skipped on a partial run.
