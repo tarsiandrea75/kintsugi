@@ -62,7 +62,7 @@ The client MUST read its settings from these properties, so the fault injector c
 - AND a `WARN` line names the order id and the cause
 
 #### Scenario: Payment-service unreachable or failing
-- GIVEN payment-service refuses connections, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED` or `DECLINED`
+- GIVEN payment-service refuses connections, or does not complete the TCP handshake within the connect timeout, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED` or `DECLINED`
 - WHEN an order is placed
 - THEN the order stays `PAYMENT_PENDING`
 - AND `POST /orders` still returns 201
@@ -208,3 +208,9 @@ The database schema MUST be created by a Flyway migration. Customer ids and SKUs
 - WHEN `./mvnw test` runs in `lab/order-service`
 - THEN the build succeeds
 - AND the persistence tests ran against the `postgres:18.6` container
+
+## Known limitations
+
+- **A read timeout leaves the payment outcome unknown.** The request reached payment-service, which may already have stored a payment, but the order stays `PAYMENT_PENDING`.
+- **Saving the outcome can fail after payment-service has decided.** If the save after the payment call fails (a database error, or an optimistic lock failure), `POST /orders` returns 500 and the order stays `PAYMENT_PENDING`, although payment-service has stored an `AUTHORIZED` or `DECLINED` payment.
+- **There is no reconciliation yet.** Nothing brings a `PAYMENT_PENDING` order in line with payment-service later. Reconciliation is a future feature, planned together with the fault injector, which may inject this inconsistency on purpose.
