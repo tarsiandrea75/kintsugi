@@ -1,0 +1,86 @@
+# Kintsugi M1 lab: PostgreSQL and the three services (ADR-007, ADR-008).
+# Prometheus, Loki, Alloy and Grafana are added in T4 (odd/tasks/lab-observability.md).
+#
+#   docker compose -f infra/compose.yaml up -d --build
+#   docker compose -f infra/compose.yaml down -v
+#
+# Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082.
+# PostgreSQL is not published on the host; containers reach each other by service name.
+name: kintsugi-lab
+
+services:
+  postgres:
+    image: postgres:18.6
+    environment:
+      # Lab-only credentials; nothing here is a secret.
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # Over TCP: during init the server listens only on the Unix socket, so this passes once the databases exist.
+      test: ["CMD", "pg_isready", "-h", "localhost", "-U", "lab", "-d", "payments"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  gateway-mock:
+    build: ../lab/gateway-mock
+    ports:
+      - "18082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8082/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
+  payment-service:
+    build: ../lab/payment-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payments
+      SPRING_DATASOURCE_USERNAME: lab
+      SPRING_DATASOURCE_PASSWORD: lab
+      KINTSUGI_GATEWAY_BASEURL: http://gateway-mock:8082
+    ports:
+      - "18081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gateway-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
+  order-service:
+    build: ../lab/order-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orders
+      SPRING_DATASOURCE_USERNAME: lab
+      SPRING_DATASOURCE_PASSWORD: lab
+      KINTSUGI_PAYMENT_BASEURL: http://payment-service:8081
+    ports:
+      - "18080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
+volumes:
+  postgres-data:
