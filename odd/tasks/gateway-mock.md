@@ -89,7 +89,8 @@ The vision's week-1 Thursday task is "`gateway-mock` with latency configurable v
 - 2026-10-06: reviews approved: `f38c563..7a7394a` (4 lenses, lineage `review-4dd7cb2541d156c2`) and `7a7394a..dce5aa2` (lineage `review-aef36cce0af86e52`). Findings accepted as T5.
 - 2026-10-06: T5 done by a delegated writer. The first run stopped on an API rate limit before any edit and was restarted. Virtual threads: RED without them (250 sleeping `/authorize` requests against the default 200 Tomcat threads, `GET /admin/behavior` took 2.49 s against a 1 s bound); GREEN with them (about 3.5 s total, admin under 1 s). Payment gateway connect timeout: RED 10.2 s without `connectTimeout`, GREEN 0.31 s. Characterization tests, each checked by a mutation: interrupted sleep returns 503, reset end-to-end, INFO log; the DECLINED stored row could not be mutated in isolation. Totals: gateway-mock 35, payment-service 48, twice each, stable (parent re-run). Known: the responsiveness test waits a fixed 500 ms for requests to arrive. About 305 lines.
 - 2026-10-06: T5 review approved (lineage `review-9bcee83444250958`). Its WARNING (the responsiveness test could pass without checking anything) was fixed: a new Micrometer gauge `gateway.authorize.inflight`, and the test polls it until 250 requests are in flight. RED with virtual threads off: the gauge peaks at 200 (the Tomcat cap). GREEN: 37 tests (parent re-run). The test's `HttpClient` is now closed. No new dependency: actuator already brings in micrometer-metrics. The gauge is also the F1 signal for Grafana later.
+- 2026-10-06: review of `4f41558` approved (lineage `review-22aeb51072bb6bea`). Fixed inline: the gauge holds a strong reference to its counter (`bc86a4b`), 37 tests. Session closed (STATE, journal 2026-10-06-02).
 
 ## Next step
 
-Review `dce5aa2..HEAD`; close the session (STATE, journal); refresh the bundle.
+Feature done. Next feature: Docker Compose with OpenTelemetry, Prometheus and Grafana (F1 dashboard).

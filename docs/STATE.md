@@ -12,41 +12,52 @@ M1 — The lab (Oct 5–25)
 
 ## Last action
 
-`payment-service` done, and order → payment wired ([feature document](../odd/tasks/payment-service.md)). `POST /orders` creates the order, calls payment-service with explicit timeouts, and ends in `PAID` or `PAYMENT_FAILED`. A timeout or an unreachable payment-service leaves the order in `PAYMENT_PENDING`, which is the fault F1 symptom. Tests: order-service 97, payment-service 29. Every committed range is reviewed and approved. All work is local and unpushed.
+`gateway-mock` done ([feature document](../odd/tasks/gateway-mock.md)).
+- A simulated payment gateway whose latency is set through `PUT /admin/behavior`. It runs on virtual threads, so the admin API stays responsive under load.
+- It exposes a `gateway.authorize.inflight` gauge.
+- payment-service calls it over HTTP with timeouts, and answers 503 without storing anything when the gateway is unavailable.
+- Fault F1 is now injectable: 10 s of latency leaves orders in `PAYMENT_PENDING`. This follows from the timeouts and is covered by tests per service; nobody has run it by hand yet.
+- Tests: gateway-mock 37, payment-service 48, order-service 97.
+- All work is local and unpushed.
 
 ## Next action
 
-Thursday task from the vision: `gateway-mock`, with latency configurable via REST (fault F1). It replaces the `AlwaysAuthorizeGateway` fake in payment-service with an HTTP client. Before that, decide on pushing the three local feature-branch chains.
+Friday task from the vision: Docker Compose with OpenTelemetry, Prometheus and Grafana, plus a dashboard that shows F1 while it is active. The `gateway.authorize.inflight` gauge and order states are the first signals. Before that, run the "Reproduce F1 by hand" recipe in `docs/setup.md` once.
 
 ## Local branch chains (not pushed)
 
 - `feat/model-smoke-test` → `-01-recorder` → `-02-harness` → `-03-adr`
 - `feat/order-service-skeleton` → `-01-domain` → `-02-api`
 - `feat/payment-service` → `-01-domain` → `-02-api` → `-03-order-payment` → `-04-order-flow`
+- `feat/gateway-mock` → `-01-behavior` → `-02-authorize` → `-03-payment-gateway`
 
 Each chain starts from the tip of the previous one.
 
 ## Open questions
 
 - When to make the GitHub repository public (private for now; the vision assumes public from week 1).
-- Order/payment reconciliation: a future feature, planned with the fault injector. It could fix the inconsistency or inject it as a fault (see the order-service spec, "Known limitations").
+- Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service may still store an AUTHORIZED payment after order-service has timed out.
+- The meaning of F2 (gateway 429): a declined payment or an unavailable gateway. Decide when F2 is built.
 
 ## Follow-ups
 
 Lab services:
-- `POST /orders` and `POST /payments` are not idempotent. A retry after a timeout can create duplicates, which is a candidate fault for the catalog.
-- The manual run guide for the two services in `docs/setup.md` was never run by hand.
-- The order-service 400 safety net (`OrderController.toOrder`) is untested by design.
+- `POST /orders` and `POST /payments` are not idempotent, so a retry after a timeout can create duplicates. This is a candidate fault.
+- The manual run guide and the "Reproduce F1 by hand" recipe in `docs/setup.md` have not been run.
+- gateway-mock: a reset does not shorten in-flight requests, and the admin API is open on all interfaces on purpose (see its spec, "Known limitations").
+- The order-service 400 safety net is untested by design.
 
 Smoke-test harness (non-blocking review findings):
-- The `@AfterAll` report is skipped on a partial run, there is no per-prompt timeout, and the max latencies over 60 s are attributed to cold start without a warm-up prompt.
-- The validity rule does not check the zone. The report omits `think=false`, misses 12-hour formats, and breaks on backticks.
-- ADR-003's validity rule omits the per-prompt minimum call count (P7 needs 2).
+- The report is skipped on a partial run.
+- There is no per-prompt timeout.
+- The validity rule does not check the zone.
+- The report omits `think=false`, misses 12-hour formats and breaks on backticks.
+- ADR-003 omits the P7 minimum call count.
 
 Carried over:
-- An automated test for the `demo` profile activation.
-- `DemoRunner` does not treat `HttpConnectTimeoutException` as a connection failure.
-- The Windows console prints `?` for non-ASCII model output.
+- A test for the `demo` profile activation.
+- `DemoRunner` and `HttpConnectTimeoutException`.
+- Non-ASCII output in the Windows console.
 
 ## Blockers
 
