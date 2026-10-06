@@ -79,12 +79,13 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 ## Delivery
 
 - Strategy: `ask-on-risk`; `feature-branch-chain` is expected. Forecast: about 900 authored lines, mostly configuration, so slicing is needed.
+- Chain strategy: `feature-branch-chain`. From now on it is the user's standing default for every over-budget feature, applied without asking (`auto-chain`, decided 2026-10-06). Tracker `feat/lab-observability` (feature doc `6880194`). PR 1 `feat/lab-observability-01-decisions` → tracker: ADR-008 and specs (about 205 lines). PR 2 `feat/lab-observability-02-metrics` → PR 1: service metrics (about 345 lines).
 - RDD: on (global). Reviews run per range with `--base-ref`.
 
 ## Tasks
 
-- [ ] **T1 — ADR-008 and living spec.** ADR-008: the observability stack, Option A versus OTLP, pinned versions including the base images, the host port policy. Living spec `openspec/specs/lab-observability/spec.md`. Route: delegated writer.
-- [ ] **T2 — Service metrics.** The Prometheus registry and exposure in the three services; the orders-by-status gauge in order-service (tests first); an update to the order-service living spec. Route: delegated writer.
+- [x] **T1 — ADR-008 and living spec.** ADR-008: the observability stack, Option A versus OTLP, pinned versions including the base images, the host port policy. Living spec `openspec/specs/lab-observability/spec.md`. Route: delegated writer.
+- [x] **T2 — Service metrics.** The Prometheus registry and exposure in the three services; the orders-by-status gauge in order-service (tests first); an update to the order-service living spec. Route: delegated writer.
 - [ ] **T3 — Images and compose.** The Dockerfiles; `infra/compose.yaml` with PostgreSQL, its init script, and the three services; healthchecks. Verify by bringing it up and placing a `PAID` order. Route: delegated writer.
 - [ ] **T4 — Observability stack.** Prometheus scrape config, Loki, Alloy config, Grafana provisioning and the "Lab — F1" dashboard. Verify that targets are up and that logs reach Loki. Route: delegated writer.
 - [ ] **T5 — F1 check and docs.** `infra/scripts/verify-f1.sh`, run and passing; `docs/setup.md` (Compose section, ports, how to view the dashboard). Route: delegated writer.
@@ -98,7 +99,8 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 ## Progress
 
 - 2026-10-06: research done (versions, Boot integration, ports); design approved; branch created.
+- 2026-10-06: T1 + T2 done by a delegated writer. Base images pinned: `maven:3.9.16-eclipse-temurin-21-noble` (build) and `eclipse-temurin:21.0.12.1_1-jre-noble` (runtime). Gauge `lab.orders`, exposed as `lab_orders{status}`: one series per status including 0, one shared query cached for 1 s, NaN when the database query fails. Boot 4.1.1 disables metrics export in tests; `@AutoConfigureMetrics` turns it back on. RED: 404 on `/actuator/prometheus`, and order-service tests did not compile. GREEN: order-service 103, payment-service 49, gateway-mock 38 (parent re-run). The spec requires `verify-f1.sh` to reset the gateway even when a check fails.
 
 ## Next step
 
-T1 + T2 via a delegated writer.
+T3 (images and compose) via a delegated writer.
