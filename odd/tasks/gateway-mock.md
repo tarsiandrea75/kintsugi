@@ -64,14 +64,15 @@ The vision's week-1 Thursday task is "`gateway-mock` with latency configurable v
 
 - Strategy: `ask-on-risk`; `feature-branch-chain` is expected to be proposed again. Forecast: about 700 authored lines, generated files excluded.
 - Generated files go in their own commit.
+- Chain strategy: `feature-branch-chain` (decided 2026-10-06). Tracker `feat/gateway-mock` (feature doc `f425f73`, skeleton `fc5bb75`). PR 1 `feat/gateway-mock-01-behavior` → tracker: spec, behavior store, admin API (about 384 lines). PR 2 `feat/gateway-mock-02-authorize` → PR 1: `POST /authorize` with latency (about 156 lines). PR 3 `feat/gateway-mock-03-payment-gateway` → PR 2: payment-service HTTP gateway, the 503 mapping, spec and docs (about 680 lines). PR 3 is a size exception: `HttpPaymentGateway` is a `@Component` that replaces `AlwaysAuthorizeGateway`, so the client, the removal of the fake, the 503 mapping and the integration test only build and pass together.
 - RDD: on (global). Reviews run per range with `--base-ref`, because full-branch candidates exceed the reviewer context.
 
 ## Tasks
 
 - [x] **T1 — Generated skeleton.** Spring Initializr `lab/gateway-mock` with the dependencies `web`, `validation` and `actuator` (no database). Route: delegated writer.
-- [ ] **T2 — gateway-mock behavior and API.** The living spec `openspec/specs/gateway-mock/spec.md`, then tests first, then code. Route: delegated writer.
-- [ ] **T3 — payment-service HTTP gateway.** `HttpPaymentGateway`, the properties, the 503 mapping, removal of the fake, and an update to the living spec `openspec/specs/payment-service/spec.md`. Tests first. Route: delegated writer.
-- [ ] **T4 — Docs.** `docs/setup.md`: run gateway-mock on 8082, the gateway properties, and how to reproduce F1 by hand with `curl`. Route: with T3.
+- [x] **T2 — gateway-mock behavior and API.** The living spec `openspec/specs/gateway-mock/spec.md`, then tests first, then code. Route: delegated writer.
+- [x] **T3 — payment-service HTTP gateway.** `HttpPaymentGateway`, the properties, the 503 mapping, removal of the fake, and an update to the living spec `openspec/specs/payment-service/spec.md`. Tests first. Route: delegated writer.
+- [x] **T4 — Docs.** `docs/setup.md`: run gateway-mock on 8082, the gateway properties, and how to reproduce F1 by hand with `curl`. Route: with T3.
 
 ## Checks
 
@@ -83,7 +84,8 @@ The vision's week-1 Thursday task is "`gateway-mock` with latency configurable v
 
 - 2026-10-06: design approved; branch created.
 - 2026-10-06: T1 done: Initializr skeleton (`web`, `validation`, `actuator`), pom placeholders replaced by a description, `server.port=8082`. Wrapper and git files are identical to payment-service. `./mvnw test`: 1 test, 0 failures. Generated scaffolding has no meaningful RED.
+- 2026-10-06: T2–T4 done by the delegated writer (tests first, with compiling stubs for a behavioral RED). gateway-mock: 26 of 31 red, then 31 green. payment-service: 17 of 47 red, then 47 green. order-service unchanged at 97 (parent re-run of all three). Characterization tests: `unavailableGatewayStoresNothing`, `otherFailuresAreNotServiceUnavailable`, `everyPropertyCanBeOverridden`, and the unknown/missing status cases. A `@BeforeEach` reset is needed because the cached test context shares the behavior store. Not run by hand: the "Reproduce F1 by hand" recipe in `docs/setup.md`. Open: with 10 s of latency, payment-service still stores an AUTHORIZED payment after order-service has timed out (expected from the timeouts, not observed). An interrupted sleep in `/authorize` returns 503, which the spec does not cover.
 
 ## Next step
 
-T2–T4 via the delegated writer; review the range from `f38c563` once committed.
+Review the range `f38c563..HEAD`; then close the session (STATE, journal, bundle).
