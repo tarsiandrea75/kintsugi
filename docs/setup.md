@@ -110,9 +110,44 @@ Its latency is the fault F1 control point. The admin API has no authentication, 
 
 Each change is logged at `INFO`. The behavior is in the [living spec](../openspec/specs/gateway-mock/spec.md).
 
-## Run the lab services together
+## Lab with Docker Compose
 
-Docker Compose for the whole lab comes on Friday (week 1). Until then, run each service by hand, each with its own PostgreSQL database.
+One command starts the whole M1 lab: PostgreSQL, the three services, Prometheus, Loki, Alloy and Grafana (ADR-008, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
+
+```bash
+docker compose -f infra/compose.yaml up -d --build --wait   # start; the first build takes about a minute
+docker compose -f infra/compose.yaml down                   # stop, keep the data
+docker compose -f infra/compose.yaml down -v                # stop and delete the data volumes
+```
+
+The compose project is called `kintsugi-lab`, so these commands never touch other containers. Every port is bound to `127.0.0.1`, so the lab is reachable only from this machine:
+
+| What | URL |
+|------|-----|
+| order-service | <http://localhost:18080> |
+| payment-service | <http://localhost:18081> |
+| gateway-mock | <http://localhost:18082> |
+| Grafana | <http://localhost:13000> |
+| Prometheus | <http://localhost:19090> |
+
+PostgreSQL, Loki and Alloy have no host port.
+
+Grafana opens on the "Lab — F1" dashboard without a login (anonymous Viewer). To edit, log in as `admin`. The password comes from `GRAFANA_ADMIN_PASSWORD` and defaults to `kintsugi-lab`. To change it, set the variable in your shell or in `infra/.env` before `up`.
+
+Loki needs about a minute after startup before it answers queries. Until then, the WARN-lines panel can stay empty.
+
+### Check that F1 is visible
+
+```bash
+infra/scripts/verify-f1.sh          # start or reuse the lab, run the checks, leave it running
+infra/scripts/verify-f1.sh --down   # the same, then `down -v`
+```
+
+The script waits for Loki, places a healthy order (`PAID`), sets the gateway latency to 10 s, and places an order that ends `PAYMENT_PENDING`. It then checks that Prometheus sees the pending count rise and the in-flight gauge above 0, and that Loki has order-service's `WARN` line for that order. It prints one `PASS` or `FAIL` line per check and exits non-zero on any failure. It always resets the gateway on exit, even when a check fails. It needs `docker` and `curl`. It takes about 1.5 minutes on a fresh stack and under a minute on a running one.
+
+## Run the lab services without Docker Compose
+
+To debug one service from the IDE, run each service by hand, each with its own PostgreSQL database. The ports below are the services' defaults, not the compose ones.
 
 1. Start one PostgreSQL 18.6 container per service:
 
@@ -150,6 +185,8 @@ Docker Compose for the whole lab comes on Friday (week 1). Until then, run each 
 
 ### Reproduce F1 by hand
 
+The quickest route is the compose lab: start it as in [Lab with Docker Compose](#lab-with-docker-compose) and use ports 18080 (orders) and 18082 (gateway) in the commands below. Watch the "Lab — F1" dashboard while the fault is active: the `PAYMENT_PENDING` series rises, the gateway in-flight panel shows the waiting authorization, and the WARN line appears. `infra/scripts/verify-f1.sh` runs the same steps and checks them.
+
 > Run by hand on 2026-10-06 (WSL, Docker Engine 29.4.0), on alternative ports (databases 55432/55433, services 18080/18081/18082) because other local projects held 5432 and 8080. Observed:
 > - a healthy order returned `PAID` in 0.48 s;
 > - with 10 s of gateway latency the order returned 201 `PAYMENT_PENDING` after 3.01 s, and order-service logged the `WARN` line;
@@ -157,7 +194,7 @@ Docker Compose for the whole lab comes on Friday (week 1). Until then, run each 
 >
 > If your ports are taken, pass `--server.port`, the datasource URL, `kintsugi.payment.base-url` and `kintsugi.gateway.base-url` the same way as the datasource arguments.
 
-With the three services running as above:
+With the compose lab (ports 18080 and 18082) or the three services run by hand (ports 8080 and 8082):
 
 1. Slow the gateway down to 10 seconds:
 
