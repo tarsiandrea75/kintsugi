@@ -155,10 +155,12 @@ class OrdersByStatusMetricsTest {
 		long start = System.nanoTime();
 		scrape();
 		long elapsed = System.nanoTime() - start;
+		// Read before releasing the query, otherwise the background refresh can finish first.
+		double whileQueryIsRunning = gauge(OrderStatus.PAID);
 		release.countDown();
 
 		assertThat(Duration.ofNanos(elapsed)).isLessThan(Duration.ofMillis(100));
-		assertThat(gauge(OrderStatus.PAID)).isNaN();
+		assertThat(whileQueryIsRunning).isNaN();
 	}
 
 	@Test
