@@ -62,7 +62,7 @@ The vision's week-1 Wednesday task is "`payment-service` and order → payment c
 
 ## Tasks
 
-- [ ] **T1 — Generated skeleton.** Spring Initializr project `lab/payment-service` (the same ids as order-service, image pinned to `postgres:18.6`). Route: delegated writer.
+- [x] **T1 — Generated skeleton.** Spring Initializr project `lab/payment-service` (the same ids as order-service, image pinned to `postgres:18.6`). Route: delegated writer.
 - [ ] **T2 — payment-service domain, persistence and API.** The living spec `openspec/specs/payment-service/spec.md`, then tests first, then code. Route: delegated writer.
 - [ ] **T3 — order-service payment step.** `OrderService`, the payment client with configurable timeouts, a decision on the test HTTP server (ADR if it is a new dependency), tests first including the timeout case. Update the living spec `openspec/specs/order-service/spec.md`. Route: delegated writer.
 - [ ] **T4 — Docs.** `docs/setup.md` (payment-service, and how the two services are configured together). Route: with T3.
@@ -75,7 +75,8 @@ The vision's week-1 Wednesday task is "`payment-service` and order → payment c
 ## Progress
 
 - 2026-10-06: design approved; branch created.
+- 2026-10-06: T1 done: the Initializr skeleton (same request as order-service), with the image pinned to `postgres:18.6` and `TestcontainersConfiguration` made public. Wrapper and git files are byte-identical to order-service. `./mvnw test`: 1 test, 0 failures. No meaningful RED for scaffolding.
 
 ## Next step
 
-T1 via a delegated writer.
+Run the review preflight on the skeleton commit (the stop hook asked for it while files were untracked). Then T2 via a delegated writer.
