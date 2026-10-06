@@ -193,6 +193,28 @@ Saving an order MUST use optimistic locking on its `version`. Saving a copy that
 - THEN the reloaded `updatedAt` equals the new value
 - AND it is later than `createdAt`
 
+### Requirement: Orders-by-status gauge
+
+order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.orders`, shown in Prometheus as `lab_orders`, with one series per `OrderStatus` and the tag `status` (`CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`). Each series MUST hold the number of stored orders in that status, read from PostgreSQL at scrape time with one `SELECT status, count(*) FROM orders GROUP BY status` query. A status with no orders MUST report 0. The gauges of one scrape MUST share that query: its result is reused for at most 1 second. Orders piling up in `PAYMENT_PENDING` is how fault F1 shows in the metrics.
+
+#### Scenario: Counts per status
+- GIVEN 3 stored orders in `PAID` and 2 in `PAYMENT_PENDING`
+- WHEN the gauges are read
+- THEN `lab_orders{status="PAID"}` is 3 and `lab_orders{status="PAYMENT_PENDING"}` is 2
+- AND `lab_orders{status="CREATED"}` and `lab_orders{status="PAYMENT_FAILED"}` are 0
+
+#### Scenario: One query per scrape
+- GIVEN the four `lab.orders` series
+- WHEN all four are read within 1 second
+- THEN the database is queried once
+- AND a read more than 1 second later queries it again
+
+#### Scenario: Scrape endpoint
+- GIVEN order-service running against PostgreSQL 18.6 with one stored order in `CREATED`
+- WHEN `GET /actuator/prometheus` is called
+- THEN the response status is 200
+- AND the body contains `lab_orders{status="CREATED"}`, `lab_orders{status="PAID"} 0.0` and `http_server_requests_seconds_count`
+
 ### Requirement: Schema and persistence tests
 
 The database schema MUST be created by a Flyway migration. Customer ids and SKUs MUST be stored in `VARCHAR(64)` columns. Persistence and end-to-end tests MUST run against a real PostgreSQL 18.6 started by Testcontainers (`postgres:18.6` with `@ServiceConnection`), not an in-memory database. `./mvnw test` from `lab/order-service` MUST pass.
