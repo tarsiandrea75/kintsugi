@@ -68,7 +68,7 @@ The vision's week-1 Thursday task is "`gateway-mock` with latency configurable v
 
 ## Tasks
 
-- [ ] **T1 — Generated skeleton.** Spring Initializr `lab/gateway-mock` with the dependencies `web`, `validation` and `actuator` (no database). Route: delegated writer.
+- [x] **T1 — Generated skeleton.** Spring Initializr `lab/gateway-mock` with the dependencies `web`, `validation` and `actuator` (no database). Route: delegated writer.
 - [ ] **T2 — gateway-mock behavior and API.** The living spec `openspec/specs/gateway-mock/spec.md`, then tests first, then code. Route: delegated writer.
 - [ ] **T3 — payment-service HTTP gateway.** `HttpPaymentGateway`, the properties, the 503 mapping, removal of the fake, and an update to the living spec `openspec/specs/payment-service/spec.md`. Tests first. Route: delegated writer.
 - [ ] **T4 — Docs.** `docs/setup.md`: run gateway-mock on 8082, the gateway properties, and how to reproduce F1 by hand with `curl`. Route: with T3.
@@ -82,7 +82,8 @@ The vision's week-1 Thursday task is "`gateway-mock` with latency configurable v
 ## Progress
 
 - 2026-10-06: design approved; branch created.
+- 2026-10-06: T1 done: Initializr skeleton (`web`, `validation`, `actuator`), pom placeholders replaced by a description, `server.port=8082`. Wrapper and git files are identical to payment-service. `./mvnw test`: 1 test, 0 failures. Generated scaffolding has no meaningful RED.
 
 ## Next step
 
-T1 via a delegated writer.
+T2–T4 via the delegated writer; review the range from `f38c563` once committed.
