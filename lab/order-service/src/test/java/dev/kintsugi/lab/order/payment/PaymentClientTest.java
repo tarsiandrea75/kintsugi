@@ -18,11 +18,17 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** The payment client against a real HTTP server on loopback, with short timeouts so the failure cases stay fast. */
 class PaymentClientTest {
+
+	// Clients connect to the IPv4 literal 127.0.0.1, so fixtures must bind the same address family.
+	private static final InetAddress IPV4_LOOPBACK = ipv4Loopback();
+
 
 	private static final UUID ORDER_ID = UUID.fromString("55555555-5555-5555-5555-555555555555");
 
@@ -101,7 +107,7 @@ class PaymentClientTest {
 	void unreachableServiceIsUnavailable() throws IOException {
 		// A bound but non-listening socket holds the port, so the kernel refuses connections and no one else can take it.
 		try (Socket portHolder = new Socket()) {
-			portHolder.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+			portHolder.bind(new InetSocketAddress(IPV4_LOOPBACK, 0));
 			PaymentClient unreachable = clientFor("http://127.0.0.1:" + portHolder.getLocalPort());
 
 			assertThatExceptionOfType(PaymentUnavailableException.class).isThrownBy(() -> unreachable.pay(ORDER_ID))
@@ -109,7 +115,9 @@ class PaymentClientTest {
 		}
 	}
 
+	// Relies on Linux dropping SYNs when the accept queue is full; other OSes may refuse instead.
 	@Test
+	@EnabledOnOs(OS.LINUX)
 	void hangingConnectTimesOutAfterTheConnectTimeout() throws IOException {
 		// The read timeout is long, so only the connect timeout can end the call quickly. The JDK client reports both as
 		// HttpConnectTimeoutException while connecting, so the elapsed time is what proves the connect timeout applies.
@@ -148,7 +156,7 @@ class PaymentClientTest {
 		private static final int MAX_QUEUED = 16;
 
 		static SaturatedListener open() throws IOException {
-			ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+			ServerSocket server = new ServerSocket(0, 1, IPV4_LOOPBACK);
 			SaturatedListener listener = new SaturatedListener(server, new ArrayList<>());
 			try {
 				listener.fillAcceptQueue();
@@ -162,7 +170,7 @@ class PaymentClientTest {
 
 		/** Connects until one handshake hangs, which proves the queue is full. */
 		private void fillAcceptQueue() throws IOException {
-			InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), port());
+			InetSocketAddress address = new InetSocketAddress(IPV4_LOOPBACK, port());
 			for (int i = 0; i < MAX_QUEUED; i++) {
 				Socket socket = new Socket();
 				try {
@@ -189,6 +197,16 @@ class PaymentClientTest {
 			server.close();
 		}
 
+	}
+
+
+	private static InetAddress ipv4Loopback() {
+		try {
+			return InetAddress.getByName("127.0.0.1");
+		}
+		catch (IOException ex) {
+			throw new IllegalStateException(ex);
+		}
 	}
 
 }
