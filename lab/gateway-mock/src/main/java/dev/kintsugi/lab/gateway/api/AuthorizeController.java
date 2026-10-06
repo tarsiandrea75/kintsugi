@@ -30,6 +30,8 @@ class AuthorizeController {
 		// Requests piling up here is what fault F1 looks like; the gauge also lets tests observe real in-flight load.
 		Gauge.builder(INFLIGHT_GAUGE, inflight, AtomicInteger::get)
 			.description("POST /authorize requests currently waiting on the simulated latency")
+			// Gauges hold a weak reference by default; keep the counter alive even if this controller is not a bean.
+			.strongReference(true)
 			.register(registry);
 	}
 
