@@ -195,7 +195,7 @@ Saving an order MUST use optimistic locking on its `version`. Saving a copy that
 
 ### Requirement: Orders-by-status gauge
 
-order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.orders`, shown in Prometheus as `lab_orders`, with one series per `OrderStatus` and the tag `status` (`CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`). Each series MUST hold the number of stored orders in that status, read from PostgreSQL at scrape time with one `SELECT status, count(*) FROM orders GROUP BY status` query. A status with no orders MUST report 0. The gauges of one scrape MUST share that query: its result is reused for at most 1 second. Orders piling up in `PAYMENT_PENDING` is how fault F1 shows in the metrics.
+order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.orders`, shown in Prometheus as `lab_orders`, with one series per `OrderStatus` and the tag `status` (`CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`). Each series MUST hold the number of stored orders in that status, read from PostgreSQL at scrape time with one `SELECT status, count(*) FROM orders GROUP BY status` query. A status with no orders MUST report 0. A scrape MUST NOT wait on the database: a gauge read MUST return the current snapshot at once, and a snapshot older than 1 second MUST trigger at most one asynchronous refresh. The refresh MUST store the counts or a failure, timestamped when the query finishes, so all series share one query and a failing database is queried at most once per second. A failed or not yet completed refresh MUST report NaN. A value MAY lag the database by about 1 second plus one query. Orders piling up in `PAYMENT_PENDING` is how fault F1 shows in the metrics.
 
 #### Scenario: Counts per status
 - GIVEN 3 stored orders in `PAID` and 2 in `PAYMENT_PENDING`
@@ -206,12 +206,26 @@ order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.
 #### Scenario: One query per scrape
 - GIVEN the four `lab.orders` series
 - WHEN all four are read within 1 second
-- THEN the database is queried once
-- AND a read more than 1 second later queries it again
+- THEN at most one refresh runs and the database is queried once
+- AND a read more than 1 second after the refresh finished starts one new query
+
+#### Scenario: Database failure gives NaN without a slow scrape
+- GIVEN the count query fails or hangs, as under fault F4
+- WHEN the gauges are read
+- THEN every read returns at once, without waiting for the query
+- AND once the failed refresh completes, every series is NaN
+- AND the failing query runs at most once per second
+- AND the counts come back after the next successful refresh
+
+#### Scenario: Value lags by up to about one refresh
+- GIVEN a snapshot older than 1 second
+- WHEN the gauges are read
+- THEN they return the previous counts and start one refresh
+- AND a read after that refresh completes returns the new counts
 
 #### Scenario: Scrape endpoint
 - GIVEN order-service running against PostgreSQL 18.6 with one stored order in `CREATED`
-- WHEN `GET /actuator/prometheus` is called
+- WHEN `GET /actuator/prometheus` is called until the first refresh has completed
 - THEN the response status is 200
 - AND the body contains `lab_orders{status="CREATED"}`, `lab_orders{status="PAID"} 0.0` and `http_server_requests_seconds_count`
 

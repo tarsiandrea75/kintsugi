@@ -86,7 +86,7 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 
 - [x] **T1 — ADR-008 and living spec.** ADR-008: the observability stack, Option A versus OTLP, pinned versions including the base images, the host port policy. Living spec `openspec/specs/lab-observability/spec.md`. Route: delegated writer.
 - [x] **T2 — Service metrics.** The Prometheus registry and exposure in the three services; the orders-by-status gauge in order-service (tests first); an update to the order-service living spec. Route: delegated writer.
-- [ ] **T3 — Images and compose.** The Dockerfiles; `infra/compose.yaml` with PostgreSQL, its init script, and the three services; healthchecks. Verify by bringing it up and placing a `PAID` order. Route: delegated writer.
+- [x] **T3 — Images and compose.** The Dockerfiles; `infra/compose.yaml` with PostgreSQL, its init script, and the three services; healthchecks. Verify by bringing it up and placing a `PAID` order. Route: delegated writer.
 - [ ] **T4 — Observability stack.** Prometheus scrape config, Loki, Alloy config, Grafana provisioning and the "Lab — F1" dashboard. Verify that targets are up and that logs reach Loki. Route: delegated writer.
 - [ ] **T5 — F1 check and docs.** `infra/scripts/verify-f1.sh`, run and passing; `docs/setup.md` (Compose section, ports, how to view the dashboard). Route: delegated writer.
 
@@ -100,7 +100,10 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 
 - 2026-10-06: research done (versions, Boot integration, ports); design approved; branch created.
 - 2026-10-06: T1 + T2 done by a delegated writer. Base images pinned: `maven:3.9.16-eclipse-temurin-21-noble` (build) and `eclipse-temurin:21.0.12.1_1-jre-noble` (runtime). Gauge `lab.orders`, exposed as `lab_orders{status}`: one series per status including 0, one shared query cached for 1 s, NaN when the database query fails. Boot 4.1.1 disables metrics export in tests; `@AutoConfigureMetrics` turns it back on. RED: 404 on `/actuator/prometheus`, and order-service tests did not compile. GREEN: order-service 103, payment-service 49, gateway-mock 38 (parent re-run). The spec requires `verify-f1.sh` to reset the gateway even when a check fails.
+- 2026-10-06: review of `29dcf1a..dd0c02f` approved (lineage `review-d70f93622ae672a0`). Its WARNINGs were fixed: the database-failure path is now proven, and the integration test no longer depends on database state.
+- 2026-10-06: T3 done. Compose `c858fbf` (review `review-a8e0f0609a04e8e4` approved): multi-stage Dockerfiles that run as a non-root `app` user; one PostgreSQL with two databases, no host port, and `pg_isready -h localhost`; curl healthchecks on `/actuator/health`; host ports 18080–18082. Verified by hand: a first build of 72 s, all four containers healthy, an order `PAID`, `lab_orders` scraped.
+- 2026-10-06: gauge rework (found while verifying). With the database down, a scrape took 120 s, because each of the 4 series re-ran the query against Hikari's 30 s connection timeout. That would hide F4. Now a scrape never waits: reads return the current snapshot or NaN, a stale snapshot starts one background refresh on a virtual thread, and failures are cached for the TTL. RED: 5 of 9 tests failed. GREEN: 108 tests, twice (parent re-run). Compose check: with Postgres stopped, scrapes take under 0.015 s and NaN appears after the 30 s Hikari timeout. Follow-up: a shorter Hikari `connection-timeout` would surface a hung database sooner. Review follow-ups for T4: `start_period` on the postgres healthcheck; the stack smoke test lives in T5's script.
 
 ## Next step
 
-T3 (images and compose) via a delegated writer.
+T4 (Prometheus, Loki, Alloy, Grafana and the dashboard) via a delegated writer.
