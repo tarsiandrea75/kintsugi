@@ -1,6 +1,7 @@
 package dev.kintsugi.lab.order.metrics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -201,6 +202,50 @@ class OrdersByStatusMetricsTest {
 		runRefreshes();
 
 		assertThat(gauge(OrderStatus.PAID)).isNaN();
+	}
+
+	@Test
+	void aHungRefreshTurnsTheGaugeNaNAfterTheMaxServedAge() {
+		rows = List.of(new OrderStatusCount(OrderStatus.PAID, 1));
+		bind();
+		scrape();
+		runRefreshes();
+
+		// The next refresh starts but never completes, like a query stuck on a hung connection.
+		nanoTime.addAndGet(PAST_TTL);
+		scrape();
+		assertThat(pendingRefreshes).hasSize(1);
+		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
+
+		nanoTime.set(OrdersByStatusMetrics.MAX_SERVED_AGE.toNanos());
+		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
+
+		nanoTime.incrementAndGet();
+		for (OrderStatus status : OrderStatus.values()) {
+			assertThat(gauge(status)).isNaN();
+		}
+		assertThat(pendingRefreshes).hasSize(1);
+		assertThat(queries).hasValue(1);
+
+		runRefreshes();
+		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
+	}
+
+	@Test
+	void anErrorStartingTheRefreshIsRethrownAndReleasesTheGuard() {
+		AtomicInteger starts = new AtomicInteger();
+		executor = task -> {
+			if (starts.incrementAndGet() == 1) {
+				throw new OutOfMemoryError("unable to create native thread");
+			}
+			pendingRefreshes.add(task);
+		};
+		OrdersByStatusMetrics metrics = bind();
+
+		assertThatThrownBy(() -> metrics.count(OrderStatus.PAID)).isInstanceOf(OutOfMemoryError.class);
+		metrics.count(OrderStatus.PAID);
+
+		assertThat(pendingRefreshes).hasSize(1);
 	}
 
 	@Test

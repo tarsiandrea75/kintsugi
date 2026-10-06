@@ -195,7 +195,7 @@ Saving an order MUST use optimistic locking on its `version`. Saving a copy that
 
 ### Requirement: Orders-by-status gauge
 
-order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.orders`, shown in Prometheus as `lab_orders`, with one series per `OrderStatus` and the tag `status` (`CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`). Each series MUST hold the number of stored orders in that status, read from PostgreSQL at scrape time with one `SELECT status, count(*) FROM orders GROUP BY status` query. A status with no orders MUST report 0. A scrape MUST NOT wait on the database: a gauge read MUST return the current snapshot at once, and a snapshot older than 1 second MUST trigger at most one asynchronous refresh. The refresh MUST store the counts or a failure, timestamped when the query finishes, so all series share one query and a failing database is queried at most once per second. A failed or not yet completed refresh MUST report NaN. A value MAY lag the database by about 1 second plus one query. Orders piling up in `PAYMENT_PENDING` is how fault F1 shows in the metrics.
+order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.orders`, shown in Prometheus as `lab_orders`, with one series per `OrderStatus` and the tag `status` (`CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`). Each series MUST hold the number of stored orders in that status, read from PostgreSQL at scrape time with one `SELECT status, count(*) FROM orders GROUP BY status` query. A status with no orders MUST report 0. A scrape MUST NOT wait on the database: a gauge read MUST return the current snapshot at once, and a snapshot older than 1 second MUST trigger at most one asynchronous refresh. The refresh MUST store the counts or a failure, timestamped when the query finishes, so all series share one query and a failing database is queried at most once per second. A failed or not yet completed refresh MUST report NaN. A snapshot older than 10 seconds MUST NOT be served: the series MUST report NaN, even while a refresh is still running. A value MAY lag the database by about 1 second plus one query. Orders piling up in `PAYMENT_PENDING` is how fault F1 shows in the metrics.
 
 #### Scenario: Counts per status
 - GIVEN 3 stored orders in `PAID` and 2 in `PAYMENT_PENDING`
@@ -216,6 +216,12 @@ order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.
 - AND once the failed refresh completes, every series is NaN
 - AND the failing query runs at most once per second
 - AND the counts come back after the next successful refresh
+
+#### Scenario: A hung refresh turns the gauge NaN after the maximum served age
+- GIVEN a successful snapshot and a later refresh that hangs after it has acquired a connection
+- WHEN the gauges are read while the snapshot is at most 10 seconds old
+- THEN they return the previous counts and no second refresh starts
+- AND once the snapshot is more than 10 seconds old, every series is NaN while the refresh is still running
 
 #### Scenario: Value lags by up to about one refresh
 - GIVEN a snapshot older than 1 second

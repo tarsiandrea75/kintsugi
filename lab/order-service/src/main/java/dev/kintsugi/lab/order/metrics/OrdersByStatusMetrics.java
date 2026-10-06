@@ -34,9 +34,10 @@ import dev.kintsugi.lab.order.persistence.OrderStatusCount;
  * refresh runs one {@code GROUP BY} query and stores the counts, or a failure, timestamped when the query finishes, so
  * a failing database is queried at most once per max age and never once per series. If the database hangs (fault
  * F4, pool exhausted), scrapes stay fast and the series show NaN or the last counts instead of timing out the target.
+ * A snapshot older than {@link #MAX_SERVED_AGE} is never served: a refresh that hangs turns the series NaN.
  *
- * <p>Trade-off: a value can be up to about one max age plus one query old. That is fine for a scrape interval of
- * several seconds.
+ * <p>Trade-off: a value can be up to about one max age plus one query old, and never older than
+ * {@link #MAX_SERVED_AGE}. That is fine for a scrape interval of several seconds.
  */
 @Component
 public class OrdersByStatusMetrics implements MeterBinder {
@@ -46,6 +47,12 @@ public class OrdersByStatusMetrics implements MeterBinder {
 
 	/** Far shorter than any scrape interval, far longer than reading the gauges of one scrape. */
 	static final Duration SNAPSHOT_MAX_AGE = Duration.ofSeconds(1);
+
+	/**
+	 * Oldest snapshot a read may serve. A refresh that hangs after it has a connection never replaces the snapshot, so
+	 * past this age the gauge reports NaN instead of stale counts, even while that refresh is still in flight.
+	 */
+	static final Duration MAX_SERVED_AGE = Duration.ofSeconds(10);
 
 	private static final Logger log = LoggerFactory.getLogger(OrdersByStatusMetrics.class);
 
@@ -95,7 +102,8 @@ public class OrdersByStatusMetrics implements MeterBinder {
 				&& refreshing.compareAndSet(false, true)) {
 			startRefresh();
 		}
-		if (current == null || current.failed()) {
+		if (current == null || current.failed()
+				|| current.isOlderThan(MAX_SERVED_AGE.toNanos(), nanoTime.getAsLong())) {
 			return Double.NaN;
 		}
 		return current.counts().getOrDefault(status, 0L);
@@ -109,6 +117,11 @@ public class OrdersByStatusMetrics implements MeterBinder {
 			// Could not even start the refresh; release the guard so the next read tries again.
 			refreshing.set(false);
 			log.debug("Cannot start the order count refresh", ex);
+		}
+		catch (Error err) {
+			// For example no native thread left: release the guard too, but never swallow an Error.
+			refreshing.set(false);
+			throw err;
 		}
 	}
 
