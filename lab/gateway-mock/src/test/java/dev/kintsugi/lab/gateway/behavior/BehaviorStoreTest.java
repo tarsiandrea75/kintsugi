@@ -7,7 +7,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
+@ExtendWith(OutputCaptureExtension.class)
 class BehaviorStoreTest {
 
 	private final BehaviorStore store = new BehaviorStore();
@@ -31,6 +35,15 @@ class BehaviorStoreTest {
 
 		assertThat(store.reset()).isEqualTo(GatewayBehavior.DEFAULT);
 		assertThat(store.get()).isEqualTo(GatewayBehavior.DEFAULT);
+	}
+
+	@Test
+	void changesAndResetsAreLoggedWithTheOldAndNewLatency(CapturedOutput output) {
+		store.set(new GatewayBehavior(750));
+		store.reset();
+
+		assertThat(output.getOut()).containsSubsequence("INFO", "Gateway behavior changed: latencyMs 0 -> 750", "INFO",
+				"Gateway behavior reset: latencyMs 750 -> 0");
 	}
 
 	@Test

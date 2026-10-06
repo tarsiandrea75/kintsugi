@@ -6,13 +6,20 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.http.HttpConnectTimeoutException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -105,6 +112,26 @@ class HttpPaymentGatewayTest {
 		}
 	}
 
+	// Relies on Linux dropping SYNs when the accept queue is full; other OSes may refuse instead.
+	@Test
+	@EnabledOnOs(OS.LINUX)
+	void hangingConnectTimesOutAfterTheConnectTimeout() throws IOException {
+		// The read timeout is long, so only the connect timeout can end the call quickly. The JDK client reports both as
+		// HttpConnectTimeoutException while connecting, so the elapsed time is what proves the connect timeout applies.
+		try (SaturatedListener listener = SaturatedListener.open()) {
+			HttpPaymentGateway hanging = new HttpPaymentGateway(new GatewayProperties(
+					URI.create("http://127.0.0.1:" + listener.port()), TIMEOUT, Duration.ofSeconds(10)));
+
+			long start = System.nanoTime();
+			assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> hanging.authorize(ORDER_ID))
+				.withMessageContaining(ORDER_ID.toString())
+				.satisfies(ex -> assertThat(causesOf(ex)).hasAtLeastOneElementOfType(HttpConnectTimeoutException.class));
+			Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+
+			assertThat(elapsed).isGreaterThanOrEqualTo(TIMEOUT).isLessThan(Duration.ofSeconds(3));
+		}
+	}
+
 	private static HttpPaymentGateway gatewayFor(String baseUrl) {
 		return new HttpPaymentGateway(new GatewayProperties(URI.create(baseUrl), TIMEOUT, TIMEOUT));
 	}
@@ -116,6 +143,66 @@ class HttpPaymentGatewayTest {
 		catch (IOException ex) {
 			throw new IllegalStateException(ex);
 		}
+	}
+
+	private static List<Throwable> causesOf(Throwable ex) {
+		List<Throwable> causes = new ArrayList<>();
+		for (Throwable cause = ex.getCause(); cause != null; cause = cause.getCause()) {
+			causes.add(cause);
+		}
+		return causes;
+	}
+
+	/**
+	 * A loopback listener that never accepts, with its accept queue already full. Linux then drops new SYNs
+	 * ({@code tcp_abort_on_overflow=0}, the default), so a client's TCP handshake hangs instead of being refused.
+	 */
+	private record SaturatedListener(ServerSocket server, List<Socket> queued) implements AutoCloseable {
+
+		private static final int MAX_QUEUED = 16;
+
+		static SaturatedListener open() throws IOException {
+			ServerSocket server = new ServerSocket(0, 1, IPV4_LOOPBACK);
+			SaturatedListener listener = new SaturatedListener(server, new ArrayList<>());
+			try {
+				listener.fillAcceptQueue();
+			}
+			catch (IOException | RuntimeException ex) {
+				listener.close();
+				throw ex;
+			}
+			return listener;
+		}
+
+		/** Connects until one handshake hangs, which proves the queue is full. */
+		private void fillAcceptQueue() throws IOException {
+			InetSocketAddress address = new InetSocketAddress(IPV4_LOOPBACK, port());
+			for (int i = 0; i < MAX_QUEUED; i++) {
+				Socket socket = new Socket();
+				try {
+					socket.connect(address, 100);
+				}
+				catch (SocketTimeoutException ex) {
+					socket.close();
+					return;
+				}
+				queued.add(socket);
+			}
+			throw new IllegalStateException("Accept queue never filled after " + MAX_QUEUED + " connections");
+		}
+
+		int port() {
+			return server.getLocalPort();
+		}
+
+		@Override
+		public void close() throws IOException {
+			for (Socket socket : queued) {
+				socket.close();
+			}
+			server.close();
+		}
+
 	}
 
 }

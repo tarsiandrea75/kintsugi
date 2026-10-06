@@ -49,4 +49,23 @@ class AuthorizeLatencyIntegrationTest {
 		assertThat(elapsed).isGreaterThanOrEqualTo(LATENCY);
 	}
 
+	@Test
+	void authorizeIsFastAgainAfterAReset() throws Exception {
+		Duration longLatency = Duration.ofSeconds(5);
+		mvc.perform(put("/admin/behavior").contentType(MediaType.APPLICATION_JSON).content("""
+				{"latencyMs": %d}
+				""".formatted(longLatency.toMillis()))).andExpect(status().isOk());
+		mvc.perform(delete("/admin/behavior")).andExpect(status().isOk());
+
+		long start = System.nanoTime();
+		mvc.perform(post("/authorize").contentType(MediaType.APPLICATION_JSON).content("""
+				{"orderId": "33333333-3333-3333-3333-333333333333"}
+				"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("AUTHORIZED"));
+		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+
+		assertThat(elapsed).isLessThan(Duration.ofSeconds(1));
+	}
+
 }

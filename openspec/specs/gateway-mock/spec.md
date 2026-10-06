@@ -28,6 +28,24 @@ The gateway MUST wait at least the configured latency before it answers `POST /a
 - THEN the response status is 200
 - AND the response arrives no sooner than 300 ms after the request
 
+### Requirement: Interrupted latency is a 503
+
+If the simulated latency is interrupted before it ends, for example when the gateway shuts down, `POST /authorize` MUST return 503 and MUST NOT authorize. payment-service treats the 503 as "gateway unavailable", not as a decline.
+
+#### Scenario: Sleep interrupted during shutdown
+- GIVEN the latency is set to 60000 ms
+- WHEN the thread serving `POST /authorize` is interrupted while it waits
+- THEN the response status is 503
+
+### Requirement: Admin API stays responsive under load
+
+The admin API MUST answer promptly while many `POST /authorize` requests are waiting for their latency, more than Tomcat's platform thread pool (200 threads by default) could hold. Requests run on virtual threads (`spring.threads.virtual.enabled=true`), so a sleeping request does not hold a platform thread. This keeps the fault injector able to restore the lab while fault F1 is active.
+
+#### Scenario: Reset while the gateway is saturated
+- GIVEN the latency is 3000 ms and 250 `POST /authorize` requests are in flight
+- WHEN `GET /admin/behavior` and then `DELETE /admin/behavior` are called
+- THEN each answers 200 in under 1 second
+
 ### Requirement: Change, read and reset the behavior
 
 - `PUT /admin/behavior` with body `{"latencyMs": <n>}` MUST replace the behavior and return 200 with the new behavior (`{"latencyMs": <n>}`).
@@ -77,5 +95,6 @@ The gateway MUST wait at least the configured latency before it answers `POST /a
 ## Known limitations
 
 - **Latency only.** The gateway always authorizes. Forced errors and the 429 response belong to fault F2 and are not built yet.
-- **No authentication.** The admin endpoints are open; this is a local lab.
+- **No authentication, all interfaces.** The admin endpoints have no auth and listen on all interfaces on purpose, so the Docker network and the fault injector can reach them. This is a local lab; do not expose it.
+- **A reset does not shorten requests already sleeping.** A `POST /authorize` reads the latency once when it starts; after a reset it still waits the old latency, and only new requests answer fast.
 - **In-memory state.** The behavior lives in memory: a restart resets the latency to 0, and several instances do not share it.

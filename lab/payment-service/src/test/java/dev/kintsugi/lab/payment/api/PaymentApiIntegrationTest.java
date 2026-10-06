@@ -101,9 +101,20 @@ class PaymentApiIntegrationTest {
 	void declinedPaymentIsStoredAsDeclined() throws Exception {
 		GATEWAY.replyWith(200, "DECLINED");
 
-		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))
+		UUID orderId = UUID.randomUUID();
+
+		String body = mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(orderId)))
 			.andExpect(status().isCreated())
-			.andExpect(jsonPath("$.status").value("DECLINED"));
+			.andExpect(jsonPath("$.status").value("DECLINED"))
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		Map<String, Object> row = jdbc.sql("select order_id, status from payments where id = ?")
+			.param(UUID.fromString(JsonPath.read(body, "$.id")))
+			.query()
+			.singleRow();
+		assertThat(row).containsEntry("order_id", orderId).containsEntry("status", "DECLINED");
 	}
 
 	@Test

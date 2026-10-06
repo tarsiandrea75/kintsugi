@@ -7,9 +7,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.stream.Stream;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -63,7 +66,7 @@ class AdminBehaviorControllerTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(longs = { 0, GatewayBehavior.MAX_LATENCY_MS })
+	@ValueSource(longs = { GatewayBehavior.MIN_LATENCY_MS, GatewayBehavior.MAX_LATENCY_MS })
 	void boundsAreAccepted(long latencyMs) throws Exception {
 		putLatency("{\"latencyMs\": " + latencyMs + "}").andExpect(status().isOk());
 
@@ -83,14 +86,19 @@ class AdminBehaviorControllerTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = { "{}", "{\"latencyMs\": null}", "{\"latencyMs\": -1}", "{\"latencyMs\": 60001}",
-			"{\"latencyMs\": \"slow\"}", "{\"latencyMs\": " })
+	@MethodSource("invalidLatencyBodies")
 	void invalidLatencyIsRejectedAndKeepsTheBehavior(String body) throws Exception {
 		GatewayBehavior before = store.set(new GatewayBehavior(500));
 
 		putLatency(body).andExpect(status().isBadRequest());
 
 		assertThat(store.get()).isEqualTo(before);
+	}
+
+	static Stream<String> invalidLatencyBodies() {
+		return Stream.of("{}", "{\"latencyMs\": null}", "{\"latencyMs\": " + (GatewayBehavior.MIN_LATENCY_MS - 1) + "}",
+				"{\"latencyMs\": " + (GatewayBehavior.MAX_LATENCY_MS + 1) + "}", "{\"latencyMs\": \"slow\"}",
+				"{\"latencyMs\": ");
 	}
 
 	private ResultActions putLatency(String body) throws Exception {
