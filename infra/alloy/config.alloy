@@ -1,0 +1,42 @@
+// Ships the Docker logs of this compose project's containers to Loki (ADR-008).
+// The `service` label is the compose service name, so `{service="order-service"}` selects one service.
+
+discovery.docker "lab" {
+  host = "unix:///var/run/docker.sock"
+
+  // Only containers of this compose project (`name: kintsugi-lab` in compose.yaml), never other projects on the host.
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=kintsugi-lab"]
+  }
+}
+
+// Its rules run inside loki.source.docker (relabel_rules), so the targets keep the Docker metadata the source needs.
+discovery.relabel "lab" {
+  targets = []
+
+  // Belt and braces next to the filter above.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "kintsugi-lab"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "lab" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.lab.targets
+  relabel_rules = discovery.relabel.lab.rules
+  forward_to    = [loki.write.lab.receiver]
+}
+
+loki.write "lab" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

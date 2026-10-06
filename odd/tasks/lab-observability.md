@@ -87,7 +87,7 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 - [x] **T1 — ADR-008 and living spec.** ADR-008: the observability stack, Option A versus OTLP, pinned versions including the base images, the host port policy. Living spec `openspec/specs/lab-observability/spec.md`. Route: delegated writer.
 - [x] **T2 — Service metrics.** The Prometheus registry and exposure in the three services; the orders-by-status gauge in order-service (tests first); an update to the order-service living spec. Route: delegated writer.
 - [x] **T3 — Images and compose.** The Dockerfiles; `infra/compose.yaml` with PostgreSQL, its init script, and the three services; healthchecks. Verify by bringing it up and placing a `PAID` order. Route: delegated writer.
-- [ ] **T4 — Observability stack.** Prometheus scrape config, Loki, Alloy config, Grafana provisioning and the "Lab — F1" dashboard. Verify that targets are up and that logs reach Loki. Route: delegated writer.
+- [x] **T4 — Observability stack.** Prometheus scrape config, Loki, Alloy config, Grafana provisioning and the "Lab — F1" dashboard. Verify that targets are up and that logs reach Loki. Route: delegated writer.
 - [ ] **T5 — F1 check and docs.** `infra/scripts/verify-f1.sh`, run and passing; `docs/setup.md` (Compose section, ports, how to view the dashboard). Route: delegated writer.
 
 ## Checks
@@ -104,7 +104,14 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 - 2026-10-06: T3 done. Compose `c858fbf` (review `review-a8e0f0609a04e8e4` approved): multi-stage Dockerfiles that run as a non-root `app` user; one PostgreSQL with two databases, no host port, and `pg_isready -h localhost`; curl healthchecks on `/actuator/health`; host ports 18080–18082. Verified by hand: a first build of 72 s, all four containers healthy, an order `PAID`, `lab_orders` scraped.
 - 2026-10-06: gauge rework (found while verifying). With the database down, a scrape took 120 s, because each of the 4 series re-ran the query against Hikari's 30 s connection timeout. That would hide F4. Now a scrape never waits: reads return the current snapshot or NaN, a stale snapshot starts one background refresh on a virtual thread, and failures are cached for the TTL. RED: 5 of 9 tests failed. GREEN: 108 tests, twice (parent re-run). Compose check: with Postgres stopped, scrapes take under 0.015 s and NaN appears after the 30 s Hikari timeout. Follow-up: a shorter Hikari `connection-timeout` would surface a hung database sooner. Review follow-ups for T4: `start_period` on the postgres healthcheck; the stack smoke test lives in T5's script.
 - 2026-10-06: the parent's re-run of `f155900` failed 1 test: `gaugeReadsNeverWaitForASlowQuery` raced, because it read the gauge after releasing the slow query, and the background refresh could finish first. That commit went in by mistake: the verification chain checked the wrong exit code. Fixed by reading the gauge before releasing the query. 5 targeted runs green, full suite 108 green.
+- 2026-10-06: gauge review approved (lineage `review-a349df2d19ac6c51`). Fixed: `MAX_SERVED_AGE = 10 s`, so a hung refresh turns the gauge NaN; the refresh guard is released on any throwable. RED 2 of 11, GREEN; the full suite passed 3 runs with 110 tests (parent re-run checked the mvn exit code).
+- 2026-10-06: T4 done.
+  - Prometheus `v3.15.0` scrapes every 5 s with a `service` label, on host port 19090.
+  - Loki `3.7.8` runs single-binary, internal only, with no healthcheck because the image is distroless.
+  - Alloy `v1.20.1` reads Docker logs filtered to the `kintsugi-lab` project and sets a `service` label; it reads the socket fine on WSL.
+  - Grafana `13.2.3` runs on 13000 with provisioned datasources and the "Lab — F1" dashboard (4 panels) as the home dashboard.
+  - Verified: 7 containers healthy; 3 targets up; Loki has the logs of all three services (it needs about a minute after startup); Grafana lists the dashboard and both datasources are healthy.
 
 ## Next step
 
-T4 (Prometheus, Loki, Alloy, Grafana and the dashboard) via a delegated writer.
+T5 (`verify-f1.sh` and docs) via a delegated writer. The script must poll Loki `/ready` and wait for logs.

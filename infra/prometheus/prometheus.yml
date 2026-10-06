@@ -1,0 +1,19 @@
+# Prometheus scrape config for the M1 lab (ADR-008).
+# A 5 s interval makes fault F1 show within seconds on the "Lab — F1" dashboard.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: lab
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["order-service:8080"]
+        labels:
+          service: order-service
+      - targets: ["payment-service:8081"]
+        labels:
+          service: payment-service
+      - targets: ["gateway-mock:8082"]
+        labels:
+          service: gateway-mock
