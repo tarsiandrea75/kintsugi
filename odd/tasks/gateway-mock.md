@@ -91,6 +91,7 @@ The vision's week-1 Thursday task is "`gateway-mock` with latency configurable v
 - 2026-10-06: T5 review approved (lineage `review-9bcee83444250958`). Its WARNING (the responsiveness test could pass without checking anything) was fixed: a new Micrometer gauge `gateway.authorize.inflight`, and the test polls it until 250 requests are in flight. RED with virtual threads off: the gauge peaks at 200 (the Tomcat cap). GREEN: 37 tests (parent re-run). The test's `HttpClient` is now closed. No new dependency: actuator already brings in micrometer-metrics. The gauge is also the F1 signal for Grafana later.
 - 2026-10-06: review of `4f41558` approved (lineage `review-22aeb51072bb6bea`). Fixed inline: the gauge holds a strong reference to its counter (`bc86a4b`), 37 tests. Session closed (STATE, journal 2026-10-06-02).
 - 2026-10-06: review of `4f41558..490566c` approved (lineage `review-cc7b5334b9f20fda`). Open follow-up (SUGGESTION R3-strong-ref-untested): no test proves that the gauge keeps its counter after a GC (`strongReference(true)`).
+- 2026-10-06: F1 reproduced by hand with all three services and two PostgreSQL 18.6 containers, on alternative ports. Healthy order: `PAID` in 0.48 s. With 10 s latency: 201 `PAYMENT_PENDING` after 3.01 s, the order-service WARN line, and an `AUTHORIZED` payment stored for the pending order. Containers and services were cleaned up. `docs/setup.md` updated.
 
 ## Next step
 

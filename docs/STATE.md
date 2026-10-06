@@ -16,13 +16,13 @@ M1 — The lab (Oct 5–25)
 - A simulated payment gateway whose latency is set through `PUT /admin/behavior`. It runs on virtual threads, so the admin API stays responsive under load.
 - It exposes a `gateway.authorize.inflight` gauge.
 - payment-service calls it over HTTP with timeouts, and answers 503 without storing anything when the gateway is unavailable.
-- Fault F1 is now injectable: 10 s of latency leaves orders in `PAYMENT_PENDING`. This follows from the timeouts and is covered by tests per service; nobody has run it by hand yet.
+- Fault F1 is now injectable and was reproduced by hand on 2026-10-06: with 10 s of latency the order returned 201 `PAYMENT_PENDING` after 3.01 s, and payment-service later stored an `AUTHORIZED` payment for it.
 - Tests: gateway-mock 37, payment-service 48, order-service 97.
 - All work is local and unpushed.
 
 ## Next action
 
-Friday task from the vision: Docker Compose with OpenTelemetry, Prometheus and Grafana, plus a dashboard that shows F1 while it is active. The `gateway.authorize.inflight` gauge and order states are the first signals. Before that, run the "Reproduce F1 by hand" recipe in `docs/setup.md` once.
+Friday task from the vision: Docker Compose with OpenTelemetry, Prometheus and Grafana, plus a dashboard that shows F1 while it is active. The first signals are the `gateway.authorize.inflight` gauge and the order states. Use non-default host ports in Compose: other local projects hold 5432, 5433 and 8080.
 
 ## Local branch chains (not pushed)
 
@@ -36,14 +36,13 @@ Each chain starts from the tip of the previous one.
 ## Open questions
 
 - When to make the GitHub repository public (private for now; the vision assumes public from week 1).
-- Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service may still store an AUTHORIZED payment after order-service has timed out.
+- Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service stores an AUTHORIZED payment after order-service has timed out (observed by hand).
 - The meaning of F2 (gateway 429): a declined payment or an unavailable gateway. Decide when F2 is built.
 
 ## Follow-ups
 
 Lab services:
 - `POST /orders` and `POST /payments` are not idempotent, so a retry after a timeout can create duplicates. This is a candidate fault.
-- The manual run guide and the "Reproduce F1 by hand" recipe in `docs/setup.md` have not been run.
 - gateway-mock: a reset does not shorten in-flight requests, and the admin API is open on all interfaces on purpose (see its spec, "Known limitations").
 - The order-service 400 safety net is untested by design.
 - No test proves that the `gateway.authorize.inflight` gauge keeps its counter after a GC (`strongReference(true)`).

@@ -150,7 +150,12 @@ Docker Compose for the whole lab comes on Friday (week 1). Until then, run each 
 
 ### Reproduce F1 by hand
 
-> Not run by hand yet: the steps follow the tested behavior of each service, but the three services have not been run together with this recipe.
+> Run by hand on 2026-10-06 (WSL, Docker Engine 29.4.0), on alternative ports (databases 55432/55433, services 18080/18081/18082) because other local projects held 5432 and 8080. Observed:
+> - a healthy order returned `PAID` in 0.48 s;
+> - with 10 s of gateway latency the order returned 201 `PAYMENT_PENDING` after 3.01 s, and order-service logged the `WARN` line;
+> - after the gateway answered, payment-service had stored an `AUTHORIZED` payment for that pending order.
+>
+> If your ports are taken, pass `--server.port`, the datasource URL, `kintsugi.payment.base-url` and `kintsugi.gateway.base-url` the same way as the datasource arguments.
 
 With the three services running as above:
 
@@ -167,7 +172,7 @@ With the three services running as above:
    curl -s -X DELETE localhost:8082/admin/behavior
    ```
 
-Why the order stays pending: order-service waits 3s for payment-service, while payment-service waits up to 15s for the gateway. With 10s of latency, order-service gives up first. payment-service is expected to still get the answer after 10s and store the payment, so the order would stay `PAYMENT_PENDING` even though a payment was authorized. That mismatch is part of what the agent has to diagnose.
+Why the order stays pending: order-service waits 3s for payment-service, while payment-service waits up to 15s for the gateway. With 10s of latency, order-service gives up first. payment-service still gets the answer after 10s and stores the payment (observed), so the order stays `PAYMENT_PENDING` even though a payment was authorized. That mismatch is part of what the agent has to diagnose.
 
 order-service reaches payment-service through these properties (set them like the datasource ones above, or as environment variables such as `KINTSUGI_PAYMENT_READ_TIMEOUT`):
 
