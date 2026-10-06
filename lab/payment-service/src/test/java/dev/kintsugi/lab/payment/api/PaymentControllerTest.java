@@ -1,5 +1,6 @@
 package dev.kintsugi.lab.payment.api;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.endsWith;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -27,6 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import dev.kintsugi.lab.payment.application.PaymentService;
 import dev.kintsugi.lab.payment.domain.Payment;
 import dev.kintsugi.lab.payment.domain.PaymentStatus;
+import dev.kintsugi.lab.payment.gateway.GatewayUnavailableException;
 
 @WebMvcTest(PaymentController.class)
 class PaymentControllerTest {
@@ -67,6 +69,24 @@ class PaymentControllerTest {
 	}
 
 	@Test
+	void unavailableGatewayIsServiceUnavailable() throws Exception {
+		given(service.pay(ORDER_ID)).willThrow(new GatewayUnavailableException("gateway timed out", null));
+
+		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(validBody()))
+			.andExpect(status().isServiceUnavailable());
+	}
+
+	@Test
+	void otherFailuresAreNotServiceUnavailable() {
+		given(service.pay(ORDER_ID)).willThrow(new IllegalStateException("bug"));
+
+		// No handler maps it, so MockMvc rethrows it; a running server answers 500, not 503.
+		assertThatThrownBy(
+				() -> mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(validBody())))
+			.hasRootCauseInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
 	void existingPaymentIsReturned() throws Exception {
 		Payment payment = Payment.create(ORDER_ID, PaymentStatus.AUTHORIZED);
 		given(service.find(payment.getId())).willReturn(Optional.of(payment));
@@ -91,6 +111,12 @@ class PaymentControllerTest {
 	void nonUuidIdIsRejected() throws Exception {
 		mvc.perform(get("/payments/not-a-uuid")).andExpect(status().isBadRequest());
 		verify(service, never()).find(any());
+	}
+
+	private static String validBody() {
+		return """
+				{"orderId": "%s"}
+				""".formatted(ORDER_ID);
 	}
 
 }

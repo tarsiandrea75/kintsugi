@@ -81,9 +81,36 @@ cd lab/payment-service && ./mvnw test
 ```
 
 - Docker must be running, for the same Testcontainers reason as order-service.
+- It asks gateway-mock for each payment's outcome; the tests use a fake gateway on loopback, so gateway-mock need not run.
 - The behavior is in the [living spec](../openspec/specs/payment-service/spec.md).
 
-## Run order-service and payment-service together
+payment-service reaches gateway-mock through these properties (set them like the datasource ones below, or as environment variables such as `KINTSUGI_GATEWAY_READ_TIMEOUT`):
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `kintsugi.gateway.base-url` | `http://localhost:8082` | gateway-mock root URL |
+| `kintsugi.gateway.connect-timeout` | `1s` | longest wait to open a connection |
+| `kintsugi.gateway.read-timeout` | `15s` | longest wait for the response once the request is sent |
+
+## gateway-mock
+
+`lab/gateway-mock` simulates the external payment gateway. It has no database, listens on port 8082, and needs no Docker. Build and test it with:
+
+```bash
+cd lab/gateway-mock && ./mvnw test
+```
+
+Its latency is the fault F1 control point. The admin API has no authentication, and the state is lost on restart:
+
+| Call | Effect |
+|------|--------|
+| `PUT /admin/behavior` with `{"latencyMs": <0..60000>}` | Every `POST /authorize` now waits that long |
+| `GET /admin/behavior` | Returns the current behavior |
+| `DELETE /admin/behavior` | Resets the latency to 0 |
+
+Each change is logged at `INFO`. The behavior is in the [living spec](../openspec/specs/gateway-mock/spec.md).
+
+## Run the lab services together
 
 Docker Compose for the whole lab comes on Friday (week 1). Until then, run each service by hand, each with its own PostgreSQL database.
 
@@ -94,19 +121,25 @@ Docker Compose for the whole lab comes on Friday (week 1). Until then, run each 
    docker run -d --name payments-db -e POSTGRES_DB=payments -e POSTGRES_USER=lab -e POSTGRES_PASSWORD=lab -p 5433:5432 postgres:18.6
    ```
 
-2. Start payment-service on 8081 (Flyway creates its schema on startup):
+2. Start gateway-mock on 8082:
+
+   ```bash
+   cd lab/gateway-mock && ./mvnw spring-boot:run
+   ```
+
+3. In another shell, start payment-service on 8081 (Flyway creates its schema on startup):
 
    ```bash
    cd lab/payment-service && ./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.datasource.url=jdbc:postgresql://localhost:5433/payments --spring.datasource.username=lab --spring.datasource.password=lab"
    ```
 
-3. In another shell, start order-service on 8080:
+4. In another shell, start order-service on 8080:
 
    ```bash
    cd lab/order-service && ./mvnw spring-boot:run -Dspring-boot.run.arguments="--spring.datasource.url=jdbc:postgresql://localhost:5432/orders --spring.datasource.username=lab --spring.datasource.password=lab"
    ```
 
-4. Place an order. With the fake gateway it ends in `PAID`:
+5. Place an order. With a healthy gateway it ends in `PAID`:
 
    ```bash
    curl -s -X POST localhost:8080/orders -H 'Content-Type: application/json' \
@@ -114,6 +147,27 @@ Docker Compose for the whole lab comes on Friday (week 1). Until then, run each 
    ```
 
    Stop payment-service and repeat: the response is still 201, the order stays `PAYMENT_PENDING`, and order-service logs a `WARN` line with the order id. That is the symptom of fault F1.
+
+### Reproduce F1 by hand
+
+> Not run by hand yet: the steps follow the tested behavior of each service, but the three services have not been run together with this recipe.
+
+With the three services running as above:
+
+1. Slow the gateway down to 10 seconds:
+
+   ```bash
+   curl -s -X PUT localhost:8082/admin/behavior -H 'Content-Type: application/json' -d '{"latencyMs": 10000}'
+   ```
+
+2. Place an order, as in step 5. After about 3 seconds (order-service's read timeout) the response is 201 with status `PAYMENT_PENDING`, and order-service logs a `WARN` line with the order id.
+3. Restore the gateway:
+
+   ```bash
+   curl -s -X DELETE localhost:8082/admin/behavior
+   ```
+
+Why the order stays pending: order-service waits 3s for payment-service, while payment-service waits up to 15s for the gateway. With 10s of latency, order-service gives up first. payment-service is expected to still get the answer after 10s and store the payment, so the order would stay `PAYMENT_PENDING` even though a payment was authorized. That mismatch is part of what the agent has to diagnose.
 
 order-service reaches payment-service through these properties (set them like the datasource ones above, or as environment variables such as `KINTSUGI_PAYMENT_READ_TIMEOUT`):
 

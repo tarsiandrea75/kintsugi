@@ -1,0 +1,121 @@
+package dev.kintsugi.lab.payment.gateway;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URI;
+import java.time.Duration;
+import java.util.UUID;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import dev.kintsugi.lab.payment.domain.PaymentStatus;
+
+/** The HTTP gateway client against a real HTTP server on loopback, with short timeouts so failures stay fast. */
+class HttpPaymentGatewayTest {
+
+	// Clients connect to the IPv4 literal 127.0.0.1, so fixtures must bind the same address family.
+	private static final InetAddress IPV4_LOOPBACK = ipv4Loopback();
+
+	private static final UUID ORDER_ID = UUID.fromString("66666666-6666-6666-6666-666666666666");
+
+	private static final Duration TIMEOUT = Duration.ofMillis(200);
+
+	private final FakeGatewayServer server = FakeGatewayServer.start();
+
+	private final HttpPaymentGateway gateway = gatewayFor(server.baseUrl());
+
+	@AfterEach
+	void stopServer() {
+		server.close();
+	}
+
+	@ParameterizedTest
+	@EnumSource(PaymentStatus.class)
+	void outcomeIsTheGatewayStatus(PaymentStatus status) {
+		server.replyWith(200, status.name());
+
+		assertThat(gateway.authorize(ORDER_ID)).isEqualTo(status);
+	}
+
+	@Test
+	void requestPostsTheOrderIdAsJson() {
+		gateway.authorize(ORDER_ID);
+
+		FakeGatewayServer.RecordedRequest request = server.lastRequest();
+		assertThat(request.method()).isEqualTo("POST");
+		assertThat(request.path()).isEqualTo("/authorize");
+		assertThat(request.contentType()).startsWith("application/json");
+		assertThat(request.body()).contains("\"orderId\"").contains(ORDER_ID.toString());
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 400, 429, 500, 503 })
+	void nonSuccessResponseIsUnavailable(int code) {
+		server.replyWithBody(code, "{}");
+
+		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID))
+			.withMessageContaining(ORDER_ID.toString());
+	}
+
+	@Test
+	void unknownStatusIsUnavailable() {
+		server.replyWith(200, "PENDING");
+
+		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID));
+	}
+
+	@Test
+	void missingStatusIsUnavailable() {
+		server.replyWithBody(200, "{}");
+
+		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID));
+	}
+
+	@Test
+	void slowResponseTimesOutAfterTheReadTimeout() {
+		server.replyAfter(Duration.ofSeconds(2));
+
+		long start = System.nanoTime();
+		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID))
+			.withMessageContaining(ORDER_ID.toString());
+		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+
+		assertThat(elapsed).isGreaterThanOrEqualTo(TIMEOUT).isLessThan(Duration.ofSeconds(2));
+	}
+
+	@Test
+	void unreachableGatewayIsUnavailable() throws IOException {
+		// A bound but non-listening socket holds the port, so the kernel refuses connections and no one else can take it.
+		try (Socket portHolder = new Socket()) {
+			portHolder.bind(new InetSocketAddress(IPV4_LOOPBACK, 0));
+			HttpPaymentGateway unreachable = gatewayFor("http://127.0.0.1:" + portHolder.getLocalPort());
+
+			assertThatExceptionOfType(GatewayUnavailableException.class)
+				.isThrownBy(() -> unreachable.authorize(ORDER_ID))
+				.withMessageContaining(ORDER_ID.toString());
+		}
+	}
+
+	private static HttpPaymentGateway gatewayFor(String baseUrl) {
+		return new HttpPaymentGateway(new GatewayProperties(URI.create(baseUrl), TIMEOUT, TIMEOUT));
+	}
+
+	private static InetAddress ipv4Loopback() {
+		try {
+			return InetAddress.getByName("127.0.0.1");
+		}
+		catch (IOException ex) {
+			throw new IllegalStateException(ex);
+		}
+	}
+
+}

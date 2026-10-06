@@ -17,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 
 import dev.kintsugi.lab.payment.domain.Payment;
 import dev.kintsugi.lab.payment.domain.PaymentStatus;
+import dev.kintsugi.lab.payment.gateway.GatewayUnavailableException;
 import dev.kintsugi.lab.payment.gateway.PaymentGateway;
 import dev.kintsugi.lab.payment.persistence.PaymentRepository;
 
@@ -51,6 +52,15 @@ class PaymentServiceTest {
 		given(gateway.authorize(ORDER_ID)).willThrow(failure);
 
 		assertThatThrownBy(() -> service.pay(ORDER_ID)).isSameAs(failure);
+		verify(repository, never()).save(any());
+	}
+
+	@Test
+	void unavailableGatewayStoresNothing() {
+		GatewayUnavailableException unavailable = new GatewayUnavailableException("gateway timed out", null);
+		given(gateway.authorize(ORDER_ID)).willThrow(unavailable);
+
+		assertThatThrownBy(() -> service.pay(ORDER_ID)).isSameAs(unavailable);
 		verify(repository, never()).save(any());
 	}
 

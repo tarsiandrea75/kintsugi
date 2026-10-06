@@ -5,7 +5,12 @@ import java.util.UUID;
 
 import jakarta.validation.Valid;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,10 +21,13 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import dev.kintsugi.lab.payment.application.PaymentService;
 import dev.kintsugi.lab.payment.domain.Payment;
+import dev.kintsugi.lab.payment.gateway.GatewayUnavailableException;
 
 @RestController
 @RequestMapping("/payments")
 class PaymentController {
+
+	private static final Logger log = LoggerFactory.getLogger(PaymentController.class);
 
 	private final PaymentService service;
 
@@ -40,6 +48,17 @@ class PaymentController {
 	@GetMapping("/{id}")
 	ResponseEntity<PaymentResponse> get(@PathVariable UUID id) {
 		return ResponseEntity.of(service.find(id).map(PaymentResponse::from));
+	}
+
+	/**
+	 * The gateway gave no usable answer, so the outcome is unknown and nothing was stored: 503, not a decline. Local
+	 * to this controller so unrelated failures keep their own status.
+	 */
+	@ExceptionHandler(GatewayUnavailableException.class)
+	ResponseEntity<ProblemDetail> gatewayUnavailable(GatewayUnavailableException ex) {
+		log.warn("Payment gateway unavailable: {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+			.body(ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "Payment gateway unavailable"));
 	}
 
 }

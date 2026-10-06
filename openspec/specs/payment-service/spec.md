@@ -17,7 +17,7 @@ A payment has an id (UUID), an order id (UUID), a status (`AUTHORIZED` or `DECLI
 - WHEN `POST /payments` is called
 - THEN the response status is 201
 - AND the `Location` header ends with `/payments/{id}` for the new payment id
-- AND the body contains the payment with the same `orderId`, the gateway's outcome as its status (`AUTHORIZED` with the current fake gateway), a UUID id and a created timestamp
+- AND the body contains the payment with the same `orderId`, the gateway's outcome as its status, a UUID id and a created timestamp
 
 #### Scenario: Created payment is stored
 - GIVEN a payment created through `POST /payments`
@@ -26,23 +26,56 @@ A payment has an id (UUID), an order id (UUID), a status (`AUTHORIZED` or `DECLI
 
 ### Requirement: Payment outcome comes from the gateway
 
-The payment status MUST be the outcome that the `PaymentGateway` returns for the order id; the service MUST NOT decide it on its own. Until the HTTP client to `gateway-mock` exists, the gateway is a fake that always returns `AUTHORIZED`.
+The payment status MUST be the outcome that the payment gateway returns for the order id; the service MUST NOT decide it on its own. The gateway is `gateway-mock`, called over HTTP: payment-service sends `POST /authorize` with body `{"orderId": "<order id>"}` and reads `status` (`AUTHORIZED` or `DECLINED`) from a 2xx answer.
 
-#### Scenario: Gateway failure
-- GIVEN a gateway that throws while deciding the outcome
-- WHEN a payment is created
-- THEN the failure propagates to the caller
-- AND no payment is stored
+The client MUST read its settings from these properties, so the fault injector can change them:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `kintsugi.gateway.base-url` | `http://localhost:8082` | gateway-mock root URL |
+| `kintsugi.gateway.connect-timeout` | `1s` | longest wait to open a connection |
+| `kintsugi.gateway.read-timeout` | `15s` | longest wait for the response once the request is sent |
+
+The read timeout is longer than order-service's 3s wait for payment-service. With a slow gateway, order-service gives up first and the order stays `PAYMENT_PENDING`: this is fault F1.
+
+#### Scenario: Authorized by the gateway
+- GIVEN the gateway answers 200 with status `AUTHORIZED`
+- WHEN `POST /payments` is called with a valid body
+- THEN the gateway received the order id
+- AND the response status is 201 and the stored payment has status `AUTHORIZED`
 
 #### Scenario: Declined by the gateway
 - GIVEN a gateway that declines the order
 - WHEN a payment is created for that order
 - THEN the stored payment has status `DECLINED`
 
-#### Scenario: Fake gateway authorizes
-- GIVEN the default fake gateway
-- WHEN it is asked for the outcome of any order
-- THEN it returns `AUTHORIZED`
+#### Scenario: Settings are configurable
+- GIVEN no `kintsugi.gateway.*` property is set
+- WHEN the client settings are read
+- THEN they are the defaults in the table above
+- AND each one takes the value of its property when the property is set
+
+### Requirement: Gateway unavailable returns 503 and stores nothing
+
+When the gateway call times out (connect or read), cannot connect, gets a non-2xx response, or gets a body without a known status, `POST /payments` MUST return 503 and MUST NOT store a payment. An unavailable gateway is not a decline: the outcome is unknown. Other failures MUST NOT be turned into 503.
+
+#### Scenario: Gateway too slow
+- GIVEN the gateway answers only after the read timeout
+- WHEN `POST /payments` is called with a valid body
+- THEN the response status is 503
+- AND no payment is stored
+
+#### Scenario: Gateway failing or unreachable
+- GIVEN the gateway refuses connections, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED` or `DECLINED`
+- WHEN `POST /payments` is called with a valid body
+- THEN the response status is 503
+- AND no payment is stored
+
+#### Scenario: Other failures keep their status
+- GIVEN a failure that is not an unavailable gateway
+- WHEN a payment is created
+- THEN the failure propagates to the caller and is not answered with 503
+- AND no payment is stored
 
 ### Requirement: Reject invalid input
 

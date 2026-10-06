@@ -7,9 +7,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,20 +23,38 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.jayway.jsonpath.JsonPath;
 
 import dev.kintsugi.lab.payment.TestcontainersConfiguration;
+import dev.kintsugi.lab.payment.gateway.FakeGatewayServer;
 
 /**
- * Full application context against PostgreSQL 18.6, with the real fake gateway: POST, then GET, then check the
- * stored row.
+ * Full application context against PostgreSQL 18.6 and a fake gateway-mock over real HTTP: POST, then GET, then
+ * check the stored row. The read timeout is shortened so the timeout case stays fast.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class PaymentApiIntegrationTest {
+
+	private static final Duration READ_TIMEOUT = Duration.ofMillis(300);
+
+	private static final FakeGatewayServer GATEWAY = FakeGatewayServer.start();
+
+	@DynamicPropertySource
+	static void gateway(DynamicPropertyRegistry registry) {
+		registry.add("kintsugi.gateway.base-url", GATEWAY::baseUrl);
+		registry.add("kintsugi.gateway.read-timeout", () -> READ_TIMEOUT.toMillis() + "ms");
+	}
+
+	@AfterAll
+	static void stopGateway() {
+		GATEWAY.close();
+	}
 
 	@Autowired
 	private MockMvc mvc;
@@ -41,13 +62,16 @@ class PaymentApiIntegrationTest {
 	@Autowired
 	private JdbcClient jdbc;
 
+	@BeforeEach
+	void gatewayAuthorizes() {
+		GATEWAY.replyWith(200, "AUTHORIZED");
+	}
+
 	@Test
 	void createdPaymentIsStoredAndReadBack() throws Exception {
 		UUID orderId = UUID.randomUUID();
 		MockHttpServletResponse created = mvc
-			.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content("""
-					{"orderId": "%s"}
-					""".formatted(orderId)))
+			.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(orderId)))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.status").value("AUTHORIZED"))
 			.andReturn()
@@ -57,6 +81,7 @@ class PaymentApiIntegrationTest {
 		String createdAt = JsonPath.read(body, "$.createdAt");
 		String location = created.getHeader("Location");
 		assertThat(location).endsWith("/payments/" + id);
+		assertThat(GATEWAY.lastRequest().body()).contains(orderId.toString());
 
 		mvc.perform(get(URI.create(location)))
 			.andExpect(status().isOk())
@@ -70,6 +95,37 @@ class PaymentApiIntegrationTest {
 			.query()
 			.singleRow();
 		assertThat(row).containsEntry("order_id", orderId).containsEntry("status", "AUTHORIZED");
+	}
+
+	@Test
+	void declinedPaymentIsStoredAsDeclined() throws Exception {
+		GATEWAY.replyWith(200, "DECLINED");
+
+		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.status").value("DECLINED"));
+	}
+
+	@Test
+	void failingGatewayIsServiceUnavailableAndStoresNothing() throws Exception {
+		GATEWAY.replyWithBody(500, "{}");
+		long before = countPayments();
+
+		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))
+			.andExpect(status().isServiceUnavailable());
+
+		assertThat(countPayments()).isEqualTo(before);
+	}
+
+	@Test
+	void slowGatewayIsServiceUnavailableAndStoresNothing() throws Exception {
+		GATEWAY.replyAfter(READ_TIMEOUT.multipliedBy(5));
+		long before = countPayments();
+
+		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))
+			.andExpect(status().isServiceUnavailable());
+
+		assertThat(countPayments()).isEqualTo(before);
 	}
 
 	@ParameterizedTest
@@ -90,6 +146,12 @@ class PaymentApiIntegrationTest {
 
 	private long countPayments() {
 		return jdbc.sql("select count(*) from payments").query(Long.class).single();
+	}
+
+	private static String bodyFor(UUID orderId) {
+		return """
+				{"orderId": "%s"}
+				""".formatted(orderId);
 	}
 
 }
