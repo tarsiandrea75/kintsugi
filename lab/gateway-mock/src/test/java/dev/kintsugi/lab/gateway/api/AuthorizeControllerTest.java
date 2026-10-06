@@ -8,11 +8,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.UUID;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -23,11 +27,53 @@ import dev.kintsugi.lab.gateway.behavior.BehaviorStore;
 import dev.kintsugi.lab.gateway.behavior.GatewayBehavior;
 
 @WebMvcTest(AuthorizeController.class)
-@Import(BehaviorStore.class)
+@Import({ BehaviorStore.class, AuthorizeControllerTest.Metrics.class })
 class AuthorizeControllerTest {
+
+	/** {@code @WebMvcTest} does not auto-configure metrics, so the controller gets an in-memory registry. */
+	@TestConfiguration
+	static class Metrics {
+
+		@Bean
+		MeterRegistry meterRegistry() {
+			return new SimpleMeterRegistry();
+		}
+
+	}
 
 	@Autowired
 	private MockMvc mvc;
+
+	@Autowired
+	private MeterRegistry registry;
+
+	@Test
+	void inflightGaugeIsBackToZeroAfterAuthorizeCompletes() throws Exception {
+		mvc.perform(post("/authorize").contentType(MediaType.APPLICATION_JSON).content("""
+				{"orderId": "11111111-1111-1111-1111-111111111111"}
+				"""))
+			.andExpect(status().isOk());
+
+		assertThat(registry.get(AuthorizeController.INFLIGHT_GAUGE).gauge().value()).isZero();
+	}
+
+	@Test
+	void inflightGaugeIsBackToZeroAfterInterruptedAuthorize() {
+		BehaviorStore slowStore = new BehaviorStore();
+		slowStore.set(new GatewayBehavior(GatewayBehavior.MAX_LATENCY_MS));
+		SimpleMeterRegistry meters = new SimpleMeterRegistry();
+		AuthorizeController controller = new AuthorizeController(slowStore, meters);
+
+		Thread.currentThread().interrupt();
+		try {
+			assertThatExceptionOfType(ResponseStatusException.class)
+				.isThrownBy(() -> controller.authorize(new AuthorizeRequest(UUID.randomUUID())));
+		}
+		finally {
+			Thread.interrupted();
+		}
+		assertThat(meters.get(AuthorizeController.INFLIGHT_GAUGE).gauge().value()).isZero();
+	}
 
 	@Test
 	void validOrderIsAuthorized() throws Exception {
@@ -52,7 +98,7 @@ class AuthorizeControllerTest {
 	void interruptedLatencyIsServiceUnavailable() {
 		BehaviorStore slowStore = new BehaviorStore();
 		slowStore.set(new GatewayBehavior(GatewayBehavior.MAX_LATENCY_MS));
-		AuthorizeController controller = new AuthorizeController(slowStore);
+		AuthorizeController controller = new AuthorizeController(slowStore, new SimpleMeterRegistry());
 
 		// An interrupt flag set before the call makes Thread.sleep throw at once, as a shutdown interrupt would.
 		Thread.currentThread().interrupt();

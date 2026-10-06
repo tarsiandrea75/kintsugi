@@ -1,5 +1,9 @@
 package dev.kintsugi.lab.gateway.api;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
@@ -14,10 +18,19 @@ import dev.kintsugi.lab.gateway.behavior.BehaviorStore;
 @RestController
 class AuthorizeController {
 
+	/** Gauge with the number of {@code /authorize} requests currently waiting on the simulated latency. */
+	static final String INFLIGHT_GAUGE = "gateway.authorize.inflight";
+
 	private final BehaviorStore store;
 
-	AuthorizeController(BehaviorStore store) {
+	private final AtomicInteger inflight = new AtomicInteger();
+
+	AuthorizeController(BehaviorStore store, MeterRegistry registry) {
 		this.store = store;
+		// Requests piling up here is what fault F1 looks like; the gauge also lets tests observe real in-flight load.
+		Gauge.builder(INFLIGHT_GAUGE, inflight, AtomicInteger::get)
+			.description("POST /authorize requests currently waiting on the simulated latency")
+			.register(registry);
 	}
 
 	/**
@@ -26,6 +39,7 @@ class AuthorizeController {
 	 */
 	@PostMapping("/authorize")
 	AuthorizeResponse authorize(@Valid @RequestBody AuthorizeRequest request) {
+		inflight.incrementAndGet();
 		try {
 			Thread.sleep(store.get().latencyMs());
 		}
@@ -33,6 +47,9 @@ class AuthorizeController {
 			Thread.currentThread().interrupt();
 			throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Interrupted while simulating latency",
 					ex);
+		}
+		finally {
+			inflight.decrementAndGet();
 		}
 		return AuthorizeResponse.AUTHORIZED;
 	}

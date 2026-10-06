@@ -46,6 +46,20 @@ The admin API MUST answer promptly while many `POST /authorize` requests are wai
 - WHEN `GET /admin/behavior` and then `DELETE /admin/behavior` are called
 - THEN each answers 200 in under 1 second
 
+### Requirement: Expose the in-flight authorize gauge
+
+The service MUST expose the Micrometer gauge `gateway.authorize.inflight`: the number of `POST /authorize` requests currently waiting on the simulated latency. A request MUST stop counting when it ends, whether it is authorized or interrupted. The gauge makes fault F1 visible as requests piling up.
+
+#### Scenario: Gauge returns to zero
+- GIVEN the default behavior
+- WHEN a `POST /authorize` call completes
+- THEN `gateway.authorize.inflight` is 0
+
+#### Scenario: Gauge counts sleeping requests
+- GIVEN the latency is 3000 ms
+- WHEN 250 `POST /authorize` requests are sent at once
+- THEN `gateway.authorize.inflight` reaches 250 while they wait
+
 ### Requirement: Change, read and reset the behavior
 
 - `PUT /admin/behavior` with body `{"latencyMs": <n>}` MUST replace the behavior and return 200 with the new behavior (`{"latencyMs": <n>}`).

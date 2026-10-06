@@ -1,6 +1,7 @@
 package dev.kintsugi.lab.gateway.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -15,8 +16,10 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -34,8 +37,8 @@ class AdminResponsivenessIntegrationTest {
 
 	private static final Duration LATENCY = Duration.ofSeconds(3);
 
-	/** Time for the slow requests to reach the server before the admin call is measured. */
-	private static final Duration SETTLE = Duration.ofMillis(500);
+	/** Upper bound for every slow request to be asleep on the server before the admin calls are measured. */
+	private static final Duration INFLIGHT_WAIT = Duration.ofSeconds(5);
 
 	private static final Duration ADMIN_BOUND = Duration.ofSeconds(1);
 
@@ -45,9 +48,14 @@ class AdminResponsivenessIntegrationTest {
 	@LocalServerPort
 	private int port;
 
+	@Autowired
+	private MeterRegistry registry;
+
 	@AfterEach
-	void resetBehavior() throws Exception {
-		client.send(request("/admin/behavior").DELETE().build(), BodyHandlers.discarding());
+	void resetBehaviorAndCloseClient() throws Exception {
+		try (client) {
+			client.send(request("/admin/behavior").DELETE().build(), BodyHandlers.discarding());
+		}
 	}
 
 	@Test
@@ -63,7 +71,7 @@ class AdminResponsivenessIntegrationTest {
 				.POST(BodyPublishers.ofString("{\"orderId\": \"" + UUID.randomUUID() + "\"}"))
 				.build(), BodyHandlers.discarding()));
 		}
-		Thread.sleep(SETTLE);
+		awaitInflight(SLOW_REQUESTS);
 
 		assertAnswersWithinBound(request("/admin/behavior").GET());
 		assertAnswersWithinBound(request("/admin/behavior").DELETE());
@@ -72,6 +80,24 @@ class AdminResponsivenessIntegrationTest {
 		CompletableFuture.allOf(slow.toArray(CompletableFuture[]::new))
 			.get(LATENCY.multipliedBy(3).toMillis(), TimeUnit.MILLISECONDS);
 		assertThat(slow).allSatisfy(response -> assertThat(response.join().statusCode()).isEqualTo(200));
+	}
+
+	/**
+	 * Polls the in-flight gauge so the admin calls are timed only once the server really holds every slow request.
+	 * Without virtual threads Tomcat's 200 platform threads cap the gauge below {@code expected}, so this fails.
+	 */
+	private void awaitInflight(int expected) throws InterruptedException {
+		long deadline = System.nanoTime() + INFLIGHT_WAIT.toNanos();
+		double peak = 0;
+		while (System.nanoTime() < deadline) {
+			peak = Math.max(peak, registry.get("gateway.authorize.inflight").gauge().value());
+			if (peak >= expected) {
+				return;
+			}
+			Thread.sleep(20);
+		}
+		fail("Expected %d /authorize requests in flight within %s, but the gauge peaked at %.0f", expected,
+				INFLIGHT_WAIT, peak);
 	}
 
 	private void assertAnswersWithinBound(HttpRequest.Builder admin) throws Exception {
