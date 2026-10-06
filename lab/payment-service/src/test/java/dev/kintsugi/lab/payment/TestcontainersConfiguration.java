@@ -12,6 +12,7 @@ public class TestcontainersConfiguration {
 	@Bean
 	@ServiceConnection
 	PostgreSQLContainer postgresContainer() {
+		// Pinned to the PostgreSQL version chosen in ADR-007 (docs/adr/ADR-007-lab-persistence-stack.md).
 		return new PostgreSQLContainer(DockerImageName.parse("postgres:18.6"));
 	}
 

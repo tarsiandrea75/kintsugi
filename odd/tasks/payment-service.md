@@ -58,12 +58,13 @@ The vision's week-1 Wednesday task is "`payment-service` and order → payment c
 
 - Strategy: `ask-on-risk`, with `feature-branch-chain` proposed again (the same as the two previous features). The forecast is about 800 authored lines, generated files excluded, so slicing is needed.
 - Generated files go in their own commit.
+- Chain strategy: `feature-branch-chain` (decided 2026-10-06). Tracker `feat/payment-service` (feature doc `b133bf9`, skeleton `486a34b`). PR 1 `feat/payment-service-01-domain` → tracker: spec, domain, gateway, persistence, skeleton tidy-up (about 420 lines, slightly over budget). PR 2 `feat/payment-service-02-api` → PR 1: application service and REST API (about 350 lines). PR 3 for T3 + T4 → PR 2.
 - RDD: on (global).
 
 ## Tasks
 
 - [x] **T1 — Generated skeleton.** Spring Initializr project `lab/payment-service` (the same ids as order-service, image pinned to `postgres:18.6`). Route: delegated writer.
-- [ ] **T2 — payment-service domain, persistence and API.** The living spec `openspec/specs/payment-service/spec.md`, then tests first, then code. Route: delegated writer.
+- [x] **T2 — payment-service domain, persistence and API.** The living spec `openspec/specs/payment-service/spec.md`, then tests first, then code. Route: delegated writer.
 - [ ] **T3 — order-service payment step.** `OrderService`, the payment client with configurable timeouts, a decision on the test HTTP server (ADR if it is a new dependency), tests first including the timeout case. Update the living spec `openspec/specs/order-service/spec.md`. Route: delegated writer.
 - [ ] **T4 — Docs.** `docs/setup.md` (payment-service, and how the two services are configured together). Route: with T3.
 
@@ -76,7 +77,9 @@ The vision's week-1 Wednesday task is "`payment-service` and order → payment c
 
 - 2026-10-06: design approved; branch created.
 - 2026-10-06: T1 done: the Initializr skeleton (same request as order-service), with the image pinned to `postgres:18.6` and `TestcontainersConfiguration` made public. Wrapper and git files are byte-identical to order-service. `./mvnw test`: 1 test, 0 failures. No meaningful RED for scaffolding.
+- 2026-10-06: skeleton review: the full-branch candidate failed with `lens_context_budget_exceeded` (no authority created). It was reduced to `5d84ecb..486a34b`, consent was granted again, and the 4-lens review approved and was acknowledged (lineage `review-98f28bf288c48aa9`). Findings were minor and are folded into T2.
+- 2026-10-06: T2 done by a delegated writer (tests first). RED: compile failure, then 1 failure and 3 errors from deliberate defects (gateway outcome ignored, `@Valid` missing). GREEN: 28 tests (parent re-run); order-service still 74. Decision: `PaymentService` lives in a new `application` package, so the domain does not depend on the gateway. Skeleton tidy-up: pom placeholders replaced by a description in both services; ADR-007 comment on the image tag; Hikari pool size 10.
 
 ## Next step
 
-Run the review preflight on the skeleton commit (the stop hook asked for it while files were untracked). Then T2 via a delegated writer.
+T3 + T4 via a delegated writer.
