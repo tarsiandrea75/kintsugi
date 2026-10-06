@@ -88,7 +88,7 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
 - [x] **T2 — Service metrics.** The Prometheus registry and exposure in the three services; the orders-by-status gauge in order-service (tests first); an update to the order-service living spec. Route: delegated writer.
 - [x] **T3 — Images and compose.** The Dockerfiles; `infra/compose.yaml` with PostgreSQL, its init script, and the three services; healthchecks. Verify by bringing it up and placing a `PAID` order. Route: delegated writer.
 - [x] **T4 — Observability stack.** Prometheus scrape config, Loki, Alloy config, Grafana provisioning and the "Lab — F1" dashboard. Verify that targets are up and that logs reach Loki. Route: delegated writer.
-- [ ] **T5 — F1 check and docs.** `infra/scripts/verify-f1.sh`, run and passing; `docs/setup.md` (Compose section, ports, how to view the dashboard). Route: delegated writer.
+- [x] **T5 — F1 check and docs.** `infra/scripts/verify-f1.sh`, run and passing; `docs/setup.md` (Compose section, ports, how to view the dashboard). Route: delegated writer.
 
 ## Checks
 
@@ -111,7 +111,10 @@ The vision's week-1 Friday task is "Docker Compose with OpenTelemetry, Prometheu
   - Alloy `v1.20.1` reads Docker logs filtered to the `kintsugi-lab` project and sets a `service` label; it reads the socket fine on WSL.
   - Grafana `13.2.3` runs on 13000 with provisioned datasources and the "Lab — F1" dashboard (4 panels) as the home dashboard.
   - Verified: 7 containers healthy; 3 targets up; Loki has the logs of all three services (it needs about a minute after startup); Grafana lists the dashboard and both datasources are healthy.
+- 2026-10-06: review of `0edc7f5..bb0ae2a` (4 lenses, `review-2c30c174eaae82b2`) found security issues, fixed in `db82d86`: every host port bound to `127.0.0.1`, Grafana admin password from `GRAFANA_ADMIN_PASSWORD` (`infra/.env.example`), the Docker socket risk recorded in ADR-008, and a 3 s statement timeout scoped to the count query (`OrderStatusCounts`, not global, so F4 slow queries stay possible).
+- 2026-10-06: T5 done. `infra/scripts/verify-f1.sh` (`760e8f1`) and the Compose docs (`f27a131`). Parent run: `RESULT: PASS` in 84 s, 10 checks covering healthy containers, Loki ready with logs, healthy order `PAID`, F1 order 201 `PAYMENT_PENDING`, `lab_orders` pending rose, in-flight gauge above 0, and the Loki WARN line for that order.
+- 2026-10-06: final review (`review-4968cdff73666cf3`) approved; WARNINGs fixed: the Javadoc and spec now say exactly what the statement timeout bounds (a lock inside the database) and what it does not (the pool wait, an unreachable server), and the spec uses MUST NOT. Script hardening: curl `--max-time`, no `grep -q` under pipefail, compose errors shown. Tests 113 (parent re-run), script PASS in 88 s (writer run). Open design choice: a datasource socket timeout.
 
 ## Next step
 
-T5 (`verify-f1.sh` and docs) via a delegated writer. The script must poll Loki `/ready` and wait for logs.
+Feature done. F1 is visible in Grafana. Next: faults F2–F4 (M1 check), then the fault injector.

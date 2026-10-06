@@ -30,7 +30,7 @@ import dev.kintsugi.lab.order.persistence.OrderStatusCount;
  */
 class OrdersByStatusMetricsTest {
 
-	private static final long PAST_TTL = OrdersByStatusMetrics.REFRESH_AFTER.plus(Duration.ofNanos(1)).toNanos();
+	private static final long PAST_REFRESH_AFTER = OrdersByStatusMetrics.REFRESH_AFTER.plus(Duration.ofNanos(1)).toNanos();
 
 	private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
@@ -130,7 +130,7 @@ class OrdersByStatusMetricsTest {
 		runRefreshes();
 
 		rows = List.of(new OrderStatusCount(OrderStatus.PAID, 4));
-		nanoTime.addAndGet(PAST_TTL);
+		nanoTime.addAndGet(PAST_REFRESH_AFTER);
 
 		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
 		runRefreshes();
@@ -183,7 +183,7 @@ class OrdersByStatusMetricsTest {
 		assertThat(metrics.count(OrderStatus.PAID)).isNaN();
 		assertThat(queries).hasValue(1);
 
-		nanoTime.addAndGet(PAST_TTL);
+		nanoTime.addAndGet(PAST_REFRESH_AFTER);
 		scrape();
 		runRefreshes();
 		assertThat(queries).hasValue(2);
@@ -197,7 +197,7 @@ class OrdersByStatusMetricsTest {
 		runRefreshes();
 
 		failQueries();
-		nanoTime.addAndGet(PAST_TTL);
+		nanoTime.addAndGet(PAST_REFRESH_AFTER);
 		scrape();
 		runRefreshes();
 
@@ -214,7 +214,7 @@ class OrdersByStatusMetricsTest {
 		long snapshotTakenAt = nanoTime.get();
 
 		// The next refresh starts but never completes, like a query stuck on a hung connection.
-		nanoTime.addAndGet(PAST_TTL);
+		nanoTime.addAndGet(PAST_REFRESH_AFTER);
 		scrape();
 		assertThat(pendingRefreshes).hasSize(1);
 		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
@@ -260,7 +260,7 @@ class OrdersByStatusMetricsTest {
 
 		rows = List.of(new OrderStatusCount(OrderStatus.PAID, 2));
 		query = () -> rows;
-		nanoTime.addAndGet(PAST_TTL);
+		nanoTime.addAndGet(PAST_REFRESH_AFTER);
 		scrape();
 		runRefreshes();
 

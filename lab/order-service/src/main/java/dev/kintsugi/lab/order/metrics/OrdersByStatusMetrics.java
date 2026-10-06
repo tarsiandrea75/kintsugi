@@ -35,9 +35,11 @@ import dev.kintsugi.lab.order.persistence.OrderStatusCounts;
  * a failing database is queried at most once per {@link #REFRESH_AFTER} and never once per series. If the database
  * hangs (fault F4, pool exhausted), scrapes stay fast and the series show NaN or the last counts instead of timing out
  * the target. A snapshot older than {@link #SERVE_AT_MOST} is never served: a refresh that hangs turns the series NaN.
- * The refresh always ends: the query has its own statement timeout ({@link OrderStatusCounts#QUERY_TIMEOUT}), and
- * waiting for a pool connection is bounded by Hikari's connection timeout, so the guard is released and a later read
- * starts a new refresh.
+ * The query's statement timeout ({@link OrderStatusCounts#QUERY_TIMEOUT}) ends a query blocked inside the database,
+ * for example by a lock. It does not bound the wait for a pool connection, which lasts up to Hikari's
+ * {@code connection-timeout} (30 s by default), nor a database or network that stops responding, because the driver's
+ * cancel needs a reachable server. In those cases the single-flight guard stays held until the connection wait or the
+ * socket gives up, and {@link #SERVE_AT_MOST} is what keeps stale counts from being served meanwhile.
  *
  * <p>Trade-off: a value can be up to about {@link #REFRESH_AFTER} plus one query old, and never older than
  * {@link #SERVE_AT_MOST}. That is fine for a scrape interval of several seconds.
@@ -56,8 +58,9 @@ public class OrdersByStatusMetrics implements MeterBinder {
 
 	/**
 	 * A snapshot older than this is never served. A refresh that is still running never replaces the snapshot, so past
-	 * this age the gauge reports NaN instead of stale counts, even while that refresh is in flight. The query's own
-	 * timeout ({@link OrderStatusCounts#QUERY_TIMEOUT}) ends a hung refresh well before this.
+	 * this age the gauge reports NaN instead of stale counts, even while that refresh is in flight. This, not the
+	 * query's statement timeout ({@link OrderStatusCounts#QUERY_TIMEOUT}), is the guarantee: a refresh waiting for a
+	 * pool connection or on an unresponsive database or network can stay in flight well past this age.
 	 */
 	static final Duration SERVE_AT_MOST = Duration.ofSeconds(10);
 

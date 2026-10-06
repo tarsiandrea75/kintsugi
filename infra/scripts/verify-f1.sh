@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# Checks that fault F1 (slow payment gateway) is visible in Prometheus and Loki (openspec/specs/lab-observability).
-#
-#   infra/scripts/verify-f1.sh          # start or reuse the lab, run the checks, leave the lab running
-#   infra/scripts/verify-f1.sh --down   # same, then tear the lab down (containers and volumes)
-#
-# Exits 0 when every check passes, non-zero otherwise. The gateway behavior is reset on every exit.
-# Needs docker (with compose) and curl on the host.
+# Checks that fault F1 (slow payment gateway) is visible in Prometheus and Loki. Run with --help for usage.
 set -euo pipefail
 
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose.yaml"
@@ -15,12 +9,27 @@ PROMETHEUS=http://127.0.0.1:19090
 SERVICES=(order-service payment-service gateway-mock)
 LOKI_WAIT_SECONDS=180
 CHECK_WAIT_SECONDS=60
+# POST /orders must answer within order-service's 3 s payment read timeout; the margin covers the rest of the request.
+ORDER_MAX_SECONDS=15
+CURL_MAX_SECONDS=5
+
+usage() {
+  cat <<'EOF'
+Checks that fault F1 (slow payment gateway) is visible in Prometheus and Loki (openspec/specs/lab-observability).
+
+  infra/scripts/verify-f1.sh          # start or reuse the lab, run the checks, leave the lab running
+  infra/scripts/verify-f1.sh --down   # same, then tear the lab down (containers and volumes)
+
+Exits 0 when every check passes, non-zero otherwise. The gateway behavior is reset on every exit.
+Needs docker (with compose) and curl on the host.
+EOF
+}
 
 down=false
 for arg in "$@"; do
   case "$arg" in
     --down) down=true ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -33,7 +42,7 @@ info() { echo "....  $*"; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
 reset_gateway() {
-  if curl -fsS -o /dev/null -X DELETE "$GATEWAY/admin/behavior" 2>/dev/null; then
+  if curl -fsS --max-time "$CURL_MAX_SECONDS" -o /dev/null -X DELETE "$GATEWAY/admin/behavior" 2>/dev/null; then
     info "gateway behavior reset"
   else
     echo "WARN  could not reset the gateway behavior (DELETE $GATEWAY/admin/behavior)" >&2
@@ -68,13 +77,18 @@ poll() {
 }
 
 # Instant PromQL query; prints the raw JSON.
-prom_query() { curl -fsS -G "$PROMETHEUS/api/v1/query" --data-urlencode "query=$1"; }
+prom_query() { curl -fsS --max-time "$CURL_MAX_SECONDS" -G "$PROMETHEUS/api/v1/query" --data-urlencode "query=$1"; }
 
 # True when the query returns at least one series (a comparison filters out the series that do not match).
-prom_has_result() { prom_query "$1" 2>/dev/null | grep -q '"result":\[{'; }
+# The output is captured first: piping into grep -q under pipefail can fail when grep exits before curl finishes.
+prom_has_result() {
+  local json
+  json=$(prom_query "$1" 2>/dev/null) || return 1
+  grep -q '"result":\[{' <<<"$json"
+}
 
 # Loki has no host port; query it from the Grafana container, which has a shell and curl.
-loki() { compose exec -T grafana curl -fsS -G "http://loki:3100$1" "${@:2}"; }
+loki() { compose exec -T grafana curl -fsS --max-time "$CURL_MAX_SECONDS" -G "http://loki:3100$1" "${@:2}"; }
 
 loki_ready() { [[ "$(loki /ready 2>/dev/null)" == ready* ]]; }
 
@@ -89,7 +103,7 @@ loki_has_all_services() {
 # POST /orders; prints "<http code> <order id> <status>".
 place_order() {
   local body code
-  body=$(curl -sS -w '\n%{http_code}' -X POST "$ORDERS/orders" -H 'Content-Type: application/json' \
+  body=$(curl -sS --max-time "$ORDER_MAX_SECONDS" -w '\n%{http_code}' -X POST "$ORDERS/orders" -H 'Content-Type: application/json' \
     -d '{"customerId":"verify-f1","items":[{"sku":"SKU-1","quantity":1}]}')
   code=${body##*$'\n'}
   body=${body%$'\n'*}
@@ -101,9 +115,9 @@ place_order() {
 
 # Current lab_orders{status="PAYMENT_PENDING"} as an integer; fails while the series is missing or NaN.
 pending_count() {
-  local value
-  value=$(prom_query 'lab_orders{status="PAYMENT_PENDING"}' 2>/dev/null \
-    | grep -o '"value":\[[^]]*\]' | head -n1 | cut -d'"' -f4)
+  local json value
+  json=$(prom_query 'lab_orders{status="PAYMENT_PENDING"}' 2>/dev/null) || return 1
+  value=$(grep -o '"value":\[[^]]*\]' <<<"$json" | head -n1 | cut -d'"' -f4)
   [[ "$value" =~ ^[0-9]+(\.0+)?$ ]] || return 1
   echo "${value%%.*}"
 }
@@ -112,9 +126,14 @@ started=$SECONDS
 
 # 1. Start or reuse the lab.
 info "starting or reusing the lab (docker compose up -d --build --wait)"
-if compose up -d --build --wait >/dev/null 2>&1; then
+up_errors=$(mktemp)
+if compose up -d --build --wait >/dev/null 2>"$up_errors"; then
+  rm -f "$up_errors"
   pass "every container is up and healthy"
 else
+  cat "$up_errors" >&2
+  rm -f "$up_errors"
+  compose ps >&2 || true
   fail "docker compose up --wait did not get every container healthy"
   exit 1
 fi
@@ -154,7 +173,7 @@ else
 fi
 
 # 3. Inject F1: the gateway answers after 10 s, past order-service's 3 s read timeout.
-if curl -fsS -o /dev/null -X PUT "$GATEWAY/admin/behavior" -H 'Content-Type: application/json' \
+if curl -fsS --max-time "$CURL_MAX_SECONDS" -o /dev/null -X PUT "$GATEWAY/admin/behavior" -H 'Content-Type: application/json' \
   -d '{"latencyMs":10000}'; then
   pass "F1 injected: gateway latency 10000 ms"
 else
@@ -185,9 +204,11 @@ fi
 
 # 5. Loki sees the order-service WARN line for the pending order.
 loki_has_warn() {
-  loki /loki/api/v1/query_range \
+  local json
+  json=$(loki /loki/api/v1/query_range \
     --data-urlencode "query={service=\"order-service\"} |= \"WARN\" |= \"$pending_id\"" \
-    --data-urlencode "since=10m" --data-urlencode "limit=5" 2>/dev/null | grep -q "$pending_id"
+    --data-urlencode "since=10m" --data-urlencode "limit=5" 2>/dev/null) || return 1
+  grep -q "$pending_id" <<<"$json"
 }
 if [[ "$pending_id" != none ]] && poll "$CHECK_WAIT_SECONDS" loki_has_warn; then
   pass "Loki: order-service WARN line for order $pending_id"
