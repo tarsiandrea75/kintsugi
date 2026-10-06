@@ -29,7 +29,8 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import dev.kintsugi.lab.order.domain.Order;
 import dev.kintsugi.lab.order.domain.OrderItem;
-import dev.kintsugi.lab.order.persistence.OrderRepository;
+import dev.kintsugi.lab.order.application.OrderService;
+import dev.kintsugi.lab.order.domain.OrderStatus;
 
 @WebMvcTest(OrderController.class)
 class OrderControllerTest {
@@ -38,28 +39,37 @@ class OrderControllerTest {
 	private MockMvc mvc;
 
 	@MockitoBean
-	private OrderRepository repository;
+	private OrderService service;
 
 	@Test
-	void validOrderIsCreated() throws Exception {
-		given(repository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
+	void validOrderIsCreatedWithItsPaymentOutcome() throws Exception {
+		givenPaymentEndsIn(OrderStatus.PAID);
 
 		ResultActions result = mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content("""
 				{"customerId": "customer-1", "items": [{"sku": "SKU-1", "quantity": 2}]}
 				"""));
 
-		ArgumentCaptor<Order> saved = ArgumentCaptor.forClass(Order.class);
-		verify(repository).save(saved.capture());
-		UUID id = saved.getValue().getId();
+		ArgumentCaptor<Order> placed = ArgumentCaptor.forClass(Order.class);
+		verify(service).place(placed.capture());
+		UUID id = placed.getValue().getId();
 		result.andExpect(status().isCreated())
 			.andExpect(header().string("Location", endsWith("/orders/" + id)))
 			.andExpect(jsonPath("$.id").value(id.toString()))
-			.andExpect(jsonPath("$.status").value("CREATED"))
+			.andExpect(jsonPath("$.status").value("PAID"))
 			.andExpect(jsonPath("$.customerId").value("customer-1"))
 			.andExpect(jsonPath("$.items[0].sku").value("SKU-1"))
 			.andExpect(jsonPath("$.items[0].quantity").value(2))
 			.andExpect(jsonPath("$.createdAt").isNotEmpty())
 			.andExpect(jsonPath("$.updatedAt").isNotEmpty());
+	}
+
+	@Test
+	void unavailablePaymentStillCreatesTheOrderAsPending() throws Exception {
+		givenPaymentEndsIn(OrderStatus.PAYMENT_PENDING);
+
+		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body("customer-1", "SKU-1", 1)))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.status").value("PAYMENT_PENDING"));
 	}
 
 	@Test
@@ -169,7 +179,7 @@ class OrderControllerTest {
 	@Test
 	void existingOrderIsReturned() throws Exception {
 		Order order = Order.create("customer-1", List.of(new OrderItem("SKU-1", 2)));
-		given(repository.findById(order.getId())).willReturn(Optional.of(order));
+		given(service.find(order.getId())).willReturn(Optional.of(order));
 
 		mvc.perform(get("/orders/{id}", order.getId()))
 			.andExpect(status().isOk())
@@ -182,7 +192,7 @@ class OrderControllerTest {
 	@Test
 	void unknownOrderIsNotFound() throws Exception {
 		UUID unknown = UUID.fromString("00000000-0000-0000-0000-000000000000");
-		given(repository.findById(unknown)).willReturn(Optional.empty());
+		given(service.find(unknown)).willReturn(Optional.empty());
 
 		mvc.perform(get("/orders/{id}", unknown)).andExpect(status().isNotFound());
 	}
@@ -190,7 +200,7 @@ class OrderControllerTest {
 	@Test
 	void nonUuidIdIsRejected() throws Exception {
 		mvc.perform(get("/orders/not-a-uuid")).andExpect(status().isBadRequest());
-		verify(repository, never()).findById(any());
+		verify(service, never()).find(any());
 	}
 
 	/** A body with {@code itemCount} identical items. */
@@ -202,8 +212,20 @@ class OrderControllerTest {
 				""".formatted(customerId, String.join(",", Collections.nCopies(itemCount, item)));
 	}
 
+	/** The service returns the order it was given, moved through the payment step to {@code finalStatus}. */
+	private void givenPaymentEndsIn(OrderStatus finalStatus) {
+		given(service.place(any(Order.class))).willAnswer(invocation -> {
+			Order order = invocation.getArgument(0);
+			order.transitionTo(OrderStatus.PAYMENT_PENDING);
+			if (finalStatus != OrderStatus.PAYMENT_PENDING) {
+				order.transitionTo(finalStatus);
+			}
+			return order;
+		});
+	}
+
 	private void postExpectingCreated(String body) throws Exception {
-		given(repository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
+		givenPaymentEndsIn(OrderStatus.PAID);
 		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().isCreated());
 	}
@@ -211,7 +233,7 @@ class OrderControllerTest {
 	private void postExpectingBadRequest(String body) throws Exception {
 		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().isBadRequest());
-		verify(repository, never()).save(any());
+		verify(service, never()).place(any());
 	}
 
 }

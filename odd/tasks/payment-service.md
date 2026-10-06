@@ -58,15 +58,15 @@ The vision's week-1 Wednesday task is "`payment-service` and order → payment c
 
 - Strategy: `ask-on-risk`, with `feature-branch-chain` proposed again (the same as the two previous features). The forecast is about 800 authored lines, generated files excluded, so slicing is needed.
 - Generated files go in their own commit.
-- Chain strategy: `feature-branch-chain` (decided 2026-10-06). Tracker `feat/payment-service` (feature doc `b133bf9`, skeleton `486a34b`). PR 1 `feat/payment-service-01-domain` → tracker: spec, domain, gateway, persistence, skeleton tidy-up (about 420 lines, slightly over budget). PR 2 `feat/payment-service-02-api` → PR 1: application service and REST API (about 350 lines). PR 3 for T3 + T4 → PR 2.
+- Chain strategy: `feature-branch-chain` (decided 2026-10-06). Tracker `feat/payment-service` (feature doc `b133bf9`, skeleton `486a34b`). PR 1 `feat/payment-service-01-domain` → tracker: spec, domain, gateway, persistence, skeleton tidy-up (about 420 lines, slightly over budget). PR 2 `feat/payment-service-02-api` → PR 1: application service and REST API (about 350 lines). PR 3 `feat/payment-service-03-order-payment` → PR 2: payment-service review follow-ups plus the order payment client (about 430 lines). PR 4 `feat/payment-service-04-order-flow` → PR 3: `OrderService` payment step, specs and docs (about 430 lines). This split came from one slicing pass over T3+T4 (857 lines).
 - RDD: on (global).
 
 ## Tasks
 
 - [x] **T1 — Generated skeleton.** Spring Initializr project `lab/payment-service` (the same ids as order-service, image pinned to `postgres:18.6`). Route: delegated writer.
 - [x] **T2 — payment-service domain, persistence and API.** The living spec `openspec/specs/payment-service/spec.md`, then tests first, then code. Route: delegated writer.
-- [ ] **T3 — order-service payment step.** `OrderService`, the payment client with configurable timeouts, a decision on the test HTTP server (ADR if it is a new dependency), tests first including the timeout case. Update the living spec `openspec/specs/order-service/spec.md`. Route: delegated writer.
-- [ ] **T4 — Docs.** `docs/setup.md` (payment-service, and how the two services are configured together). Route: with T3.
+- [x] **T3 — order-service payment step.** `OrderService`, the payment client with configurable timeouts, a decision on the test HTTP server (ADR if it is a new dependency), tests first including the timeout case. Update the living spec `openspec/specs/order-service/spec.md`. Route: delegated writer.
+- [x] **T4 — Docs.** `docs/setup.md` (payment-service, and how the two services are configured together). Route: with T3.
 
 ## Checks
 
@@ -79,7 +79,9 @@ The vision's week-1 Wednesday task is "`payment-service` and order → payment c
 - 2026-10-06: T1 done: the Initializr skeleton (same request as order-service), with the image pinned to `postgres:18.6` and `TestcontainersConfiguration` made public. Wrapper and git files are byte-identical to order-service. `./mvnw test`: 1 test, 0 failures. No meaningful RED for scaffolding.
 - 2026-10-06: skeleton review: the full-branch candidate failed with `lens_context_budget_exceeded` (no authority created). It was reduced to `5d84ecb..486a34b`, consent was granted again, and the 4-lens review approved and was acknowledged (lineage `review-98f28bf288c48aa9`). Findings were minor and are folded into T2.
 - 2026-10-06: T2 done by a delegated writer (tests first). RED: compile failure, then 1 failure and 3 errors from deliberate defects (gateway outcome ignored, `@Valid` missing). GREEN: 28 tests (parent re-run); order-service still 74. Decision: `PaymentService` lives in a new `application` package, so the domain does not depend on the gateway. Skeleton tidy-up: pom placeholders replaced by a description in both services; ADR-007 comment on the image tag; Hikari pool size 10.
+- 2026-10-06: review of `486a34b..93dfbbc` (4 lenses, high risk because of the payments migration): approved, lineage `review-e611373a428b8acd`. Accepted: the spec wording, a gateway-failure test and a stronger truncation test. Out of scope: authentication (lab) and idempotency (see Scope).
+- 2026-10-06: T3 + T4 done by a delegated writer (tests first). RED: order-service 16 failures and 3 errors with stub code; payment-service truncation test red without truncation. GREEN: order-service 96, payment-service 29 (parent re-run). RestClient timeouts use `JdkClientHttpRequestFactory` plus the JDK `HttpClient` connect timeout, because `spring-boot-http-client` is not on the classpath. The fake payment server is the JDK `HttpServer`, so no new dependency and no ADR. Decisions kept: the controller still calls `Order.create`, so domain errors stay 400 and `OrderService.place(Order)` handles payment; a 2xx with an unknown status counts as unavailable, so the order stays pending. Commits: `b20f2ed` (payment-service follow-ups), `59aa239` (payment client; verified alone with 87 tests). Not verified: the manual run guide in `docs/setup.md`.
 
 ## Next step
 
-T3 + T4 via a delegated writer.
+Review the PR 3 + PR 4 range; then close the session (STATE, journal) and refresh the git bundle. Push and PRs are human decisions.

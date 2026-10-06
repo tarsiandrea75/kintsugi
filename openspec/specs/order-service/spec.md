@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`lab/order-service` creates and reads orders persisted in PostgreSQL. It is the entry point of the M1 lab and the first place where injected faults show symptoms. Design: [feature document](../../../odd/tasks/order-service-skeleton.md). Stack: [ADR-007](../../../docs/adr/ADR-007-lab-persistence-stack.md). Verified by `./mvnw test` from `lab/order-service`.
+`lab/order-service` creates and reads orders persisted in PostgreSQL. It is the entry point of the M1 lab and the first place where injected faults show symptoms. Design: [feature document](../../../odd/tasks/order-service-skeleton.md), and for the payment step the [payment-service feature document](../../../odd/tasks/payment-service.md). Stack: [ADR-007](../../../docs/adr/ADR-007-lab-persistence-stack.md). Verified by `./mvnw test` from `lab/order-service`.
 
 An order has an id (UUID), a customer id, a list of items (SKU and quantity), a status, and created and updated timestamps.
 
@@ -10,19 +10,68 @@ An order has an id (UUID), a customer id, a list of items (SKU and quantity), a 
 
 ### Requirement: Create an order
 
-`POST /orders` with a valid body MUST store the order in PostgreSQL with status `CREATED` and MUST return 201, a `Location` header pointing to `/orders/{id}`, and the created order.
+`POST /orders` with a valid body MUST store the order in PostgreSQL, take it through the payment step (see "Payment step"), and MUST return 201, a `Location` header pointing to `/orders/{id}`, and the order in its final status. The response is 201 whatever the payment outcome, including when payment-service is unavailable.
 
 #### Scenario: Valid order is created
-- GIVEN a body with a non-blank customer id and one item with SKU `SKU-1` and quantity 2
+- GIVEN payment-service authorizes payments
+- AND a body with a non-blank customer id and one item with SKU `SKU-1` and quantity 2
 - WHEN `POST /orders` is called
 - THEN the response status is 201
 - AND the `Location` header ends with `/orders/{id}` for the new order id
-- AND the body contains the order with status `CREATED`, a UUID id, and created and updated timestamps
+- AND the body contains the order with status `PAID`, a UUID id, and created and updated timestamps
 
 #### Scenario: Created order is stored
-- GIVEN an order created through `POST /orders`
+- GIVEN an order created through `POST /orders` while payment-service authorizes payments
 - WHEN the orders table in PostgreSQL is queried by its id
-- THEN one row exists with the same customer id, items and status `CREATED`
+- THEN one row exists with the same customer id, items and status `PAID`
+
+### Requirement: Payment step
+
+After storing a new order, order-service MUST move it to `PAYMENT_PENDING`, save it, and only then call `POST /payments` on payment-service with body `{"orderId": "<order id>"}`. No database transaction spans the call. Then:
+
+- when payment-service answers 2xx with status `AUTHORIZED`, the order MUST move to `PAID` and be saved;
+- when it answers 2xx with status `DECLINED`, the order MUST move to `PAYMENT_FAILED` and be saved;
+- when the call times out (connect or read), cannot connect, gets a non-2xx response, or gets a body without a known status, the order MUST stay `PAYMENT_PENDING`, and order-service MUST log a `WARN` line with the order id and the cause. This is the visible symptom of fault F1 (slow gateway).
+
+The client MUST read its settings from these properties, so the fault injector can change them:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `kintsugi.payment.base-url` | `http://localhost:8081` | payment-service root URL |
+| `kintsugi.payment.connect-timeout` | `1s` | longest wait to open a connection |
+| `kintsugi.payment.read-timeout` | `3s` | longest wait for the response once the request is sent |
+
+#### Scenario: Payment authorized
+- GIVEN payment-service answers `AUTHORIZED`
+- WHEN `POST /orders` is called with a valid body
+- THEN the response status is 201 and the order status is `PAID`
+- AND payment-service received the order id
+- AND the stored order has status `PAID`
+
+#### Scenario: Payment declined
+- GIVEN payment-service answers `DECLINED`
+- WHEN `POST /orders` is called with a valid body
+- THEN the response status is 201 and the order status is `PAYMENT_FAILED`
+- AND the stored order has status `PAYMENT_FAILED`
+
+#### Scenario: Payment times out
+- GIVEN payment-service answers only after the read timeout
+- WHEN `POST /orders` is called with a valid body
+- THEN the response status is 201 and the order status is `PAYMENT_PENDING`
+- AND the stored order has status `PAYMENT_PENDING`
+- AND a `WARN` line names the order id and the cause
+
+#### Scenario: Payment-service unreachable or failing
+- GIVEN payment-service refuses connections, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED` or `DECLINED`
+- WHEN an order is placed
+- THEN the order stays `PAYMENT_PENDING`
+- AND `POST /orders` still returns 201
+
+#### Scenario: Settings are configurable
+- GIVEN no `kintsugi.payment.*` property is set
+- WHEN the client settings are read
+- THEN they are the defaults in the table above
+- AND each one takes the value of its property when the property is set
 
 ### Requirement: Reject invalid input
 

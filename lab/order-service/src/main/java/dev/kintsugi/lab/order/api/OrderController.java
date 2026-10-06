@@ -17,23 +17,24 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import dev.kintsugi.lab.order.application.OrderService;
 import dev.kintsugi.lab.order.domain.Order;
 import dev.kintsugi.lab.order.domain.OrderItem;
-import dev.kintsugi.lab.order.persistence.OrderRepository;
 
 @RestController
 @RequestMapping("/orders")
 class OrderController {
 
-	private final OrderRepository repository;
+	private final OrderService service;
 
-	OrderController(OrderRepository repository) {
-		this.repository = repository;
+	OrderController(OrderService service) {
+		this.service = service;
 	}
 
+	/** Always 201 once the order is stored: the body carries the payment outcome as the order's final status. */
 	@PostMapping
 	ResponseEntity<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request) {
-		Order order = repository.save(toOrder(request));
+		Order order = service.place(toOrder(request));
 		URI location = ServletUriComponentsBuilder.fromCurrentRequest()
 			.path("/{id}")
 			.buildAndExpand(order.getId())
@@ -60,7 +61,7 @@ class OrderController {
 
 	@GetMapping("/{id}")
 	ResponseEntity<OrderResponse> get(@PathVariable UUID id) {
-		return ResponseEntity.of(repository.findById(id).map(OrderResponse::from));
+		return ResponseEntity.of(service.find(id).map(OrderResponse::from));
 	}
 
 }
