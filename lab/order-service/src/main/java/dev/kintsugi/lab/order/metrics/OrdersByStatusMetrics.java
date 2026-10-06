@@ -21,8 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import dev.kintsugi.lab.order.domain.OrderStatus;
-import dev.kintsugi.lab.order.persistence.OrderRepository;
 import dev.kintsugi.lab.order.persistence.OrderStatusCount;
+import dev.kintsugi.lab.order.persistence.OrderStatusCounts;
 
 /**
  * Gauge {@value #GAUGE} with one series per {@link OrderStatus} (tag {@code status}), read from the database. Orders
@@ -30,14 +30,17 @@ import dev.kintsugi.lab.order.persistence.OrderStatusCount;
  *
  * <p>A scrape never waits on the database. A gauge read returns the current snapshot at once: the last good counts,
  * or NaN after a failed refresh or before the first refresh completes. When the snapshot is older than
- * {@link #SNAPSHOT_MAX_AGE}, the read starts one asynchronous refresh (single-flight) and does not wait for it. The
+ * {@link #REFRESH_AFTER}, the read starts one asynchronous refresh (single-flight) and does not wait for it. The
  * refresh runs one {@code GROUP BY} query and stores the counts, or a failure, timestamped when the query finishes, so
- * a failing database is queried at most once per max age and never once per series. If the database hangs (fault
- * F4, pool exhausted), scrapes stay fast and the series show NaN or the last counts instead of timing out the target.
- * A snapshot older than {@link #MAX_SERVED_AGE} is never served: a refresh that hangs turns the series NaN.
+ * a failing database is queried at most once per {@link #REFRESH_AFTER} and never once per series. If the database
+ * hangs (fault F4, pool exhausted), scrapes stay fast and the series show NaN or the last counts instead of timing out
+ * the target. A snapshot older than {@link #SERVE_AT_MOST} is never served: a refresh that hangs turns the series NaN.
+ * The refresh always ends: the query has its own statement timeout ({@link OrderStatusCounts#QUERY_TIMEOUT}), and
+ * waiting for a pool connection is bounded by Hikari's connection timeout, so the guard is released and a later read
+ * starts a new refresh.
  *
- * <p>Trade-off: a value can be up to about one max age plus one query old, and never older than
- * {@link #MAX_SERVED_AGE}. That is fine for a scrape interval of several seconds.
+ * <p>Trade-off: a value can be up to about {@link #REFRESH_AFTER} plus one query old, and never older than
+ * {@link #SERVE_AT_MOST}. That is fine for a scrape interval of several seconds.
  */
 @Component
 public class OrdersByStatusMetrics implements MeterBinder {
@@ -45,14 +48,18 @@ public class OrdersByStatusMetrics implements MeterBinder {
 	/** Exported to Prometheus as {@code lab_orders{status="..."}}. */
 	static final String GAUGE = "lab.orders";
 
-	/** Far shorter than any scrape interval, far longer than reading the gauges of one scrape. */
-	static final Duration SNAPSHOT_MAX_AGE = Duration.ofSeconds(1);
+	/**
+	 * A read of a snapshot older than this starts a refresh. Far shorter than any scrape interval, far longer than
+	 * reading the gauges of one scrape.
+	 */
+	static final Duration REFRESH_AFTER = Duration.ofSeconds(1);
 
 	/**
-	 * Oldest snapshot a read may serve. A refresh that hangs after it has a connection never replaces the snapshot, so
-	 * past this age the gauge reports NaN instead of stale counts, even while that refresh is still in flight.
+	 * A snapshot older than this is never served. A refresh that is still running never replaces the snapshot, so past
+	 * this age the gauge reports NaN instead of stale counts, even while that refresh is in flight. The query's own
+	 * timeout ({@link OrderStatusCounts#QUERY_TIMEOUT}) ends a hung refresh well before this.
 	 */
-	static final Duration MAX_SERVED_AGE = Duration.ofSeconds(10);
+	static final Duration SERVE_AT_MOST = Duration.ofSeconds(10);
 
 	private static final Logger log = LoggerFactory.getLogger(OrdersByStatusMetrics.class);
 
@@ -72,8 +79,8 @@ public class OrdersByStatusMetrics implements MeterBinder {
 	private final AtomicBoolean failing = new AtomicBoolean();
 
 	@Autowired
-	public OrdersByStatusMetrics(OrderRepository repository) {
-		this(repository::countOrdersPerStatus, System::nanoTime,
+	public OrdersByStatusMetrics(OrderStatusCounts counts) {
+		this(counts::countOrdersPerStatus, System::nanoTime,
 				task -> Thread.ofVirtual().name("lab-orders-refresh").start(task));
 	}
 
@@ -98,12 +105,12 @@ public class OrdersByStatusMetrics implements MeterBinder {
 	/** Statuses with no orders report 0, so every series has a value; NaN when the counts are unknown. */
 	double count(OrderStatus status) {
 		Snapshot current = snapshot.get();
-		if ((current == null || current.isOlderThan(SNAPSHOT_MAX_AGE.toNanos(), nanoTime.getAsLong()))
+		if ((current == null || current.isOlderThan(REFRESH_AFTER.toNanos(), nanoTime.getAsLong()))
 				&& refreshing.compareAndSet(false, true)) {
 			startRefresh();
 		}
 		if (current == null || current.failed()
-				|| current.isOlderThan(MAX_SERVED_AGE.toNanos(), nanoTime.getAsLong())) {
+				|| current.isOlderThan(SERVE_AT_MOST.toNanos(), nanoTime.getAsLong())) {
 			return Double.NaN;
 		}
 		return current.counts().getOrDefault(status, 0L);
@@ -137,7 +144,7 @@ public class OrdersByStatusMetrics implements MeterBinder {
 			}
 		}
 		catch (RuntimeException ex) {
-			// The failure is stored like a result, so it is not re-queried before the max age passes.
+			// The failure is stored like a result, so it is not re-queried before REFRESH_AFTER passes.
 			snapshot.set(new Snapshot(null, nanoTime.getAsLong()));
 			if (failing.compareAndSet(false, true)) {
 				log.warn("Cannot count orders per status; lab.orders reports NaN until the query succeeds", ex);

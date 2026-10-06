@@ -47,7 +47,7 @@ Alloy MUST read the Docker logs of the three services and push them to Loki with
 
 ### Requirement: Grafana is provisioned
 
-Grafana MUST start with the Prometheus and Loki datasources and the "Lab — F1" dashboard provisioned from files in `infra/grafana/`, with anonymous viewer access. The dashboard MUST have these panels:
+Grafana MUST start with the Prometheus and Loki datasources and the "Lab — F1" dashboard provisioned from files in `infra/grafana/`, with anonymous viewer access; the admin password MUST come from `GRAFANA_ADMIN_PASSWORD`, with a lab default. The dashboard MUST have these panels:
 
 | Panel | Source |
 |-------|--------|
@@ -83,7 +83,7 @@ It MUST exit non-zero when any assertion fails, and MUST reset the gateway whate
 
 ### Requirement: Compose startup and host ports
 
-`docker compose -f infra/compose.yaml up -d` MUST start every container healthy, with healthchecks and `depends_on` conditions. One PostgreSQL 18.6 container MUST hold the `orders` and `payments` databases. Services MUST reach each other by compose service name. Only these host ports MUST be published:
+`docker compose -f infra/compose.yaml up -d` MUST start every container healthy, with healthchecks and `depends_on` conditions. One PostgreSQL 18.6 container MUST hold the `orders` and `payments` databases. Services MUST reach each other by compose service name. Only these host ports MUST be published, each bound to `127.0.0.1` so the lab is not reachable from the network:
 
 | Container | Host port |
 |-----------|-----------|

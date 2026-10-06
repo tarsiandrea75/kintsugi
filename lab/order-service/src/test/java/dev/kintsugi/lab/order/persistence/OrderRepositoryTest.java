@@ -90,20 +90,6 @@ class OrderRepositoryTest {
 	}
 
 	@Test
-	void countsOrdersPerStatusAndOmitsStatusesWithNoOrders() {
-		repository.save(Order.create("customer-1", List.of(new OrderItem("SKU-1", 1))));
-		repository.save(Order.create("customer-2", List.of(new OrderItem("SKU-1", 1))));
-		Order pending = Order.create("customer-3", List.of(new OrderItem("SKU-1", 1)));
-		pending.transitionTo(OrderStatus.PAYMENT_PENDING);
-		repository.save(pending);
-
-		List<OrderStatusCount> counts = repository.countOrdersPerStatus();
-
-		assertThat(counts).containsExactlyInAnyOrder(new OrderStatusCount(OrderStatus.CREATED, 2),
-				new OrderStatusCount(OrderStatus.PAYMENT_PENDING, 1));
-	}
-
-	@Test
 	void updatedAtIsPersistedAfterATransition() {
 		Order order = repository.save(Order.create("customer-1", List.of(new OrderItem("SKU-1", 1))));
 

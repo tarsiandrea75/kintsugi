@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import dev.kintsugi.lab.order.domain.OrderStatus;
-import dev.kintsugi.lab.order.persistence.OrderRepository;
+import dev.kintsugi.lab.order.persistence.OrderStatusCounts;
 import dev.kintsugi.lab.order.persistence.OrderStatusCount;
 
 /**
@@ -30,7 +30,7 @@ import dev.kintsugi.lab.order.persistence.OrderStatusCount;
  */
 class OrdersByStatusMetricsTest {
 
-	private static final long PAST_TTL = OrdersByStatusMetrics.SNAPSHOT_MAX_AGE.plus(Duration.ofNanos(1)).toNanos();
+	private static final long PAST_TTL = OrdersByStatusMetrics.REFRESH_AFTER.plus(Duration.ofNanos(1)).toNanos();
 
 	private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
 
@@ -166,9 +166,9 @@ class OrdersByStatusMetricsTest {
 
 	@Test
 	void aFailingQueryGivesNaNAndRunsAtMostOncePerTtl() {
-		OrderRepository repository = mock(OrderRepository.class);
-		when(repository.countOrdersPerStatus()).thenThrow(new DataAccessResourceFailureException("pool exhausted"));
-		query = repository::countOrdersPerStatus;
+		OrderStatusCounts counts = mock(OrderStatusCounts.class);
+		when(counts.countOrdersPerStatus()).thenThrow(new DataAccessResourceFailureException("pool exhausted"));
+		query = counts::countOrdersPerStatus;
 		OrdersByStatusMetrics metrics = bind();
 
 		scrape();
@@ -205,11 +205,13 @@ class OrdersByStatusMetricsTest {
 	}
 
 	@Test
-	void aHungRefreshTurnsTheGaugeNaNAfterTheMaxServedAge() {
+	void aHungRefreshTurnsTheGaugeNaNOnceTheSnapshotIsOlderThanServeAtMost() {
 		rows = List.of(new OrderStatusCount(OrderStatus.PAID, 1));
 		bind();
+		nanoTime.set(1_000);
 		scrape();
 		runRefreshes();
+		long snapshotTakenAt = nanoTime.get();
 
 		// The next refresh starts but never completes, like a query stuck on a hung connection.
 		nanoTime.addAndGet(PAST_TTL);
@@ -217,7 +219,7 @@ class OrdersByStatusMetricsTest {
 		assertThat(pendingRefreshes).hasSize(1);
 		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
 
-		nanoTime.set(OrdersByStatusMetrics.MAX_SERVED_AGE.toNanos());
+		nanoTime.set(snapshotTakenAt + OrdersByStatusMetrics.SERVE_AT_MOST.toNanos());
 		assertThat(gauge(OrderStatus.PAID)).isEqualTo(1.0);
 
 		nanoTime.incrementAndGet();

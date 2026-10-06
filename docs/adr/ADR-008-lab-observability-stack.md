@@ -52,7 +52,7 @@ Host ports, chosen away from ports other local projects already use (5432, 5433 
 | Grafana | 13000 |
 | Prometheus | 19090 |
 
-PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by compose service name.
+Every published port is bound to `127.0.0.1`, so the lab is not reachable from the network. PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by compose service name.
 
 ## Alternatives considered
 
@@ -72,5 +72,5 @@ PostgreSQL, Loki and Alloy are not published on the host; containers reach each 
 ### Negative
 
 - No traces: a cross-service latency path (for example F1 from gateway-mock up to order-service) is inferred from metrics and logs, not seen as a span tree.
-- Alloy needs read access to the Docker socket.
+- Alloy mounts the Docker socket. Even mounted `:ro`, the socket gives full Docker API control, which is root-equivalent on the host. This is accepted for a local lab whose ports are bound to loopback only. If the lab ever leaves the laptop, the mitigation is a `docker-socket-proxy` in front of the socket that allows only the container list and log endpoints.
 - Image tags must be bumped by hand, with a new ADR or a superseding one.

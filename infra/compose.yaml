@@ -4,7 +4,8 @@
 #   docker compose -f infra/compose.yaml down -v
 #
 # Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082,
-# Grafana 13000 (dashboard "Lab — F1"), Prometheus 19090.
+# Grafana 13000 (dashboard "Lab — F1"), Prometheus 19090. Every port is bound to 127.0.0.1 only.
+# Grafana's admin password comes from GRAFANA_ADMIN_PASSWORD (see infra/.env.example).
 # PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by service name.
 name: kintsugi-lab
 
@@ -30,7 +31,7 @@ services:
   gateway-mock:
     build: ../lab/gateway-mock
     ports:
-      - "18082:8082"
+      - "127.0.0.1:18082:8082"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8082/actuator/health"]
       interval: 5s
@@ -47,7 +48,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: lab
       KINTSUGI_GATEWAY_BASEURL: http://gateway-mock:8082
     ports:
-      - "18081:8081"
+      - "127.0.0.1:18081:8081"
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,7 +70,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: lab
       KINTSUGI_PAYMENT_BASEURL: http://payment-service:8081
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,7 +90,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "19090:9090"
+      - "127.0.0.1:19090:9090"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/ready"]
       interval: 5s
@@ -111,7 +112,8 @@ services:
     command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      # Read-only: Alloy only lists containers and reads their logs.
+      # Alloy only lists containers and reads their logs, but ":ro" does not limit the API: the socket gives full
+      # Docker API control, which is root-equivalent on the host. Accepted for a local, loopback-only lab (ADR-008).
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - loki
@@ -127,8 +129,9 @@ services:
   grafana:
     image: grafana/grafana:13.2.3
     environment:
-      # Lab only: anyone can view, nobody needs to log in.
+      # Lab only: anyone can view, nobody needs to log in. Editing needs the admin login.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-kintsugi-lab}
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -137,7 +140,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "13000:3000"
+      - "127.0.0.1:13000:3000"
     depends_on:
       prometheus:
         condition: service_healthy
