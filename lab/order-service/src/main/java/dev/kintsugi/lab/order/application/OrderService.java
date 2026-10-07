@@ -87,8 +87,11 @@ public class OrderService {
 			log.warn("Inventory unavailable for order {}, order not stored: {}", order.getId(), ex.getMessage());
 			throw ex;
 		}
-		if (outcome == ReservationOutcome.INSUFFICIENT_STOCK) {
-			throw new InsufficientStockException(order.getId());
+		// Exhaustive on purpose: a new outcome must be handled here before an order can be accepted with it.
+		switch (outcome) {
+			case RESERVED -> {
+			}
+			case INSUFFICIENT_STOCK -> throw new InsufficientStockException(order.getId());
 		}
 	}
 
