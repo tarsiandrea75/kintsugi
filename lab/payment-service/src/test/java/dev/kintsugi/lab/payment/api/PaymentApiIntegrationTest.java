@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -95,6 +96,10 @@ class PaymentApiIntegrationTest {
 			.query()
 			.singleRow();
 		assertThat(row).containsEntry("order_id", orderId).containsEntry("status", "AUTHORIZED");
+		assertThat(eventsOf(orderId)).singleElement()
+			.satisfies(event -> assertThat(event).containsEntry("type", "PAYMENT_ATTEMPT")
+				.containsEntry("outcome", "AUTHORIZED")
+				.containsEntry("detail", "{\"paymentId\":\"" + id + "\"}"));
 	}
 
 	@Test
@@ -115,6 +120,8 @@ class PaymentApiIntegrationTest {
 			.query()
 			.singleRow();
 		assertThat(row).containsEntry("order_id", orderId).containsEntry("status", "DECLINED");
+		assertThat(eventsOf(orderId)).singleElement()
+			.satisfies(event -> assertThat(event).containsEntry("outcome", "DECLINED"));
 	}
 
 	@Test
@@ -135,29 +142,37 @@ class PaymentApiIntegrationTest {
 			.query()
 			.singleRow();
 		assertThat(row).containsEntry("order_id", orderId).containsEntry("status", "FAILED");
+		assertThat(eventsOf(orderId)).singleElement()
+			.satisfies(event -> assertThat(event).containsEntry("outcome", "FAILED"));
 	}
 
 	@ParameterizedTest
 	@ValueSource(ints = { 500, 503 })
-	void failingGatewayIsServiceUnavailableAndStoresNothing(int code) throws Exception {
+	void failingGatewayIsServiceUnavailableAndStoresOnlyTheAttempt(int code) throws Exception {
 		GATEWAY.replyWithBody(code, "{}");
 		long before = countPayments();
+		UUID orderId = UUID.randomUUID();
 
-		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))
+		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(orderId)))
 			.andExpect(status().isServiceUnavailable());
 
 		assertThat(countPayments()).isEqualTo(before);
+		assertGatewayUnavailableRecorded(orderId);
 	}
 
 	@Test
-	void slowGatewayIsServiceUnavailableAndStoresNothing() throws Exception {
+	void slowGatewayIsServiceUnavailableAndStoresOnlyTheAttempt() throws Exception {
 		GATEWAY.replyAfter(READ_TIMEOUT.multipliedBy(5));
 		long before = countPayments();
+		UUID orderId = UUID.randomUUID();
 
-		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))
+		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(orderId)))
 			.andExpect(status().isServiceUnavailable());
 
 		assertThat(countPayments()).isEqualTo(before);
+		Map<String, Object> event = assertGatewayUnavailableRecorded(orderId);
+		assertThat((String) event.get("detail")).contains("Timeout");
+		assertThat((Long) event.get("duration_ms")).isGreaterThanOrEqualTo(READ_TIMEOUT.toMillis());
 	}
 
 	@ParameterizedTest
@@ -174,6 +189,31 @@ class PaymentApiIntegrationTest {
 	@Test
 	void unknownPaymentIsNotFound() throws Exception {
 		mvc.perform(get("/payments/00000000-0000-0000-0000-000000000000")).andExpect(status().isNotFound());
+	}
+
+	/** The attempt is stored with the exception and the gateway URL, and no payment row exists for the order. */
+	private Map<String, Object> assertGatewayUnavailableRecorded(UUID orderId) {
+		Long payments = jdbc.sql("select count(*) from payments where order_id = ?")
+			.param(orderId)
+			.query(Long.class)
+			.single();
+		assertThat(payments).isZero();
+		List<Map<String, Object>> events = eventsOf(orderId);
+		assertThat(events).singleElement()
+			.satisfies(event -> assertThat(event).containsEntry("type", "PAYMENT_ATTEMPT")
+				.containsEntry("outcome", "GATEWAY_UNAVAILABLE"));
+		Map<String, Object> event = events.getFirst();
+		assertThat((String) event.get("detail")).contains("\"exception\":")
+			.contains("\"url\":\"" + GATEWAY.baseUrl() + "/authorize\"");
+		assertThat(event.get("duration_ms")).isNotNull();
+		return event;
+	}
+
+	private List<Map<String, Object>> eventsOf(UUID orderId) {
+		return jdbc.sql("select type, outcome, detail, duration_ms from payment_events where order_id = ?")
+			.param(orderId)
+			.query()
+			.listOfRows();
 	}
 
 	private long countPayments() {

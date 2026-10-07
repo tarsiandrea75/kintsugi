@@ -1,5 +1,6 @@
 package dev.kintsugi.lab.payment.gateway;
 
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.util.UUID;
 
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
@@ -32,6 +34,9 @@ public class HttpPaymentGateway implements PaymentGateway {
 
 	private final RestClient restClient;
 
+	/** The full {@code /authorize} URL, carried by every {@link GatewayUnavailableException}. */
+	private final URI authorizeUrl;
+
 	public HttpPaymentGateway(GatewayProperties properties) {
 		// The JDK client sets the connect timeout; the Spring request factory sets the read timeout per request.
 		// HTTP/1.1 avoids the JDK client's h2c upgrade attempt on plain http.
@@ -41,6 +46,7 @@ public class HttpPaymentGateway implements PaymentGateway {
 			.build();
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
 		requestFactory.setReadTimeout(properties.readTimeout());
+		this.authorizeUrl = UriComponentsBuilder.fromUri(properties.baseUrl()).path("/authorize").build().toUri();
 		this.restClient = RestClient.builder()
 			.baseUrl(properties.baseUrl())
 			.requestFactory(requestFactory)
@@ -70,15 +76,17 @@ public class HttpPaymentGateway implements PaymentGateway {
 		}
 		catch (RestClientException ex) {
 			throw new GatewayUnavailableException("Authorization of order " + orderId + " failed: " + ex.getMessage(),
-					ex);
+					authorizeUrl, ex);
 		}
 		if (reply == null || reply.status() == null) {
-			throw new GatewayUnavailableException("Authorization of order " + orderId + " returned no status", null);
+			throw new GatewayUnavailableException("Authorization of order " + orderId + " returned no status", authorizeUrl,
+					null);
 		}
 		// FAILED is how this service reads a 429; the gateway itself only answers AUTHORIZED or DECLINED.
 		if (reply.status() == PaymentStatus.FAILED) {
 			throw new GatewayUnavailableException(
-					"Authorization of order " + orderId + " returned an unknown status: " + reply.status(), null);
+					"Authorization of order " + orderId + " returned an unknown status: " + reply.status(), authorizeUrl,
+					null);
 		}
 		return reply.status();
 	}

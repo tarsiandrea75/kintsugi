@@ -90,7 +90,8 @@ class HttpPaymentGatewayTest {
 		server.replyWithBody(code, "{}");
 
 		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID))
-			.withMessageContaining(ORDER_ID.toString());
+			.withMessageContaining(ORDER_ID.toString())
+			.satisfies(ex -> assertThat(ex.getUrl()).hasToString(server.baseUrl() + "/authorize"));
 	}
 
 	@Test
@@ -104,7 +105,8 @@ class HttpPaymentGatewayTest {
 	void missingStatusIsUnavailable() {
 		server.replyWithBody(200, "{}");
 
-		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID));
+		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID))
+			.satisfies(ex -> assertThat(ex.getUrl()).hasToString(server.baseUrl() + "/authorize"));
 	}
 
 	@Test
