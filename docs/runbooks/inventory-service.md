@@ -73,7 +73,7 @@ Check `sum by (uri, status) (rate(http_server_requests_seconds_count{service="in
 | Slow queries holding connections | `pg_stat_activity` query below; `rate(http_server_requests_seconds_sum{service="inventory-service",uri="/reservations"}[1m]) / rate(http_server_requests_seconds_count{service="inventory-service",uri="/reservations"}[1m])` | long-running `active` sessions; successful reservations take seconds |
 | Locks on `stock` rows | `pg_stat_activity` with `wait_event_type = 'Lock'` | sessions waiting on locks |
 | Traffic spike | `sum(rate(http_server_requests_seconds_count{service="inventory-service",uri="/reservations"}[1m]))` | request rate well above its usual level |
-| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab -d inventory` | not accepting connections; the WARN message names a connection error rather than a timeout on a busy pool |
+| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab_app -d inventory` | not accepting connections; the WARN message names a connection error rather than a timeout on a busy pool |
 | Other server error | LogQL `{service="inventory-service"} \|= "ERROR"` | stack traces without the WARN line above |
 
 ### Slow `POST /reservations`
@@ -96,12 +96,12 @@ Not an error of this service. Check `curl -s localhost:18083/stock/<sku>`: `avai
 - **Check configuration:** `docker compose -f infra/compose.yaml config inventory-service`. Expect `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "10"` and `KINTSUGI_INVENTORY_RESERVATIONDELAY: 0s`.
 - **Roll back a configuration change:** `unset INVENTORY_POOL_SIZE INVENTORY_RESERVATION_DELAY`, then `docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service`.
 - **Restart:** `docker compose -f infra/compose.yaml restart inventory-service`. In-flight reservations fail; stock already reserved stays reserved.
-- **Inspect database sessions:** `docker compose -f infra/compose.yaml exec postgres psql -U lab -d inventory -c "SELECT pid, state, wait_event_type, now() - query_start AS age, query FROM pg_stat_activity WHERE datname = 'inventory'"`.
+- **Inspect database sessions:** `docker compose -f infra/compose.yaml exec postgres psql -U lab_app -d inventory -c "SELECT pid, state, wait_event_type, now() - query_start AS age, query FROM pg_stat_activity WHERE datname = 'inventory'"`.
 - Do not raise the pool size as a first response: it hides slow queries and moves load onto the database.
 
 ## 8. Where the evidence is
 
-Database `inventory` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab -d inventory -c "<sql>"`.
+Database `inventory` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab_app -d inventory -c "<sql>"`.
 
 | Table | Columns | Content |
 |-------|---------|---------|

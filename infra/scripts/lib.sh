@@ -1,9 +1,16 @@
 # Shared helpers for the fault visibility checks (verify-f1.sh … verify-f4.sh). Source it; do not run it.
 # The caller sets "set -euo pipefail", defines usage(), then calls parse_args "$@" and start_lab.
 
-COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose.yaml"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+COMPOSE_FILE="$REPO_DIR/infra/compose.yaml"
+# fault-injector mounts the repository read-only at its host path and joins the Docker socket's group (ADR-009). The
+# scripts derive both from this machine, so the lab starts the same from any working directory; an exported value wins.
+export KINTSUGI_REPO_DIR="${KINTSUGI_REPO_DIR:-$REPO_DIR}"
+DOCKER_GID="${DOCKER_GID:-$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 1001)}"
+export DOCKER_GID
 ORDERS=http://127.0.0.1:18080
 GATEWAY=http://127.0.0.1:18082
+INJECTOR=http://127.0.0.1:18084
 PROMETHEUS=http://127.0.0.1:19090
 SERVICES=(order-service payment-service gateway-mock inventory-service)
 LOKI_WAIT_SECONDS=180
@@ -12,10 +19,15 @@ CHECK_WAIT_SECONDS=60
 # and 3 s payment read timeouts; the margin covers the rest of the request.
 ORDER_MAX_SECONDS=15
 CURL_MAX_SECONDS=5
+# Transport cap for POST /faults and POST /faults/{id}/restore: an F3 or F4 step is a recreate that waits for health,
+# bounded by the injector's recreate-wait-timeout (120 s) plus its 30 s kill margin.
+INJECTOR_MAX_SECONDS=180
 
 down=false
 failures=0
 started=$SECONDS
+# The injection this script activated; the exit trap restores it through the injector.
+injection_id=""
 
 # Parses --down and --help; usage() is defined by the caller.
 parse_args() {
@@ -42,20 +54,17 @@ reset_gateway() {
   fi
 }
 
-# PUT /admin/behavior with the given JSON body; fails on a non-2xx answer.
-set_gateway_behavior() {
-  curl -fsS --max-time "$CURL_MAX_SECONDS" -o /dev/null -X PUT "$GATEWAY/admin/behavior" \
-    -H 'Content-Type: application/json' -d "$1"
-}
-
-# A check that changes more than the gateway defines before_exit(); it runs first on every exit, so its restore
-# happens even when a check fails or the script is interrupted.
+# Restores the injection on every exit, even when a check fails or the script is interrupted. Restore is idempotent,
+# so a script that already restored it calls the injector once more for nothing.
 on_exit() {
   local status=$?
-  if declare -F before_exit >/dev/null; then
-    before_exit || echo "WARN  before_exit failed" >&2
+  if [[ -n "$injection_id" ]]; then
+    if restore_injection; then
+      info "injection $injection_id restored"
+    else
+      echo "WARN  could not restore injection $injection_id; run: curl -X POST $INJECTOR/faults/$injection_id/restore" >&2
+    fi
   fi
-  reset_gateway
   if [[ "$down" == true ]]; then
     info "tearing the lab down"
     compose down -v >/dev/null 2>&1 || echo "WARN  docker compose down failed" >&2
@@ -158,13 +167,149 @@ place_order() {
   echo "${code:-000} ${id:-none} ${status:-none} ${seconds:-none}"
 }
 
-# Runs SQL $2 in database $1 (orders, payments or inventory) as the lab user; prints unaligned rows, "|" between columns.
-psql_lab() { compose exec -T postgres psql -U lab -d "$1" -Atc "$2"; }
+# Runs SQL $2 in database $1 (orders, payments or inventory) as lab_app, the services' non-superuser role; prints
+# unaligned rows, "|" between columns.
+psql_lab() { compose exec -T postgres psql -U lab_app -d "$1" -Atc "$2"; }
+
+# Runs SQL $1 in the faults database as the faults role, the only non-superuser role that can connect to it.
+psql_faults() { compose exec -T postgres psql -U faults -d faults -Atc "$1"; }
+
+# --- Fault injector (ADR-009) ---
+
+# Calls the injector: $1 method, $2 path, $3 optional JSON body. Prints "<http code> <body>" on one line, "000 " on a
+# transport failure; never fails, so a broken call never aborts the script before the exit trap.
+injector_call() {
+  local out rc=0
+  out=$(curl -sS --max-time "$INJECTOR_MAX_SECONDS" -w '\n%{http_code}' -X "$1" "$INJECTOR$2" \
+    -H 'Content-Type: application/json' ${3:+-d "$3"} 2>/dev/null) || rc=$?
+  (( rc == 0 )) || { echo "000 "; return 0; }
+  echo "${out##*$'\n'} ${out%$'\n'*}" | tr -d '\n'
+  echo
+}
+
+# POST /faults for fault $1. On 201 stores the injection id for the exit trap and passes; otherwise fails and exits.
+# A failed activation (500) still carries an id: it is stored too, so the trap retries the restore.
+inject_fault() {
+  local code body
+  read -r code body <<<"$(injector_call POST /faults "{\"fault\":\"$1\"}")"
+  local id
+  id=$(json_field id "$body")
+  is_uuid "$id" && injection_id=$id
+  if [[ "$code" == 201 && -n "$injection_id" ]]; then
+    pass "$1 injected through the fault injector (injection $injection_id)"
+  else
+    fail "POST /faults $1: expected 201, got $code ${body:-no body}"
+    exit 1
+  fi
+}
+
+# POST /faults/{id}/restore for this script's injection; true when the answer is 200 and the injection no longer
+# blocks (RESTORED, or FAILED when its activation had already been undone).
+restore_injection() {
+  local code body status
+  read -r code body <<<"$(injector_call POST "/faults/$injection_id/restore")"
+  status=$(json_field status "$body")
+  [[ "$code" == 200 && ( "$status" == RESTORED || "$status" == FAILED ) ]]
+}
+
+# Restores the injection through the injector as a check step.
+expect_restored() {
+  if restore_injection; then
+    pass "injection $injection_id restored through the fault injector"
+  else
+    fail "could not restore injection $injection_id through the fault injector"
+    exit 1
+  fi
+}
+
+# Restores an injection that an earlier, interrupted run left blocking, so this run can inject its own.
+restore_leftover_injection() {
+  local code body leftover
+  read -r code body <<<"$(injector_call GET /faults/active)"
+  case "$code" in
+    204) pass "the fault injector answers and no injection is active" ;;
+    200)
+      leftover=$(json_field id "$body")
+      injection_id=$leftover
+      if is_uuid "$leftover" && restore_injection; then
+        pass "the fault injector restored injection $leftover left by an earlier run"
+        injection_id=""
+      else
+        fail "an earlier injection ($body) is still blocking and could not be restored"
+        exit 1
+      fi
+      ;;
+    *) fail "GET $INJECTOR/faults/active: expected 200 or 204, got $code"; exit 1 ;;
+  esac
+}
+
+# The truth row of this script's injection, read as the faults role: exactly one row, with fault $1, root-cause
+# service $2, status RESTORED and a restored_at time.
+check_truth_row() {
+  local rows
+  rows=$(psql_faults "select fault_id, root_cause_service, status, restored_at is not null
+    from injections where id = '$injection_id'" 2>&1 || true)
+  if [[ "$rows" == "$1|$2|RESTORED|t" ]]; then
+    pass "truth: one injections row for $injection_id, fault $1, root cause service $2, RESTORED (read as faults)"
+    info "truth row: $(psql_faults "select id, fault_id, target_service, root_cause_service, root_cause_category,
+      status, injected_at, restored_at from injections where id = '$injection_id'")"
+  else
+    fail "truth: expected exactly '$1|$2|RESTORED|t' for injection $injection_id, got '${rows:-no row}'"
+  fi
+}
+
+# The truth is isolated from the services' role: lab_app and faults are not superusers (a superuser ignores
+# REVOKE CONNECT), and lab_app cannot connect to the faults database.
+check_truth_isolation() {
+  local supers denied
+  supers=$(psql_lab orders "select rolname || '=' || rolsuper from pg_roles
+    where rolname in ('lab_app', 'faults') order by rolname" 2>&1 | tr '\n' ' ' || true)
+  if [[ "$supers" == "faults=false lab_app=false " ]]; then
+    pass "PostgreSQL: lab_app and faults are not superusers (rolsuper false)"
+  else
+    fail "PostgreSQL: expected lab_app and faults with rolsuper false, got '$supers'"
+  fi
+  if denied=$(compose exec -T postgres psql -U lab_app -d faults -Atc "select 1" 2>&1); then
+    fail "PostgreSQL: lab_app connected to the faults database"
+  elif grep -q 'permission denied for database "faults"' <<<"$denied"; then
+    pass "PostgreSQL: lab_app cannot connect to the faults database (permission denied)"
+  else
+    fail "PostgreSQL: lab_app could not connect to faults, but not for lack of permission: $denied"
+  fi
+}
+
+# The injector is invisible in Loki: no service="fault-injector" label value and no such stream, although its own
+# log (docker logs) has lines for this injection, so the absence comes from the Alloy drop rule, not from silence.
+check_injector_invisible() {
+  local values series
+  if compose logs --no-log-prefix fault-injector 2>/dev/null | grep -q "injection_id=$injection_id"; then
+    pass "docker logs: fault-injector logged injection $injection_id"
+  else
+    fail "docker logs: no fault-injector line for injection $injection_id, so the Loki check proves nothing"
+  fi
+  values=$(loki /loki/api/v1/label/service/values 2>/dev/null) || values="unreadable"
+  series=$(loki /loki/api/v1/series --data-urlencode 'match[]={service="fault-injector"}' \
+    --data-urlencode "since=1h" 2>/dev/null) || series="unreadable"
+  if [[ "$values" == *'"status":"success"'* && "$values" != *'"fault-injector"'* && "$series" == *'"data":[]'* ]]; then
+    pass "Loki: no service=\"fault-injector\" label value or stream"
+  else
+    fail "Loki: fault-injector is visible or Loki is unreadable (label values: $values; series: $series)"
+  fi
+}
+
+# The checks every verify script runs after its restore: the truth row, its isolation, and the injector's
+# invisibility in Loki.
+check_truth() {
+  check_truth_row "$1" "$2"
+  check_truth_isolation
+  check_injector_invisible
+}
 
 # True when $1 is a UUID, so it is safe to put in SQL between quotes.
 is_uuid() { [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
 
-# Starts or reuses the lab, waits for Loki, and resets the gateway. Exits on failure.
+# Starts or reuses the lab, waits for Loki, restores any injection an earlier run left blocking, and resets the gateway.
+# Exits on failure.
 start_lab() {
   info "starting or reusing the lab (docker compose up -d --build --wait)"
   local up_errors
@@ -193,6 +338,7 @@ start_lab() {
     exit 1
   fi
 
+  restore_leftover_injection
   # Start from a healthy gateway, whatever an earlier run left behind.
   reset_gateway
 }

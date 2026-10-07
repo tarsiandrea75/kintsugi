@@ -50,10 +50,13 @@ Host ports, chosen away from ports other local projects already use (5432, 5433 
 | payment-service | 18081 |
 | gateway-mock | 18082 |
 | inventory-service | 18083 (added with fault F4) |
+| fault-injector | 18084 (added with the fault injector, [ADR-009](ADR-009-fault-injector-docker-control.md)) |
 | Grafana | 13000 |
 | Prometheus | 19090 |
 
 Every published port is bound to `127.0.0.1`, so the lab is not reachable from the network. PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by compose service name.
+
+The fault injector is the one compose service kept out of this stack's signals ([ADR-009](ADR-009-fault-injector-docker-control.md)): Alloy drops its container's logs with a relabel rule, and Prometheus has no scrape target for it. Prometheus and Loki are the agent's data sources, so the injector's own logs and metrics would reveal which fault was injected and when.
 
 ## Alternatives considered
 
@@ -73,5 +76,5 @@ Every published port is bound to `127.0.0.1`, so the lab is not reachable from t
 ### Negative
 
 - No traces: a cross-service latency path (for example F1 from gateway-mock up to order-service) is inferred from metrics and logs, not seen as a span tree.
-- Alloy mounts the Docker socket. Even mounted `:ro`, the socket gives full Docker API control, which is root-equivalent on the host. This is accepted for a local lab whose ports are bound to loopback only. If the lab ever leaves the laptop, the mitigation is a `docker-socket-proxy` in front of the socket that allows only the container list and log endpoints.
+- Alloy mounts the Docker socket, and so does the fault injector (ADR-009). Even mounted `:ro`, the socket gives full Docker API control, which is root-equivalent on the host. This is accepted for a local lab whose ports are bound to loopback only. If the lab ever leaves the laptop, the mitigation is a `docker-socket-proxy` in front of the socket that allows only the container list and log endpoints.
 - Image tags must be bumped by hand, with a new ADR or a superseding one.

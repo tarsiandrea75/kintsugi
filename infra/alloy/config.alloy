@@ -1,5 +1,6 @@
 // Ships the Docker logs of this compose project's containers to Loki (ADR-008).
 // The `service` label is the compose service name, so `{service="order-service"}` selects one service.
+// Every compose service is shipped except fault-injector, which is dropped below.
 
 discovery.docker "lab" {
   host = "unix:///var/run/docker.sock"
@@ -20,6 +21,14 @@ discovery.relabel "lab" {
     source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
     regex         = "kintsugi-lab"
     action        = "keep"
+  }
+
+  // The fault injector's logs never reach Loki (ADR-009): they name the injected faults, and Loki is one of the agent's
+  // data sources. The operator reads them with "docker logs". The verify scripts assert that Loki has no such stream.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "fault-injector"
+    action        = "drop"
   }
 
   rule {

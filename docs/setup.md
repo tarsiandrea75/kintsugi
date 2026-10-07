@@ -112,9 +112,10 @@ Each change is logged as one `INFO` line with `key=value` pairs (`Gateway behavi
 
 ## Lab with Docker Compose
 
-One command starts the whole M1 lab: PostgreSQL, the four services, Prometheus, Loki, Alloy and Grafana (ADR-008, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
+One command starts the whole M1 lab: PostgreSQL, the four services, the fault injector, Prometheus, Loki, Alloy and Grafana (ADR-008, ADR-009, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
 
 ```bash
+export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
 docker compose -f infra/compose.yaml up -d --build --wait   # start; the first build takes about a minute
 docker compose -f infra/compose.yaml down                   # stop, keep the data
 docker compose -f infra/compose.yaml down -v                # stop and delete the data volumes
@@ -128,12 +129,58 @@ The compose project is called `kintsugi-lab`, so these commands never touch othe
 | payment-service | <http://localhost:18081> |
 | gateway-mock | <http://localhost:18082> |
 | inventory-service | <http://localhost:18083> |
+| fault-injector | <http://localhost:18084> |
 | Grafana | <http://localhost:13000> |
 | Prometheus | <http://localhost:19090> |
 
 PostgreSQL, Loki and Alloy have no host port.
 
-Grafana opens on the "Lab — Faults" dashboard (uid `lab-f1`) without a login (anonymous Viewer). To edit, log in as `admin`. The password comes from `GRAFANA_ADMIN_PASSWORD` and defaults to `kintsugi-lab`. To change it, set the variable in your shell or in `infra/.env` before `up`.
+### Variables
+
+Every variable has a lab default; nothing here is a secret. Put overrides in `infra/.env` (a template is `infra/.env.example`), not only in the shell: the fault injector recreates services from the same compose file and reads `infra/.env`, but it never sees your shell.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `KINTSUGI_REPO_DIR` | `$PWD` | absolute host path of the repository; fault-injector mounts it read-only at that same path |
+| `DOCKER_GID` | `1001` | group id of `/var/run/docker.sock`, added to fault-injector so it can use Docker |
+| `POSTGRES_BOOTSTRAP_PASSWORD` | `postgres` | the bootstrap superuser `postgres`, used only by the init script |
+| `LAB_APP_DB_PASSWORD` | `lab_app` | the role `lab_app`, which the four services connect as |
+| `FAULTS_DB_PASSWORD` | `faults` | the role `faults`, which the fault injector connects as |
+| `GRAFANA_ADMIN_PASSWORD` | `kintsugi-lab` | Grafana's `admin` login |
+
+`KINTSUGI_REPO_DIR` defaults to the current directory, which is right only from the repository root. From anywhere else, export it as above; the verify scripts set it themselves. With a wrong value the injector does not start, because it cannot read the compose file.
+
+### Database roles
+
+One PostgreSQL instance holds four databases (ADR-007, ADR-009):
+
+- `postgres` is the bootstrap superuser. Only `infra/postgres/init/01-roles-and-databases.sh` uses it.
+- `lab_app` is a non-superuser that owns `orders`, `payments` and `inventory`. The four services connect as `lab_app`.
+- `faults` is a non-superuser that owns the `faults` database, where the injector records the true cause of each fault. `CONNECT` on `faults` is revoked from `PUBLIC`, so `lab_app` cannot connect to it. A superuser would ignore that revoke, which is why no service or agent role is one.
+
+```bash
+docker compose -f infra/compose.yaml exec -T postgres psql -U lab_app -d orders -c "select count(*) from orders"
+docker compose -f infra/compose.yaml exec -T postgres psql -U faults -d faults -c "select fault_id, status from injections"
+```
+
+The init script runs only on an empty data volume. **Upgrading a lab created before the fault injector:** its volume has the old `lab` superuser and no `lab_app` or `faults`, so run `docker compose -f infra/compose.yaml down -v` once before the first start. The same applies after changing any database password.
+
+### Fault injector API
+
+The fault injector (`lab/fault-injector`, [spec](../openspec/specs/fault-injector/spec.md)) activates one catalog fault at a time, records its true cause in the `faults` database, and restores the lab. F1 and F2 change gateway-mock's behavior; F3 and F4 recreate one service with `docker compose ... up -d --no-deps --no-build --wait <service>`, never the injector itself or the whole stack. It is invisible to the agent's data sources: Alloy drops its logs and Prometheus does not scrape it. Read its logs with `docker compose -f infra/compose.yaml logs fault-injector`.
+
+```bash
+curl -s localhost:18084/faults/catalog                                   # [{"fault":"F1"}, …, {"fault":"F4"}]
+curl -s -X POST localhost:18084/faults -H 'Content-Type: application/json' -d '{"fault": "F1"}'   # 201 {id, fault, injectedAt}
+curl -s -i localhost:18084/faults/active                                 # 200 {id, fault, status, injectedAt}, or 204
+curl -s -X POST localhost:18084/faults/<id>/restore                      # 200 {..., status RESTORED, restoredAt}
+```
+
+A second `POST /faults` while one is active answers 409; an F3 or F4 step takes as long as the recreate, up to about two minutes. No answer ever contains the true cause: read it as the `faults` role, as above.
+
+The "Reproduce by hand" recipes below change the lab directly. They are useful to watch a fault, but they record no truth row, so scored incidents always go through the injector.
+
+Grafana opens on the "Lab — Faults" dashboard (uid `lab-f1`) without a login (anonymous Viewer). To edit, log in as `admin`. The password comes from `GRAFANA_ADMIN_PASSWORD` and defaults to `kintsugi-lab`. To change it, set the variable in `infra/.env` before `up` (see [Variables](#variables)).
 
 Loki needs about a minute after startup before it answers queries. Until then, the WARN-lines and gateway-rejections panels can stay empty.
 
@@ -144,7 +191,7 @@ infra/scripts/verify-f1.sh          # start or reuse the lab, run the checks, le
 infra/scripts/verify-f1.sh --down   # the same, then `down -v`
 ```
 
-The script waits for Loki, places a healthy order (`PAID`), sets the gateway latency to 10 s, and places an order that ends `PAYMENT_PENDING`. It then checks that Prometheus sees the pending count rise and the in-flight gauge above 0, and that Loki has order-service's `WARN` line for that order. It prints one `PASS` or `FAIL` line per check and exits non-zero on any failure. It always resets the gateway on exit, even when a check fails. It needs `docker` and `curl`. It takes about 1.5 minutes on a fresh stack and under a minute on a running one.
+The script waits for Loki, restores any injection an earlier run left active, places a healthy order (`PAID`), injects F1 through the fault injector (gateway latency 10 s), and places an order that ends `PAYMENT_PENDING`. It then checks that Prometheus sees the pending count rise and the in-flight gauge above 0, and that Loki has order-service's `WARN` line for that order. It restores F1 through the injector and checks the truth: one `injections` row with the right fault and root-cause service, `RESTORED`, read as `faults`; `lab_app` is not a superuser and cannot connect to `faults`; Loki has no `fault-injector` stream although the injector logged the injection. It prints one `PASS` or `FAIL` line per check and exits non-zero on any failure. It always restores the injection on exit, even when a check fails. It needs `docker` and `curl`, and works from any directory. It takes about 1.5 minutes on a fresh stack and under a minute on a running one.
 
 ### Check that F2 is visible
 
@@ -153,7 +200,7 @@ infra/scripts/verify-f2.sh          # start or reuse the lab, run the checks, le
 infra/scripts/verify-f2.sh --down   # the same, then `down -v`
 ```
 
-The script places a healthy order (`PAID`), reads the `FAILED` payment and `PAYMENT_FAILED` order counts, makes the gateway answer 429, and places three orders that each end `PAYMENT_FAILED`. It then checks that Prometheus sees both counts rise by at least 3 and that Loki has payment-service's `WARN` line for one of those orders. Last, it resets the gateway and checks that a new order is `PAID` again. Output, exit status and the reset on exit work as in the F1 check. It takes about 1.5 minutes on a fresh stack and under a minute on a running one. The scripts share their helpers in `infra/scripts/lib.sh`.
+The script places a healthy order (`PAID`), reads the `FAILED` payment and `PAYMENT_FAILED` order counts, injects F2 through the fault injector (the gateway answers 429), and places three orders that each end `PAYMENT_FAILED`. It then checks that Prometheus sees both counts rise by at least 3 and that Loki has payment-service's `WARN` line for one of those orders. Last, it restores F2, checks that a new order is `PAID` again, and runs the same truth checks as the F1 script. Output, exit status and the restore on exit work as in the F1 check. It takes about 1.5 minutes on a fresh stack and under a minute on a running one. The scripts share their helpers in `infra/scripts/lib.sh`.
 
 ### Reproduce F2 by hand
 
@@ -187,7 +234,7 @@ infra/scripts/verify-f3.sh          # start or reuse the lab, run the checks, le
 infra/scripts/verify-f3.sh --down   # the same, then `down -v`
 ```
 
-The script places a healthy order (`PAID`), then recreates order-service with a wrong payment URL (`ORDER_PAYMENT_BASEURL=http://payment-service:9999`) and places an order that ends `PAYMENT_PENDING` in under 2 s. It then checks that Prometheus sees the refused-connection series (`http_client_requests_seconds_count{exception="ConnectException"}`) rise and the gateway in-flight gauge stay 0, and that Loki has order-service's `WARN` line with the order id and `ConnectException`. Last, it recreates order-service with its default URL and checks that a new order is `PAID` again. It always restores order-service on exit, even when a check fails. Output and exit status work as in the F1 check. It needs `docker`, `curl` and `awk`.
+The script places a healthy order (`PAID`), then injects F3 through the fault injector, which recreates order-service with a wrong payment URL (`ORDER_PAYMENT_BASEURL=http://payment-service:9999`), and places an order that ends `PAYMENT_PENDING` in under 2 s. It then checks that Prometheus sees the refused-connection series (`http_client_requests_seconds_count{exception="ConnectException"}`) rise and the gateway in-flight gauge stay 0, and that Loki has order-service's `WARN` line with the order id and `ConnectException`. Last, it restores F3 (the injector recreates order-service with its default URL), checks that a new order is `PAID` again, and runs the same truth checks as the F1 script. It always restores the injection on exit, even when a check fails. Output and exit status work as in the F1 check. It needs `docker`, `curl` and `awk`.
 
 ### Reproduce F3 by hand
 
@@ -221,7 +268,7 @@ infra/scripts/verify-f4.sh          # start or reuse the lab, run the checks, le
 infra/scripts/verify-f4.sh --down   # the same, then `down -v`
 ```
 
-The script places a healthy order (`PAID`), then recreates inventory-service with a pool of 2 connections and a 5 s reservation query (`INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s`). It fires six concurrent orders and checks that at least one answers 503 and that every answer is either 503 or 201 `PAID`. With these settings all six usually answer 503: the 5 s query outlasts order-service's 3 s inventory read timeout, so even an order that got a connection times out. It then checks that Prometheus sees inventory's 5xx count on `/reservations` rise and the pool's pending connections reach 1 or its timeouts rise, and that Loki has order-service's `Inventory unavailable` or inventory-service's `No database connection available` `WARN` line. Before restoring inventory-service, it checks the stored evidence in PostgreSQL: every order answered 503 is stored as `REJECTED_INVENTORY_UNAVAILABLE` with an `INVENTORY_UNAVAILABLE` row in `order_events`, and at least one of them also has a `RESERVED` row in inventory's `reservation_events`, committed after order-service gave up (it polls for up to 12 s). That pair is the stock leak: stock reserved for an order that was rejected. It prints the order id and both rows. Last, it recreates inventory-service with its defaults and checks that a new order is `PAID` again. It always restores inventory-service on exit, even when a check fails. Output and exit status work as in the F1 check. It takes about 2 minutes on a fresh stack.
+The script places a healthy order (`PAID`), then injects F4 through the fault injector, which recreates inventory-service with a pool of 2 connections and a 5 s reservation query (`INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s`). It fires six concurrent orders and checks that at least one answers 503 and that every answer is either 503 or 201 `PAID`. With these settings all six usually answer 503: the 5 s query outlasts order-service's 3 s inventory read timeout, so even an order that got a connection times out. It then checks that Prometheus sees inventory's 5xx count on `/reservations` rise and the pool's pending connections reach 1 or its timeouts rise, and that Loki has order-service's `Inventory unavailable` or inventory-service's `No database connection available` `WARN` line. Before restoring inventory-service, it checks the stored evidence in PostgreSQL: every order answered 503 is stored as `REJECTED_INVENTORY_UNAVAILABLE` with an `INVENTORY_UNAVAILABLE` row in `order_events`, and at least one of them also has a `RESERVED` row in inventory's `reservation_events`, committed after order-service gave up (it polls for up to 12 s). That pair is the stock leak: stock reserved for an order that was rejected. It prints the order id and both rows. Last, it restores F4 (the injector recreates inventory-service with its defaults), checks that a new order is `PAID` again, and runs the same truth checks as the F1 script. It always restores the injection on exit, even when a check fails. Output and exit status work as in the F1 check. It takes about 2 minutes on a fresh stack.
 
 Upgrading an existing lab: the `inventory` database is created by a PostgreSQL init script, and init scripts only run on an empty data volume. A lab volume created before inventory-service existed has no `inventory` database, so run `docker compose -f infra/compose.yaml down -v` once before the first start with inventory-service. `verify-*.sh --down` is not a substitute: it tears the lab down only after its checks have run.
 
@@ -247,9 +294,9 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F4, "i
 3. Within a few seconds, compare the two databases. order-service has the rejected orders; inventory-service has `RESERVED` rows for the two that got a connection:
 
    ```bash
-   docker compose -f infra/compose.yaml exec -T postgres psql -U lab -d orders -Atc \
+   docker compose -f infra/compose.yaml exec -T postgres psql -U lab_app -d orders -Atc \
      "select o.id, o.status from orders o join order_events e on e.order_id = o.id where e.type = 'INVENTORY_UNAVAILABLE' order by e.occurred_at desc limit 6"
-   docker compose -f infra/compose.yaml exec -T postgres psql -U lab -d inventory -Atc \
+   docker compose -f infra/compose.yaml exec -T postgres psql -U lab_app -d inventory -Atc \
      "select order_id, outcome, duration_ms from reservation_events order by occurred_at desc limit 6"
    ```
 

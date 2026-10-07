@@ -83,12 +83,18 @@ How the image uses them:
 
 The injector runs as the image's unprivileged `app` user, not as root. The Docker socket is `root:<docker group>` with mode `660`, so `app` can use it only as a member of the socket's group. That group id belongs to the host (1001 on the development machine) and differs between hosts, so the image does not hard-code it:
 
-- compose adds it at run time with `group_add`, from a variable such as `DOCKER_GID` set to the output of `stat -c %g /var/run/docker.sock` (task T5);
+- compose adds it at run time with `group_add: ["${DOCKER_GID:-1001}"]`; the verify scripts export `DOCKER_GID` as the output of `stat -c %g /var/run/docker.sock`;
 - checked in T4: without the group, `docker compose ps` fails with "permission denied while trying to connect to the docker API"; with `--group-add 1001` it succeeds.
 
 Group membership on the socket is as root-equivalent as running as root (see Negative consequences); `group_add` only keeps the JVM process itself unprivileged inside its container.
 
 The compose file must be mounted **at its host path** (for example `/home/<user>/kintsugi:/home/<user>/kintsugi:ro`). Compose resolves the file's relative bind mounts (`./postgres/init`, `./alloy/config.alloy`, …) against the file's own directory, and the Docker daemon reads those resolved paths on the host. Mounted elsewhere, a recreate would hand the daemon paths that do not exist on the host.
+
+How T5 wires it (`infra/compose.yaml`):
+
+- The repository is a read-only bind mount whose source and target are both `${KINTSUGI_REPO_DIR:-$PWD}`, with `create_host_path: false`, so a wrong path fails container creation instead of creating an empty directory on the host. `KINTSUGI_LABCONTROL_COMPOSEFILE` is `${KINTSUGI_REPO_DIR:-$PWD}/infra/compose.yaml`.
+- `$PWD` is right when compose runs from the repository root, as `docs/setup.md` documents. The verify scripts export `KINTSUGI_REPO_DIR` from their own location, so they work from any directory. A wrong value makes the injector fail at startup, because the compose file is not readable.
+- Inside the injector, compose reads the same file and the same `infra/.env`, but not the host shell. Variable overrides therefore belong in `infra/.env`; one set only in the shell would be lost when the injector recreates a service.
 
 ### Isolation of the truth
 
@@ -98,7 +104,8 @@ The compose file must be mounted **at its host path** (for example `/home/<user>
   - `faults` is owned by a **non-superuser `faults` role**. `CONNECT` on `faults` is revoked from `PUBLIC`, so only `faults` (and the bootstrap superuser) can connect.
   - The agent's future read-only role (M2, behind `queryDb`) MUST be a non-superuser and MUST NOT have `CONNECT` on `faults`. It must never be given the `faults` credentials.
   - The verify scripts MUST assert both halves: the service role is not a superuser (`SELECT rolsuper FROM pg_roles WHERE rolname = 'lab_app'` is false), and it cannot connect to `faults`.
-  - Task T5 implements this in `infra/postgres/init/` and in the services' compose credentials.
+  - Implemented in T5 by `infra/postgres/init/01-roles-and-databases.sh` and the services' compose credentials. The bootstrap superuser is renamed from `lab` to the image's conventional `postgres`: the old name suggested the application user, and any leftover `psql -U lab` now fails loudly instead of silently running as a superuser. The passwords are lab defaults (`postgres`, `lab_app`, `faults`), overridable with `POSTGRES_BOOTSTRAP_PASSWORD`, `LAB_APP_DB_PASSWORD` and `FAULTS_DB_PASSWORD`.
+  - `docker compose exec postgres psql -U <role>` connects over the container's local socket, which the image trusts without a password. That is no weaker than the socket access it already needs: anyone who can `exec` into a container can read its data. The isolation that matters is between network roles, and `REVOKE CONNECT` holds there.
 - **Not in any HTTP answer.** No endpoint ever returns the true cause. `GET /faults/catalog` returns fault ids only, and `GET /faults/active` returns the injection id, the fault id, its status and times. Neither returns a target service or a parameter, because each fault's target is also its root-cause service. In M4 the eval harness reads the truth with the `faults` role.
 - **Not in Loki.** Alloy drops the fault-injector container's logs, so they never reach Loki. The operator reads them with `docker logs`.
 - **Not in Prometheus.** Prometheus does not scrape the injector. The service still exposes `/actuator/prometheus`, for consistency with the other services.
@@ -135,5 +142,6 @@ The compose file must be mounted **at its host path** (for example `/home/<user>
 - The injector image is larger: it adds two static binaries, the Docker CLI and the compose plugin, to the JRE image.
 - The CLI and the plugin are pinned by hand and must be bumped with a new ADR or a superseding one.
 - Invisibility depends on configuration in three places (Alloy, Prometheus and the database roles and grants). The verify scripts must assert each one, or a change could quietly leak the truth.
-- T5 must move the services from the `lab` superuser to `lab_app`, which touches every service's compose credentials and the init scripts. Existing data volumes were initialized without `lab_app`, so the lab needs `down -v` once.
+- T5 moved the services from the `lab` superuser to `lab_app`, which touched every service's compose credentials and the init script. Existing data volumes were initialized without `lab_app` or `faults`, so the lab needs `docker compose -f infra/compose.yaml down -v` once.
+- **Compose version skew with the host.** The injector's Compose v5.6.0 records the platform manifest digest in a recreated container's `com.docker.compose.image` label; the host's Compose v5.1.3 records the image index digest there and treats the difference as a changed image. The next `up` from the host therefore recreates, once, each service the injector recreated, although its configuration hash is unchanged (observed 2026-10-07 after F3 and F4). The lab stays correct, but that extra redeploy is noise in the deploy evidence. Keeping the host's Compose at the injector's version avoids it.
 - A `RESTORE_PENDING` injection blocks every new fault until an operator gets a restore through. That is deliberate: a stuck lab is visible, a silently double-faulted lab is not.

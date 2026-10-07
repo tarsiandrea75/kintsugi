@@ -26,48 +26,32 @@ evidence of the leak: an order rejected by order-service whose reservation inven
   infra/scripts/verify-f4.sh          # start or reuse the lab, run the checks, leave the lab running
   infra/scripts/verify-f4.sh --down   # same, then tear the lab down (containers and volumes)
 
-F4 is injected by recreating inventory-service with INVENTORY_POOL_SIZE=2 and INVENTORY_RESERVATION_DELAY=5s.
-Exits 0 when every check passes, non-zero otherwise. inventory-service is recreated without the variables on every
-exit. Needs docker (with compose) and curl on the host; PostgreSQL is queried through the postgres container.
+F4 is injected and restored through the fault injector (POST /faults, POST /faults/{id}/restore), which recreates
+inventory-service with INVENTORY_POOL_SIZE=2 and INVENTORY_RESERVATION_DELAY=5s and then without them. After the
+restore it checks the injection's truth row (read as the faults role), that lab_app is not a superuser and cannot
+connect to the faults database, and that Loki has no fault-injector stream.
+Exits 0 when every check passes, non-zero otherwise. The injection is restored on every exit.
+Needs docker (with compose) and curl on the host; PostgreSQL is queried through the postgres container.
 EOF
-}
-
-# Recreates inventory-service with pool size $1 and reservation delay $2, or with the defaults from compose.yaml when
-# they are empty. Inject and restore both go through here; compose only recreates the container when a value changed.
-recreate_inventory_service() {
-  env -u INVENTORY_POOL_SIZE -u INVENTORY_RESERVATION_DELAY \
-    ${1:+"INVENTORY_POOL_SIZE=$1"} ${2:+"INVENTORY_RESERVATION_DELAY=$2"} \
-    docker compose -f "$COMPOSE_FILE" up -d --no-deps --wait inventory-service >/dev/null 2>&1
-}
-restore_inventory_service() { recreate_inventory_service "" ""; }
-
-before_exit() {
-  if restore_inventory_service; then
-    info "inventory-service restored with its default pool and no reservation delay"
-  else
-    echo "WARN  could not restore inventory-service; run: docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service" >&2
-    return 1
-  fi
 }
 
 parse_args "$@"
 trap on_exit EXIT
 
-# 1. Start or reuse the lab, with inventory-service on its defaults; a healthy order is paid.
+# 1. Start or reuse the lab ("up" puts inventory-service back on its defaults); a healthy order is paid.
 start_lab
-if ! restore_inventory_service; then
-  fail "could not start inventory-service with its default pool"
-  exit 1
-fi
 expect_paid_order verify-f4 healthy
 
-# 2. Inject F4: a redeploy of inventory-service with a tiny pool and a slow reservation query.
+# 2. Inject F4 through the fault injector: a redeploy of inventory-service with a tiny pool and a slow reservation query.
 injected_at=$SECONDS
-if recreate_inventory_service "$F4_POOL_SIZE" "$F4_RESERVATION_DELAY"; then
-  pass "F4 injected: inventory-service recreated with pool size $F4_POOL_SIZE and reservation delay $F4_RESERVATION_DELAY"
+inject_fault F4
+configured=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  "$(compose ps -q inventory-service)" 2>/dev/null |
+  grep -E '^(SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE|KINTSUGI_INVENTORY_RESERVATIONDELAY)=' | sort | tr '\n' ' ' || true)
+if [[ "$configured" == "KINTSUGI_INVENTORY_RESERVATIONDELAY=$F4_RESERVATION_DELAY SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE=$F4_POOL_SIZE " ]]; then
+  pass "inventory-service was recreated with pool size $F4_POOL_SIZE and reservation delay $F4_RESERVATION_DELAY"
 else
-  fail "could not recreate inventory-service with the F4 settings"
-  exit 1
+  fail "inventory-service runs with '${configured:-neither variable}', expected pool $F4_POOL_SIZE and delay $F4_RESERVATION_DELAY"
 fi
 
 # 3. The baselines are read after the recreate: the new process starts its counters from zero.
@@ -203,16 +187,14 @@ else
   fail "PostgreSQL: no order answered 503 has a RESERVED reservation_events row within ${LEAK_WAIT_SECONDS}s"
 fi
 
-# 9. Recovery: inventory-service back on its defaults; the trap restores it again on every exit.
-if restore_inventory_service; then
-  pass "inventory-service recreated with its default pool and no reservation delay"
-else
-  fail "could not restore inventory-service"
-  exit 1
-fi
+# 9. Recovery: the injector recreates inventory-service on its defaults; the trap restores again on every exit.
+expect_restored
 
 # 10. A new order is paid again.
 expect_paid_order verify-f4 "after the restore, the"
+
+# 11. The truth row and its isolation.
+check_truth F4 inventory-service
 
 info "checks finished in $((SECONDS - started))s"
 (( failures == 0 ))

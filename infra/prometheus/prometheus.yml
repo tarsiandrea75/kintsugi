@@ -1,5 +1,7 @@
 # Prometheus scrape config for the M1 lab (ADR-008).
 # A 5 s interval makes faults show within seconds on the "Lab — Faults" dashboard.
+# fault-injector is deliberately not a target (ADR-009): Prometheus is one of the agent's data sources, and the injector's
+# metrics would reveal when a fault was injected.
 global:
   scrape_interval: 5s
   evaluation_interval: 5s

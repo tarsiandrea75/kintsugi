@@ -104,7 +104,7 @@ Compare `rate(http_server_requests_seconds_sum{service="order-service",uri="/ord
 
 | Possible cause | How to check | Points to it |
 |----------------|--------------|--------------|
-| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab -d orders` | not accepting connections |
+| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab_app -d orders` | not accepting connections |
 | `orders` table locked or count query slow | `pg_stat_activity` query below | sessions waiting on a lock for `orders` |
 | Pool exhausted in order-service | `hikaricp_connections_pending{service="order-service"}` | above 0 for a sustained period |
 
@@ -116,12 +116,12 @@ The WARN `Cannot count orders per status` carries the exception; `Order counts a
 - **Check configuration:** `docker compose -f infra/compose.yaml config order-service` shows the resolved environment. Confirm both base URLs point at `payment-service:8081` and `inventory-service:8083`.
 - **Roll back a configuration change:** unset the overriding shell variable (for example `unset ORDER_PAYMENT_BASEURL`), then recreate: `docker compose -f infra/compose.yaml up -d --no-deps --wait order-service`.
 - **Restart:** `docker compose -f infra/compose.yaml restart order-service`. Counters restart from zero; stored orders are kept.
-- **Inspect database sessions:** `docker compose -f infra/compose.yaml exec postgres psql -U lab -d orders -c "SELECT pid, state, wait_event_type, now() - query_start AS age, query FROM pg_stat_activity WHERE datname = 'orders'"`.
+- **Inspect database sessions:** `docker compose -f infra/compose.yaml exec postgres psql -U lab_app -d orders -c "SELECT pid, state, wait_event_type, now() - query_start AS age, query FROM pg_stat_activity WHERE datname = 'orders'"`.
 - Do not edit order statuses by hand: a `PAYMENT_PENDING` order may already have a payment stored in payment-service.
 
 ## 8. Where the evidence is
 
-Database `orders` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab -d orders -c "<sql>"`.
+Database `orders` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab_app -d orders -c "<sql>"`.
 
 | Table | Columns | Content |
 |-------|---------|---------|

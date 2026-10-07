@@ -96,7 +96,7 @@ If an activation step fails partway, the injector attempts a restore, records `F
 - [x] **T2 — Generated skeleton.** Route: delegated writer.
 - [x] **T3 — Catalog, persistence and API**, with a fake `LabControl`, tests first. Route: delegated writer.
 - [x] **T4 — Real `LabControl`**: a gateway REST client plus compose recreate, and the image with the Docker CLI. Route: delegated writer.
-- [ ] **T5 — Compose wiring**: the `faults` database and user, the Alloy drop, the ports; the verify scripts switched to the injector with the truth and isolation assertions; docs and runbooks. Run every script for real. Route: delegated writer.
+- [x] **T5 — Compose wiring**: the `faults` database and user, the Alloy drop, the ports; the verify scripts switched to the injector with the truth and isolation assertions; docs and runbooks. Run every script for real. Route: delegated writer.
 
 ## Progress
 
@@ -127,7 +127,22 @@ If an activation step fails partway, the injector attempts a restore, records `F
   - The container runs as uid 999; with `--group-add <socket gid>` it reaches the Engine (client 29.8.2, server 29.4.0, API 1.54). `--no-build --wait` was verified on v5.6.0 in a throwaway project.
   - 79 tests, two runs (parent re-run, mvn exit 0).
   - T5 needs: `group_add` with the socket gid, the socket mount, the repo mounted read-only at its host path, `KINTSUGI_LABCONTROL_MODE=docker` and `KINTSUGI_LABCONTROL_COMPOSEFILE`.
+- 2026-10-07: T4 review (4 lenses, `review-bd3fe05bf332f859`) approved. Its WARNINGs were fixed in T5 part A:
+  - orphaned compose processes on interrupt (the process tree is now killed);
+  - the serialization test now proves its stub ran (mutation check).
+
+  Suggestions applied: CLI images pinned by digest; a minimal child environment (no datasource credentials); a per-service recreate lock; fail-fast on a missing compose file; gateway serialization inside the contract. 86 tests.
+- 2026-10-07: T5 done by a delegated writer.
+  - Roles: bootstrap superuser `postgres` (init only); non-superuser `lab_app` owns orders, payments and inventory; non-superuser `faults` owns `faults`, with CONNECT and TEMPORARY revoked from PUBLIC. Passwords come through psql variables.
+  - The fault-injector runs in compose: `group_add` with `DOCKER_GID`, the socket, and the repo mounted read-only at `KINTSUGI_REPO_DIR` with `create_host_path: false`.
+  - Alloy drops its logs and Prometheus does not scrape it.
+  - The verify scripts inject through the injector and assert the truth row, `lab_app` not superuser, `lab_app` unable to connect to `faults`, and no fault-injector stream in Loki.
+  - Real runs after `down -v`: F1 PASS in 99 s (run from `/tmp`), F2 in 58 s, F3 in 110 s, F4 in 79 s.
+  - **Open:**
+    - (1) The injector's Compose (v5.6.0) and the host's (v5.1.3) write different image-digest labels, so the host's next `up` recreates the touched services once. That is noise in the future deploy history; align the versions.
+    - (2) `infra/.env.example` is protected by a user permission rule, so the human must add `KINTSUGI_REPO_DIR=`, `DOCKER_GID=`, `POSTGRES_BOOTSTRAP_PASSWORD=postgres`, `LAB_APP_DB_PASSWORD=lab_app`, `FAULTS_DB_PASSWORD=faults`.
+    - (3) Unexplained rebuilds of gateway-mock and payment-service seen once with `up --build`; not caused by the injector.
 
 ## Next step
 
-T5 (compose wiring, non-superuser roles, Alloy drop, verify scripts switched to the injector with truth and isolation assertions, docs) via a delegated writer.
+Feature done: M1 complete. Next: resolve the open points, then M2.

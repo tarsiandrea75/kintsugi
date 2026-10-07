@@ -102,7 +102,7 @@ Callers see this as orders stuck in `PAYMENT_PENDING` (see the order-service run
 
 | Possible cause | How to check | Points to it |
 |----------------|--------------|--------------|
-| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab -d payments` | not accepting connections |
+| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab_app -d payments` | not accepting connections |
 | `payments` table locked or count query slow | `pg_stat_activity` on `payments` | sessions waiting on a lock |
 | Pool exhausted | `hikaricp_connections_pending{service="payment-service"}` | above 0 for a sustained period |
 
@@ -117,7 +117,7 @@ Callers see this as orders stuck in `PAYMENT_PENDING` (see the order-service run
 
 ## 8. Where the evidence is
 
-Database `payments` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab -d payments -c "<sql>"`.
+Database `payments` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab_app -d payments -c "<sql>"`.
 
 | Table | Columns | Content |
 |-------|---------|---------|

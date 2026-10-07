@@ -1,28 +1,42 @@
-# Kintsugi M1 lab: PostgreSQL, the four services and the observability stack (ADR-007, ADR-008).
+# Kintsugi M1 lab: PostgreSQL, the four services, the fault injector and the observability stack (ADR-007, ADR-008,
+# ADR-009).
 #
+#   export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
 #   docker compose -f infra/compose.yaml up -d --build --wait
 #   docker compose -f infra/compose.yaml down -v
 #
 # Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082, inventory-service 18083,
-# Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090. Every port is bound to 127.0.0.1 only.
-# Grafana's admin password comes from GRAFANA_ADMIN_PASSWORD (see infra/.env.example).
+# fault-injector 18084, Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090. Every port is bound to 127.0.0.1.
 # PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by service name.
+#
+# Variables (lab defaults; see infra/.env.example). Put overrides in infra/.env rather than in the shell: the fault
+# injector recreates services from this same file and reads infra/.env too, but never sees the host shell.
+# - KINTSUGI_REPO_DIR: absolute host path of the repository, mounted read-only at that same path into fault-injector.
+#   Defaults to $PWD, which is right when compose runs from the repository root.
+# - DOCKER_GID: group id of /var/run/docker.sock on the host, added to fault-injector (default 1001).
+# - POSTGRES_BOOTSTRAP_PASSWORD, LAB_APP_DB_PASSWORD, FAULTS_DB_PASSWORD: database passwords. They are applied only
+#   when the postgres volume is empty, so changing them needs a "down -v".
+# - GRAFANA_ADMIN_PASSWORD: Grafana's admin password.
 name: kintsugi-lab
 
 services:
   postgres:
     image: postgres:18.6
     environment:
-      # Lab-only credentials; nothing here is a secret.
-      POSTGRES_USER: lab
-      POSTGRES_PASSWORD: lab
+      # Lab-only credentials; nothing here is a secret. The bootstrap superuser is used only by the init script, which
+      # creates the non-superuser roles lab_app (the services) and faults (the fault injector); see
+      # postgres/init/01-roles-and-databases.sh and ADR-009.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_BOOTSTRAP_PASSWORD:-postgres}
+      LAB_APP_DB_PASSWORD: ${LAB_APP_DB_PASSWORD:-lab_app}
+      FAULTS_DB_PASSWORD: ${FAULTS_DB_PASSWORD:-faults}
     volumes:
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
       # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker.
       - postgres-data:/var/lib/postgresql
     healthcheck:
       # Over TCP: during init the server listens only on the Unix socket, so this passes once the databases exist.
-      test: ["CMD", "pg_isready", "-h", "localhost", "-U", "lab", "-d", "payments"]
+      test: ["CMD", "pg_isready", "-h", "localhost", "-U", "lab_app", "-d", "payments"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -44,8 +58,8 @@ services:
     build: ../lab/payment-service
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payments
-      SPRING_DATASOURCE_USERNAME: lab
-      SPRING_DATASOURCE_PASSWORD: lab
+      SPRING_DATASOURCE_USERNAME: lab_app
+      SPRING_DATASOURCE_PASSWORD: ${LAB_APP_DB_PASSWORD:-lab_app}
       KINTSUGI_GATEWAY_BASEURL: http://gateway-mock:8082
     ports:
       - "127.0.0.1:18081:8081"
@@ -66,10 +80,10 @@ services:
     build: ../lab/inventory-service
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory
-      SPRING_DATASOURCE_USERNAME: lab
-      SPRING_DATASOURCE_PASSWORD: lab
-      # Fault F4 (DB pool exhausted) sets INVENTORY_POOL_SIZE=2 and INVENTORY_RESERVATION_DELAY=5s, then recreates
-      # this service; see verify-f4.sh. The delay is a lab-only fault hook that holds a pooled connection.
+      SPRING_DATASOURCE_USERNAME: lab_app
+      SPRING_DATASOURCE_PASSWORD: ${LAB_APP_DB_PASSWORD:-lab_app}
+      # Fault F4 (DB pool exhausted): fault-injector recreates this service with INVENTORY_POOL_SIZE=2 and
+      # INVENTORY_RESERVATION_DELAY=5s. The delay is a lab-only fault hook that holds a pooled connection.
       SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: ${INVENTORY_POOL_SIZE:-10}
       KINTSUGI_INVENTORY_RESERVATIONDELAY: ${INVENTORY_RESERVATION_DELAY:-0s}
     ports:
@@ -89,9 +103,10 @@ services:
     build: ../lab/order-service
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orders
-      SPRING_DATASOURCE_USERNAME: lab
-      SPRING_DATASOURCE_PASSWORD: lab
-      # Fault F3 (wrong configuration) sets ORDER_PAYMENT_BASEURL to a port where nothing listens; see verify-f3.sh.
+      SPRING_DATASOURCE_USERNAME: lab_app
+      SPRING_DATASOURCE_PASSWORD: ${LAB_APP_DB_PASSWORD:-lab_app}
+      # Fault F3 (wrong configuration): fault-injector recreates this service with ORDER_PAYMENT_BASEURL pointing at a
+      # port where nothing listens.
       KINTSUGI_PAYMENT_BASEURL: ${ORDER_PAYMENT_BASEURL:-http://payment-service:8081}
       KINTSUGI_INVENTORY_BASEURL: http://inventory-service:8083
     ports:
@@ -105,6 +120,46 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
+  # The fault injector (ADR-009): activates a catalog fault, records its true cause in the faults database, and restores
+  # the lab. F1 and F2 go through gateway-mock's admin API; F3 and F4 recreate one service with
+  # "docker compose ... up -d --no-deps --no-build --wait <service>", so it never recreates itself or the whole stack.
+  # It is invisible to the agent's data sources: Alloy drops its logs and Prometheus does not scrape it.
+  fault-injector:
+    build: ../lab/fault-injector
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/faults
+      SPRING_DATASOURCE_USERNAME: faults
+      SPRING_DATASOURCE_PASSWORD: ${FAULTS_DB_PASSWORD:-faults}
+      KINTSUGI_LABCONTROL_MODE: docker
+      KINTSUGI_LABCONTROL_COMPOSEFILE: ${KINTSUGI_REPO_DIR:-$PWD}/infra/compose.yaml
+      KINTSUGI_LABCONTROL_GATEWAYBASEURL: http://gateway-mock:8082
+    # The image runs as an unprivileged user; membership of the socket's group is what lets it use Docker. Like the
+    # socket mount for Alloy, this is root-equivalent on the host, accepted for a loopback-only lab (ADR-008, ADR-009).
+    group_add:
+      - "${DOCKER_GID:-1001}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The repository, read-only, at its host path: compose resolves this file's relative bind mounts against its own
+      # directory, and the Docker daemon reads those resolved paths on the host. The path must already exist.
+      - type: bind
+        source: ${KINTSUGI_REPO_DIR:-$PWD}
+        target: ${KINTSUGI_REPO_DIR:-$PWD}
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:18084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8084/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 5

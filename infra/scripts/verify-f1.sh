@@ -11,7 +11,10 @@ Checks that fault F1 (slow payment gateway) is visible in Prometheus and Loki (o
   infra/scripts/verify-f1.sh          # start or reuse the lab, run the checks, leave the lab running
   infra/scripts/verify-f1.sh --down   # same, then tear the lab down (containers and volumes)
 
-Exits 0 when every check passes, non-zero otherwise. The gateway behavior is reset on every exit.
+F1 is injected and restored through the fault injector (POST /faults, POST /faults/{id}/restore). After the restore
+it checks the injection's truth row (read as the faults role), that lab_app is not a superuser and cannot connect to
+the faults database, and that Loki has no fault-injector stream.
+Exits 0 when every check passes, non-zero otherwise. The injection is restored on every exit.
 Needs docker (with compose) and curl on the host.
 EOF
 }
@@ -34,13 +37,8 @@ else
   exit 1
 fi
 
-# 3. Inject F1: the gateway answers after 10 s, past order-service's 3 s read timeout.
-if set_gateway_behavior '{"latencyMs":10000}'; then
-  pass "F1 injected: gateway latency 10000 ms"
-else
-  fail "could not set the gateway latency"
-  exit 1
-fi
+# 3. Inject F1 through the fault injector: the gateway answers after 10 s, past order-service's 3 s read timeout.
+inject_fault F1
 
 read -r code pending_id status _ <<<"$(place_order verify-f1)"
 if [[ "$code" == 201 && "$status" == PAYMENT_PENDING ]]; then
@@ -70,6 +68,9 @@ else
   fail "Loki: no order-service WARN line for order $pending_id within ${CHECK_WAIT_SECONDS}s"
 fi
 
-# 6. The trap resets the gateway on every exit.
+# 6. Restore through the injector (the trap restores again on every exit), then check the truth and its isolation.
+expect_restored
+check_truth F1 gateway-mock
+
 info "checks finished in $((SECONDS - started))s"
 (( failures == 0 ))

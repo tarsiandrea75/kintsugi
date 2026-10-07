@@ -15,7 +15,10 @@ Checks that fault F2 (gateway rejecting with 429) is visible in Prometheus and L
   infra/scripts/verify-f2.sh          # start or reuse the lab, run the checks, leave the lab running
   infra/scripts/verify-f2.sh --down   # same, then tear the lab down (containers and volumes)
 
-Exits 0 when every check passes, non-zero otherwise. The gateway behavior is reset on every exit.
+F2 is injected and restored through the fault injector (POST /faults, POST /faults/{id}/restore). After the restore
+it checks the injection's truth row (read as the faults role), that lab_app is not a superuser and cannot connect to
+the faults database, and that Loki has no fault-injector stream.
+Exits 0 when every check passes, non-zero otherwise. The injection is restored on every exit.
 Needs docker (with compose) and curl on the host.
 EOF
 }
@@ -41,13 +44,8 @@ else
   exit 1
 fi
 
-# 3. Inject F2: every authorization is rejected with 429.
-if set_gateway_behavior '{"latencyMs":0,"errorStatus":429}'; then
-  pass "F2 injected: gateway answers 429"
-else
-  fail "could not set the gateway error status"
-  exit 1
-fi
+# 3. Inject F2 through the fault injector: every authorization is rejected with 429.
+inject_fault F2
 
 failed_id=none
 for ((i = 1; i <= F2_ORDERS; i++)); do
@@ -82,9 +80,12 @@ else
   fail "Loki: no payment-service WARN line for order $failed_id within ${CHECK_WAIT_SECONDS}s"
 fi
 
-# 6. Recovery: after a reset, orders are paid again. The trap resets the gateway again on every exit.
-reset_gateway
-expect_paid_order verify-f2 "after the reset, the"
+# 6. Recovery: after the restore through the injector, orders are paid again. The trap restores again on every exit.
+expect_restored
+expect_paid_order verify-f2 "after the restore, the"
+
+# 7. The truth row and its isolation.
+check_truth F2 gateway-mock
 
 info "checks finished in $((SECONDS - started))s"
 (( failures == 0 ))

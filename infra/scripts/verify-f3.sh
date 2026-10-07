@@ -19,52 +19,36 @@ Checks that fault F3 (wrong payment URL in order-service) is visible in Promethe
   infra/scripts/verify-f3.sh          # start or reuse the lab, run the checks, leave the lab running
   infra/scripts/verify-f3.sh --down   # same, then tear the lab down (containers and volumes)
 
-F3 is injected by recreating order-service with ORDER_PAYMENT_BASEURL=http://payment-service:9999.
-Exits 0 when every check passes, non-zero otherwise. order-service is recreated without the variable on every exit.
+F3 is injected and restored through the fault injector (POST /faults, POST /faults/{id}/restore), which recreates
+order-service with ORDER_PAYMENT_BASEURL=http://payment-service:9999 and then without it. After the restore it checks
+the injection's truth row (read as the faults role), that lab_app is not a superuser and cannot connect to the faults
+database, and that Loki has no fault-injector stream.
+Exits 0 when every check passes, non-zero otherwise. The injection is restored on every exit.
 Needs docker (with compose), curl and awk on the host.
 EOF
-}
-
-# Recreates order-service with payment URL $1, or with the default from compose.yaml when $1 is empty. Inject and
-# restore both go through here; compose only recreates the container when the URL changed.
-recreate_order_service() {
-  env -u ORDER_PAYMENT_BASEURL ${1:+"ORDER_PAYMENT_BASEURL=$1"} \
-    docker compose -f "$COMPOSE_FILE" up -d --no-deps --wait order-service >/dev/null 2>&1
-}
-restore_order_service() { recreate_order_service ""; }
-
-before_exit() {
-  if restore_order_service; then
-    info "order-service restored with its default payment URL"
-  else
-    echo "WARN  could not restore order-service; run: docker compose -f infra/compose.yaml up -d --no-deps --wait order-service" >&2
-    return 1
-  fi
 }
 
 parse_args "$@"
 trap on_exit EXIT
 
-# 1. Start or reuse the lab, with order-service on its default payment URL.
+# 1. Start or reuse the lab; "up" puts order-service back on its default payment URL.
 start_lab
-if ! restore_order_service; then
-  fail "could not start order-service with its default payment URL"
-  exit 1
-fi
 
 # 2. A healthy order is paid.
 expect_paid_order verify-f3 healthy
 
-# 3. Inject F3: a redeploy of order-service with a wrong payment URL.
+# 3. Inject F3 through the fault injector: a redeploy of order-service with a wrong payment URL.
 # Wait one scrape interval first, so the healthy order's gateway call is scraped before the window that step 5 checks
 # for gateway_authorize_inflight == 0 starts.
 sleep "$SCRAPE_SETTLE_SECONDS"
 injected_at=$SECONDS
-if recreate_order_service "$F3_PAYMENT_BASEURL"; then
-  pass "F3 injected: order-service recreated with payment URL $F3_PAYMENT_BASEURL"
+inject_fault F3
+configured=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  "$(compose ps -q order-service)" 2>/dev/null | grep '^KINTSUGI_PAYMENT_BASEURL=' || true)
+if [[ "$configured" == "KINTSUGI_PAYMENT_BASEURL=$F3_PAYMENT_BASEURL" ]]; then
+  pass "order-service was recreated with $configured"
 else
-  fail "could not recreate order-service with the wrong payment URL"
-  exit 1
+  fail "order-service runs with '${configured:-no KINTSUGI_PAYMENT_BASEURL}', expected $F3_PAYMENT_BASEURL"
 fi
 
 # The baseline is read after the recreate: the new process starts its counters from zero.
@@ -115,14 +99,13 @@ else
   fail "Loki: no order-service WARN line with ConnectException for order $pending_id within ${CHECK_WAIT_SECONDS}s"
 fi
 
-# 7. Recovery: order-service back on its default URL pays orders again. The trap restores it again on every exit.
-if restore_order_service; then
-  pass "order-service recreated with its default payment URL"
-else
-  fail "could not restore order-service"
-  exit 1
-fi
+# 7. Recovery: the injector recreates order-service on its default URL, which pays orders again. The trap restores
+# again on every exit.
+expect_restored
 expect_paid_order verify-f3 "after the restore, the"
+
+# 8. The truth row and its isolation.
+check_truth F3 order-service
 
 info "checks finished in $((SECONDS - started))s"
 (( failures == 0 ))
