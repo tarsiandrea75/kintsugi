@@ -109,6 +109,8 @@ public class PaymentService {
 			return transaction.execute(status -> {
 				Payment saved = repository.save(payment);
 				events.insert(event);
+				// Spring Data JDBC and JdbcClient execute their SQL immediately (no write-behind persistence context), so
+				// once both calls return the rows are in the open transaction: any later failure is the commit itself.
 				written.set(true);
 				return saved;
 			});

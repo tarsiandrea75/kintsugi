@@ -4,7 +4,7 @@
 
 payment-service records the payment of an order. For each request it asks the payment gateway (gateway-mock) for the outcome, stores a payment with that outcome in PostgreSQL, and returns it. It never decides the outcome on its own.
 
-Payment statuses: `AUTHORIZED` and `DECLINED` come from the gateway; `FAILED` means the gateway answered 429 and the payment was recorded without a decision. Every attempt, stored or not, is recorded in `payment_events` (see section 8). There is no retry, no backoff and no idempotency: two calls for one order create two payments.
+Payment statuses: `AUTHORIZED` and `DECLINED` come from the gateway; `FAILED` means the gateway answered 429 and the payment was recorded without a decision. Every attempt that reaches the database is recorded in `payment_events`, including attempts that store no payment; an attempt made while the database is unreachable leaves only a structured WARN line (see section 8). There is no retry, no backoff and no idempotency: two calls for one order create two payments.
 
 ## 2. Dependencies
 

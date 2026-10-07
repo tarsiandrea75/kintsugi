@@ -11,6 +11,8 @@ F4_POOL_SIZE=2
 F4_RESERVATION_DELAY=5s
 # Enough concurrent orders to exhaust a pool of 2 several times over.
 F4_ORDERS=6
+# Inventory commits a reservation after its 5 s delay; wait a little longer than that for the RESERVED row.
+LEAK_WAIT_SECONDS=12
 INVENTORY_5XX='sum(http_server_requests_seconds_count{service="inventory-service",uri="/reservations",status=~"5.."}) or vector(0)'
 POOL_TIMEOUTS='sum(hikaricp_connections_timeout_total{service="inventory-service"}) or vector(0)'
 POOL_PENDING='hikaricp_connections_pending{service="inventory-service"}'
@@ -159,7 +161,8 @@ fi
 # Every 503 order must be stored by order-service as REJECTED_INVENTORY_UNAVAILABLE with an INVENTORY_UNAVAILABLE event:
 # order-service commits both before it answers, so this holds for each of them at once.
 rejected_ok=0
-for id in "${unavailable_ids[@]}"; do
+# Guarded: expanding an empty array under set -u fails on bash 4.3 and older.
+for id in ${unavailable_ids[@]+"${unavailable_ids[@]}"}; do
   order_status=$(psql_lab orders "select status from orders where id = '$id'" 2>/dev/null || true)
   order_event=$(psql_lab orders "select type, outcome, duration_ms from order_events
     where order_id = '$id' and type = 'INVENTORY_UNAVAILABLE'" 2>/dev/null || true)
@@ -189,7 +192,7 @@ find_leaked_order() {
   done
   return 1
 }
-if (( ${#unavailable_ids[@]} > 0 )) && poll 12 find_leaked_order; then
+if (( ${#unavailable_ids[@]} > 0 )) && poll "$LEAK_WAIT_SECONDS" find_leaked_order; then
   pass "PostgreSQL: order $leaked_id was rejected by order-service and reserved by inventory-service"
   info "orders:             $(psql_lab orders "select id, status from orders where id = '$leaked_id'")"
   info "order_events:       $(psql_lab orders "select type, outcome, duration_ms, occurred_at from order_events
@@ -197,7 +200,7 @@ if (( ${#unavailable_ids[@]} > 0 )) && poll 12 find_leaked_order; then
   info "reservation_events: $(psql_lab inventory "select outcome, duration_ms, occurred_at, detail from reservation_events
     where order_id = '$leaked_id' and outcome = 'RESERVED'")"
 else
-  fail "PostgreSQL: no order answered 503 has a RESERVED reservation_events row within 12s"
+  fail "PostgreSQL: no order answered 503 has a RESERVED reservation_events row within ${LEAK_WAIT_SECONDS}s"
 fi
 
 # 9. Recovery: inventory-service back on its defaults; the trap restores it again on every exit.

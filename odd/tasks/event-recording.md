@@ -114,6 +114,10 @@ The F4 stock leak shows the cost. Inventory commits a reservation for an order t
   - B: gateway-mock logs one key=value line per `/authorize` and per behavior change (Loki's `| logfmt` parses them). 76 tests.
   - C: scripts, runbooks (new section "Where the evidence is"), setup and the lab-observability spec are aligned with the new log lines and statuses. `verify-f4.sh` step 8 checks the database evidence: every 503 order is `REJECTED_INVENTORY_UNAVAILABLE` with an `INVENTORY_UNAVAILABLE` event, and at least one of them also has a `RESERVED` reservation event. This is the F4 stock leak, now provable from data (example: order `7993d1bf…`, order-service gave up at 3002 ms, inventory reserved at 5024 ms).
   - Real runs: F4 PASS in 140 s, F1 in 59 s, F2 in 62 s, F3 in 70 s. The leakage grep is clean. Parent re-run: payment 86, gateway 76, script syntax OK.
+- 2026-10-07: T4 review (4 lenses, `review-5ea9bcb2655dade3`) approved.
+  - The WARNING about the `COMMIT_UNKNOWN` classification was answered with a code comment: Spring Data JDBC and JdbcClient execute immediately (no write-behind), so once both writes return, any later failure is the commit.
+  - Suggestions applied: the payment runbook no longer overstates the guarantee; `LEAK_WAIT_SECONDS` is a named constant; the empty-array loop is guarded.
+  - Parent re-run: payment mvn exit 0; `verify-f4.sh` PASS in 128 s on a fresh stack (the leak was proven for order `cc271329…`).
 
 ## Next step
 
