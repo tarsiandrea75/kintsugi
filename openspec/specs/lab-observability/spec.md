@@ -69,7 +69,7 @@ Grafana MUST start with the Prometheus and Loki datasources and the "Lab — Fau
 |-------|--------|
 | Orders by status | `lab_orders` by `status` |
 | Gateway in-flight authorizations | `gateway_authorize_inflight` |
-| payment-service request latency and 503 rate | `http_server_requests_seconds` of payment-service |
+| payment-service /payments latency and 503 rate | `http_server_requests_seconds` of payment-service |
 | order-service WARN lines | Loki, `{service="order-service"}` filtered to `WARN` |
 | Payments by status | `lab_payments` by `status` |
 | Gateway rejections | Loki, per-minute count of payment-service's "Gateway rejected the payment" `WARN` lines |
