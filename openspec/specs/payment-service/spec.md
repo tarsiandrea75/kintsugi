@@ -95,7 +95,7 @@ The `Payment gateway unavailable` prefix is stable: runbooks search for it. An u
 
 ### Requirement: Every payment attempt is recorded
 
-Every `POST /payments` with a valid body MUST leave exactly one row in the append-only table `payment_events`, whatever the outcome:
+Every `POST /payments` with a valid body MUST leave exactly one row in the append-only table `payment_events`, whatever the outcome (the one exception, a failed commit, is described below):
 
 | Column | Value |
 |--------|-------|
@@ -103,11 +103,11 @@ Every `POST /payments` with a valid body MUST leave exactly one row in the appen
 | `order_id` | the order id of the request |
 | `occurred_at` | when the attempt was recorded (`timestamptz`, microseconds) |
 | `type` | `PAYMENT_ATTEMPT`, the only type; a CHECK constraint rejects any other |
-| `outcome` | `AUTHORIZED`, `DECLINED`, `FAILED`, `GATEWAY_UNAVAILABLE` or `ERROR` |
-| `detail` | compact JSON: `{"paymentId":"<id>"}` for a stored outcome; `{"exception":"<class>","url":"<gateway /authorize URL>","message":"<message>"}` for `GATEWAY_UNAVAILABLE`, where the class is the most specific cause, for example `java.net.http.HttpTimeoutException`; `{"exception":"<class>","message":"<message>"}` for `ERROR` |
+| `outcome` | `AUTHORIZED`, `DECLINED`, `FAILED`, `GATEWAY_UNAVAILABLE`, `ERROR` or `COMMIT_UNKNOWN` |
+| `detail` | compact JSON: `{"paymentId":"<id>"}` for a stored outcome; `{"exception":"<class>","url":"<gateway /authorize URL>","message":"<message>"}` for `GATEWAY_UNAVAILABLE`, where the class is the most specific cause, for example `java.net.http.HttpTimeoutException`; `{"exception":"<class>","message":"<message>"}` for `ERROR`; `{"paymentId":"<id>","exception":"<class>","message":"<message>"}` for `COMMIT_UNKNOWN` |
 | `duration_ms` | how long the attempt took, gateway call included |
 
-For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same transaction as the `payments` row, so a payment and its event commit or roll back together. For `GATEWAY_UNAVAILABLE` no payment is stored and the event MUST be inserted in a transaction of its own; the response is still 503. An attempt that fails with any other runtime exception (a non-gateway failure, or a failure storing the payment and its event, which roll back together) stores no payment, MUST be recorded as `ERROR` in a transaction of its own, and the exception then propagates unchanged (500). When the database itself is unavailable no `ERROR` event is attempted, because the attempt's event was already logged. The gateway call runs outside any transaction. The table is indexed by `order_id` and `occurred_at`. It is append-only: the code exposes insert and read only (by order id, and the latest N), with no update or delete, and a test checks it. A request rejected with 400 leaves no event.
+For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same transaction as the `payments` row, so a payment and its event commit or roll back together. For `GATEWAY_UNAVAILABLE` no payment is stored and the event MUST be inserted in a transaction of its own; the response is still 503. An attempt that fails with any other runtime exception (a non-gateway failure, or a failure storing the payment and its event, which roll back together) stores no payment, MUST be recorded as `ERROR` in a transaction of its own, and the exception then propagates unchanged (500). When the database itself is unavailable no `ERROR` event is attempted, because the attempt's event was already logged. When the payment and its event were written but the commit itself fails (for example a `TransactionSystemException`), the database may or may not have stored them, so the attempt MUST NOT be recorded as `ERROR`: a `COMMIT_UNKNOWN` event is inserted in a transaction of its own, best effort, and the exception then propagates unchanged (500). In that case the order may have two rows: the stored outcome, if the commit did land, and `COMMIT_UNKNOWN`. The gateway call runs outside any transaction. The table is indexed by `order_id` and `occurred_at`. It is append-only: the code exposes insert and read only (by order id, and the latest N), with no update or delete, and a test checks it. A request rejected with 400 leaves no event.
 
 #### Scenario: One event per stored outcome
 - GIVEN the gateway answers `AUTHORIZED`, `DECLINED` or 429
@@ -127,6 +127,20 @@ For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same
 - THEN the failure propagates
 - AND no `payments` row exists for the order id
 
+#### Scenario: Commit outcome unknown
+- GIVEN the gateway answers `AUTHORIZED` and the commit of the payment transaction throws
+- WHEN a payment is attempted
+- THEN the failure propagates (500)
+- AND no `ERROR` event is recorded; a `COMMIT_UNKNOWN` event with the payment id and the exception class in `detail` is inserted in a transaction of its own
+- AND one `WARN` line contains `Payment commit outcome unknown, the payment may or may not be stored`, `order=<order id>`, `outcome=COMMIT_UNKNOWN` and `gateway_outcome=AUTHORIZED`
+
+#### Scenario: No connection for the stored outcome
+- GIVEN the gateway answers `AUTHORIZED` and no database connection can be opened for the payment transaction
+- WHEN a payment is attempted
+- THEN the failure propagates (500)
+- AND no `ERROR` event is attempted
+- AND one `WARN` line contains `Payment event not stored`, `order=<order id>` and `outcome=AUTHORIZED`
+
 #### Scenario: Event table is append-only
 - GIVEN the event repository
 - WHEN its public methods are listed
@@ -140,6 +154,12 @@ When an event cannot be stored, because no database connection is available or b
 
 ```
 Payment event not stored: event=PAYMENT_ATTEMPT order=<order id> outcome=<outcome> duration_ms=<ms> detail="<detail JSON>" record_failure=<exception class> cause="<database message>"
+```
+
+A failed commit of the payment transaction is logged differently, because its outcome is unknown rather than failed:
+
+```
+Payment commit outcome unknown, the payment may or may not be stored: event=PAYMENT_ATTEMPT order=<order id> outcome=COMMIT_UNKNOWN duration_ms=<ms> payment=<payment id> gateway_outcome=<gateway outcome> exception=<exception class> cause="<message>"
 ```
 
 A failure to record never masks the attempt's own outcome. For `GATEWAY_UNAVAILABLE` the response is still 503; for `ERROR` the original exception still propagates. For a stored outcome the payment cannot be stored either, because they share one transaction, so the failure propagates (500). Quoted values escape `\` and `"`. This is a stated limitation: an attempt made while the database is unavailable exists only in the logs.

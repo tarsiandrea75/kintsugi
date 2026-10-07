@@ -10,9 +10,10 @@ import java.util.UUID;
  * @param orderId the order being paid
  * @param occurredAt when the event was recorded, in microseconds (what PostgreSQL stores)
  * @param type what happened; today always {@value #PAYMENT_ATTEMPT}
- * @param outcome a {@link PaymentStatus} name, {@value #GATEWAY_UNAVAILABLE} or {@value #ERROR}
+ * @param outcome a {@link PaymentStatus} name, {@value #GATEWAY_UNAVAILABLE}, {@value #ERROR} or
+ * {@value #COMMIT_UNKNOWN}
  * @param detail compact JSON: the payment id, or the exception class, URL and message, or the exception class and
- * message
+ * message (preceded by the payment id for {@value #COMMIT_UNKNOWN})
  * @param durationMs how long the attempt took, gateway call included, in milliseconds
  */
 public record PaymentEvent(UUID id, UUID orderId, Instant occurredAt, String type, String outcome, String detail,
@@ -26,5 +27,11 @@ public record PaymentEvent(UUID id, UUID orderId, Instant occurredAt, String typ
 
 	/** Outcome of an attempt that failed with an unexpected exception (a 500); no payment is stored for it. */
 	public static final String ERROR = "ERROR";
+
+	/**
+	 * Outcome of an attempt whose payment transaction failed while committing (a 500): the database may or may not have
+	 * stored the payment and its event.
+	 */
+	public static final String COMMIT_UNKNOWN = "COMMIT_UNKNOWN";
 
 }

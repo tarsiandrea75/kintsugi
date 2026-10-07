@@ -26,6 +26,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -203,6 +204,65 @@ class PaymentServiceTest {
 		assertThat(notStoredLines(output)).singleElement()
 			.satisfies(line -> assertThat(line).contains("outcome=ERROR")
 				.contains("record_failure=java.lang.IllegalArgumentException"));
+	}
+
+	/**
+	 * The commit itself fails after the payment and its event were written: the server may or may not have committed.
+	 * That is not an {@code ERROR}: the attempt is recorded as {@code COMMIT_UNKNOWN} in a transaction of its own, one
+	 * WARN line says the payment may or may not be stored, and the failure propagates (a 500).
+	 */
+	@Test
+	void commitFailureIsRecordedAsCommitUnknownNotError(CapturedOutput output) {
+		given(gateway.authorize(ORDER_ID)).willReturn(PaymentStatus.AUTHORIZED);
+		given(repository.save(any(Payment.class))).willAnswer(invocation -> invocation.getArgument(0));
+		TransactionSystemException commitFailure = new TransactionSystemException("Could not commit JDBC transaction");
+		willThrow(commitFailure).willAnswer(invocation -> null).given(transactionManager).commit(any());
+
+		assertThatThrownBy(() -> service.pay(ORDER_ID)).isSameAs(commitFailure);
+
+		ArgumentCaptor<PaymentEvent> inserted = ArgumentCaptor.forClass(PaymentEvent.class);
+		verify(events, times(2)).insert(inserted.capture());
+		assertThat(inserted.getAllValues()).extracting(PaymentEvent::outcome)
+			.containsExactly("AUTHORIZED", PaymentEvent.COMMIT_UNKNOWN);
+		ArgumentCaptor<Payment> saved = ArgumentCaptor.forClass(Payment.class);
+		verify(repository).save(saved.capture());
+		PaymentEvent unknown = inserted.getAllValues().get(1);
+		assertThat(unknown.orderId()).isEqualTo(ORDER_ID);
+		assertThat(unknown.detail()).isEqualTo("{\"paymentId\":\"" + saved.getValue().getId()
+				+ "\",\"exception\":\"org.springframework.transaction.TransactionSystemException\","
+				+ "\"message\":\"Could not commit JDBC transaction\"}");
+		assertThat(warnLines(output)).singleElement()
+			.satisfies(line -> assertThat(line).contains("Payment commit outcome unknown")
+				.contains("may or may not be stored")
+				.contains("event=PAYMENT_ATTEMPT")
+				.contains("order=" + ORDER_ID)
+				.contains("outcome=COMMIT_UNKNOWN")
+				.contains("gateway_outcome=AUTHORIZED")
+				.contains("exception=org.springframework.transaction.TransactionSystemException"));
+	}
+
+	/**
+	 * No connection for the stored outcome's transaction: nothing was written, so the attempt is only logged (its
+	 * event cannot be stored either) and no {@code ERROR} attempt is made, which would wait for a connection again.
+	 */
+	@Test
+	void noConnectionForTheStoredOutcomeIsLoggedOnceWithoutAnErrorAttempt(CapturedOutput output) {
+		given(gateway.authorize(ORDER_ID)).willReturn(PaymentStatus.AUTHORIZED);
+		CannotCreateTransactionException noConnection = new CannotCreateTransactionException(
+				"Could not open JDBC Connection",
+				new SQLTransientConnectionException("HikariPool-1 - Connection is not available"));
+		willThrow(noConnection).given(transactionManager).getTransaction(any());
+
+		assertThatThrownBy(() -> service.pay(ORDER_ID)).isSameAs(noConnection);
+
+		verify(events, never()).insert(any());
+		verify(repository, never()).save(any());
+		assertThat(warnLines(output)).singleElement()
+			.satisfies(line -> assertThat(line).contains("Payment event not stored: ")
+				.contains("order=" + ORDER_ID)
+				.contains("outcome=AUTHORIZED")
+				.doesNotContain("outcome=ERROR")
+				.contains("record_failure=org.springframework.transaction.CannotCreateTransactionException"));
 	}
 
 	private static List<String> warnLines(CapturedOutput output) {
