@@ -42,7 +42,7 @@ else
   exit 1
 fi
 
-read -r code pending_id status < <(place_order verify-f1)
+read -r code pending_id status _ <<<"$(place_order verify-f1)"
 if [[ "$code" == 201 && "$status" == PAYMENT_PENDING ]]; then
   pass "order $pending_id under F1 is 201 PAYMENT_PENDING"
 else

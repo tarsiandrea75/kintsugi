@@ -51,7 +51,7 @@ fi
 
 failed_id=none
 for ((i = 1; i <= F2_ORDERS; i++)); do
-  read -r code id status < <(place_order verify-f2)
+  read -r code id status _ <<<"$(place_order verify-f2)"
   if [[ "$code" == 201 && "$status" == PAYMENT_FAILED ]]; then
     pass "order $id under F2 is 201 PAYMENT_FAILED"
     failed_id=$id

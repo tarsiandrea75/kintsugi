@@ -6,8 +6,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # F3 points order-service at a payment-service port where nothing listens, so every connection is refused at once.
 F3_PAYMENT_BASEURL=http://payment-service:9999
-# A refused connection fails in milliseconds; a slow call (F1) takes the 3 s read timeout.
-F3_ORDER_MAX_SECONDS=2
+# Pass threshold for POST /orders under F3: a refused connection fails in milliseconds, while a slow call (F1) takes the
+# 3 s read timeout. ORDER_MAX_SECONDS in lib.sh is only curl's transport cap.
+F3_FAST_FAIL_SECONDS=2
 REFUSED_CALLS='sum(http_client_requests_seconds_count{service="order-service",client_name="payment-service",exception="ConnectException"}) or vector(0)'
 
 usage() {
@@ -24,10 +25,13 @@ Needs docker (with compose), curl and awk on the host.
 EOF
 }
 
-# Recreates order-service with the payment URL from compose.yaml; compose only recreates it when the URL changed.
-restore_order_service() {
-  env -u ORDER_PAYMENT_BASEURL docker compose -f "$COMPOSE_FILE" up -d --no-deps --wait order-service >/dev/null 2>&1
+# Recreates order-service with payment URL $1, or with the default from compose.yaml when $1 is empty. Inject and
+# restore both go through here; compose only recreates the container when the URL changed.
+recreate_order_service() {
+  env -u ORDER_PAYMENT_BASEURL ${1:+"ORDER_PAYMENT_BASEURL=$1"} \
+    docker compose -f "$COMPOSE_FILE" up -d --no-deps --wait order-service >/dev/null 2>&1
 }
+restore_order_service() { recreate_order_service ""; }
 
 before_exit() {
   if restore_order_service; then
@@ -36,18 +40,6 @@ before_exit() {
     echo "WARN  could not restore order-service; run: docker compose -f infra/compose.yaml up -d --no-deps --wait order-service" >&2
     return 1
   fi
-}
-
-# POST /orders as customer $1; prints "<http code> <order id> <status> <seconds>".
-place_timed_order() {
-  local out code seconds body id status
-  out=$(curl -sS --max-time "$ORDER_MAX_SECONDS" -w '\n%{http_code} %{time_total}' -X POST "$ORDERS/orders" \
-    -H 'Content-Type: application/json' -d "{\"customerId\":\"$1\",\"items\":[{\"sku\":\"SKU-1\",\"quantity\":1}]}")
-  read -r code seconds <<<"${out##*$'\n'}"
-  body=${out%$'\n'*}
-  id=$(grep -o '"id":"[^"]*"' <<<"$body" | head -n1 | cut -d'"' -f4)
-  status=$(grep -o '"status":"[^"]*"' <<<"$body" | head -n1 | cut -d'"' -f4)
-  echo "$code ${id:-none} ${status:-none} $seconds"
 }
 
 parse_args "$@"
@@ -64,8 +56,11 @@ fi
 expect_paid_order verify-f3 healthy
 
 # 3. Inject F3: a redeploy of order-service with a wrong payment URL.
+# Wait one scrape interval first, so the healthy order's gateway call is scraped before the window that step 5 checks
+# for gateway_authorize_inflight == 0 starts.
+sleep "$SCRAPE_SETTLE_SECONDS"
 injected_at=$SECONDS
-if ORDER_PAYMENT_BASEURL=$F3_PAYMENT_BASEURL compose up -d --no-deps --wait order-service >/dev/null 2>&1; then
+if recreate_order_service "$F3_PAYMENT_BASEURL"; then
   pass "F3 injected: order-service recreated with payment URL $F3_PAYMENT_BASEURL"
 else
   fail "could not recreate order-service with the wrong payment URL"
@@ -83,16 +78,18 @@ else
 fi
 
 # 4. The order is created, stays pending, and the answer is fast because the connection is refused at once.
-read -r code pending_id status seconds < <(place_timed_order verify-f3)
+read -r code pending_id status seconds <<<"$(place_order verify-f3)"
 if [[ "$code" == 201 && "$status" == PAYMENT_PENDING ]]; then
   pass "order $pending_id under F3 is 201 PAYMENT_PENDING"
 else
   fail "order under F3: expected 201 PAYMENT_PENDING, got $code $status"
 fi
-if awk -v s="$seconds" -v max="$F3_ORDER_MAX_SECONDS" 'BEGIN { exit !(s + 0 < max + 0) }'; then
-  pass "POST /orders under F3 answered in ${seconds}s (under ${F3_ORDER_MAX_SECONDS}s)"
+if [[ "$code" == 000 ]]; then
+  fail "POST /orders under F3 got no HTTP answer (curl transport failure after ${seconds}s), so its speed is unknown"
+elif awk -v s="$seconds" -v max="$F3_FAST_FAIL_SECONDS" 'BEGIN { exit !(s + 0 < max + 0) }'; then
+  pass "POST /orders under F3 answered in ${seconds}s (under ${F3_FAST_FAIL_SECONDS}s)"
 else
-  fail "POST /orders under F3 took ${seconds}s, expected under ${F3_ORDER_MAX_SECONDS}s"
+  fail "POST /orders under F3 took ${seconds}s, expected under ${F3_FAST_FAIL_SECONDS}s"
 fi
 
 # 5. Prometheus: the client metric shows the refused connection, and no authorization reached the gateway.
@@ -103,7 +100,8 @@ else
   fail "Prometheus: refused payment calls did not reach $expected within ${CHECK_WAIT_SECONDS}s"
 fi
 
-window=$((SECONDS - injected_at + 10))
+# The window starts at the injection; the settle wait before it keeps the healthy order's call out.
+window=$((SECONDS - injected_at))
 if prom_has_result "max_over_time(gateway_authorize_inflight[${window}s]) == 0"; then
   pass "Prometheus: gateway_authorize_inflight stayed 0 since the injection (${window}s)"
 else

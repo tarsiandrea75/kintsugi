@@ -8,7 +8,8 @@ PROMETHEUS=http://127.0.0.1:19090
 SERVICES=(order-service payment-service gateway-mock)
 LOKI_WAIT_SECONDS=180
 CHECK_WAIT_SECONDS=60
-# POST /orders must answer within order-service's 3 s payment read timeout; the margin covers the rest of the request.
+# Transport cap for POST /orders (curl --max-time), not a pass threshold: order-service answers within its 3 s payment
+# read timeout; the margin covers the rest of the request.
 ORDER_MAX_SECONDS=15
 CURL_MAX_SECONDS=5
 
@@ -135,17 +136,23 @@ loki_has_warn() {
   grep -q "$2" <<<"$json"
 }
 
-# POST /orders as customer $1; prints "<http code> <order id> <status>".
+# Prints the value of JSON string field $1 in $2, or nothing. Never fails: grep finds no match on an error body.
+json_field() { grep -o "\"$1\":\"[^\"]*\"" <<<"$2" | head -n1 | cut -d'"' -f4 || true; }
+
+# POST /orders as customer $1; always prints "<http code> <order id> <status> <seconds>", one line, even when curl
+# fails: a transport failure (refused, timed out) prints "000 none none <seconds>". Callers read it with
+#   read -r code id status seconds <<<"$(place_order customer)"
+# and report a FAIL themselves, so a broken request never aborts the script before the exit trap restores the lab.
 place_order() {
-  local body code
-  body=$(curl -sS --max-time "$ORDER_MAX_SECONDS" -w '\n%{http_code}' -X POST "$ORDERS/orders" -H 'Content-Type: application/json' \
-    -d "{\"customerId\":\"$1\",\"items\":[{\"sku\":\"SKU-1\",\"quantity\":1}]}")
-  code=${body##*$'\n'}
-  body=${body%$'\n'*}
-  local id status
-  id=$(grep -o '"id":"[^"]*"' <<<"$body" | head -n1 | cut -d'"' -f4)
-  status=$(grep -o '"status":"[^"]*"' <<<"$body" | head -n1 | cut -d'"' -f4)
-  echo "$code ${id:-none} ${status:-none}"
+  local out rc=0 code seconds body id status
+  out=$(curl -sS --max-time "$ORDER_MAX_SECONDS" -w '\n%{http_code} %{time_total}' -X POST "$ORDERS/orders" \
+    -H 'Content-Type: application/json' -d "{\"customerId\":\"$1\",\"items\":[{\"sku\":\"SKU-1\",\"quantity\":1}]}") || rc=$?
+  read -r code seconds <<<"${out##*$'\n'}" || true
+  body=${out%$'\n'*}
+  (( rc == 0 )) || code=000
+  id=$(json_field id "$body")
+  status=$(json_field status "$body")
+  echo "${code:-000} ${id:-none} ${status:-none} ${seconds:-none}"
 }
 
 # Starts or reuses the lab, waits for Loki, and resets the gateway. Exits on failure.
@@ -184,7 +191,7 @@ start_lab() {
 # Places an order as customer $1 and requires 201 PAID; exits otherwise.
 expect_paid_order() {
   local code id status
-  read -r code id status < <(place_order "$1")
+  read -r code id status _ <<<"$(place_order "$1")"
   if [[ "$code" == 201 && "$status" == PAID ]]; then
     pass "$2 order $id is PAID"
   else

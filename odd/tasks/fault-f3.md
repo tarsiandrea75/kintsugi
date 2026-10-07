@@ -76,6 +76,7 @@ A misconfigured service URL is one of the most common real incidents. The agent 
   - The baseline is read after the recreate, because recreating a container resets its counters. The in-flight window starts at injection time. `lib.sh` gained an optional `before_exit` hook, which restores order-service.
 
   RED/GREEN: T1 failed with a compile error, then `MeterNotFoundException`, then the wrong tag; it is now green. mvn exit 0, 122 tests (parent re-run). Real runs on a fresh stack: `verify-f3.sh` PASS in 140 s (order answered in 0.23 s); `verify-f1.sh` PASS in 44 s; `verify-f2.sh` PASS in 57 s.
+- 2026-10-07: F3 review (4 lenses, `review-e24f82dcc85609e3`) approved. Its WARNINGs were fixed: the verify helpers always print a parseable line (`000 none none` on a transport failure) and the callers report FAIL and continue; the in-flight window waits one scrape interval after the healthy order; `F3_FAST_FAIL_SECONDS` is renamed; inject and restore share `recreate_order_service`. Real runs: F3 PASS in 146 s, F1 PASS in 52 s, F2 PASS in 60 s; failure reporting proven against a closed port.
 - **To review with the human:** (1) the F3 evidence is `ConnectException` plus the wrong URL, not the literal "connection refused" text in the vision table; (2) whether `docs/vision.md:33` should say "connection errors (ConnectException) in logs"; (3) the T1 message change added a scenario to the order-service "Payment step" requirement.
 
 ## Next step
