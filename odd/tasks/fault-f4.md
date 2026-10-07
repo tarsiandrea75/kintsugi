@@ -74,12 +74,13 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 1,500 lines, sliced per task.
 - The generated skeleton goes in its own commit.
+- Slices: tracker `feat/fault-f4` (doc `7657927`, skeleton `c4fb992`); PR 1 `-01-inventory-data`: spec, domain, persistence, migrations, pool settings; PR 2 `-02-inventory-api`: application service, fault hook, API, exhaustion handler; then T3, then T4.
 - RDD: on; consent is a standing grant. Reviews run per slice.
 
 ## Tasks
 
 - [x] **T1 — inventory-service skeleton.** Initializr skeleton with the same ids as payment-service, the image pinned, `TestcontainersConfiguration` made public, and the pom tidied. Route: delegated writer.
-- [ ] **T2 — inventory-service domain, persistence and API.** Spec first, tests first, the seed migration, atomic reservation, the delay hook and explicit pool settings. Route: delegated writer.
+- [x] **T2 — inventory-service domain, persistence and API.** Spec first, tests first, the seed migration, atomic reservation, the delay hook and explicit pool settings. Route: delegated writer.
 - [ ] **T3 — order-service inventory step.** `InventoryClient` with metrics, `OrderService` reserve-before-save, 409 and 503 handling, and the spec. Route: delegated writer.
 - [ ] **T4 — Compose, dashboard, verify-f4 and docs.** The inventory service and its database in compose; the F4 variables; the panels; `verify-f4.sh`; all four verify scripts run for real. Route: delegated writer.
 
@@ -92,7 +93,12 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
 
 - 2026-10-07: design decided autonomously (the user was away, autonomy authorized until the quota ends); branch created.
 - 2026-10-07: T1 done: the Initializr skeleton with the same ids as payment-service, tidied the same way (image pinned and public test config, pom description, Prometheus registry and exposure, port 8083, Dockerfile). mvn exit 0, 1 test against PostgreSQL 18.6. Generated scaffolding has no meaningful RED.
+- 2026-10-07: T2 done by the delegated writer (tests first).
+  - RED: compile failure, then 1 failure and 2 errors without an exhaustion handler.
+  - Finding: Hikari exhaustion surfaces as `CannotCreateTransactionException`, because the transaction cannot start. Spring already returns 500 for it, but logs an ERROR stack trace. A handler scoped to the controller keeps the 500 and logs one readable WARN line naming the pool timeout. Kept, and to review.
+  - GREEN: mvn exit 0, 52 tests, two runs (parent re-run). The exhaustion test (pool 1, timeout 250 ms, delay 1 s) takes about 3.5 s.
+  - Duplicate SKU lines in one reservation add up (written in the spec).
 
 ## Next step
 
-T2 via the same writer.
+T3 (order-service inventory step) via a delegated writer.
