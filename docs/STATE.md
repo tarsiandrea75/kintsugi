@@ -4,35 +4,38 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-07 (session 02, autonomous)
+2026-10-07 (session 03, autonomous)
 
 ## Milestone
 
-M1 — The lab (Oct 5–25)
+M1 — The lab (Oct 5–25). **The M1 check is met: faults F1–F4 are visible in Grafana, and each has a passing verify script.** The remaining M1 bullets are service runbooks in Markdown and the "I built a system designed to break" post.
 
 ## Last action
 
-`fault-f3` is done ([feature document](../odd/tasks/fault-f3.md)), built autonomously while the user was away.
-- **What F3 breaks:** a wrong order-service payment URL, set with `ORDER_PAYMENT_BASEURL=http://payment-service:9999` and a recreate of order-service. Orders stay `PAYMENT_PENDING` but answer in about 0.3 s instead of 3 s.
-- **Evidence:**
-  - the client metric `http_client_requests_seconds_count{client_name="payment-service",exception="ConnectException"}`;
-  - zero gateway in-flight;
-  - a WARN line naming `ConnectException` and the wrong URL.
-- **How F1 and F3 differ:** under F1 the same metric has `exception="HttpTimeoutException"`.
-- **Dashboard:** a new panel, "order-service → payment calls by outcome".
-- **Checks:** `verify-f1.sh`, `verify-f2.sh` and `verify-f3.sh` all pass on one fresh stack.
-- **Tests:** order-service 122.
+`fault-f4` is done ([feature document](../odd/tasks/fault-f4.md)), built autonomously while the user was away.
+- **New service:** `inventory-service`, with its own `inventory` database, a seed of SKU-1…SKU-5, atomic SKU-ordered reservations, and a 500 on pool exhaustion.
+- **order-service:** reserves stock before accepting an order. It answers 409 when stock is short and 503 when inventory is unavailable, and stores nothing in either case.
+- **F4:** set `INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s`, then recreate inventory-service. Six concurrent orders all answer 503, with Hikari pending 4, timeouts 4 and inventory 500s.
+- **Dashboard:** "Lab — Faults" now has 9 panels.
+- **Checks:** `verify-f1.sh` … `verify-f4.sh` all pass on one fresh stack.
+- **Tests:** order-service 148, inventory-service 58, payment-service 74, gateway-mock 71.
 - **Status:** every range is reviewed and approved. Nothing is pushed.
 
-**To review with the human (decided autonomously):** see "To review with the human" in `odd/tasks/fault-f3.md`. In short: the F3 evidence is `ConnectException` plus the URL, not the literal "connection refused" text in the vision table, so the vision line may need rewording.
+**To review with the human (decided autonomously):**
+- The F3 and F4 designs; see "To review with the human" in `odd/tasks/fault-f3.md` and the Design section of `odd/tasks/fault-f4.md`.
+- In particular: whether to reword the F3 symptom in `docs/vision.md:33`.
+- That under F4 even reservations that got a connection answer 503, because the 5 s query outlasts the 3 s read timeout. Stock probably leaks; this is documented as a known limitation.
 
-## Where the autonomous session stopped (quota reached)
-
-F4 is in progress on `feat/fault-f4-02-inventory-api` (see `odd/tasks/fault-f4.md`, Next step): inventory-service T1 and T2 are committed and tested (52 tests). The second review was interrupted by the quota. T3 (order → inventory) and T4 (compose, dashboard, verify-f4) are still to do.
+**Upgrading an old lab volume:** run `docker compose -f infra/compose.yaml down -v` once, so the `inventory` database is created.
 
 ## Next action
 
-Last fault of the M1 check: F4, "DB pool exhausted", with the symptom "500 errors on inventory" (`docs/vision.md:34`). It needs a new `inventory-service`, an order → inventory call, which also prepares F8, and a pool of 2 plus a slow query.
+Finish M1:
+1. Write the service runbooks in Markdown (vision M1 bullet).
+2. Prepare the M1 LinkedIn post, "I built a system designed to break", with a dashboard screenshot. This is a human task.
+3. Decide on pushing the local chains.
+
+Then M2: the MCP server with read-only tools on logs, metrics and deploys (`docs/vision.md:154`).
 
 ## Local branch chains (not pushed)
 
@@ -43,6 +46,7 @@ Last fault of the M1 check: F4, "DB pool exhausted", with the symptom "500 error
 - `feat/lab-observability` → `-01-decisions` → `-02-metrics` → `-03-stack`
 - `feat/fault-f2` → `-01-gateway` → `-02-payment-failed` → `-03-payment-gauge` → `-04-order` → `-05-check`
 - `feat/fault-f3` → `-01-client-metrics` → `-02-check`
+- `feat/fault-f4` → `-01-inventory-data` → `-02-inventory-api` → `-03-order-inventory` → `-04-check`
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -56,7 +60,8 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - When to make the GitHub repository public. It is private for now; the vision assumes it is public from week 1.
 - Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service still stores an AUTHORIZED payment after order-service has timed out (observed).
 - Datasource socket timeout. Without one, a database that stops responding keeps the count refresh busy until TCP gives up. The gauges still show NaN after 10 s. A socket timeout would apply to every query, including F4's slow queries.
-- F3 decisions taken autonomously (see `odd/tasks/fault-f3.md`): whether to accept `ConnectException` as the evidence and reword `docs/vision.md:33`.
+- F3 and F4 decisions taken autonomously (see the feature documents): accept `ConnectException` as the F3 evidence and reword `docs/vision.md:33`? Accept the F4 design: reserve before saving, injection through compose variables?
+- Reservation release on payment failure or timeout. The stock leak under F4 belongs with reconciliation.
 
 ## Follow-ups
 
