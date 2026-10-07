@@ -43,7 +43,7 @@ public class SystemProcessRunner implements ProcessRunner {
 			catch (InterruptedException interrupted) {
 				killTree(process);
 				Thread.currentThread().interrupt();
-				throw new LabControlException("interrupted while waiting for " + command.argv().get(0)
+				throw new ProcessInterruptedException("interrupted while waiting for " + command.argv().get(0)
 						+ "; the process and its children were killed", interrupted);
 			}
 			if (!finished) {

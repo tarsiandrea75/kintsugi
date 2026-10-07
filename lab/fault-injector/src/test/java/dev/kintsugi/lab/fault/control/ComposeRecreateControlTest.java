@@ -239,7 +239,7 @@ class ComposeRecreateControlTest {
 
 	@Test
 	void anInterruptedRunNamesTheStepAndTheFaultAndKeepsTheCause() {
-		LabControlException interrupted = new LabControlException(
+		LabControlException interrupted = new ProcessInterruptedException(
 				"interrupted while waiting for docker; the process and its children were killed",
 				new InterruptedException());
 		runner.interruption = interrupted;
@@ -248,6 +248,15 @@ class ComposeRecreateControlTest {
 			.withMessage("compose restore of F3 was interrupted: interrupted while waiting for docker; the process and"
 					+ " its children were killed")
 			.withCause(interrupted);
+	}
+
+	@Test
+	void aRunnerFailureThatIsNotAnInterruptIsNotReportedAsOne() {
+		LabControlException other = new LabControlException("docker exploded");
+		runner.interruption = other;
+
+		assertThatExceptionOfType(LabControlException.class).isThrownBy(() -> control.restore(Fault.F3))
+			.isSameAs(other);
 	}
 
 	/**

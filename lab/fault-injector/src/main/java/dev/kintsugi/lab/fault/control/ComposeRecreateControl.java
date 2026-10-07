@@ -126,8 +126,8 @@ public class ComposeRecreateControl implements LabControl {
 			throw new LabControlException("compose " + step + " of " + fault.id() + " could not start: "
 					+ notStarted.getMessage(), notStarted);
 		}
-		catch (LabControlException interrupted) {
-			// The runner's contract: thrown only when this thread was interrupted; it has set the interrupt flag again.
+		catch (ProcessInterruptedException interrupted) {
+			// The runner killed the process tree and set the interrupt flag again; add the step and fault for the record.
 			throw new LabControlException("compose " + step + " of " + fault.id() + " was interrupted: "
 					+ interrupted.getMessage(), interrupted);
 		}

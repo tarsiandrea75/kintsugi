@@ -14,7 +14,7 @@ public interface ProcessRunner {
 	/**
 	 * Runs {@code command} to completion, or kills it when it outlives {@link Command#timeout()}.
 	 * @throws IOException the program could not be started
-	 * @throws LabControlException the calling thread was interrupted while waiting; the program and its children were
+	 * @throws ProcessInterruptedException the calling thread was interrupted while waiting; the program and its children were
 	 * killed and the thread's interrupt flag is set again
 	 */
 	Result run(Command command) throws IOException;

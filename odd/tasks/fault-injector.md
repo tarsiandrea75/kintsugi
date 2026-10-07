@@ -151,6 +151,7 @@ If an activation step fails partway, the injector attempts a restore, records `F
   - The interrupt message names the step and the fault again.
 
   88 tests. Real runs: F1 PASS in 110 s, F2 in 59 s, F3 in 91 s (stale fault variables exported on purpose), F4 in 79 s. ADR-009 and the spec list `DOCKER_GID` in the child environment.
+- 2026-10-07: review of `ab77636` (`review-4cea4cfa8fb233fe`) approved. Its WARNING is fixed: a dedicated `ProcessInterruptedException` means only real interrupts are reported as "interrupted". A new test passes any other runner failure through unchanged; it goes RED when the old broad catch is restored (mutation check). 89 tests. The remaining suggestions are recorded as follow-ups: the fault-variable list is duplicated in `lib.sh`, `start_lab` bypasses the compose helper, the Prometheus check is a substring match, and a 204 race can follow an injector transport failure.
 
 ## Next step
 
