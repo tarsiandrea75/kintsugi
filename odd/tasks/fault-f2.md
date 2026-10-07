@@ -99,6 +99,7 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
   - The `prom_stable_int` wait is a named constant, linked to the 5 s `scrape_interval`.
   - Re-run: `verify-f2.sh` PASS in 100 s.
   - Follow-ups (suggestions): `place_order` fails silently on a curl failure; `lib.sh`'s caller contract does not mention the `trap on_exit EXIT`; `expect_paid_order` takes a label fragment.
+- 2026-10-07: review of `5448610..9309599` approved (`review-f5e1371c084cc970`), suggestions only, recorded in the STATE follow-ups. Session closed (STATE, journal 2026-10-07-01).
 
 ## Next step
 
