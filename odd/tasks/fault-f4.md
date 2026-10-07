@@ -82,7 +82,7 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
 - [x] **T1 — inventory-service skeleton.** Initializr skeleton with the same ids as payment-service, the image pinned, `TestcontainersConfiguration` made public, and the pom tidied. Route: delegated writer.
 - [x] **T2 — inventory-service domain, persistence and API.** Spec first, tests first, the seed migration, atomic reservation, the delay hook and explicit pool settings. Route: delegated writer.
 - [x] **T3 — order-service inventory step.** `InventoryClient` with metrics, `OrderService` reserve-before-save, 409 and 503 handling, and the spec. Route: delegated writer.
-- [ ] **T4 — Compose, dashboard, verify-f4 and docs.** The inventory service and its database in compose; the F4 variables; the panels; `verify-f4.sh`; all four verify scripts run for real. Route: delegated writer.
+- [x] **T4 — Compose, dashboard, verify-f4 and docs.** The inventory service and its database in compose; the F4 variables; the panels; `verify-f4.sh`; all four verify scripts run for real. Route: delegated writer.
 
 ## Checks
 
@@ -111,7 +111,13 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
     - `OrderService` follows build → reserve → save → pay. A 409 means nothing is stored. An unavailable inventory gives a 503 with nothing stored and a WARN line.
     - A status that contradicts the HTTP code counts as unavailable.
   - Parent re-run, mvn exit 0: inventory-service 58 tests, order-service 148.
+- 2026-10-07: review of `177eaac..6854dc2` approved (`review-c53a4e081c82dcd4`). Its suggestion was applied in `28e3203`: `reserveStock` now uses an exhaustive switch on the outcome.
+- 2026-10-07: T4 done by a delegated writer.
+  - Compose runs inventory-service on `127.0.0.1:18083` with its own `inventory` database. F4 is injected through `INVENTORY_POOL_SIZE` and `INVENTORY_RESERVATION_DELAY`, and the binding was checked on the container: `hikaricp_connections_max` is 10 by default and 2 under F4.
+  - Two new panels: inventory DB pool and inventory 5xx rate.
+  - `verify-f4.sh`. Real runs on a fresh stack: F4 PASS in 109 s, with all 6 orders 503, pending 4, 4 Hikari timeouts and 4 inventory 500s. F1 PASS in 77 s, F2 PASS in 60 s, F3 PASS in 70 s.
+  - **To review:** under F4 even the orders whose reservation got a connection answer 503, because the 5 s delay exceeds order-service's 3 s read timeout. Inventory probably still commits those reservations, so stock leaks (not confirmed). This belongs to the reconciliation/release known limitation.
 
 ## Next step
 
-T4 (compose, dashboard, verify-f4, docs) via a delegated writer.
+Feature done. The M1 check is complete: F1–F4 are visible in Grafana, and each has a passing verify script.

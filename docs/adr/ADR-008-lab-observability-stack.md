@@ -49,6 +49,7 @@ Host ports, chosen away from ports other local projects already use (5432, 5433 
 | order-service | 18080 |
 | payment-service | 18081 |
 | gateway-mock | 18082 |
+| inventory-service | 18083 (added with fault F4) |
 | Grafana | 13000 |
 | Prometheus | 19090 |
 

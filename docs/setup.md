@@ -112,7 +112,7 @@ Each change is logged at `INFO`. The behavior is in the [living spec](../openspe
 
 ## Lab with Docker Compose
 
-One command starts the whole M1 lab: PostgreSQL, the three services, Prometheus, Loki, Alloy and Grafana (ADR-008, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
+One command starts the whole M1 lab: PostgreSQL, the four services, Prometheus, Loki, Alloy and Grafana (ADR-008, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
 
 ```bash
 docker compose -f infra/compose.yaml up -d --build --wait   # start; the first build takes about a minute
@@ -127,6 +127,7 @@ The compose project is called `kintsugi-lab`, so these commands never touch othe
 | order-service | <http://localhost:18080> |
 | payment-service | <http://localhost:18081> |
 | gateway-mock | <http://localhost:18082> |
+| inventory-service | <http://localhost:18083> |
 | Grafana | <http://localhost:13000> |
 | Prometheus | <http://localhost:19090> |
 
@@ -212,6 +213,42 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F3, "o
    ```
 
 Why F3 looks different from F1: both leave the order `PAYMENT_PENDING`, but under F3 no request reaches payment-service. The call fails at once with `ConnectException` instead of waiting 3 s for `HttpTimeoutException`, and the gateway in-flight gauge stays 0.
+
+### Check that F4 is visible
+
+```bash
+infra/scripts/verify-f4.sh          # start or reuse the lab, run the checks, leave it running
+infra/scripts/verify-f4.sh --down   # the same, then `down -v`
+```
+
+The script places a healthy order (`PAID`), then recreates inventory-service with a pool of 2 connections and a 5 s reservation query (`INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s`). It fires six concurrent orders and checks that at least one answers 503 and every other one is 201 `PAID`. It then checks that Prometheus sees inventory's 5xx count on `/reservations` rise and the pool's pending connections reach 1 or its timeouts rise, and that Loki has order-service's `Inventory unavailable` or inventory-service's `No database connection available` `WARN` line. Last, it recreates inventory-service with its defaults and checks that a new order is `PAID` again. It always restores inventory-service on exit, even when a check fails. Output and exit status work as in the F1 check. It takes about 2 minutes on a fresh stack.
+
+### Reproduce F4 by hand
+
+With the compose lab running, watch the "Lab — Faults" dashboard: under F4, "inventory DB pool" shows active connections at 2 with pending connections and timeouts, and "inventory 5xx rate" shows `/reservations 500`.
+
+1. Redeploy inventory-service with a pool of 2 and a slow reservation query. The delay is a lab-only fault hook: each reservation holds its pooled connection for that long.
+
+   ```bash
+   INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service
+   ```
+
+2. Place six orders at once. Every one answers 503 and nothing is stored. Four fail after about 2 s: inventory finds no free connection within its 2 s connection timeout, answers 500, and logs `No database connection available: HikariPool-1 - Connection is not available, request timed out after 2001ms`. The two that got a connection fail after 3 s, order-service's inventory read timeout. order-service logs `Inventory unavailable for order <id>, order not stored: ...` for each:
+
+   ```bash
+   for i in 1 2 3 4 5 6; do
+     curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:18080/orders -H 'Content-Type: application/json' \
+       -d '{"customerId": "customer-1", "items": [{"sku": "SKU-1", "quantity": 1}]}' &
+   done; wait
+   ```
+
+3. Restore inventory-service with its defaults (pool of 10, no delay); the next order is `PAID` again:
+
+   ```bash
+   docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service
+   ```
+
+Why F4 looks different from F3: the symptom is again an error on order, but the root cause is inside inventory-service's own resources. Its pool metrics (`hikaricp_connections_pending`, `hikaricp_connections_timeout_total`) show the exhaustion, while inventory's database and its other dependencies are healthy.
 
 ## Run the lab services without Docker Compose
 

@@ -1,15 +1,15 @@
-# Shared helpers for the fault visibility checks (verify-f1.sh, verify-f2.sh, verify-f3.sh). Source it; do not run it.
+# Shared helpers for the fault visibility checks (verify-f1.sh … verify-f4.sh). Source it; do not run it.
 # The caller sets "set -euo pipefail", defines usage(), then calls parse_args "$@" and start_lab.
 
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose.yaml"
 ORDERS=http://127.0.0.1:18080
 GATEWAY=http://127.0.0.1:18082
 PROMETHEUS=http://127.0.0.1:19090
-SERVICES=(order-service payment-service gateway-mock)
+SERVICES=(order-service payment-service gateway-mock inventory-service)
 LOKI_WAIT_SECONDS=180
 CHECK_WAIT_SECONDS=60
-# Transport cap for POST /orders (curl --max-time), not a pass threshold: order-service answers within its 3 s payment
-# read timeout; the margin covers the rest of the request.
+# Transport cap for POST /orders (curl --max-time), not a pass threshold: order-service answers within its 3 s inventory
+# and 3 s payment read timeouts; the margin covers the rest of the request.
 ORDER_MAX_SECONDS=15
 CURL_MAX_SECONDS=5
 

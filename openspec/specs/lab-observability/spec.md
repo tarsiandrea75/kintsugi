@@ -2,13 +2,13 @@
 
 ## Purpose
 
-The lab observability stack makes injected faults visible. One Docker Compose command starts the M1 lab (PostgreSQL, order-service, payment-service, gateway-mock) with Prometheus, Loki, Alloy and Grafana. A provisioned dashboard shows faults F1, F2 and F3 while they are active. Prometheus (PromQL) and Loki (LogQL) are also the query APIs the agent will use in M2. Design: [feature document](../../../odd/tasks/lab-observability.md) and, for F2 and F3, [fault F2](../../../odd/tasks/fault-f2.md) and [fault F3](../../../odd/tasks/fault-f3.md). Stack and versions: [ADR-008](../../../docs/adr/ADR-008-lab-observability-stack.md). Verified by `./mvnw test` in each `lab/*` service and by `infra/scripts/verify-f1.sh`, `infra/scripts/verify-f2.sh` and `infra/scripts/verify-f3.sh`.
+The lab observability stack makes injected faults visible. One Docker Compose command starts the M1 lab (PostgreSQL, order-service, payment-service, gateway-mock, inventory-service) with Prometheus, Loki, Alloy and Grafana. A provisioned dashboard shows faults F1, F2, F3 and F4 while they are active. Prometheus (PromQL) and Loki (LogQL) are also the query APIs the agent will use in M2. Design: [feature document](../../../odd/tasks/lab-observability.md) and, for F2 and F3, [fault F2](../../../odd/tasks/fault-f2.md) and [fault F3](../../../odd/tasks/fault-f3.md) and [fault F4](../../../odd/tasks/fault-f4.md). Stack and versions: [ADR-008](../../../docs/adr/ADR-008-lab-observability-stack.md). Verified by `./mvnw test` in each `lab/*` service and by `infra/scripts/verify-f1.sh`, `infra/scripts/verify-f2.sh`, `infra/scripts/verify-f3.sh` and `infra/scripts/verify-f4.sh`.
 
 ## Requirements
 
 ### Requirement: Every service exposes Prometheus metrics
 
-order-service, payment-service and gateway-mock MUST expose `/actuator/prometheus` in the Prometheus text format, with the actuator exposure set to `health,prometheus`. Each MUST export the Spring HTTP server timer `http_server_requests_seconds`. gateway-mock MUST also export `gateway_authorize_inflight`, order-service MUST export `lab_orders` (see "Orders-by-status gauge"), and payment-service MUST export `lab_payments` (see "Payments-by-status gauge").
+order-service, payment-service, gateway-mock and inventory-service MUST expose `/actuator/prometheus` in the Prometheus text format, with the actuator exposure set to `health,prometheus`. Each MUST export the Spring HTTP server timer `http_server_requests_seconds`. gateway-mock MUST also export `gateway_authorize_inflight`, order-service MUST export `lab_orders` (see "Orders-by-status gauge"), payment-service MUST export `lab_payments` (see "Payments-by-status gauge"), and inventory-service MUST export the Hikari pool metrics `hikaricp_connections_active`, `hikaricp_connections_idle`, `hikaricp_connections_pending`, `hikaricp_connections_max` and `hikaricp_connections_timeout_total`.
 
 #### Scenario: Scrape a service
 - GIVEN a running service that has served at least one HTTP request
@@ -17,16 +17,17 @@ order-service, payment-service and gateway-mock MUST expose `/actuator/prometheu
 - AND the body contains `http_server_requests_seconds_count`
 
 #### Scenario: Service-specific metrics
-- GIVEN gateway-mock, order-service and payment-service are running
+- GIVEN gateway-mock, order-service, payment-service and inventory-service are running
 - WHEN each is scraped
 - THEN gateway-mock's body contains `gateway_authorize_inflight`
 - AND order-service's body contains `lab_orders`
 - AND payment-service's body contains `lab_payments`
+- AND inventory-service's body contains `hikaricp_connections_pending`
 
 #### Scenario: Prometheus scrapes every service
 - GIVEN the compose stack is up
 - WHEN Prometheus' targets are listed
-- THEN the three services are targets with health `up`
+- THEN the four services are targets with health `up`, each with the label `service` set to its compose service name
 
 ### Requirement: Orders-by-status gauge
 
@@ -53,7 +54,7 @@ payment-service MUST export the gauge `lab_payments` (Micrometer name `lab.payme
 
 ### Requirement: Logs reach Loki labelled by service
 
-Alloy MUST read the Docker logs of the three services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`).
+Alloy MUST read the Docker logs of the four services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`, `inventory-service`).
 
 #### Scenario: Query a service's logs
 - GIVEN the compose stack is up and order-service has logged a line
@@ -73,15 +74,19 @@ Grafana MUST start with the Prometheus and Loki datasources and the "Lab — Fau
 | Payments by status | `lab_payments` by `status` |
 | Gateway rejections | Loki, per-minute count of payment-service's "Gateway rejected the payment" `WARN` lines |
 | order-service → payment calls by outcome | rate of `http_client_requests_seconds_count` of order-service with `client_name="payment-service"`, by `outcome` and `exception` |
+| inventory DB pool | `hikaricp_connections_active`, `hikaricp_connections_idle`, `hikaricp_connections_pending` and the rate of `hikaricp_connections_timeout_total`, all with `service="inventory-service"` |
+| inventory 5xx rate | rate of `http_server_requests_seconds_count{service="inventory-service",status=~"5.."}`, by `uri` and `status` |
 
 "Gateway rejections" counts log lines rather than reusing `lab_payments`: it names the cause (the gateway's 429) from a second, independent source, while "Payments by status" shows the effect.
 
 "order-service → payment calls by outcome" tells F3 from F1, which both leave orders in `PAYMENT_PENDING`: under F3 the calls fail at once with `exception="ConnectException"`, under F1 they end after the read timeout with `exception="HttpTimeoutException"`.
 
+"inventory DB pool" shows F4's root cause inside inventory-service: active connections at the pool size, pending connections above 0 and timeouts rising. "inventory 5xx rate" shows its first symptom, the 500s on `/reservations`.
+
 #### Scenario: Open the dashboard
 - GIVEN the compose stack is up
 - WHEN `http://localhost:13000` is opened without logging in
-- THEN the "Lab — Faults" dashboard is listed and shows the seven panels
+- THEN the "Lab — Faults" dashboard is listed and shows the nine panels
 - AND both datasources are configured
 
 ### Requirement: F1 visibility check
@@ -145,15 +150,39 @@ It MUST exit non-zero when any assertion fails, and MUST restore order-service w
 - THEN it exits 0
 - AND order-service runs with `KINTSUGI_PAYMENT_BASEURL=http://payment-service:8081` afterwards
 
+### Requirement: F4 visibility check
+
+Fault F4 is an exhausted database connection pool in inventory-service. `infra/compose.yaml` MUST set inventory-service's `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE` from `INVENTORY_POOL_SIZE`, defaulting to 10, and its `KINTSUGI_INVENTORY_RESERVATIONDELAY` from `INVENTORY_RESERVATION_DELAY`, defaulting to `0s`. F4 recreates inventory-service with `INVENTORY_POOL_SIZE=2` and `INVENTORY_RESERVATION_DELAY=5s`: every reservation holds one of two connections for 5 s, and a request that finds no free connection within the 2 s connection timeout gets a 500.
+
+`infra/scripts/verify-f4.sh` MUST bring the compose stack up, or use a running one, and wait until it is healthy. It then MUST:
+
+1. place a healthy order and assert it is `PAID`;
+2. inject F4 by recreating inventory-service with both variables (`docker compose up -d --no-deps --wait inventory-service`);
+3. read the baselines of inventory's 5xx count on `/reservations` and of `hikaricp_connections_timeout_total` after the recreate, because the new process starts its counters from zero;
+4. place six orders concurrently;
+5. assert that at least one answers 503 and that every answer is either 503 or 201 `PAID`;
+6. assert through the Prometheus HTTP API that inventory's 5xx count rose by at least 1, and that `hikaricp_connections_pending` reached at least 1 since the injection or the timeout count rose;
+7. assert through the Loki API that, since the injection, order-service logged its `Inventory unavailable` `WARN` line or inventory-service logged its `No database connection available` `WARN` line;
+8. recreate inventory-service without the variables and assert that a new order is `PAID` again.
+
+It MUST exit non-zero when any assertion fails, and MUST restore inventory-service whatever the outcome.
+
+#### Scenario: F4 is visible and the lab recovers
+- GIVEN Docker is running
+- WHEN `infra/scripts/verify-f4.sh` runs
+- THEN it exits 0
+- AND inventory-service runs with a pool of 10 connections and no reservation delay afterwards
+
 ### Requirement: Compose startup and host ports
 
-`docker compose -f infra/compose.yaml up -d` MUST start every container healthy, with healthchecks and `depends_on` conditions. One PostgreSQL 18.6 container MUST hold the `orders` and `payments` databases. Services MUST reach each other by compose service name. Only these host ports MUST be published, each bound to `127.0.0.1` so the lab is not reachable from the network:
+`docker compose -f infra/compose.yaml up -d` MUST start every container healthy, with healthchecks and `depends_on` conditions. One PostgreSQL 18.6 container MUST hold the `orders`, `payments` and `inventory` databases. Services MUST reach each other by compose service name. Only these host ports MUST be published, each bound to `127.0.0.1` so the lab is not reachable from the network:
 
 | Container | Host port |
 |-----------|-----------|
 | order-service | 18080 |
 | payment-service | 18081 |
 | gateway-mock | 18082 |
+| inventory-service | 18083 |
 | Grafana | 13000 |
 | Prometheus | 19090 |
 
@@ -168,5 +197,5 @@ PostgreSQL, Loki and Alloy MUST NOT be published on the host.
 
 - **No traces.** Cross-service latency is inferred from metrics and logs; OTLP and Tempo come with the agent in M2+ (ADR-008).
 - **No alerting.** Nothing fires when a fault is active; alerting comes with the agent's perception module.
-- **Only F1, F2 and F3 are visible.** Fault F4 and its panel are not built yet.
-- **F3 is injected by hand.** Until the fault injector exists, `verify-f3.sh` and the manual recipe in `docs/setup.md` recreate order-service with `ORDER_PAYMENT_BASEURL` set.
+- **Only F1 to F4 are visible.** The later faults and their panels are not built yet.
+- **F3 and F4 are injected by hand.** Until the fault injector exists, `verify-f3.sh`, `verify-f4.sh` and the manual recipes in `docs/setup.md` recreate the service with compose variables set.

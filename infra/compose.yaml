@@ -1,9 +1,9 @@
-# Kintsugi M1 lab: PostgreSQL, the three services and the observability stack (ADR-007, ADR-008).
+# Kintsugi M1 lab: PostgreSQL, the four services and the observability stack (ADR-007, ADR-008).
 #
 #   docker compose -f infra/compose.yaml up -d --build --wait
 #   docker compose -f infra/compose.yaml down -v
 #
-# Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082,
+# Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082, inventory-service 18083,
 # Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090. Every port is bound to 127.0.0.1 only.
 # Grafana's admin password comes from GRAFANA_ADMIN_PASSWORD (see infra/.env.example).
 # PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by service name.
@@ -62,6 +62,29 @@ services:
       start_period: 60s
       start_interval: 2s
 
+  inventory-service:
+    build: ../lab/inventory-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory
+      SPRING_DATASOURCE_USERNAME: lab
+      SPRING_DATASOURCE_PASSWORD: lab
+      # Fault F4 (DB pool exhausted) sets INVENTORY_POOL_SIZE=2 and INVENTORY_RESERVATION_DELAY=5s, then recreates
+      # this service; see verify-f4.sh. The delay is a lab-only fault hook that holds a pooled connection.
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: ${INVENTORY_POOL_SIZE:-10}
+      KINTSUGI_INVENTORY_RESERVATIONDELAY: ${INVENTORY_RESERVATION_DELAY:-0s}
+    ports:
+      - "127.0.0.1:18083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8083/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
   order-service:
     build: ../lab/order-service
     environment:
@@ -70,12 +93,15 @@ services:
       SPRING_DATASOURCE_PASSWORD: lab
       # Fault F3 (wrong configuration) sets ORDER_PAYMENT_BASEURL to a port where nothing listens; see verify-f3.sh.
       KINTSUGI_PAYMENT_BASEURL: ${ORDER_PAYMENT_BASEURL:-http://payment-service:8081}
+      KINTSUGI_INVENTORY_BASEURL: http://inventory-service:8083
     ports:
       - "127.0.0.1:18080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       payment-service:
+        condition: service_healthy
+      inventory-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/actuator/health"]
