@@ -30,9 +30,15 @@ public class StockRepository {
 
 	/**
 	 * Takes {@code quantity} units of {@code sku} if that many are available.
+	 * @param quantity units to take, positive: zero would "succeed" without taking anything and a negative quantity
+	 * would add stock
 	 * @return {@code false} when the SKU is unknown or has fewer units; nothing changes then
+	 * @throws IllegalArgumentException when {@code quantity} is zero or negative
 	 */
 	public boolean take(String sku, int quantity) {
+		if (quantity <= 0) {
+			throw new IllegalArgumentException("quantity must be positive, was " + quantity);
+		}
 		int updated = jdbc.sql("UPDATE stock SET available = available - ? WHERE sku = ? AND available >= ?")
 			.params(quantity, sku, quantity)
 			.update();

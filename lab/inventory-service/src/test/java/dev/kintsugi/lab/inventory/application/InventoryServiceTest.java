@@ -5,8 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.jdbc.test.autoconfigure.DataJdbcTest;
@@ -87,6 +93,47 @@ class InventoryServiceTest {
 		assertThat(service.reserve(reservationOf(new ReservationLine(a, 2), new ReservationLine(a, 2))))
 			.isEqualTo(ReservationStatus.INSUFFICIENT_STOCK);
 		assertThat(available(a)).isEqualTo(3);
+	}
+
+	@Test
+	void repeatedSkuLinesBeyondAnIntAreInsufficient() {
+		String a = newSku(5);
+
+		assertThat(service.reserve(reservationOf(new ReservationLine(a, Integer.MAX_VALUE), new ReservationLine(a, 1))))
+			.isEqualTo(ReservationStatus.INSUFFICIENT_STOCK);
+		assertThat(available(a)).isEqualTo(5);
+	}
+
+	/**
+	 * Two reservations name the same SKUs in opposite orders. If rows were locked in request order, one transaction
+	 * would hold the first half and wait for the second while the other did the reverse, and PostgreSQL would abort
+	 * one with a deadlock. Locking in SKU order makes both succeed every time. Forty SKUs per reservation make the
+	 * two transactions cross on almost every run when the order is not fixed.
+	 */
+	@Test
+	@Timeout(10)
+	void reservationsWithOppositeSkuOrdersDoNotDeadlock() throws Exception {
+		int skuCount = 40;
+		int iterations = 20;
+		List<String> skus = IntStream.range(0, skuCount).mapToObj(i -> newSku(1_000)).toList();
+		List<ReservationLine> forward = skus.stream().map(sku -> new ReservationLine(sku, 1)).toList();
+		List<ReservationLine> backward = forward.reversed();
+
+		try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+			for (int i = 0; i < iterations; i++) {
+				CyclicBarrier start = new CyclicBarrier(2);
+				Future<ReservationStatus> first = pool.submit(() -> reserveAfter(start, forward));
+				Future<ReservationStatus> second = pool.submit(() -> reserveAfter(start, backward));
+
+				assertThat(List.of(first.get(), second.get())).containsOnly(ReservationStatus.RESERVED);
+			}
+		}
+		assertThat(skus).allSatisfy(sku -> assertThat(available(sku)).isEqualTo(1_000 - 2 * iterations));
+	}
+
+	private ReservationStatus reserveAfter(CyclicBarrier start, List<ReservationLine> lines) throws Exception {
+		start.await();
+		return service.reserve(new Reservation(UUID.randomUUID(), lines));
 	}
 
 	@Test

@@ -2,11 +2,14 @@ package dev.kintsugi.lab.inventory.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jdbc.test.autoconfigure.DataJdbcTest;
 import org.springframework.context.annotation.Import;
@@ -58,6 +61,15 @@ class StockRepositoryTest {
 	@Test
 	void takeOfAnUnknownSkuChangesNothing() {
 		assertThat(repository.take("NO-SUCH-SKU", 1)).isFalse();
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 0, -1 })
+	void takeRejectsAQuantityThatIsNotPositive(int quantity) {
+		String sku = newSku(5);
+
+		assertThatIllegalArgumentException().isThrownBy(() -> repository.take(sku, quantity));
+		assertThat(repository.find(sku)).contains(new Stock(sku, 5));
 	}
 
 	@Test

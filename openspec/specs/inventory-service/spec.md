@@ -10,7 +10,9 @@ A stock row has a SKU (at most 64 characters) and an available quantity that is 
 
 ### Requirement: Reserve stock atomically
 
-`POST /reservations` with a valid body MUST, in one database transaction, subtract each line's quantity from the available stock of its SKU, and return 201 with `{"orderId": "<order id>", "status": "RESERVED"}`. Each line is a conditional update (`available = available - quantity` only where `available >= quantity`), so two concurrent reservations can never take the same units.
+`POST /reservations` with a valid body MUST, in one database transaction, subtract each line's quantity from the available stock of its SKU, and return 201 with `{"orderId": "<order id>", "status": "RESERVED"}`. Each SKU is a conditional update (`available = available - quantity` only where `available >= quantity`), so two concurrent reservations can never take the same units.
+
+Lines for the same SKU add up: they are merged into one quantity per SKU before any update. The merged SKUs MUST then be applied in ascending SKU order, whatever order the request lists them in. Every reservation therefore locks its stock rows in the same order, so two concurrent reservations that name the same SKUs in different orders MUST both complete and never fail with a database deadlock.
 
 #### Scenario: Stock is reserved
 - GIVEN SKU `SKU-1` with available stock of at least 2 and `SKU-2` with at least 1
@@ -19,9 +21,21 @@ A stock row has a SKU (at most 64 characters) and an available quantity that is 
 - AND the body is the order id with status `RESERVED`
 - AND the available stock of `SKU-1` is 2 lower and that of `SKU-2` is 1 lower
 
+#### Scenario: Repeated SKU lines add up
+- GIVEN SKU A with available stock 3
+- WHEN a reservation asks for A × 2 and A × 2
+- THEN the result is `INSUFFICIENT_STOCK`, because together the lines ask for 4
+- AND the available stock of A is still 3
+
+#### Scenario: Opposite SKU orders do not deadlock
+- GIVEN 40 SKUs with enough stock
+- WHEN two reservations of those SKUs, one listing them in ascending and one in descending order, run at the same time, 20 times over
+- THEN every reservation is `RESERVED`
+- AND no reservation fails with a deadlock
+
 ### Requirement: Insufficient stock returns 409 and changes nothing
 
-When any line asks for more than the available stock of its SKU, or names a SKU that does not exist, `POST /reservations` MUST return 409 with `{"orderId": "<order id>", "status": "INSUFFICIENT_STOCK"}` and MUST roll back every line of the reservation, including lines that could have been reserved.
+When any SKU's merged quantity is more than its available stock, or a line names a SKU that does not exist, `POST /reservations` MUST return 409 with `{"orderId": "<order id>", "status": "INSUFFICIENT_STOCK"}` and MUST roll back every line of the reservation, including lines that could have been reserved.
 
 #### Scenario: Second line is short
 - GIVEN SKU A with available stock 5 and SKU B with available stock 1

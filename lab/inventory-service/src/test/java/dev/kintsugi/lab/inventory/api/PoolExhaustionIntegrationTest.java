@@ -48,6 +48,9 @@ class PoolExhaustionIntegrationTest {
 		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
 		assertThat(statuses).containsExactly(201, 500);
+		// Assumes the two requests overlap: both are sent at once and the first holds the only connection for 1 s,
+		// far longer than it takes the second to arrive. If the second started after the first had finished, both
+		// would answer 201. The 5 s bound shows the 500 came from the 250 ms timeout, not from waiting out the delay.
 		assertThat(elapsed).isLessThan(Duration.ofSeconds(5));
 		assertThat(output.getAll().lines()
 			.filter(line -> line.contains(" WARN ") && line.contains("No database connection available")

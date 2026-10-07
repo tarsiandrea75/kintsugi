@@ -3,6 +3,7 @@ package dev.kintsugi.lab.inventory.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
+import static org.assertj.core.api.Assertions.entry;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,15 +49,32 @@ class ReservationTest {
 	}
 
 	@Test
-	void atMostOneHundredLinesAreAccepted() {
+	void atMostMaxLinesAreAccepted() {
 		List<ReservationLine> hundred = java.util.stream.IntStream.range(0, Reservation.MAX_LINES)
 			.mapToObj(i -> new ReservationLine("SKU-1", 1))
 			.toList();
 		List<ReservationLine> tooMany = new ArrayList<>(hundred);
 		tooMany.add(new ReservationLine("SKU-1", 1));
 
-		assertThat(new Reservation(ORDER_ID, hundred).lines()).hasSize(100);
+		assertThat(new Reservation(ORDER_ID, hundred).lines()).hasSize(Reservation.MAX_LINES);
 		assertThatIllegalArgumentException().isThrownBy(() -> new Reservation(ORDER_ID, tooMany));
+	}
+
+	@Test
+	void quantitiesBySkuMergesRepeatedSkusAndSortsBySku() {
+		Reservation reservation = new Reservation(ORDER_ID, List.of(new ReservationLine("SKU-3", 1),
+				new ReservationLine("SKU-1", 2), new ReservationLine("SKU-3", 4), new ReservationLine("SKU-2", 1)));
+
+		assertThat(reservation.quantitiesBySku()).containsExactly(entry("SKU-1", 2L), entry("SKU-2", 1L),
+				entry("SKU-3", 5L));
+	}
+
+	@Test
+	void quantitiesBySkuDoesNotOverflowWhenRepeatedLinesExceedAnInt() {
+		Reservation reservation = new Reservation(ORDER_ID,
+				List.of(new ReservationLine("SKU-1", Integer.MAX_VALUE), new ReservationLine("SKU-1", 1)));
+
+		assertThat(reservation.quantitiesBySku()).containsExactly(entry("SKU-1", Integer.MAX_VALUE + 1L));
 	}
 
 	@ParameterizedTest
@@ -72,9 +90,10 @@ class ReservationTest {
 	}
 
 	@Test
-	void skuIsAtMostSixtyFourCharacters() {
-		assertThat(new ReservationLine("S".repeat(64), 1).sku()).hasSize(64);
-		assertThatIllegalArgumentException().isThrownBy(() -> new ReservationLine("S".repeat(65), 1));
+	void skuIsAtMostMaxSkuLengthCharacters() {
+		int max = ReservationLine.MAX_SKU_LENGTH;
+		assertThat(new ReservationLine("S".repeat(max), 1).sku()).hasSize(max);
+		assertThatIllegalArgumentException().isThrownBy(() -> new ReservationLine("S".repeat(max + 1), 1));
 		assertThatNullPointerException().isThrownBy(() -> new ReservationLine(null, 1));
 	}
 

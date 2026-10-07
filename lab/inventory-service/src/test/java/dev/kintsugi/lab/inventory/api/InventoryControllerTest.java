@@ -1,11 +1,13 @@
 package dev.kintsugi.lab.inventory.api;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -16,9 +18,12 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
@@ -33,6 +38,7 @@ import dev.kintsugi.lab.inventory.domain.ReservationStatus;
 import dev.kintsugi.lab.inventory.domain.Stock;
 
 @WebMvcTest(InventoryController.class)
+@ExtendWith(OutputCaptureExtension.class)
 class InventoryControllerTest {
 
 	private static final UUID ORDER_ID = UUID.fromString("55555555-5555-5555-5555-555555555555");
@@ -90,21 +96,44 @@ class InventoryControllerTest {
 		verify(service, never()).reserve(any());
 	}
 
+	/**
+	 * Spring would answer 500 without the handler too, so the status alone proves nothing: the ProblemDetail body and
+	 * the single WARN line with the pool's message are what only the handler produces.
+	 */
 	@Test
-	void exhaustedPoolIsInternalServerError() throws Exception {
+	void exhaustedPoolIsInternalServerErrorWithOneWarnLine(CapturedOutput output) throws Exception {
 		given(service.reserve(any())).willThrow(new CannotCreateTransactionException("Could not open JDBC Connection",
 				new java.sql.SQLTransientConnectionException(
 						"HikariPool-1 - Connection is not available, request timed out after 250ms")));
 
 		mvc.perform(post("/reservations").contentType(MediaType.APPLICATION_JSON).content(validBody()))
-			.andExpect(status().isInternalServerError());
+			.andExpect(status().isInternalServerError())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(500))
+			.andExpect(jsonPath("$.detail").value("No database connection available"));
+
+		assertThat(warnLines(output, "Connection is not available, request timed out after 250ms")).hasSize(1);
 	}
 
 	@Test
-	void noConnectionOnReadIsInternalServerError() throws Exception {
+	void noConnectionOnReadIsInternalServerErrorWithOneWarnLine(CapturedOutput output) throws Exception {
 		given(service.stock("SKU-1")).willThrow(new CannotGetJdbcConnectionException("Failed to obtain JDBC Connection"));
 
-		mvc.perform(get("/stock/SKU-1")).andExpect(status().isInternalServerError());
+		mvc.perform(get("/stock/SKU-1"))
+			.andExpect(status().isInternalServerError())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(500))
+			.andExpect(jsonPath("$.detail").value("No database connection available"));
+
+		assertThat(warnLines(output, "Failed to obtain JDBC Connection")).hasSize(1);
+	}
+
+	private static List<String> warnLines(CapturedOutput output, String cause) {
+		return output.getAll()
+			.lines()
+			.filter(line -> line.contains(" WARN ") && line.contains("No database connection available: ")
+					&& line.contains(cause))
+			.toList();
 	}
 
 	@Test
