@@ -119,6 +119,15 @@ class OrderApiIntegrationTest {
 	}
 
 	@Test
+	void failedPaymentIsStoredAsPaymentFailed() throws Exception {
+		PAYMENT.replyWith(201, "FAILED");
+
+		String id = postValidOrderExpecting("PAYMENT_FAILED");
+
+		assertThat(storedStatus(id)).isEqualTo("PAYMENT_FAILED");
+	}
+
+	@Test
 	void paymentTimeoutLeavesOrderPendingAndStillCreatesIt() throws Exception {
 		PAYMENT.replyAfter(READ_TIMEOUT.multipliedBy(5));
 

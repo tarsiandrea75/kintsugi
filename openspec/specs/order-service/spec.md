@@ -30,7 +30,7 @@ An order has an id (UUID), a customer id, a list of items (SKU and quantity), a 
 After storing a new order, order-service MUST move it to `PAYMENT_PENDING`, save it, and only then call `POST /payments` on payment-service with body `{"orderId": "<order id>"}`. No database transaction spans the call. Then:
 
 - when payment-service answers 2xx with status `AUTHORIZED`, the order MUST move to `PAID` and be saved;
-- when it answers 2xx with status `DECLINED`, the order MUST move to `PAYMENT_FAILED` and be saved;
+- when it answers 2xx with status `DECLINED` or `FAILED`, the order MUST move to `PAYMENT_FAILED` and be saved. `FAILED` means the gateway rejected the payment with a 429 (fault F2); the order ends as it does after a decline, and the difference stays in payment-service's record;
 - when the call times out (connect or read), cannot connect, gets a non-2xx response, or gets a body without a known status, the order MUST stay `PAYMENT_PENDING`, and order-service MUST log a `WARN` line with the order id and the cause. This is the visible symptom of fault F1 (slow gateway).
 
 The client MUST read its settings from these properties, so the fault injector can change them:
@@ -54,6 +54,12 @@ The client MUST read its settings from these properties, so the fault injector c
 - THEN the response status is 201 and the order status is `PAYMENT_FAILED`
 - AND the stored order has status `PAYMENT_FAILED`
 
+#### Scenario: Payment failed (fault F2)
+- GIVEN payment-service answers `FAILED`
+- WHEN `POST /orders` is called with a valid body
+- THEN the response status is 201 and the order status is `PAYMENT_FAILED`
+- AND the stored order has status `PAYMENT_FAILED`
+
 #### Scenario: Payment times out
 - GIVEN payment-service answers only after the read timeout
 - WHEN `POST /orders` is called with a valid body
@@ -62,7 +68,7 @@ The client MUST read its settings from these properties, so the fault injector c
 - AND a `WARN` line names the order id and the cause
 
 #### Scenario: Payment-service unreachable or failing
-- GIVEN payment-service refuses connections, or does not complete the TCP handshake within the connect timeout, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED` or `DECLINED`
+- GIVEN payment-service refuses connections, or does not complete the TCP handshake within the connect timeout, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED`, `DECLINED` or `FAILED`
 - WHEN an order is placed
 - THEN the order stays `PAYMENT_PENDING`
 - AND `POST /orders` still returns 201
@@ -260,5 +266,5 @@ The database schema MUST be created by a Flyway migration. Customer ids and SKUs
 ## Known limitations
 
 - **A read timeout leaves the payment outcome unknown.** The request reached payment-service, which may already have stored a payment, but the order stays `PAYMENT_PENDING`.
-- **Saving the outcome can fail after payment-service has decided.** If the save after the payment call fails (a database error, or an optimistic lock failure), `POST /orders` returns 500 and the order stays `PAYMENT_PENDING`, although payment-service has stored an `AUTHORIZED` or `DECLINED` payment.
+- **Saving the outcome can fail after payment-service has decided.** If the save after the payment call fails (a database error, or an optimistic lock failure), `POST /orders` returns 500 and the order stays `PAYMENT_PENDING`, although payment-service has stored an `AUTHORIZED`, `DECLINED` or `FAILED` payment.
 - **There is no reconciliation yet.** Nothing brings a `PAYMENT_PENDING` order in line with payment-service later. Reconciliation is a future feature, planned together with the fault injector, which may inject this inconsistency on purpose.

@@ -57,6 +57,14 @@ class PaymentClientTest {
 		assertThat(client.pay(ORDER_ID)).isEqualTo(PaymentOutcome.DECLINED);
 	}
 
+	// Fault F2: payment-service stored the payment as FAILED because the gateway answered 429.
+	@Test
+	void failedPaymentIsFailed() {
+		server.replyWith(201, "FAILED");
+
+		assertThat(client.pay(ORDER_ID)).isEqualTo(PaymentOutcome.FAILED);
+	}
+
 	@Test
 	void requestPostsTheOrderIdAsJson() {
 		client.pay(ORDER_ID);

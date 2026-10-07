@@ -19,7 +19,8 @@ import dev.kintsugi.lab.order.persistence.OrderRepository;
  *
  * <p>The pending order is saved before the call, and no transaction spans the call, so a database connection is
  * never held while waiting for payment-service. If payment-service gives no usable answer the order stays
- * {@code PAYMENT_PENDING}: that is the visible symptom of fault F1 (slow gateway).
+ * {@code PAYMENT_PENDING}: that is the visible symptom of fault F1 (slow gateway). A payment that failed because the
+ * gateway rejected it with 429 moves the order to {@code PAYMENT_FAILED}: the symptom of fault F2.
  */
 @Service
 public class OrderService {
@@ -37,7 +38,8 @@ public class OrderService {
 
 	/**
 	 * Takes a new order in {@code CREATED} through the payment step and returns it in its final state:
-	 * {@code PAID}, {@code PAYMENT_FAILED}, or {@code PAYMENT_PENDING} when payment-service is unavailable.
+	 * {@code PAID}, {@code PAYMENT_FAILED} (payment declined or failed), or {@code PAYMENT_PENDING} when payment-service
+	 * is unavailable.
 	 */
 	public Order place(Order order) {
 		order.transitionTo(OrderStatus.PAYMENT_PENDING);
@@ -51,7 +53,11 @@ public class OrderService {
 					ex.getMessage());
 			return pending;
 		}
-		pending.transitionTo(outcome == PaymentOutcome.AUTHORIZED ? OrderStatus.PAID : OrderStatus.PAYMENT_FAILED);
+		// FAILED ends like DECLINED; the difference (rejected vs declined) stays in payment-service's record.
+		pending.transitionTo(switch (outcome) {
+			case AUTHORIZED -> OrderStatus.PAID;
+			case DECLINED, FAILED -> OrderStatus.PAYMENT_FAILED;
+		});
 		return repository.save(pending);
 	}
 

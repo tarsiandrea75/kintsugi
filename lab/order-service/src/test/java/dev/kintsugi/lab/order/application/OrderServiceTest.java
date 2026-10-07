@@ -72,6 +72,16 @@ class OrderServiceTest {
 	}
 
 	@Test
+	void failedPaymentFailsTheOrderLikeADecline() {
+		given(paymentClient.pay(order.getId())).willReturn(PaymentOutcome.FAILED);
+
+		Order placed = service.place(order);
+
+		assertThat(placed.getStatus()).isEqualTo(OrderStatus.PAYMENT_FAILED);
+		assertThat(savedStatuses).containsExactly(OrderStatus.PAYMENT_PENDING, OrderStatus.PAYMENT_FAILED);
+	}
+
+	@Test
 	void pendingOrderIsSavedBeforePaymentIsCalled() {
 		given(paymentClient.pay(order.getId())).willReturn(PaymentOutcome.AUTHORIZED);
 
