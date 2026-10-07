@@ -51,10 +51,10 @@ Fixed, in code. Each entry has a fault id, the target service, the injection par
 
 ### API
 Port 8084, published on `127.0.0.1:18084`.
-- `GET /faults/catalog` returns the catalog **without** the true causes.
+- `GET /faults/catalog` returns the fault ids **only**. Each fault's target service is also its root-cause service, so exposing targets or parameters would leak part of the answer (decided 2026-10-07, stricter than the first draft).
 - `POST /faults {"fault":"F1"}` activates the fault and returns 201 `{id, fault, injectedAt}`. At most one fault may be active at a time: a second one returns 409. An unknown fault returns 400.
 - `POST /faults/{id}/restore` restores the lab and sets `restoredAt`. It is idempotent.
-- `GET /faults/active` returns the active fault's id and fault id, without the true cause.
+- `GET /faults/active` returns the active injection id and fault id without the true cause, or 204 when nothing is active. A `POST /faults` while the `faults` database is down answers 503. A failed restore keeps the injection `ACTIVE` and answers 500, so the restore can be retried.
 - The true cause is readable only through the injector's database. In M4 the eval harness reads it with the `faults` user. No API endpoint ever returns it, so an agent that can call HTTP cannot learn it either.
 
 ### Database
@@ -91,8 +91,8 @@ If an activation step fails partway, the injector attempts a restore, records `F
 
 ## Tasks
 
-- [ ] **T1 — ADR-009 and living spec.** ADR-009 covers the injector's Docker control, the version pins and the isolation of the truth. The spec is `openspec/specs/fault-injector/spec.md`. Route: delegated writer.
-- [ ] **T2 — Generated skeleton.** Route: delegated writer.
+- [x] **T1 — ADR-009 and living spec.** ADR-009 covers the injector's Docker control, the version pins and the isolation of the truth. The spec is `openspec/specs/fault-injector/spec.md`. Route: delegated writer.
+- [x] **T2 — Generated skeleton.** Route: delegated writer.
 - [ ] **T3 — Catalog, persistence and API**, with a fake `LabControl`, tests first. Route: delegated writer.
 - [ ] **T4 — Real `LabControl`**: a gateway REST client plus compose recreate, and the image with the Docker CLI. Route: delegated writer.
 - [ ] **T5 — Compose wiring**: the `faults` database and user, the Alloy drop, the ports; the verify scripts switched to the injector with the truth and isolation assertions; docs and runbooks. Run every script for real. Route: delegated writer.
@@ -100,7 +100,13 @@ If an activation step fails partway, the injector attempts a restore, records `F
 ## Progress
 
 - 2026-10-07: option A chosen by the human; design written; branch created.
+- 2026-10-07: T1 + T2 done by a delegated writer.
+  - ADR-009 pins the Docker CLI at 29.8.2 and Compose at v5.6.0, taken from the `docker:29.8.2-cli` image; the local Engine is 29.4.0 (API 1.54).
+  - `--no-build` recreates a service from its existing image without the build context (checked on v5.1.3; to recheck on v5.6.0 in T4).
+  - Living spec `openspec/specs/fault-injector/spec.md`, with a note never to index `openspec/` into the agent's RAG; the runbooks README says the knowledge base is `docs/runbooks/` only.
+  - Accepted decisions: the catalog returns ids only; `GET /faults/active` answers 204 when nothing is active; 503 when the `faults` database is down; categories `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION`.
+  - Skeleton: mvn exit 0 (parent re-run).
 
 ## Next step
 
-T1 + T2 via a delegated writer.
+T3 (catalog, persistence, API with a fake LabControl) via a delegated writer.
