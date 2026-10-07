@@ -6,6 +6,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,10 +29,12 @@ import dev.kintsugi.lab.inventory.persistence.StockRepository;
 /**
  * Reserves stock for orders, all lines or none, records every attempt, and reads stock.
  *
- * <p>Every attempt leaves one {@code reservation_events} row: {@code RESERVED} in the same transaction as the stock
- * decrement, so one never exists without the other, and {@code INSUFFICIENT_STOCK} in a new transaction after the
- * rollback, so it survives. When the database itself is unavailable nothing can be stored, so the attempt becomes one
- * structured WARN line with the order id instead. Nothing is dropped silently.
+ * <p>Every attempt leaves one {@code reservation_events} row, written in the reservation's own transaction on its one
+ * connection. {@code RESERVED} is inserted with the stock decrement, so one never exists without the other.
+ * {@code INSUFFICIENT_STOCK} is inserted after rolling back to a savepoint taken before the first line, so the stock is
+ * unchanged and the event survives; no second connection is borrowed, which under fault F4 would wait the whole
+ * connection timeout. When the attempt cannot be stored (the database is unavailable, or recording fails in any other
+ * way) it becomes one structured WARN line with the order id instead. Nothing is dropped silently.
  */
 @Service
 public class InventoryService {
@@ -59,53 +62,66 @@ public class InventoryService {
 	/**
 	 * Takes every line in one transaction. Lines for the same SKU are merged and the SKUs taken in ascending order
 	 * ({@link Reservation#quantitiesBySku()}), so concurrent reservations lock rows in the same order and cannot
-	 * deadlock. The first short SKU (or unknown SKU) marks the transaction rollback-only, so the units already taken
-	 * are given back and the result is {@link ReservationStatus#INSUFFICIENT_STOCK}. A merged total beyond an
-	 * {@code int} is short too: no stock row can hold that much.
+	 * deadlock. The first short SKU (or unknown SKU) rolls back to the savepoint taken before the first line, so the
+	 * units already taken are given back, records the rejection and answers {@link ReservationStatus#INSUFFICIENT_STOCK}.
+	 * A merged total beyond an {@code int} is short too: no stock row can hold that much.
+	 * <p>A rejection whose event cannot be stored is still answered: the stock is unchanged either way, and the attempt
+	 * is logged. A reservation whose event cannot be stored fails, because the event and the decrement roll back
+	 * together; it is logged too.
 	 * @throws DatabaseUnavailableException when no database connection is available; the attempt is logged instead
 	 */
 	public ReservationStatus reserve(Reservation reservation) {
 		long start = System.nanoTime();
-		ReservationStatus result;
+		AtomicReference<ReservationEvent> recording = new AtomicReference<>();
 		try {
-			result = transaction.execute(status -> {
+			return transaction.execute(status -> {
 				if (reservationDelay.isPositive()) {
 					repository.sleep(reservationDelay);
 				}
+				Object beforeLines = status.createSavepoint();
 				for (Map.Entry<String, Long> entry : reservation.quantitiesBySku().entrySet()) {
 					long quantity = entry.getValue();
 					if (quantity > Integer.MAX_VALUE || !repository.take(entry.getKey(), (int) quantity)) {
-						status.setRollbackOnly();
-						return ReservationStatus.INSUFFICIENT_STOCK;
+						status.rollbackToSavepoint(beforeLines);
+						return record(recording, attempt(reservation, ReservationStatus.INSUFFICIENT_STOCK, start));
 					}
 				}
-				events.insert(attempt(reservation, ReservationStatus.RESERVED.name(), start));
-				return ReservationStatus.RESERVED;
+				return record(recording, attempt(reservation, ReservationStatus.RESERVED, start));
 			});
 		}
-		catch (CannotCreateTransactionException | DataAccessResourceFailureException ex) {
-			log.warn("No database connection available: {} cause={}",
-					logFields(attempt(reservation, "DATABASE_UNAVAILABLE", start)), cause(ex));
-			throw new DatabaseUnavailableException(ex);
+		catch (RuntimeException ex) {
+			ReservationEvent event = recording.get();
+			if (event != null) {
+				log.warn("Reservation event not stored: {} record_failure={} cause={}", logFields(event),
+						ex.getClass().getName(), cause(ex));
+				if (ReservationStatus.INSUFFICIENT_STOCK.name().equals(event.outcome())) {
+					return ReservationStatus.INSUFFICIENT_STOCK;
+				}
+			}
+			else if (isDatabaseUnavailable(ex)) {
+				log.warn("No database connection available: {} cause={}",
+						logFields(attempt(reservation, "DATABASE_UNAVAILABLE", start)), cause(ex));
+			}
+			throw isDatabaseUnavailable(ex) ? new DatabaseUnavailableException(ex) : ex;
 		}
-		if (result == ReservationStatus.INSUFFICIENT_STOCK) {
-			recordAfterRollback(attempt(reservation, result.name(), start));
-		}
-		return result;
 	}
 
 	public Optional<Stock> stock(String sku) {
 		return repository.find(sku);
 	}
 
-	/** The rejected attempt still answers 409 when its event cannot be stored; it is logged instead. */
-	private void recordAfterRollback(ReservationEvent event) {
-		try {
-			transaction.executeWithoutResult(status -> events.insert(event));
-		}
-		catch (CannotCreateTransactionException | DataAccessResourceFailureException ex) {
-			log.warn("Reservation event not stored: {} cause={}", logFields(event), cause(ex));
-		}
+	/**
+	 * Inserts {@code event} in the current transaction, first remembering it in {@code recording} so a failure of the
+	 * insert or of the commit can still be logged with it.
+	 */
+	private ReservationStatus record(AtomicReference<ReservationEvent> recording, ReservationEvent event) {
+		recording.set(event);
+		events.insert(event);
+		return ReservationStatus.valueOf(event.outcome());
+	}
+
+	private ReservationEvent attempt(Reservation reservation, ReservationStatus outcome, long startNanos) {
+		return attempt(reservation, outcome.name(), startNanos);
 	}
 
 	private ReservationEvent attempt(Reservation reservation, String outcome, long startNanos) {
@@ -113,6 +129,10 @@ public class InventoryService {
 				clock.instant().truncatedTo(ChronoUnit.MICROS), ReservationEvent.RESERVATION_ATTEMPT, outcome,
 				JsonMapper.shared().writeValueAsString(reservation.lines()),
 				Duration.ofNanos(System.nanoTime() - startNanos).toMillis());
+	}
+
+	private static boolean isDatabaseUnavailable(RuntimeException ex) {
+		return ex instanceof CannotCreateTransactionException || ex instanceof DataAccessResourceFailureException;
 	}
 
 	private static String logFields(ReservationEvent event) {

@@ -9,7 +9,10 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -18,6 +21,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.data.jdbc.test.autoconfigure.DataJdbcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DelegatingDataSource;
+import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +61,9 @@ class InventoryServiceTest {
 
 	@Autowired
 	private JdbcClient jdbc;
+
+	@Autowired
+	private DataSource dataSource;
 
 	@Test
 	void everyLineIsReserved() {
@@ -100,6 +108,31 @@ class InventoryServiceTest {
 			assertThat(event.detail()).isEqualTo(
 					"[{\"sku\":\"" + a + "\",\"quantity\":2},{\"sku\":\"" + b + "\",\"quantity\":3}]");
 		});
+	}
+
+	/**
+	 * The rejected attempt rolls back to a savepoint and records its event in the same transaction, so it borrows one
+	 * connection from the pool, not two. Under fault F4 a second borrow would wait the whole connection timeout. The
+	 * service runs here on a data source that counts every connection it hands out.
+	 */
+	@Test
+	void insufficientAttemptBorrowsOneConnection() {
+		CountingDataSource counting = new CountingDataSource(dataSource);
+		JdbcClient countingJdbc = JdbcClient.create(counting);
+		InventoryService counted = new InventoryService(new StockRepository(countingJdbc),
+				new ReservationEventRepository(countingJdbc), new JdbcTransactionManager(counting),
+				new InventoryProperties(Duration.ZERO));
+		String a = newSku(5);
+		String b = newSku(1);
+		Reservation reservation = reservationOf(new ReservationLine(a, 2), new ReservationLine(b, 3));
+
+		assertThat(counted.reserve(reservation)).isEqualTo(ReservationStatus.INSUFFICIENT_STOCK);
+
+		assertThat(counting.borrowed()).isEqualTo(1);
+		assertThat(available(a)).isEqualTo(5);
+		assertThat(available(b)).isEqualTo(1);
+		assertThat(events.findByOrderId(reservation.orderId())).singleElement()
+			.satisfies(event -> assertThat(event.outcome()).isEqualTo("INSUFFICIENT_STOCK"));
 	}
 
 	@Test
@@ -211,6 +244,27 @@ class InventoryServiceTest {
 
 	private int available(String sku) {
 		return jdbc.sql("select available from stock where sku = ?").param(sku).query(Integer.class).single();
+	}
+
+	/** Counts the connections handed out, so a test can tell one borrow from two. */
+	private static final class CountingDataSource extends DelegatingDataSource {
+
+		private final AtomicInteger borrowed = new AtomicInteger();
+
+		CountingDataSource(DataSource target) {
+			super(target);
+		}
+
+		@Override
+		public java.sql.Connection getConnection() throws java.sql.SQLException {
+			borrowed.incrementAndGet();
+			return super.getConnection();
+		}
+
+		int borrowed() {
+			return borrowed.get();
+		}
+
 	}
 
 }

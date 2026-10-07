@@ -63,7 +63,7 @@ Every `POST /reservations` with a valid body that can reach the database MUST le
 | `detail` | the requested lines, as sent, in compact JSON, for example `[{"sku":"SKU-1","quantity":2}]` |
 | `duration_ms` | how long the reservation took |
 
-A `RESERVED` event MUST be inserted in the same transaction as the stock decrement, so a reservation and its event commit or roll back together. An `INSUFFICIENT_STOCK` event MUST be inserted in a new transaction after the reservation's rollback, so the rejected attempt is kept while the stock stays unchanged. The table is indexed by `order_id` and `occurred_at`. It is append-only: the code exposes insert and read only (by order id, and the latest N), with no update or delete, and a test checks it. A request rejected with 400 never reaches the reservation and leaves no event.
+A `RESERVED` event MUST be inserted in the same transaction as the stock decrement, so a reservation and its event commit or roll back together. An `INSUFFICIENT_STOCK` event MUST be inserted in the same transaction after rolling back to a savepoint taken before the first line, so the rejected attempt is kept while the stock stays unchanged, and the attempt uses one database connection: a second connection would wait the whole connection timeout when the pool is exhausted (fault F4). The table is indexed by `order_id` and `occurred_at`. It is append-only: the code exposes insert and read only (by order id, and the latest N), with no update or delete, and a test checks it. A request rejected with 400 never reaches the reservation and leaves no event.
 
 #### Scenario: Reserved attempt is recorded
 - GIVEN a SKU with enough stock
@@ -77,6 +77,7 @@ A `RESERVED` event MUST be inserted in the same transaction as the stock decreme
 - THEN the result is `INSUFFICIENT_STOCK`
 - AND the available stock of A is still 5 and that of B is still 1
 - AND exactly one `reservation_events` row exists for the order id, with outcome `INSUFFICIENT_STOCK`
+- AND the attempt borrowed exactly one connection from the pool
 
 #### Scenario: Event table is append-only
 - GIVEN the event repository
@@ -93,7 +94,12 @@ When a reservation cannot get a database connection (the pool is exhausted, faul
 No database connection available: event=RESERVATION_ATTEMPT order=<order id> outcome=DATABASE_UNAVAILABLE duration_ms=<ms> detail="<lines as JSON>" cause="<pool message>"
 ```
 
-The order id is known because the body was parsed before the database was touched. When the reservation was rejected but its `INSUFFICIENT_STOCK` event cannot be stored, the response is still 409 and the service MUST log one `WARN` line `Reservation event not stored: event=RESERVATION_ATTEMPT order=<order id> outcome=INSUFFICIENT_STOCK ...`. Quoted values escape `\` and `"`.
+The order id is known because the body was parsed before the database was touched. Quoted values escape `\` and `"`.
+
+A failure to record an event never masks the primary outcome, whatever the failure (any runtime exception, not only a missing connection). The service MUST log one `WARN` line `Reservation event not stored: event=RESERVATION_ATTEMPT order=<order id> outcome=<outcome> ... record_failure=<exception class> cause="<message>"`, and then:
+
+- for a rejection, the response is still 409: the stock is unchanged whether or not the event was stored;
+- for a reservation, the request fails, because the `RESERVED` event and the stock decrement share one transaction and roll back together.
 
 This is a stated limitation: an attempt made while the database is unavailable exists only in the logs, not in `reservation_events`.
 
@@ -102,6 +108,18 @@ This is a stated limitation: an attempt made while the database is unavailable e
 - WHEN a reservation is made
 - THEN no event row is written
 - AND one `WARN` line contains `event=RESERVATION_ATTEMPT`, `order=<order id>` and `outcome=DATABASE_UNAVAILABLE`
+
+#### Scenario: Recording a rejection fails
+- GIVEN a reservation that is short of stock
+- WHEN inserting or committing its `INSUFFICIENT_STOCK` event throws any runtime exception
+- THEN the result is still `INSUFFICIENT_STOCK` (409)
+- AND one `WARN` line contains `Reservation event not stored`, `order=<order id>`, `outcome=INSUFFICIENT_STOCK` and `record_failure=<exception class>`
+
+#### Scenario: Recording a reservation fails
+- GIVEN a reservation with enough stock
+- WHEN inserting its `RESERVED` event throws a runtime exception
+- THEN the stock decrement is rolled back and the request fails
+- AND one `WARN` line contains `Reservation event not stored`, `order=<order id>`, `outcome=RESERVED` and `record_failure=<exception class>`
 
 ### Requirement: Reject invalid input
 

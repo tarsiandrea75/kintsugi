@@ -5,8 +5,6 @@ import java.util.UUID;
 
 import jakarta.validation.Valid;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -26,8 +24,6 @@ import dev.kintsugi.lab.payment.gateway.GatewayUnavailableException;
 @RestController
 @RequestMapping("/payments")
 class PaymentController {
-
-	private static final Logger log = LoggerFactory.getLogger(PaymentController.class);
 
 	private final PaymentService service;
 
@@ -51,12 +47,12 @@ class PaymentController {
 	}
 
 	/**
-	 * The gateway gave no usable answer, so the outcome is unknown and nothing was stored: 503, not a decline. Local
-	 * to this controller so unrelated failures keep their own status.
+	 * The gateway gave no usable answer, so the outcome is unknown and no payment was stored: 503, not a decline.
+	 * {@link PaymentService} has already logged the attempt as one structured WARN line with the order id. Local to this
+	 * controller so unrelated failures keep their own status.
 	 */
 	@ExceptionHandler(GatewayUnavailableException.class)
 	ResponseEntity<ProblemDetail> gatewayUnavailable(GatewayUnavailableException ex) {
-		log.warn("Payment gateway unavailable: {}", ex.getMessage());
 		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
 			.body(ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "Payment gateway unavailable"));
 	}

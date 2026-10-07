@@ -64,7 +64,13 @@ The read timeout is longer than order-service's 3s wait for payment-service. Wit
 
 ### Requirement: Gateway unavailable returns 503 and stores no payment
 
-When the gateway call times out (connect or read), cannot connect, gets a non-2xx response other than 429, or gets a body without a known status (including `FAILED`, which the gateway never sends), `POST /payments` MUST return 503 and MUST NOT store a payment. It still records the attempt as a `GATEWAY_UNAVAILABLE` event (see "Every payment attempt is recorded"). An unavailable gateway is not a decline: the outcome is unknown. Other failures MUST NOT be turned into 503.
+When the gateway call times out (connect or read), cannot connect, gets a non-2xx response other than 429, or gets a body without a known status (including `FAILED`, which the gateway never sends), `POST /payments` MUST return 503 and MUST NOT store a payment. It still records the attempt as a `GATEWAY_UNAVAILABLE` event (see "Every payment attempt is recorded") and logs one `WARN` line with `key=value` pairs:
+
+```
+Payment gateway unavailable: event=PAYMENT_ATTEMPT order=<order id> outcome=GATEWAY_UNAVAILABLE duration_ms=<ms> url="<gateway /authorize URL>" exception=<most specific cause class> cause="<message>"
+```
+
+The `Payment gateway unavailable` prefix is stable: runbooks search for it. An unavailable gateway is not a decline: the outcome is unknown. Other failures MUST NOT be turned into 503.
 
 #### Scenario: Gateway too slow
 - GIVEN the gateway answers only after the read timeout
@@ -85,6 +91,7 @@ When the gateway call times out (connect or read), cannot connect, gets a non-2x
 - WHEN a payment is created
 - THEN the failure propagates to the caller and is not answered with 503
 - AND no payment is stored
+- AND one `ERROR` event is stored for the order, with the exception class and message in `detail`
 
 ### Requirement: Every payment attempt is recorded
 
@@ -96,11 +103,11 @@ Every `POST /payments` with a valid body MUST leave exactly one row in the appen
 | `order_id` | the order id of the request |
 | `occurred_at` | when the attempt was recorded (`timestamptz`, microseconds) |
 | `type` | `PAYMENT_ATTEMPT`, the only type; a CHECK constraint rejects any other |
-| `outcome` | `AUTHORIZED`, `DECLINED`, `FAILED` or `GATEWAY_UNAVAILABLE` |
-| `detail` | compact JSON: `{"paymentId":"<id>"}` for a stored outcome; `{"exception":"<class>","url":"<gateway /authorize URL>","message":"<message>"}` for `GATEWAY_UNAVAILABLE`, where the class is the most specific cause, for example `java.net.http.HttpTimeoutException` |
+| `outcome` | `AUTHORIZED`, `DECLINED`, `FAILED`, `GATEWAY_UNAVAILABLE` or `ERROR` |
+| `detail` | compact JSON: `{"paymentId":"<id>"}` for a stored outcome; `{"exception":"<class>","url":"<gateway /authorize URL>","message":"<message>"}` for `GATEWAY_UNAVAILABLE`, where the class is the most specific cause, for example `java.net.http.HttpTimeoutException`; `{"exception":"<class>","message":"<message>"}` for `ERROR` |
 | `duration_ms` | how long the attempt took, gateway call included |
 
-For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same transaction as the `payments` row, so a payment and its event commit or roll back together. For `GATEWAY_UNAVAILABLE` no payment is stored and the event MUST be inserted in a transaction of its own; the response is still 503. The gateway call runs outside any transaction. The table is indexed by `order_id` and `occurred_at`. It is append-only: the code exposes insert and read only (by order id, and the latest N), with no update or delete, and a test checks it. A request rejected with 400 leaves no event.
+For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same transaction as the `payments` row, so a payment and its event commit or roll back together. For `GATEWAY_UNAVAILABLE` no payment is stored and the event MUST be inserted in a transaction of its own; the response is still 503. An attempt that fails with any other runtime exception (a non-gateway failure, or a failure storing the payment and its event, which roll back together) stores no payment, MUST be recorded as `ERROR` in a transaction of its own, and the exception then propagates unchanged (500). When the database itself is unavailable no `ERROR` event is attempted, because the attempt's event was already logged. The gateway call runs outside any transaction. The table is indexed by `order_id` and `occurred_at`. It is append-only: the code exposes insert and read only (by order id, and the latest N), with no update or delete, and a test checks it. A request rejected with 400 leaves no event.
 
 #### Scenario: One event per stored outcome
 - GIVEN the gateway answers `AUTHORIZED`, `DECLINED` or 429
@@ -114,6 +121,12 @@ For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same
 - AND no `payments` row exists for the order id
 - AND exactly one `payment_events` row exists for it, with outcome `GATEWAY_UNAVAILABLE`, the exception class and the URL in `detail`, and a duration
 
+#### Scenario: Payment and event are atomic
+- GIVEN the gateway answers `AUTHORIZED` and inserting the event fails after the `payments` row was written in the same transaction (a CHECK violation)
+- WHEN a payment is attempted
+- THEN the failure propagates
+- AND no `payments` row exists for the order id
+
 #### Scenario: Event table is append-only
 - GIVEN the event repository
 - WHEN its public methods are listed
@@ -123,19 +136,25 @@ For `AUTHORIZED`, `DECLINED` and `FAILED` the event MUST be inserted in the same
 
 This rule is shared by every lab service that records events: if the database itself is unreachable, the event goes to a structured log line instead. Nothing is silently dropped.
 
-When an event cannot be stored because no database connection is available, the service MUST log exactly one `WARN` line with `key=value` pairs, readable by Loki's `logfmt` parser:
+When an event cannot be stored, because no database connection is available or because the insert or its commit fails with any other runtime exception, the service MUST log exactly one `WARN` line for it with `key=value` pairs, readable by Loki's `logfmt` parser:
 
 ```
-Payment event not stored: event=PAYMENT_ATTEMPT order=<order id> outcome=<outcome> duration_ms=<ms> detail="<detail JSON>" cause="<database message>"
+Payment event not stored: event=PAYMENT_ATTEMPT order=<order id> outcome=<outcome> duration_ms=<ms> detail="<detail JSON>" record_failure=<exception class> cause="<database message>"
 ```
 
-For `GATEWAY_UNAVAILABLE` the response is still 503. For a stored outcome the payment cannot be stored either, so the failure propagates as before (500). Quoted values escape `\` and `"`. This is a stated limitation: an attempt made while the database is unavailable exists only in the logs.
+A failure to record never masks the attempt's own outcome. For `GATEWAY_UNAVAILABLE` the response is still 503; for `ERROR` the original exception still propagates. For a stored outcome the payment cannot be stored either, because they share one transaction, so the failure propagates (500). Quoted values escape `\` and `"`. This is a stated limitation: an attempt made while the database is unavailable exists only in the logs.
 
 #### Scenario: Event of an unavailable gateway cannot be stored
 - GIVEN the gateway is unavailable and no database connection can be opened
 - WHEN a payment is attempted
 - THEN the gateway failure still propagates, so the response is 503
 - AND one `WARN` line contains `event=PAYMENT_ATTEMPT`, `order=<order id>` and `outcome=GATEWAY_UNAVAILABLE`
+
+#### Scenario: Event cannot be stored for another reason
+- GIVEN the gateway is unavailable and inserting the event throws an unexpected runtime exception
+- WHEN a payment is attempted
+- THEN the response is still 503
+- AND one `WARN` line contains `Payment event not stored`, `order=<order id>`, `outcome=GATEWAY_UNAVAILABLE` and `record_failure=<exception class>`
 
 ### Requirement: Reject invalid input
 

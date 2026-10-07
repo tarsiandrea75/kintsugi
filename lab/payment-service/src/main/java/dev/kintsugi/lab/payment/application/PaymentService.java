@@ -33,8 +33,10 @@ import dev.kintsugi.lab.payment.persistence.PaymentRepository;
  * <p>Every attempt leaves one {@code payment_events} row. For a stored outcome ({@code AUTHORIZED}, {@code DECLINED},
  * {@code FAILED}) it is inserted in the same transaction as the {@code payments} row, so one never exists without the
  * other. For an unavailable gateway no payment is stored, and the {@code GATEWAY_UNAVAILABLE} event is inserted in a
- * transaction of its own. The gateway call itself runs outside any transaction. When the database is unavailable the
- * event cannot be stored, so it becomes one structured WARN line instead. Nothing is dropped silently.
+ * transaction of its own; so is the {@code ERROR} event of an attempt that failed with an unexpected exception. The
+ * gateway call itself runs outside any transaction. When an event cannot be stored (the database is unavailable, or the
+ * insert fails in any other way) it becomes one structured WARN line instead, and the attempt keeps its own outcome.
+ * Nothing is dropped silently.
  */
 @Service
 public class PaymentService {
@@ -62,17 +64,41 @@ public class PaymentService {
 	/**
 	 * Creates and stores the payment of {@code orderId} with the gateway's outcome, together with its event.
 	 * @throws GatewayUnavailableException if the gateway gives no usable answer; the attempt is still recorded
+	 * @throws RuntimeException any other failure, unchanged, after recording the attempt as {@code ERROR}
 	 */
 	public Payment pay(UUID orderId) {
 		long start = System.nanoTime();
-		PaymentStatus outcome;
 		try {
-			outcome = gateway.authorize(orderId);
+			return authorizeAndStore(orderId, start);
 		}
 		catch (GatewayUnavailableException ex) {
-			record(attempt(orderId, PaymentEvent.GATEWAY_UNAVAILABLE, unavailableDetail(ex), start));
+			PaymentEvent event = attempt(orderId, PaymentEvent.GATEWAY_UNAVAILABLE, unavailableDetail(ex), start);
+			log.warn("Payment gateway unavailable: {} url={} exception={} cause={}", logFields(event),
+					LogFmt.quote(ex.getUrl() == null ? null : ex.getUrl().toString()),
+					NestedExceptionUtils.getMostSpecificCause(ex).getClass().getName(), LogFmt.quote(ex.getMessage()));
+			record(event);
 			throw ex;
 		}
+		catch (CannotCreateTransactionException | DataAccessResourceFailureException ex) {
+			// Already logged with the attempt's event; another insert would only wait for a connection again.
+			throw ex;
+		}
+		catch (RuntimeException ex) {
+			record(attempt(orderId, PaymentEvent.ERROR, errorDetail(ex), start));
+			throw ex;
+		}
+	}
+
+	public Optional<Payment> find(UUID id) {
+		return repository.findById(id);
+	}
+
+	/**
+	 * Asks the gateway, then stores the payment and its event in one transaction. If either cannot be stored both roll
+	 * back, so the request fails; the event is logged first.
+	 */
+	private Payment authorizeAndStore(UUID orderId, long start) {
+		PaymentStatus outcome = gateway.authorize(orderId);
 		Payment payment = Payment.create(orderId, outcome);
 		PaymentEvent event = attempt(orderId, outcome.name(), json(Map.of("paymentId", payment.getId().toString())),
 				start);
@@ -83,22 +109,18 @@ public class PaymentService {
 				return saved;
 			});
 		}
-		catch (CannotCreateTransactionException | DataAccessResourceFailureException ex) {
+		catch (RuntimeException ex) {
 			logNotStored(event, ex);
 			throw ex;
 		}
 	}
 
-	public Optional<Payment> find(UUID id) {
-		return repository.findById(id);
-	}
-
-	/** Inserts {@code event} in a transaction of its own; when the database is unavailable, logs it instead. */
+	/** Inserts {@code event} in a transaction of its own; when that fails for any reason, logs it instead. */
 	private void record(PaymentEvent event) {
 		try {
 			transaction.executeWithoutResult(status -> events.insert(event));
 		}
-		catch (CannotCreateTransactionException | DataAccessResourceFailureException ex) {
+		catch (RuntimeException ex) {
 			logNotStored(event, ex);
 		}
 	}
@@ -118,13 +140,26 @@ public class PaymentService {
 		return json(detail);
 	}
 
+	/** The class and message of an unexpected failure. */
+	private static String errorDetail(RuntimeException ex) {
+		Map<String, String> detail = new LinkedHashMap<>();
+		detail.put("exception", ex.getClass().getName());
+		detail.put("message", ex.getMessage());
+		return json(detail);
+	}
+
 	private static String json(Map<String, String> value) {
 		return JsonMapper.shared().writeValueAsString(value);
 	}
 
-	private static void logNotStored(PaymentEvent event, Exception ex) {
-		log.warn("Payment event not stored: event={} order={} outcome={} duration_ms={} detail={} cause={}",
-				event.type(), event.orderId(), event.outcome(), event.durationMs(), LogFmt.quote(event.detail()),
+	private static String logFields(PaymentEvent event) {
+		return "event=" + event.type() + " order=" + event.orderId() + " outcome=" + event.outcome() + " duration_ms="
+				+ event.durationMs();
+	}
+
+	private static void logNotStored(PaymentEvent event, RuntimeException ex) {
+		log.warn("Payment event not stored: {} detail={} record_failure={} cause={}", logFields(event),
+				LogFmt.quote(event.detail()), ex.getClass().getName(),
 				LogFmt.quote(NestedExceptionUtils.getMostSpecificCause(ex).getMessage()));
 	}
 

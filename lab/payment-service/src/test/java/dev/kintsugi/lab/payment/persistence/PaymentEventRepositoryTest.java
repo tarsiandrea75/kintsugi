@@ -45,18 +45,23 @@ class PaymentEventRepositoryTest {
 		assertThat(repository.findByOrderId(UUID.randomUUID())).isEmpty();
 	}
 
+	/**
+	 * The table is shared with every other test, so {@code latest} is checked on this order's rows only. They are dated
+	 * a year ahead, so no other row can be newer and push them out of the window.
+	 */
 	@Test
 	void eventsOfAnOrderAreInTimeOrderAndLatestIsNewestFirst() {
 		UUID orderId = UUID.randomUUID();
-		Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-		PaymentEvent older = event(orderId, now.minusSeconds(1));
-		PaymentEvent newer = event(orderId, now);
+		Instant ahead = Instant.now().plus(365, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MICROS);
+		PaymentEvent older = event(orderId, ahead.minusSeconds(1));
+		PaymentEvent newer = event(orderId, ahead);
 
 		repository.insert(newer);
 		repository.insert(older);
 
 		assertThat(repository.findByOrderId(orderId)).containsExactly(older, newer);
-		assertThat(repository.latest(1)).containsExactly(newer);
+		assertThat(repository.latest(2).stream().filter(event -> event.orderId().equals(orderId)))
+			.containsExactly(newer, older);
 	}
 
 	@Test
