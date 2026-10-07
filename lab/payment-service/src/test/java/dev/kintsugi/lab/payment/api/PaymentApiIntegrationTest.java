@@ -118,8 +118,29 @@ class PaymentApiIntegrationTest {
 	}
 
 	@Test
-	void failingGatewayIsServiceUnavailableAndStoresNothing() throws Exception {
-		GATEWAY.replyWithBody(500, "{}");
+	void rateLimitedPaymentIsStoredAsFailed() throws Exception {
+		GATEWAY.replyWithBody(429, "{\"error\": \"rate limited\"}");
+
+		UUID orderId = UUID.randomUUID();
+
+		String body = mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(orderId)))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.status").value("FAILED"))
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		Map<String, Object> row = jdbc.sql("select order_id, status from payments where id = ?")
+			.param(UUID.fromString(JsonPath.read(body, "$.id")))
+			.query()
+			.singleRow();
+		assertThat(row).containsEntry("order_id", orderId).containsEntry("status", "FAILED");
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 500, 503 })
+	void failingGatewayIsServiceUnavailableAndStoresNothing(int code) throws Exception {
+		GATEWAY.replyWithBody(code, "{}");
 		long before = countPayments();
 
 		mvc.perform(post("/payments").contentType(MediaType.APPLICATION_JSON).content(bodyFor(UUID.randomUUID())))

@@ -58,6 +58,30 @@ class PaymentRepositoryTest {
 	}
 
 	@Test
+	void failedPaymentIsStoredOnceTheV2MigrationIsApplied() {
+		Integer v2Applied = jdbc
+			.sql("select count(*) from flyway_schema_history where success and version = '2'")
+			.query(Integer.class)
+			.single();
+		Payment payment = Payment.create(UUID.randomUUID(), PaymentStatus.FAILED);
+
+		repository.save(payment);
+
+		assertThat(v2Applied).isOne();
+		assertThat(repository.findById(payment.getId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.FAILED);
+	}
+
+	@Test
+	void failedStatusIsAcceptedByTheSchema() {
+		int inserted = jdbc
+			.sql("insert into payments (id, order_id, status, version, created_at) values (?, ?, 'FAILED', 0, now())")
+			.params(UUID.randomUUID(), UUID.randomUUID())
+			.update();
+
+		assertThat(inserted).isOne();
+	}
+
+	@Test
 	void unknownStatusIsRejectedByTheSchema() {
 		assertThatExceptionOfType(DataIntegrityViolationException.class).isThrownBy(() -> jdbc
 			.sql("insert into payments (id, order_id, status, version, created_at) values (?, ?, 'PENDING', 0, now())")

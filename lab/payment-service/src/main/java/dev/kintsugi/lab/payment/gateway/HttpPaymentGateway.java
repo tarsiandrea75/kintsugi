@@ -3,9 +3,13 @@ package dev.kintsugi.lab.payment.gateway;
 import java.net.http.HttpClient;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -16,11 +20,15 @@ import dev.kintsugi.lab.payment.domain.PaymentStatus;
 /**
  * Asks gateway-mock ({@code POST /authorize}) for the outcome of a payment over HTTP with explicit timeouts.
  *
- * <p>Every way the call can fail without a usable answer (timeout, connection error, non-2xx response, unknown or
- * missing status) becomes one {@link GatewayUnavailableException}, so the caller handles a single case.
+ * <p>A {@code 429 Too Many Requests} is an answer, not a failure: the gateway rejected the payment, so the outcome is
+ * {@link PaymentStatus#FAILED} (fault F2). Every way the call can fail without a usable answer (timeout, connection
+ * error, any other non-2xx response, unknown or missing status) becomes one {@link GatewayUnavailableException}, so the
+ * caller handles a single failure case.
  */
 @Component
 public class HttpPaymentGateway implements PaymentGateway {
+
+	private static final Logger log = LoggerFactory.getLogger(HttpPaymentGateway.class);
 
 	private final RestClient restClient;
 
@@ -54,12 +62,23 @@ public class HttpPaymentGateway implements PaymentGateway {
 				.retrieve()
 				.body(AuthorizeReply.class);
 		}
+		catch (HttpClientErrorException.TooManyRequests ex) {
+			// One WARN per failed payment: the line that makes fault F2 visible in the logs.
+			log.warn("Gateway rejected the payment of order {} with status {}; recording it as FAILED", orderId,
+					HttpStatus.TOO_MANY_REQUESTS.value());
+			return PaymentStatus.FAILED;
+		}
 		catch (RestClientException ex) {
 			throw new GatewayUnavailableException("Authorization of order " + orderId + " failed: " + ex.getMessage(),
 					ex);
 		}
 		if (reply == null || reply.status() == null) {
 			throw new GatewayUnavailableException("Authorization of order " + orderId + " returned no status", null);
+		}
+		// FAILED is how this service reads a 429; the gateway itself only answers AUTHORIZED or DECLINED.
+		if (reply.status() == PaymentStatus.FAILED) {
+			throw new GatewayUnavailableException(
+					"Authorization of order " + orderId + " returned an unknown status: " + reply.status(), null);
 		}
 		return reply.status();
 	}

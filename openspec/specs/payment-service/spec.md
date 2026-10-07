@@ -2,9 +2,9 @@
 
 ## Purpose
 
-`lab/payment-service` records the payment of an order and stores it in its own PostgreSQL database. `order-service` calls it after creating an order. A slow or failing payment path is where fault F1 shows up. Design: [feature document](../../../odd/tasks/payment-service.md). Stack: [ADR-007](../../../docs/adr/ADR-007-lab-persistence-stack.md). Verified by `./mvnw test` from `lab/payment-service`.
+`lab/payment-service` records the payment of an order and stores it in its own PostgreSQL database. `order-service` calls it after creating an order. A slow or failing payment path is where fault F1 shows up, and a gateway rejecting with 429 is where fault F2 shows up as failed payments. Design: [feature document](../../../odd/tasks/payment-service.md) and, for `FAILED`, [fault F2](../../../odd/tasks/fault-f2.md). Stack: [ADR-007](../../../docs/adr/ADR-007-lab-persistence-stack.md). Verified by `./mvnw test` from `lab/payment-service`.
 
-A payment has an id (UUID), an order id (UUID), a status (`AUTHORIZED` or `DECLINED`) and a created timestamp.
+A payment has an id (UUID), an order id (UUID), a status (`AUTHORIZED`, `DECLINED` or `FAILED`) and a created timestamp. `FAILED` means the gateway rejected the request with a 429 instead of deciding the payment.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ A payment has an id (UUID), an order id (UUID), a status (`AUTHORIZED` or `DECLI
 
 ### Requirement: Payment outcome comes from the gateway
 
-The payment status MUST be the outcome that the payment gateway returns for the order id; the service MUST NOT decide it on its own. The gateway is `gateway-mock`, called over HTTP: payment-service sends `POST /authorize` with body `{"orderId": "<order id>"}` and reads `status` (`AUTHORIZED` or `DECLINED`) from a 2xx answer.
+The payment status MUST be the outcome that the payment gateway returns for the order id; the service MUST NOT decide it on its own. The gateway is `gateway-mock`, called over HTTP: payment-service sends `POST /authorize` with body `{"orderId": "<order id>"}` and reads `status` (`AUTHORIZED` or `DECLINED`) from a 2xx answer. A `429 Too Many Requests` answer is also an outcome: the payment is `FAILED`.
 
 The client MUST read its settings from these properties, so the fault injector can change them:
 
@@ -49,6 +49,13 @@ The read timeout is longer than order-service's 3s wait for payment-service. Wit
 - WHEN a payment is created for that order
 - THEN the stored payment has status `DECLINED`
 
+#### Scenario: Rate-limited by the gateway
+- GIVEN the gateway answers 429
+- WHEN `POST /payments` is called with a valid body
+- THEN the response status is 201 and the body's status is `FAILED`
+- AND the stored payment has status `FAILED`
+- AND one `WARN` line is logged that names the order id and the gateway status 429
+
 #### Scenario: Settings are configurable
 - GIVEN no `kintsugi.gateway.*` property is set
 - WHEN the client settings are read
@@ -57,7 +64,7 @@ The read timeout is longer than order-service's 3s wait for payment-service. Wit
 
 ### Requirement: Gateway unavailable returns 503 and stores nothing
 
-When the gateway call times out (connect or read), cannot connect, gets a non-2xx response, or gets a body without a known status, `POST /payments` MUST return 503 and MUST NOT store a payment. An unavailable gateway is not a decline: the outcome is unknown. Other failures MUST NOT be turned into 503.
+When the gateway call times out (connect or read), cannot connect, gets a non-2xx response other than 429, or gets a body without a known status (including `FAILED`, which the gateway never sends), `POST /payments` MUST return 503 and MUST NOT store a payment. An unavailable gateway is not a decline: the outcome is unknown. Other failures MUST NOT be turned into 503.
 
 #### Scenario: Gateway too slow
 - GIVEN the gateway answers only after the read timeout
@@ -66,7 +73,7 @@ When the gateway call times out (connect or read), cannot connect, gets a non-2x
 - AND no payment is stored
 
 #### Scenario: Gateway failing or unreachable
-- GIVEN the gateway refuses connections, or answers a non-2xx status such as 500, or answers a status other than `AUTHORIZED` or `DECLINED`
+- GIVEN the gateway refuses connections, or answers a non-2xx status such as 400, 500 or 503, or answers a status other than `AUTHORIZED` or `DECLINED`
 - WHEN `POST /payments` is called with a valid body
 - THEN the response status is 503
 - AND no payment is stored
@@ -119,15 +126,36 @@ When the gateway call times out (connect or read), cannot connect, gets a non-2x
 - WHEN `GET /payments/00000000-0000-0000-0000-000000000000` is called
 - THEN the response status is 404
 
+### Requirement: Expose payments by status
+
+The service MUST expose the Micrometer gauge `lab.payments` (`lab_payments` in Prometheus) with one series per payment status (tag `status`), counted from the database. A status with no payments MUST report 0. A burst of `FAILED` payments is how fault F2 shows in the metrics. The design copies order-service's `lab.orders`: a scrape never waits on the database; it reads a snapshot refreshed asynchronously at most once per second, the count query has its own 3 s statement timeout, a failed refresh reports NaN, and a snapshot older than 10 s is never served.
+
+#### Scenario: Scrape shows every status
+- GIVEN one stored payment with status `FAILED` and no other payments
+- WHEN `/actuator/prometheus` is scraped
+- THEN it contains `lab_payments{status="FAILED"} 1.0`
+- AND `lab_payments{status="AUTHORIZED"} 0.0` and `lab_payments{status="DECLINED"} 0.0`
+
+#### Scenario: Database failure
+- GIVEN the count query fails or exceeds its timeout
+- WHEN the gauge is read
+- THEN every series reports NaN, and the scrape does not wait for the database
+
 ### Requirement: Schema and persistence tests
 
-The database schema MUST be created by a Flyway migration. The status column MUST accept only `AUTHORIZED` and `DECLINED`. Timestamps MUST be cut to microseconds, so a payment read back equals the payment written. The service listens on port 8081, so it can run next to order-service (8080) locally. Persistence and end-to-end tests MUST run against a real PostgreSQL 18.6 started by Testcontainers (`postgres:18.6` with `@ServiceConnection`), not an in-memory database. `./mvnw test` from `lab/payment-service` MUST pass.
+The database schema MUST be created by Flyway migrations. The status column MUST accept only `AUTHORIZED`, `DECLINED` and `FAILED`: `V1` created it with the first two, and `V2` widens the constraint, because `V1` may already be applied on existing databases and is never edited. Timestamps MUST be cut to microseconds, so a payment read back equals the payment written. The service listens on port 8081, so it can run next to order-service (8080) locally. Persistence and end-to-end tests MUST run against a real PostgreSQL 18.6 started by Testcontainers (`postgres:18.6` with `@ServiceConnection`), not an in-memory database. `./mvnw test` from `lab/payment-service` MUST pass.
 
 #### Scenario: Flyway creates the schema
 - GIVEN an empty PostgreSQL 18.6 database started by Testcontainers
 - WHEN the application context starts
-- THEN Flyway applies the migrations
+- THEN Flyway applies the migrations, `V2` included
 - AND the payments table exists
+
+#### Scenario: Status constraint
+- GIVEN the migrated schema
+- WHEN a row with status `FAILED` is inserted, and then a row with status `PENDING`
+- THEN the `FAILED` row is stored
+- AND the `PENDING` row is rejected
 
 #### Scenario: Timestamp precision
 - GIVEN a clock reading `2026-10-06T10:15:30.123456789Z`
@@ -149,3 +177,4 @@ The database schema MUST be created by a Flyway migration. The status column MUS
 
 - **No amount.** Orders have no prices yet; prices come with the product catalog in `inventory-service` (fault F6). A payment carries only the order id.
 - **No idempotency.** Calling `POST /payments` twice for the same order creates two payments. There is no idempotency key and no unique constraint on the order id; retries are out of scope.
+- **No retry on 429.** A rate-limited payment is stored as `FAILED` at once; there is no retry, backoff or `Retry-After` handling.

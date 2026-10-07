@@ -20,13 +20,17 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import dev.kintsugi.lab.payment.domain.PaymentStatus;
 
 /** The HTTP gateway client against a real HTTP server on loopback, with short timeouts so failures stay fast. */
+@ExtendWith(OutputCaptureExtension.class)
 class HttpPaymentGatewayTest {
 
 	// Clients connect to the IPv4 literal 127.0.0.1, so fixtures must bind the same address family.
@@ -46,7 +50,7 @@ class HttpPaymentGatewayTest {
 	}
 
 	@ParameterizedTest
-	@EnumSource(PaymentStatus.class)
+	@EnumSource(names = { "AUTHORIZED", "DECLINED" })
 	void outcomeIsTheGatewayStatus(PaymentStatus status) {
 		server.replyWith(200, status.name());
 
@@ -64,8 +68,24 @@ class HttpPaymentGatewayTest {
 		assertThat(request.body()).contains("\"orderId\"").contains(ORDER_ID.toString());
 	}
 
+	@Test
+	void rateLimitedResponseIsAFailedPayment(CapturedOutput output) {
+		server.replyWithBody(429, "{\"error\": \"rate limited\"}");
+
+		assertThat(gateway.authorize(ORDER_ID)).isEqualTo(PaymentStatus.FAILED);
+		assertThat(output.getOut()).containsSubsequence("WARN", ORDER_ID.toString(), "429");
+	}
+
+	// FAILED is how this service reads a 429; a gateway that answers it in a 200 body sent an unknown status.
+	@Test
+	void failedStatusInASuccessBodyIsUnavailable() {
+		server.replyWith(200, "FAILED");
+
+		assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> gateway.authorize(ORDER_ID));
+	}
+
 	@ParameterizedTest
-	@ValueSource(ints = { 400, 429, 500, 503 })
+	@ValueSource(ints = { 400, 404, 500, 502, 503 })
 	void nonSuccessResponseIsUnavailable(int code) {
 		server.replyWithBody(code, "{}");
 
