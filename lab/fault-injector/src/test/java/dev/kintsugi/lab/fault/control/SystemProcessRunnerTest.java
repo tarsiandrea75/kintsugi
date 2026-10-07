@@ -92,7 +92,7 @@ class SystemProcessRunnerTest {
 		caller.join(Duration.ofSeconds(10));
 
 		assertThat(caller.isAlive()).isFalse();
-		assertThat(thrown.get()).isInstanceOf(LabControlException.class).hasMessageContaining("interrupted");
+		assertThat(thrown.get()).isInstanceOf(ProcessInterruptedException.class).hasMessageContaining("interrupted");
 		assertThat(interruptedAfter).isTrue();
 		assertThat(started).hasSize(2).allSatisfy(pid -> assertThat(awaitGone(pid)).as("pid %d is gone", pid).isTrue());
 	}
