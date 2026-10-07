@@ -74,14 +74,14 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 1,500 lines, sliced per task.
 - The generated skeleton goes in its own commit.
-- Slices: tracker `feat/fault-f4` (doc `7657927`, skeleton `c4fb992`); PR 1 `-01-inventory-data`: spec, domain, persistence, migrations, pool settings; PR 2 `-02-inventory-api`: application service, fault hook, API, exhaustion handler; then T3, then T4.
+- Slices: tracker `feat/fault-f4` (doc `7657927`, skeleton `c4fb992`); PR 1 `-01-inventory-data`: spec, domain, persistence, migrations, pool settings; PR 2 `-02-inventory-api`: application service, fault hook, API, exhaustion handler; PR 3 `-03-order-inventory`: inventory review fixes, `ServiceRestClients` with `InventoryClient`, and the order flow in three commits; then T4.
 - RDD: on; consent is a standing grant. Reviews run per slice.
 
 ## Tasks
 
 - [x] **T1 — inventory-service skeleton.** Initializr skeleton with the same ids as payment-service, the image pinned, `TestcontainersConfiguration` made public, and the pom tidied. Route: delegated writer.
 - [x] **T2 — inventory-service domain, persistence and API.** Spec first, tests first, the seed migration, atomic reservation, the delay hook and explicit pool settings. Route: delegated writer.
-- [ ] **T3 — order-service inventory step.** `InventoryClient` with metrics, `OrderService` reserve-before-save, 409 and 503 handling, and the spec. Route: delegated writer.
+- [x] **T3 — order-service inventory step.** `InventoryClient` with metrics, `OrderService` reserve-before-save, 409 and 503 handling, and the spec. Route: delegated writer.
 - [ ] **T4 — Compose, dashboard, verify-f4 and docs.** The inventory service and its database in compose; the F4 variables; the panels; `verify-f4.sh`; all four verify scripts run for real. Route: delegated writer.
 
 ## Checks
@@ -103,7 +103,15 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
   - `StockRepository.take` accepts a quantity of 0 or less;
   - the slice's progress notes and properties comment refer to code that is in the next slice.
 - 2026-10-07: review of `e9d881e..98e97c3` was started (lineage `review-5964885f8bc7ec5a`), but the reviewer capture failed when the usage quota ran out. STATUS re-offers the same reliability slot. Resume with the bound STATUS command from that lineage, or start a new review of the range.
+- 2026-10-07: the interrupted review was redone as a new independent START, because the docs commit `6bedbee` had moved HEAD. `e9d881e..6bedbee` approved (`review-5b83b49e887acf66`).
+- 2026-10-07: review fixes and T3 done by a delegated writer.
+  - Fixes: reservation lines are merged by SKU and locked in SKU order. The RED was a real `deadlock detected`; the test (40 SKUs, opposite orders, 20 iterations) now passes in about 0.4 s. `take` rejects a quantity of 0 or less. Summed duplicates above `int` count as insufficient. The handler tests now assert the ProblemDetail body and the WARN line.
+  - T3:
+    - `ServiceRestClients` holds the shared RestClient setup and metrics convention; `PaymentClient` and the new `InventoryClient` both use it.
+    - `OrderService` follows build → reserve → save → pay. A 409 means nothing is stored. An unavailable inventory gives a 503 with nothing stored and a WARN line.
+    - A status that contradicts the HTTP code counts as unavailable.
+  - Parent re-run, mvn exit 0: inventory-service 58 tests, order-service 148.
 
 ## Next step
 
-Resume: finish the review of `e9d881e..98e97c3`, fix the T2 review WARNINGs, then T3 and T4.
+T4 (compose, dashboard, verify-f4, docs) via a delegated writer.

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -27,10 +28,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+import dev.kintsugi.lab.order.application.OrderService;
+import dev.kintsugi.lab.order.domain.InsufficientStockException;
 import dev.kintsugi.lab.order.domain.Order;
 import dev.kintsugi.lab.order.domain.OrderItem;
-import dev.kintsugi.lab.order.application.OrderService;
 import dev.kintsugi.lab.order.domain.OrderStatus;
+import dev.kintsugi.lab.order.inventory.InventoryUnavailableException;
 
 @WebMvcTest(OrderController.class)
 class OrderControllerTest {
@@ -70,6 +73,34 @@ class OrderControllerTest {
 		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body("customer-1", "SKU-1", 1)))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.status").value("PAYMENT_PENDING"));
+	}
+
+	@Test
+	void insufficientStockIsConflict() throws Exception {
+		given(service.place(any(Order.class))).willAnswer(invocation -> {
+			Order order = invocation.getArgument(0);
+			throw new InsufficientStockException(order.getId());
+		});
+
+		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body("customer-1", "SKU-1", 1)))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(409))
+			.andExpect(jsonPath("$.detail").value("Insufficient stock"))
+			.andExpect(header().doesNotExist("Location"));
+	}
+
+	@Test
+	void unavailableInventoryIsServiceUnavailable() throws Exception {
+		given(service.place(any(Order.class)))
+			.willThrow(new InventoryUnavailableException("inventory-service answered 500", null));
+
+		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body("customer-1", "SKU-1", 1)))
+			.andExpect(status().isServiceUnavailable())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(503))
+			.andExpect(jsonPath("$.detail").value("Inventory unavailable"))
+			.andExpect(header().doesNotExist("Location"));
 	}
 
 	@Test

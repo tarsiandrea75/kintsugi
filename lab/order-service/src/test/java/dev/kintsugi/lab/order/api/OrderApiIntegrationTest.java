@@ -31,11 +31,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.jayway.jsonpath.JsonPath;
 
 import dev.kintsugi.lab.order.TestcontainersConfiguration;
+import dev.kintsugi.lab.order.inventory.FakeInventoryServer;
 import dev.kintsugi.lab.order.payment.FakePaymentServer;
 
 /**
- * Full application context against PostgreSQL 18.6 and a fake payment-service over real HTTP: POST, then GET, then
- * check the stored rows. The read timeout is shortened so the timeout case stays fast.
+ * Full application context against PostgreSQL 18.6 and fake inventory-service and payment-service over real HTTP:
+ * POST, then GET, then check the stored rows. The payment read timeout is shortened so the timeout case stays fast.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -44,16 +45,20 @@ class OrderApiIntegrationTest {
 
 	private static final Duration READ_TIMEOUT = Duration.ofMillis(300);
 
+	private static final FakeInventoryServer INVENTORY = FakeInventoryServer.start();
+
 	private static final FakePaymentServer PAYMENT = FakePaymentServer.start();
 
 	@DynamicPropertySource
-	static void paymentService(DynamicPropertyRegistry registry) {
+	static void dependencies(DynamicPropertyRegistry registry) {
+		registry.add("kintsugi.inventory.base-url", INVENTORY::baseUrl);
 		registry.add("kintsugi.payment.base-url", PAYMENT::baseUrl);
 		registry.add("kintsugi.payment.read-timeout", () -> READ_TIMEOUT.toMillis() + "ms");
 	}
 
 	@AfterAll
-	static void stopPaymentService() {
+	static void stopDependencies() {
+		INVENTORY.close();
 		PAYMENT.close();
 	}
 
@@ -64,7 +69,8 @@ class OrderApiIntegrationTest {
 	private JdbcClient jdbc;
 
 	@BeforeEach
-	void paymentAuthorizes() {
+	void stockIsReservedAndPaymentAuthorizes() {
+		INVENTORY.replyWith(201, "RESERVED");
 		PAYMENT.replyWith(201, "AUTHORIZED");
 	}
 
@@ -106,7 +112,37 @@ class OrderApiIntegrationTest {
 			.list();
 		assertThat(row).containsEntry("customer_id", "customer-e2e").containsEntry("status", "PAID");
 		assertThat(skus).containsExactly("SKU-1", "SKU-2");
+		assertThat(INVENTORY.lastRequest().body()).contains(id).contains("SKU-1").contains("SKU-2");
 		assertThat(PAYMENT.lastRequest().body()).contains(id);
+	}
+
+	@Test
+	void insufficientStockIsConflictAndStoresNothing() throws Exception {
+		INVENTORY.replyWith(409, "INSUFFICIENT_STOCK");
+		long before = countOrders();
+		String paymentBefore = String.valueOf(PAYMENT.lastRequest());
+
+		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.detail").value("Insufficient stock"));
+
+		assertThat(countOrders()).isEqualTo(before);
+		assertThat(String.valueOf(PAYMENT.lastRequest())).isEqualTo(paymentBefore);
+	}
+
+	// Fault F4 as order-service sees it: inventory-service answers 500 because its pool is exhausted.
+	@Test
+	void inventoryServerErrorIsServiceUnavailableAndStoresNothing() throws Exception {
+		INVENTORY.replyWithBody(500, "{}");
+		long before = countOrders();
+		String paymentBefore = String.valueOf(PAYMENT.lastRequest());
+
+		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
+			.andExpect(status().isServiceUnavailable())
+			.andExpect(jsonPath("$.detail").value("Inventory unavailable"));
+
+		assertThat(countOrders()).isEqualTo(before);
+		assertThat(String.valueOf(PAYMENT.lastRequest())).isEqualTo(paymentBefore);
 	}
 
 	@Test
@@ -202,15 +238,19 @@ class OrderApiIntegrationTest {
 
 	/** Posts a valid order, expects 201 with {@code status}, and returns the order id. */
 	private String postValidOrderExpecting(String status) throws Exception {
-		String body = mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content("""
-				{"customerId": "customer-e2e", "items": [{"sku": "SKU-1", "quantity": 1}]}
-				"""))
+		String body = mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.status").value(status))
 			.andReturn()
 			.getResponse()
 			.getContentAsString();
 		return JsonPath.read(body, "$.id");
+	}
+
+	private static String validOrder() {
+		return """
+				{"customerId": "customer-e2e", "items": [{"sku": "SKU-1", "quantity": 1}]}
+				""";
 	}
 
 	private String storedStatus(String id) {
