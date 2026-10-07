@@ -86,12 +86,44 @@ The service MUST expose the Micrometer gauge `gateway.authorize.inflight`: the n
 - WHEN 250 `POST /authorize` requests are sent at once
 - THEN `gateway.authorize.inflight` reaches 250 while they wait
 
+### Requirement: Every authorize call is logged
+
+The gateway has no database by design, so its record of each call is a log line, which reaches Loki. Every `POST /authorize` that passes validation MUST log exactly one structured line with `key=value` pairs, readable by Loki's `logfmt` parser: the order id, the configured latency, the status answered and the actual duration, measured from before the latency.
+
+```
+Authorize answered: event=AUTHORIZE order=<order id> latency_ms=<configured ms> answered=<200|429|500|503> duration_ms=<actual ms>
+```
+
+The line is `INFO`. When the latency is interrupted the one line is `WARN` instead, says so, and reports the 503 answered:
+
+```
+Authorize interrupted: event=AUTHORIZE order=<order id> latency_ms=<configured ms> answered=503 duration_ms=<actual ms> interrupted=true
+```
+
+A body rejected with 400 never reaches the controller and logs no such line.
+
+#### Scenario: One line per call
+- GIVEN any configured latency and error status
+- WHEN `POST /authorize` is called with a valid order id
+- THEN exactly one `INFO` line contains `event=AUTHORIZE`, `order=<order id>`, `latency_ms=<configured latency>` and `answered=<status returned>`
+- AND its `duration_ms` is at least the configured latency
+
+#### Scenario: Interrupted call
+- GIVEN the latency is interrupted
+- WHEN `POST /authorize` is answered with 503
+- THEN exactly one `WARN` line contains `Authorize interrupted`, `event=AUTHORIZE`, `order=<order id>`, `answered=503` and `interrupted=true`
+
 ### Requirement: Change, read and reset the behavior
 
 - `PUT /admin/behavior` with body `{"latencyMs": <n>, "errorStatus": <s>}` MUST replace the whole behavior and return 200 with the new behavior (`{"latencyMs": <n>, "errorStatus": <s>}`). A missing `errorStatus` means no error, so it clears an error set earlier.
 - `GET /admin/behavior` MUST return 200 with the current behavior.
 - `DELETE /admin/behavior` MUST reset the latency to 0 and the error status to `null`, and return 200 with the reset behavior.
-- Every change and reset MUST be logged at `INFO` with the old and the new latency and error status (`none` when there is no error), so the fault injector and the observability stack can see when the lab was broken and restored.
+- Every change and reset MUST be logged as one `INFO` line with `key=value` pairs, readable by Loki's `logfmt` parser, with the old and the new latency and error status (`none` when there is no error), so the fault injector and the observability stack can see when the lab was broken and restored. The `Gateway behavior changed` and `Gateway behavior reset` prefixes are stable, because runbooks search for them:
+
+  ```
+  Gateway behavior changed: event=BEHAVIOR_CHANGED previous_latency_ms=<ms> latency_ms=<ms> previous_error_status=<status|none> error_status=<status|none>
+  Gateway behavior reset: event=BEHAVIOR_RESET previous_latency_ms=<ms> latency_ms=0 previous_error_status=<status|none> error_status=none
+  ```
 - Changes MUST be safe under concurrent requests: a reader sees either the old or the new behavior, never a mix.
 
 #### Scenario: Set the latency

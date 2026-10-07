@@ -42,8 +42,9 @@ class BehaviorStoreTest {
 		store.set(new GatewayBehavior(750));
 		store.reset();
 
-		assertThat(output.getOut()).containsSubsequence("INFO", "Gateway behavior changed: latencyMs 0 -> 750", "INFO",
-				"Gateway behavior reset: latencyMs 750 -> 0");
+		assertThat(output.getOut()).containsSubsequence("INFO",
+				"Gateway behavior changed: event=BEHAVIOR_CHANGED previous_latency_ms=0 latency_ms=750", "INFO",
+				"Gateway behavior reset: event=BEHAVIOR_RESET previous_latency_ms=750 latency_ms=0");
 	}
 
 	@Test
@@ -52,8 +53,10 @@ class BehaviorStoreTest {
 		store.reset();
 
 		assertThat(output.getOut()).containsSubsequence("INFO",
-				"Gateway behavior changed: latencyMs 0 -> 0, errorStatus none -> 429", "INFO",
-				"Gateway behavior reset: latencyMs 0 -> 0, errorStatus 429 -> none");
+				"Gateway behavior changed: event=BEHAVIOR_CHANGED previous_latency_ms=0 latency_ms=0"
+						+ " previous_error_status=none error_status=429",
+				"INFO", "Gateway behavior reset: event=BEHAVIOR_RESET previous_latency_ms=0 latency_ms=0"
+						+ " previous_error_status=429 error_status=none");
 	}
 
 	@Test

@@ -7,16 +7,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -30,7 +36,10 @@ import dev.kintsugi.lab.gateway.behavior.GatewayBehavior;
 
 @WebMvcTest(AuthorizeController.class)
 @Import({ BehaviorStore.class, AuthorizeControllerTest.Metrics.class })
+@ExtendWith(OutputCaptureExtension.class)
 class AuthorizeControllerTest {
+
+	private static final Pattern DURATION = Pattern.compile(" duration_ms=(\\d+)");
 
 	/** {@code @WebMvcTest} does not auto-configure metrics, so the controller gets an in-memory registry. */
 	@TestConfiguration
@@ -149,6 +158,62 @@ class AuthorizeControllerTest {
 		finally {
 			Thread.interrupted();
 		}
+	}
+
+	@ParameterizedTest
+	@CsvSource({ "120, , 200", "50, 429, 429", "0, 500, 500", "0, 503, 503" })
+	void everyAuthorizeLogsOneStructuredInfoLine(long latencyMs, Integer errorStatus, int answered,
+			CapturedOutput output) throws Exception {
+		UUID orderId = UUID.randomUUID();
+		store.set(new GatewayBehavior(latencyMs, errorStatus));
+		try {
+			mvc.perform(post("/authorize").contentType(MediaType.APPLICATION_JSON).content("""
+					{"orderId": "%s"}
+					""".formatted(orderId))).andExpect(status().is(answered));
+		}
+		finally {
+			store.reset();
+		}
+
+		List<String> lines = authorizeLines(output);
+		assertThat(lines).singleElement()
+			.satisfies(line -> assertThat(line).contains(" INFO ")
+				.contains("Authorize answered: event=AUTHORIZE order=" + orderId + " latency_ms=" + latencyMs
+						+ " answered=" + answered + " duration_ms="));
+		assertThat(durationMs(lines.get(0))).isGreaterThanOrEqualTo(latencyMs);
+	}
+
+	@Test
+	void interruptedAuthorizeLogsOneLineThatSaysSo(CapturedOutput output) {
+		BehaviorStore slowStore = new BehaviorStore();
+		slowStore.set(new GatewayBehavior(GatewayBehavior.MAX_LATENCY_MS));
+		AuthorizeController controller = new AuthorizeController(slowStore, new SimpleMeterRegistry());
+		UUID orderId = UUID.randomUUID();
+
+		Thread.currentThread().interrupt();
+		try {
+			assertThatExceptionOfType(ResponseStatusException.class)
+				.isThrownBy(() -> controller.authorize(new AuthorizeRequest(orderId)));
+		}
+		finally {
+			Thread.interrupted();
+		}
+
+		assertThat(authorizeLines(output)).singleElement()
+			.satisfies(line -> assertThat(line).contains(" WARN ")
+				.contains("Authorize interrupted: event=AUTHORIZE order=" + orderId + " latency_ms="
+						+ GatewayBehavior.MAX_LATENCY_MS + " answered=503 duration_ms=")
+				.contains(" interrupted=true"));
+	}
+
+	private static List<String> authorizeLines(CapturedOutput output) {
+		return output.getAll().lines().filter(line -> line.contains("event=AUTHORIZE ")).toList();
+	}
+
+	private static long durationMs(String line) {
+		Matcher matcher = DURATION.matcher(line);
+		assertThat(matcher.find()).as("duration_ms in %s", line).isTrue();
+		return Long.parseLong(matcher.group(1));
 	}
 
 }
