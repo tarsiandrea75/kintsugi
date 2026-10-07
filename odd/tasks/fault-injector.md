@@ -87,13 +87,14 @@ If an activation step fails partway, the injector attempts a restore, records `F
 ## Delivery
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 1,500 lines.
+- Slices: tracker `feat/fault-injector` (doc, ADR-009, spec, skeleton); PR 1 `-01-core`: design fixes, catalog, domain, persistence; PR 2 `-02-api`: control port, service, API; then T4, then T5.
 - RDD: on; consent is a standing grant.
 
 ## Tasks
 
 - [x] **T1 — ADR-009 and living spec.** ADR-009 covers the injector's Docker control, the version pins and the isolation of the truth. The spec is `openspec/specs/fault-injector/spec.md`. Route: delegated writer.
 - [x] **T2 — Generated skeleton.** Route: delegated writer.
-- [ ] **T3 — Catalog, persistence and API**, with a fake `LabControl`, tests first. Route: delegated writer.
+- [x] **T3 — Catalog, persistence and API**, with a fake `LabControl`, tests first. Route: delegated writer.
 - [ ] **T4 — Real `LabControl`**: a gateway REST client plus compose recreate, and the image with the Docker CLI. Route: delegated writer.
 - [ ] **T5 — Compose wiring**: the `faults` database and user, the Alloy drop, the ports; the verify scripts switched to the injector with the truth and isolation assertions; docs and runbooks. Run every script for real. Route: delegated writer.
 
@@ -106,7 +107,20 @@ If an activation step fails partway, the injector attempts a restore, records `F
   - Living spec `openspec/specs/fault-injector/spec.md`, with a note never to index `openspec/` into the agent's RAG; the runbooks README says the knowledge base is `docs/runbooks/` only.
   - Accepted decisions: the catalog returns ids only; `GET /faults/active` answers 204 when nothing is active; 503 when the `faults` database is down; categories `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION`.
   - Skeleton: mvn exit 0 (parent re-run).
+- 2026-10-07: review of T1+T2 (`review-028bf5d4411d2ff7`) approved, but it found real design flaws, fixed in the ADR and spec before any code:
+  - **Superuser bypass:** the `lab` role is the image's superuser, which ignores `REVOKE CONNECT`. Services move to a non-superuser `lab_app` role (in T5), `faults` gets its own non-superuser owner, and the future agent role must be non-superuser too.
+  - **New status `RESTORE_PENDING`:** a failed activation whose restore also fails stays blocking.
+  - **One active injection:** enforced by a unique index on the constant `((true)) WHERE status IN ('ACTIVE','RESTORE_PENDING')`. An index on the status column would allow one row per status.
+  - **Bounded recreate:** `--wait-timeout`, set by the property `kintsugi.lab-control.recreate-wait-timeout`, default 120 s.
+  - **Naming:** a table maps each compose variable to its container variable.
+  - **Catalog:** returns ids only.
+- 2026-10-07: T3 done by a delegated writer (tests first).
+  - Catalog, domain, the V1/V2 migrations, append-only events, `FaultInjectionService`, the API, and the `unsupported` `LabControl` mode until T4.
+  - Tests: concurrency (5×, real HTTP, a barrier), database down → 503, and a test that no response body contains truth values.
+  - A false positive (parameter "2" matching "F2") fixed the leak test.
+  - mvn exit 0, 48 tests, two runs (parent re-run).
+  - Accepted: if the `ACTIVATED` event cannot be written, the injector answers 201 and logs an ERROR; the row stays ACTIVE and blocking.
 
 ## Next step
 
-T3 (catalog, persistence, API with a fake LabControl) via a delegated writer.
+T4 (real `LabControl`: gateway REST plus compose recreate, image with the Docker CLI) via a delegated writer.

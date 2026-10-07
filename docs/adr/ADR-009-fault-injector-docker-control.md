@@ -20,6 +20,16 @@ Today the verify scripts inject the faults themselves:
 | F3 | compose variable `ORDER_PAYMENT_BASEURL`, then `docker compose up -d --no-deps --wait order-service` |
 | F4 | compose variables `INVENTORY_POOL_SIZE` and `INVENTORY_RESERVATION_DELAY`, then the same recreate of inventory-service |
 
+Two layers of names are involved in F3 and F4. The injector sets the **compose variables** (interpolated by `infra/compose.yaml`); compose turns them into the **container variables** that Spring Boot reads:
+
+| Compose variable (set by the injector) | Container variable (read by the service) | Default |
+|----------------------------------------|------------------------------------------|---------|
+| `ORDER_PAYMENT_BASEURL` | `KINTSUGI_PAYMENT_BASEURL` (order-service) | `http://payment-service:8081` |
+| `INVENTORY_POOL_SIZE` | `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE` (inventory-service) | `10` |
+| `INVENTORY_RESERVATION_DELAY` | `KINTSUGI_INVENTORY_RESERVATIONDELAY` (inventory-service) | `0s` |
+
+The catalog's parameters use the compose names, because those are what the injector sets. Assertions on a running container use the container names.
+
 Nothing records what was injected, when, or why. Two questions follow: how a container can redeploy another container, and how to keep the truth away from an agent that will read logs, metrics, runbooks and HTTP APIs.
 
 ## Decision
@@ -32,10 +42,11 @@ Nothing records what was injected, when, or why. Two questions follow: how a con
 - **F3 and F4** run, inside the injector container:
 
   ```bash
-  docker compose -p kintsugi-lab -f <compose.yaml> up -d --no-deps --no-build --wait <service>
+  docker compose -p kintsugi-lab -f <compose.yaml> up -d --no-deps --no-build --wait --wait-timeout <N> <service>
   ```
 
   first with the fault variables set, then again without them to restore. The compose project files are mounted read-only.
+- **Bounded recreate.** `<N>` is the property `kintsugi.lab-control.recreate-wait-timeout`, default `120s`: a Spring service in this lab becomes healthy in well under a minute, and its healthcheck allows `start_period` 60 s. The injector also kills the CLI process if it outlives the timeout plus a small margin. A non-zero exit, including a `--wait-timeout` expiry, is a failed step: activation then follows the failed-activation rule, and a restore keeps the injection blocking.
 - Why a real recreate:
   - It leaves real deploy evidence: the container is recreated at time T with a new configuration. The M2 `getDeployments` tool will read that evidence, as an SRE reads a deploy log.
   - F3 stays "wrong configuration via env", as the vision describes it. No fault hook is added to order-service's code.
@@ -63,8 +74,14 @@ How the image uses them:
 
 ### Isolation of the truth
 
-- **Separate database and user.** The truth lives in its own `faults` database, owned by a dedicated `faults` user. `CONNECT` on it is revoked from `PUBLIC`, so the `lab` user that the services use cannot connect. The agent's future read-only `queryDb` tool must never be given the `faults` credentials.
-- **Not in any HTTP answer.** No endpoint ever returns the true cause. `GET /faults/catalog` and `GET /faults/active` return fault ids and targets only. In M4 the eval harness reads the truth with the `faults` user.
+- **Separate database and roles, none of them a superuser except the bootstrap one.** A PostgreSQL superuser ignores `REVOKE CONNECT`, so a grant only isolates the truth from roles that are **not** superusers. Today the services connect as `lab`, the image's `POSTGRES_USER`, which is a superuser and could read `faults`. Therefore:
+  - The compose `postgres` keeps a **bootstrap superuser** (`POSTGRES_USER`). Only the init scripts in `infra/postgres/init/` use it. No service, script assertion or tool connects with it.
+  - The services connect with a **non-superuser application role**, `lab_app` (`NOSUPERUSER NOCREATEDB NOCREATEROLE`). It owns `orders`, `payments` and `inventory`, and nothing else.
+  - `faults` is owned by a **non-superuser `faults` role**. `CONNECT` on `faults` is revoked from `PUBLIC`, so only `faults` (and the bootstrap superuser) can connect.
+  - The agent's future read-only role (M2, behind `queryDb`) MUST be a non-superuser and MUST NOT have `CONNECT` on `faults`. It must never be given the `faults` credentials.
+  - The verify scripts MUST assert both halves: the service role is not a superuser (`SELECT rolsuper FROM pg_roles WHERE rolname = 'lab_app'` is false), and it cannot connect to `faults`.
+  - Task T5 implements this in `infra/postgres/init/` and in the services' compose credentials.
+- **Not in any HTTP answer.** No endpoint ever returns the true cause. `GET /faults/catalog` returns fault ids only, and `GET /faults/active` returns the injection id, the fault id, its status and times. Neither returns a target service or a parameter, because each fault's target is also its root-cause service. In M4 the eval harness reads the truth with the `faults` role.
 - **Not in Loki.** Alloy drops the fault-injector container's logs, so they never reach Loki. The operator reads them with `docker logs`.
 - **Not in Prometheus.** Prometheus does not scrape the injector. The service still exposes `/actuator/prometheus`, for consistency with the other services.
 - **Not in the knowledge base.** The agent's knowledge base is `docs/runbooks/` only. `openspec/` and `odd/` name the true causes and are never indexed into the agent's RAG.
@@ -72,7 +89,9 @@ How the image uses them:
 ### Rules
 
 - **Refuse to inject when the truth cannot be recorded.** If the `faults` database is unreachable, `POST /faults` fails before touching the lab. An injection without its truth would be an incident that cannot be scored.
-- **One active fault at a time.** A second activation returns 409. Each incident has exactly one true cause, which keeps the scoring unambiguous.
+- **One blocking injection at a time.** An injection is blocking while its status is `ACTIVE` or `RESTORE_PENDING`. A second activation returns 409. Each incident has exactly one true cause, which keeps the scoring unambiguous.
+  - The database enforces it, not only the code: a partial unique index on a constant, `CREATE UNIQUE INDEX ... ON injections ((true)) WHERE status IN ('ACTIVE', 'RESTORE_PENDING')`, admits at most one blocking row. An index on `status` itself would still admit one `ACTIVE` and one `RESTORE_PENDING` row. Two concurrent `POST /faults` therefore give exactly one 201 and one 409.
+- **A lab that may still be broken stays blocking.** If an activation step fails and its compensating restore succeeds, the injection is `FAILED` and no longer blocks. If the compensating restore also fails, or a later `POST /faults/{id}/restore` fails, the injection is `RESTORE_PENDING`: the lab may still be broken, so no new fault may be layered on top of it. `POST /faults` answers 409 until a restore succeeds.
 
 ## Alternatives considered
 
@@ -89,11 +108,14 @@ How the image uses them:
 
 - F3 and F4 produce real redeploys, the evidence a production SRE would use.
 - The scripts and the injector use the same compose commands, so behavior does not change when the scripts switch to the injector.
-- The truth is recorded before anything breaks, and it is readable only by the `faults` user.
+- The truth is recorded before anything breaks, and it is readable only by the `faults` role. Because no service or agent role is a superuser, the `REVOKE CONNECT` actually holds.
+- A failed restore never frees the lab for a second fault, so an incident never has two overlapping causes.
 
 ### Negative
 
 - The mounted Docker socket is root-equivalent on the host, the same risk accepted for Alloy in ADR-008. It is accepted for a lab whose ports are bound to `127.0.0.1`. If the lab ever leaves the laptop, the mitigation is a socket proxy that allows only the endpoints compose needs.
 - The injector image is larger: it adds two static binaries, the Docker CLI and the compose plugin, to the JRE image.
 - The CLI and the plugin are pinned by hand and must be bumped with a new ADR or a superseding one.
-- Invisibility depends on configuration in three places (Alloy, Prometheus and the database grants). The verify scripts must assert each one, or a change could quietly leak the truth.
+- Invisibility depends on configuration in three places (Alloy, Prometheus and the database roles and grants). The verify scripts must assert each one, or a change could quietly leak the truth.
+- T5 must move the services from the `lab` superuser to `lab_app`, which touches every service's compose credentials and the init scripts. Existing data volumes were initialized without `lab_app`, so the lab needs `down -v` once.
+- A `RESTORE_PENDING` injection blocks every new fault until an operator gets a restore through. That is deliberate: a stuck lab is visible, a silently double-faulted lab is not.
