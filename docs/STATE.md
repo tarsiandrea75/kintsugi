@@ -26,6 +26,10 @@ M1 — The lab (Oct 5–25)
 
 **To review with the human (decided autonomously):** see "To review with the human" in `odd/tasks/fault-f3.md`. In short: the F3 evidence is `ConnectException` plus the URL, not the literal "connection refused" text in the vision table, so the vision line may need rewording.
 
+## Where the autonomous session stopped (quota reached)
+
+F4 is in progress on `feat/fault-f4-02-inventory-api` (see `odd/tasks/fault-f4.md`, Next step): inventory-service T1 and T2 are committed and tested (52 tests). The second review was interrupted by the quota. T3 (order → inventory) and T4 (compose, dashboard, verify-f4) are still to do.
+
 ## Next action
 
 Last fault of the M1 check: F4, "DB pool exhausted", with the symptom "500 errors on inventory" (`docs/vision.md:34`). It needs a new `inventory-service`, an order → inventory call, which also prepares F8, and a pool of 2 plus a slow query.

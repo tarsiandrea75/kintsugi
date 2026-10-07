@@ -98,7 +98,12 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
   - Finding: Hikari exhaustion surfaces as `CannotCreateTransactionException`, because the transaction cannot start. Spring already returns 500 for it, but logs an ERROR stack trace. A handler scoped to the controller keeps the 500 and logs one readable WARN line naming the pool timeout. Kept, and to review.
   - GREEN: mvn exit 0, 52 tests, two runs (parent re-run). The exhaustion test (pool 1, timeout 250 ms, delay 1 s) takes about 3.5 s.
   - Duplicate SKU lines in one reservation add up (written in the spec).
+- 2026-10-07: review of `7657927..e9d881e` approved (`review-3ec4c41766b6682e`). WARNINGs to fix:
+  - lock-order deadlock risk: sort reservation lines by SKU before updating;
+  - `StockRepository.take` accepts a quantity of 0 or less;
+  - the slice's progress notes and properties comment refer to code that is in the next slice.
+- 2026-10-07: review of `e9d881e..98e97c3` was started (lineage `review-5964885f8bc7ec5a`), but the reviewer capture failed when the usage quota ran out. STATUS re-offers the same reliability slot. Resume with the bound STATUS command from that lineage, or start a new review of the range.
 
 ## Next step
 
-T3 (order-service inventory step) via a delegated writer.
+Resume: finish the review of `e9d881e..98e97c3`, fix the T2 review WARNINGs, then T3 and T4.
