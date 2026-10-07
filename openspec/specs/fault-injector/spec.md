@@ -132,7 +132,7 @@ The database MUST enforce it with a partial unique index that admits at most one
 
 `POST /faults/{id}/restore` on a blocking injection (`ACTIVE` or `RESTORE_PENDING`) MUST apply the fault's restore steps, set `restored_at`, set status `RESTORED`, record a `RESTORED` event and return 200 with `{"id", "fault", "status", "injectedAt", "restoredAt"}`. Restoring an injection that is no longer blocking (`RESTORED`, or `FAILED` after a successful compensating restore) MUST return 200 with the same body and change nothing: no restore step runs and no event is added. An unknown id, or one that is not a UUID, MUST return 404.
 
-If the restore steps fail, the injector MUST record a `RESTORE_FAILED` event with the cause, set status `RESTORE_PENDING` (still blocking) and return 500 with `{"error": "restore failed", "id": <injection id>}`, so the restore can be retried.
+If the restore steps fail, the injector MUST record a `RESTORE_FAILED` event with the cause, set status `RESTORE_PENDING` (still blocking) and return 500 with `{"error": "restore failed", "id": <injection id>}`, so the restore can be retried. The move to `RESTORE_PENDING` MUST be conditional on the row still being blocking (`UPDATE ... WHERE id = ? AND status IN ('ACTIVE', 'RESTORE_PENDING')`): a failure that ends after a concurrent restore already set `RESTORED` is recorded as a `RESTORE_FAILED` event only, and the row stays `RESTORED`.
 
 #### Scenario: Restore F4
 - GIVEN F4 is active
@@ -154,6 +154,13 @@ If the restore steps fail, the injector MUST record a `RESTORE_FAILED` event wit
 - AND the row is `RESTORE_PENDING` with a `RESTORE_FAILED` event naming the cause
 - AND a new `POST /faults` answers 409 until a restore succeeds
 
+#### Scenario: A late restore failure does not undo a successful restore
+- GIVEN F1 is active and two restores of it run at the same time
+- WHEN one restore succeeds and sets `RESTORED`, and the other fails afterwards
+- THEN the failing call answers 500
+- AND the row stays `RESTORED` with `restored_at` set, with a `RESTORE_FAILED` event after the `RESTORED` one
+- AND no injection is blocking
+
 ### Requirement: Failed activation is restored and recorded
 
 If an activation step fails, the injector MUST attempt the restore steps (the compensating restore) and record an `ACTIVATION_FAILED` event with the failure cause. Then:
@@ -161,7 +168,7 @@ If an activation step fails, the injector MUST attempt the restore steps (the co
 - if the compensating restore succeeds, it MUST set status `FAILED` and `restored_at`; the injection no longer blocks;
 - if the compensating restore also fails, it MUST also record a `RESTORE_FAILED` event with that cause and set status `RESTORE_PENDING`; the injection keeps blocking until a `POST /faults/{id}/restore` succeeds.
 
-Either way it returns 500 with `{"error": "activation failed", "id": <injection id>}`. The 500 body MUST NOT contain the true cause or a failure message.
+Either way it returns 500 with `{"error": "activation failed", "id": <injection id>}`. The 500 body MUST NOT contain the true cause or a failure message. If recording the outcome itself fails, for any reason (database, transaction, serialization of the event detail), the injector MUST log that error and still answer the same 500; the row then stays `ACTIVE`, which keeps blocking.
 
 #### Scenario: Recreate fails during F3, restore succeeds
 - GIVEN the compose recreate of order-service fails, and the compensating restore succeeds

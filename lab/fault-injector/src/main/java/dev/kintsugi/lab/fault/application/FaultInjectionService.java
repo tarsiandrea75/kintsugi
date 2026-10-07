@@ -119,11 +119,15 @@ public class FaultInjectionService {
 			lab.restore(fault);
 		}
 		catch (RuntimeException restoreFailure) {
-			transaction.executeWithoutResult(status -> {
+			// A concurrent restore may have succeeded since the row was read. The conditional update moves the row to
+			// RESTORE_PENDING only while it is still blocking, so a late failure never turns RESTORED back into
+			// blocking: it is then recorded as an event only.
+			Boolean stillBlocking = transaction.execute(status -> {
 				events.append(id, InjectionEventType.RESTORE_FAILED, now(), failure(restoreFailure, null));
-				injections.updateStatus(id, InjectionStatus.RESTORE_PENDING, null);
+				return injections.updateStatus(id, InjectionStatus.RESTORE_PENDING, null);
 			});
-			log.warn("event=restore_failed injection_id={} fault={}", id, fault.id());
+			log.warn("event=restore_failed injection_id={} fault={} status={}", id, fault.id(),
+					Boolean.TRUE.equals(stillBlocking) ? InjectionStatus.RESTORE_PENDING : "unchanged_not_blocking");
 			throw new RestoreFailedException(id, restoreFailure);
 		}
 		Instant restoredAt = now();
@@ -144,7 +148,8 @@ public class FaultInjectionService {
 	/**
 	 * After a failed activation: tries the restore steps, then records {@code ACTIVATION_FAILED} and either
 	 * {@code FAILED} (restore succeeded) or {@code RESTORE_FAILED} and {@code RESTORE_PENDING} (it failed too). If even
-	 * that cannot be recorded, the row stays {@code ACTIVE}, which still blocks new faults.
+	 * that cannot be recorded, for any reason, the error is logged and the row stays {@code ACTIVE}, which still blocks
+	 * new faults.
 	 */
 	private void compensate(Injection injection, Fault fault, RuntimeException activationFailure) {
 		RuntimeException restoreFailure = null;
@@ -169,9 +174,11 @@ public class FaultInjectionService {
 				}
 			});
 		}
-		catch (DataAccessException | TransactionException unrecorded) {
-			log.error("event=activation_failure_not_recorded injection_id={} fault={} error={}", injection.id(),
-					fault.id(), unrecorded.getClass().getName());
+		catch (RuntimeException unrecorded) {
+			// Any failure here (database, transaction, serialization of the detail) must not replace the activation
+			// failure the caller is about to receive. The row stays ACTIVE, which still blocks new faults.
+			log.error("event=activation_failure_not_recorded injection_id={} fault={}", injection.id(), fault.id(),
+					unrecorded);
 		}
 		log.warn("event=activation_failed injection_id={} fault={} restore={}", injection.id(), fault.id(),
 				restoreOutcome == null ? "succeeded" : "failed");

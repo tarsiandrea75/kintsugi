@@ -127,6 +127,50 @@ class InjectionRepositoryTest {
 	}
 
 	@Test
+	void updateStatusMovesAnActiveRowToRestorePendingWithoutRestoredAt() {
+		Injection injection = injection(Fault.F3, InjectionStatus.ACTIVE);
+		repository.insert(injection);
+
+		assertThat(repository.updateStatus(injection.id(), InjectionStatus.RESTORE_PENDING, null)).isTrue();
+
+		assertThat(repository.findById(injection.id())).hasValueSatisfying(read -> {
+			assertThat(read.status()).isEqualTo(InjectionStatus.RESTORE_PENDING);
+			assertThat(read.restoredAt()).isNull();
+		});
+		assertThat(repository.findBlocking()).map(Injection::id).contains(injection.id());
+	}
+
+	@Test
+	void updateStatusMovesARestorePendingRowToRestored() {
+		Injection injection = injection(Fault.F3, InjectionStatus.RESTORE_PENDING);
+		repository.insert(injection);
+		Instant restoredAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
+		assertThat(repository.updateStatus(injection.id(), InjectionStatus.RESTORED, restoredAt)).isTrue();
+
+		assertThat(repository.findById(injection.id())).hasValueSatisfying(read -> {
+			assertThat(read.status()).isEqualTo(InjectionStatus.RESTORED);
+			assertThat(read.restoredAt()).isEqualTo(restoredAt);
+		});
+		assertThat(repository.findBlocking()).isEmpty();
+	}
+
+	@Test
+	void updateStatusMovesAnActiveRowToFailedAndSetsRestoredAt() {
+		Injection injection = injection(Fault.F4, InjectionStatus.ACTIVE);
+		repository.insert(injection);
+		Instant restoredAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
+
+		assertThat(repository.updateStatus(injection.id(), InjectionStatus.FAILED, restoredAt)).isTrue();
+
+		assertThat(repository.findById(injection.id())).hasValueSatisfying(read -> {
+			assertThat(read.status()).isEqualTo(InjectionStatus.FAILED);
+			assertThat(read.restoredAt()).isEqualTo(restoredAt);
+		});
+		assertThat(repository.findBlocking()).isEmpty();
+	}
+
+	@Test
 	void updateStatusLeavesAFinishedRowUnchanged() {
 		Injection injection = injection(Fault.F1, InjectionStatus.RESTORED);
 		repository.insert(injection);
