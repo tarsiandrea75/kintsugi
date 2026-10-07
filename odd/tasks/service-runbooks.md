@@ -20,7 +20,7 @@ Write one Markdown runbook per lab service in `docs/runbooks/`. This covers the 
 ## Acceptance criteria
 
 - Four runbooks plus the README exist and follow the same structure.
-- `grep -niE 'F[1-8]\b|fault|inject'` finds nothing in the runbooks, except the README's rule about it.
+- `grep -niE '\bF[1-8]\b|fault|inject'` (the same pattern as the README rule) finds nothing in the runbooks, except the README's rule about it.
 - Every metric, log phrase, property and endpoint cited exists in the repo (spot-checked by the parent).
 
 ## Tasks
@@ -31,4 +31,5 @@ Write one Markdown runbook per lab service in `docs/runbooks/`. This covers the 
 
 - 2026-10-07: design decided autonomously; branch created.
 - 2026-10-07: T1 done by a delegated writer. Five files: README with the authoring rule, plus four runbooks of 96–119 lines each. The leakage grep matches only the README's rule. The parent spot-checked 3 signals against the code and the dashboard.
-- Open (to review): runbooks avoid the word "default" and the dashboard title/uid ("Lab — Faults", `lab-f1`) because they would trip the leakage grep, so renaming the dashboard to a neutral name would let runbooks link to it. Two cited series (`hikaricp_connections_pending` for order-service and payment-service, the `HttpConnectTimeoutException` tag) come from Spring auto-instrumentation and are not written anywhere in the repo. The lab-observability spec gives the payment latency panel an older name.
+- Open (to review): runbooks avoid the word "default" and the dashboard title/uid ("Lab — Faults", `lab-f1`) because they would trip the leakage grep, so renaming the dashboard to a neutral name would let runbooks link to it. Two cited series (`hikaricp_connections_pending` for order-service and payment-service, the `HttpConnectTimeoutException` tag) come from Spring auto-instrumentation and are not written anywhere in the repo.
+- 2026-10-07: the lab-observability spec now uses the real payment panel title, "payment-service /payments latency and 503 rate" (`768ff1c`). All 9 dashboard titles were checked against the spec.

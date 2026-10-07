@@ -23,7 +23,7 @@ M1 — The lab (Oct 5–25). **The M1 check is met: faults F1–F4 are visible i
 
 **To review with the human (decided autonomously):**
 - The F3 and F4 designs; see "To review with the human" in `odd/tasks/fault-f3.md` and the Design section of `odd/tasks/fault-f4.md`.
-- In particular: whether to reword the F3 symptom in `docs/vision.md:33`.
+- F3 is resolved: the human accepted `ConnectException` as the evidence, and `docs/vision.md:33` was updated.
 - That under F4 even reservations that got a connection answer 503, because the 5 s query outlasts the 3 s read timeout. Stock probably leaks; this is documented as a known limitation.
 
 **Upgrading an old lab volume:** run `docker compose -f infra/compose.yaml down -v` once, so the `inventory` database is created.
@@ -60,7 +60,7 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - When to make the GitHub repository public. It is private for now; the vision assumes it is public from week 1.
 - Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service still stores an AUTHORIZED payment after order-service has timed out (observed).
 - Datasource socket timeout. Without one, a database that stops responding keeps the count refresh busy until TCP gives up. The gauges still show NaN after 10 s. A socket timeout would apply to every query, including F4's slow queries.
-- F3 and F4 decisions taken autonomously (see the feature documents): accept `ConnectException` as the F3 evidence and reword `docs/vision.md:33`? Accept the F4 design: reserve before saving, injection through compose variables?
+- F4 design, decided autonomously and waiting for the human: reserve before saving, injection through compose variables, and the stock leak under F4 (see `odd/tasks/fault-f4.md`).
 - Reservation release on payment failure or timeout. The stock leak under F4 belongs with reconciliation.
 
 ## Follow-ups
