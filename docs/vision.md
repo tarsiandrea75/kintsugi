@@ -91,7 +91,7 @@ Java/Spring for the system, Python only to measure. This is the split a real com
 | Tools | MCP server | standard protocol, reusable from other MCP clients |
 | Evals | Python, pandas, matplotlib | CLI scripts, no web service until needed |
 | UI | one HTML page with SVG, updated via Server-Sent Events | no frontend framework: the value is in the backend |
-| Infra | Docker Compose, GitHub Actions | clone and run with one command |
+| Infra | Docker Compose, local check scripts | clone and run with one command |
 
 Exact versions of Spring AI and models: verify on day one and record in an ADR. They change every few months.
 
@@ -141,14 +141,13 @@ CI runs a reduced eval (10 cases, recorded model responses) on every PR. The ful
 
 ## 7. Roadmap
 
-Four 3-week milestones, Oct 5 – Dec 27, 2026. Each ends with something working, a passing check, and a public LinkedIn post, so even an interrupted project stays showable. Move to the next milestone only after the check passes; if one slips, shorten the next one, never the M4 evals.
+Four 3-week milestones, Oct 5 – Dec 27, 2026. Each ends with something working and a passing check, so even an interrupted project stays showable. Move to the next milestone only after the check passes; if one slips, shorten the next one, never the M4 evals.
 
 **M1 — The lab (Oct 5–25)**
 - Three services, gateway-mock, PostgreSQL in Docker Compose
 - Fault injector with F1–F4 and true cause recorded
-- OpenTelemetry, Prometheus, Loki, Grafana
+- Prometheus, Loki, Grafana (OpenTelemetry traces deferred to the agent in M2+, ADR-008)
 - Service runbooks in Markdown
-- Post: "I built a system designed to break"
 - **Check: every fault F1–F4 is visible in Grafana**
 
 **M2 — First agent (Oct 26 – Nov 15)**
@@ -156,7 +155,6 @@ Four 3-week milestones, Oct 5 – Dec 27, 2026. Each ends with something working
 - RAG on runbooks with pgvector
 - Loop perception → plan → action → observation, with IncidentState
 - JSON report with cited evidence
-- Post: the first correct diagnosis, with its step-by-step trace
 - **Check: F1–F3 correctly diagnosed with a local model**
 
 **M3 — Safe and observable agent (Nov 16 – Dec 6)**
@@ -164,16 +162,14 @@ Four 3-week milestones, Oct 5 – Dec 27, 2026. Each ends with something working
 - Long-term memory of resolved incidents
 - Deterministic rules and faults F5–F8
 - Live page with the architecture diagram lighting up
-- Post: video of the agent asking for approval before acting
 - **Check: zero risky actions without approval**
 
 **M4 — Benchmark and launch (Dec 7–27)**
 - Python harness, ~200 cases per configuration
 - Configs A–D compared via ModelRouter
-- Reduced eval in CI, README with numbers, 3-minute demo video
+- Reduced eval as a local check script, README with numbers, 3-minute demo video
 - Technical article: local models vs APIs for SMEs
-- Post: benchmark results
-- **Goal: public portfolio and first applications**
+- **Goal: benchmark results documented in `docs/benchmark.md`; any publication is a separate human decision**
 
 Out of scope unless a benchmark justifies it: multi-agent architectures (supervisor + specialist agents). If attempted, only as a final measured experiment.
 
@@ -197,8 +193,7 @@ kintsugi/
 ├── mcp-tools/           # MCP server
 ├── evals/               # Python
 ├── ui/
-├── infra/               # compose, Prometheus, Grafana, Loki
-└── .github/workflows/
+└── infra/               # compose, Prometheus, Grafana, Loki, check scripts
 ```
 
 First ADRs (about one per week):
@@ -218,8 +213,9 @@ First ADRs (about one per week):
 
 Market: remote from Argentina; time-zone overlap with US companies is a real advantage. Languages: English, Spanish, Italian.
 
-Visibility:
-- One LinkedIn post in English per milestone, with an image/gif and a number. First post in week 1.
+Repository and visibility (decided 2026-10-07): the repository stays local and private, with no pushes and no posts. Backups are full `git bundle` files kept outside the laptop. Anything below that involves publishing is a separate human decision, taken later if ever.
+
+Visibility options, not scheduled:
 - One final technical article on local vs API benchmark.
 - 3-minute demo video: fault injected, diagram lighting up, report with evidence, human approval.
 - One small open-source contribution to Spring AI or the MCP Java SDK.
@@ -234,18 +230,18 @@ Rule: if time runs short, cut from the end of M3, never from the evals. A simple
 |---|---|---|
 | Not enough time | two weeks in a row under 8 h | drop long-term memory and write actions; keep M4 whole |
 | Hardware too slow for local models | more than a minute per agent step | develop with a cheap API, local only for benchmark, or hourly cloud GPU |
-| Small models fail at tool calling | under half of calls valid | fewer tools per step, more deterministic rules; document the failure as a post |
+| Small models fail at tool calling | under half of calls valid | fewer tools per step, more deterministic rules; document the failure in `docs/benchmark.md` |
 | Scope creep | urge for multi-agent or fancy UI | ADR-005 says no until a number justifies it |
 | Spring AI API changes | upgrades breaking the build | own interfaces isolate the framework; pinned version |
-| Motivation drop | a week without commits | public milestone posts create commitment; restart from the smallest task |
+| Motivation drop | a week without commits | milestone checks and the session journal keep the thread; restart from the smallest task |
 
 ## 11. Week 1 (Oct 5–11)
 
-Goal: fault F1 visible on a Grafana dashboard, and the first post published. ~2 h/day.
+Goal: fault F1 visible on a Grafana dashboard. ~2 h/day. (Status as of 2026-10-07: done, and F2–F4 too; see `docs/STATE.md`.)
 
-- [ ] Mon: verify environment, install Docker and Ollama, pull a ~8B model, make it call one tool from a minimal Spring AI app
-- [ ] Tue: public GitHub repo, README with vision, folder structure; `order-service` skeleton with PostgreSQL
-- [ ] Wed: `payment-service` and order → payment call
-- [ ] Thu: `gateway-mock` with latency configurable via REST (fault F1)
-- [ ] Fri: Docker Compose with OpenTelemetry, Prometheus, Grafana; dashboard showing F1 when active
-- [ ] Weekend: ADR-001, first LinkedIn post with the dashboard screenshot
+- [x] Mon: verify environment, install Docker and Ollama, pull a ~8B model, make it call one tool from a minimal Spring AI app
+- [x] Tue: local repository, README with vision, folder structure; `order-service` skeleton with PostgreSQL
+- [x] Wed: `payment-service` and order → payment call
+- [x] Thu: `gateway-mock` with latency configurable via REST (fault F1)
+- [x] Fri: Docker Compose with Prometheus, Loki and Grafana (OpenTelemetry deferred, ADR-008); dashboard showing F1 when active
+- [x] Weekend: ADR-001

@@ -8,7 +8,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Milestone
 
-M1 — The lab (Oct 5–25). **The M1 check is met:** F1–F4 are visible in Grafana, and each fault has a passing verify script. The service runbooks are done. What remains is the M1 post, which is a human task.
+M1 — The lab (Oct 5–25). **The M1 check is met:** F1–F4 are visible in Grafana, and each fault has a passing verify script. The service runbooks are done. **One M1 item is still open:** the fault injector with the true cause recorded (`docs/vision.md:148`). It is required before M2's check (F1–F3 correctly diagnosed), because diagnoses are scored against that recorded truth.
 
 ## Last action
 
@@ -25,9 +25,8 @@ M1 — The lab (Oct 5–25). **The M1 check is met:** F1–F4 are visible in Gra
 
 ## Next action
 
-1. The M1 LinkedIn post, "I built a system designed to break". Use a screenshot of the "Lab — Faults" dashboard at `http://127.0.0.1:13000`. This is a human task.
-2. Decide on pushing the local chains.
-3. M2 design: the MCP server with read-only tools on logs, metrics, deploys and the event tables (`queryDb`), and the first agent loop (`docs/vision.md:154`). Start with the design discussion; do not start it autonomously.
+1. `fault-injector` (closes M1). A REST service that activates a fault through the existing mechanisms (the gateway-mock admin API, and compose environment variables plus a recreate), records the true cause in its own database that the agent cannot read, and restores the lab.
+2. M2, in this order: MCP server with read-only tools (Loki logs, Prometheus metrics, `queryDb` on the event tables); RAG on the runbooks with pgvector (ADR-002); the agent loop with `IncidentState` and a JSON report with cited evidence; the Python eval harness for the M2 check.
 
 ## Local branch chains (not pushed)
 
@@ -46,12 +45,13 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 ## Standing preferences
 
+- No posts, no pushes (decided 2026-10-07). The repository stays local. Backups are full git bundles plus a sha256 checksum, kept outside the laptop (`kintsugi-YYYY-MM-DD-full.bundle`).
+
 - Over-budget features use `feature-branch-chain` without asking.
 - Native review consent is always granted: run the review and report it in one line.
 
 ## Open questions
 
-- When to make the GitHub repository public. It is private for now; the vision assumes it is public from week 1.
 - Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service still stores an AUTHORIZED payment after order-service has timed out (observed).
 - Datasource socket timeout. Without one, a database that stops responding keeps the count refresh busy until TCP gives up. The gauges still show NaN after 10 s. A socket timeout would apply to every query, including F4's slow queries.
 - Reconciliation and reservation release: the evidence now exists in the event tables (order/payment and order/reservation mismatches); deciding what to do with it is a future feature.
