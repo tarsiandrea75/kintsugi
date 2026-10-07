@@ -5,9 +5,13 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$REPO_DIR/infra/compose.yaml"
 # fault-injector mounts the repository read-only at its host path and joins the Docker socket's group (ADR-009). The
 # scripts derive both from this machine, so the lab starts the same from any working directory; an exported value wins.
+# There is no fallback gid: when the socket cannot be read, DOCKER_GID stays empty and compose refuses to start.
 export KINTSUGI_REPO_DIR="${KINTSUGI_REPO_DIR:-$REPO_DIR}"
-DOCKER_GID="${DOCKER_GID:-$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 1001)}"
+DOCKER_GID="${DOCKER_GID:-$(stat -c %g /var/run/docker.sock 2>/dev/null || true)}"
 export DOCKER_GID
+# The compose variables the fault injector sets for F3 and F4. start_lab removes them from the "up" environment, so a
+# value left in this shell cannot start the lab with a fault already applied.
+FAULT_VARIABLES=(ORDER_PAYMENT_BASEURL INVENTORY_POOL_SIZE INVENTORY_RESERVATION_DELAY)
 ORDERS=http://127.0.0.1:18080
 GATEWAY=http://127.0.0.1:18082
 INJECTOR=http://127.0.0.1:18084
@@ -45,6 +49,14 @@ fail() { echo "FAIL  $*"; failures=$((failures + 1)); }
 info() { echo "....  $*"; }
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+# Prints the environment of service $1's container, one NAME=value per line; prints nothing when it is not running.
+container_env() {
+  local container
+  container=$(compose ps -q "$1" 2>/dev/null) || return 0
+  [[ -n "$container" ]] || return 0
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null || true
+}
 
 reset_gateway() {
   if curl -fsS --max-time "$CURL_MAX_SECONDS" -o /dev/null -X DELETE "$GATEWAY/admin/behavior" 2>/dev/null; then
@@ -188,18 +200,39 @@ injector_call() {
 }
 
 # POST /faults for fault $1. On 201 stores the injection id for the exit trap and passes; otherwise fails and exits.
-# A failed activation (500) still carries an id: it is stored too, so the trap retries the restore.
+# A failed activation (500) still carries an id: it is stored too, so the trap retries the restore. A transport failure
+# (000) or a body without an id says nothing about the injector's side: the activation may have gone through after curl
+# gave up. So the active injection is read back, and when there is one its id is stored for the trap too.
 inject_fault() {
-  local code body
-  read -r code body <<<"$(injector_call POST /faults "{\"fault\":\"$1\"}")"
-  local id
-  id=$(json_field id "$body")
-  is_uuid "$id" && injection_id=$id
+  local code body id=""
+  read -r code body <<<"$(injector_call POST /faults "{\"fault\":\"$1\"}")" || true
+  id=$(json_field id "$body") || true
+  if is_uuid "$id"; then
+    injection_id=$id
+  else
+    adopt_active_injection "POST /faults $1 got $code ${body:-with no body}"
+  fi
   if [[ "$code" == 201 && -n "$injection_id" ]]; then
     pass "$1 injected through the fault injector (injection $injection_id)"
   else
-    fail "POST /faults $1: expected 201, got $code ${body:-no body}"
+    fail "POST /faults $1: expected 201 with an injection id, got $code ${body:-no body}"
     exit 1
+  fi
+}
+
+# After a POST /faults without a usable answer ($1 describes it): stores the id of the active injection, if any, so the
+# exit trap restores it.
+adopt_active_injection() {
+  local code body id=""
+  read -r code body <<<"$(injector_call GET /faults/active)" || true
+  if [[ "$code" == 200 ]]; then
+    id=$(json_field id "$body") || true
+  fi
+  if is_uuid "$id"; then
+    injection_id=$id
+    fail "$1, but injection $id is active; the exit trap restores it"
+  elif [[ "$code" != 204 ]]; then
+    fail "$1, and GET /faults/active answered $code: an injection may be active; check $INJECTOR/faults/active"
   fi
 }
 
@@ -278,11 +311,14 @@ check_truth_isolation() {
   fi
 }
 
-# The injector is invisible in Loki: no service="fault-injector" label value and no such stream, although its own
-# log (docker logs) has lines for this injection, so the absence comes from the Alloy drop rule, not from silence.
+# The injector is invisible to the agent's data sources:
+# - Loki has no service="fault-injector" label value and no such stream, although its own log (docker logs) has lines
+#   for this injection, so the absence comes from the Alloy drop rule, not from silence;
+# - Prometheus has no active target for it: no service="fault-injector" label and no fault-injector address.
 check_injector_invisible() {
-  local values series
-  if compose logs --no-log-prefix fault-injector 2>/dev/null | grep -q "injection_id=$injection_id"; then
+  local logs values series targets
+  logs=$(compose logs --no-log-prefix fault-injector 2>/dev/null || true)
+  if grep -q "injection_id=$injection_id" <<<"$logs"; then
     pass "docker logs: fault-injector logged injection $injection_id"
   else
     fail "docker logs: no fault-injector line for injection $injection_id, so the Loki check proves nothing"
@@ -295,10 +331,18 @@ check_injector_invisible() {
   else
     fail "Loki: fault-injector is visible or Loki is unreadable (label values: $values; series: $series)"
   fi
+  # Every label and address of every active target is in this body, so one string match covers both.
+  targets=$(curl -fsS --max-time "$CURL_MAX_SECONDS" "$PROMETHEUS/api/v1/targets?state=active" 2>/dev/null) ||
+    targets="unreadable"
+  if [[ "$targets" == *'"activeTargets":[{'* && "$targets" != *fault-injector* ]]; then
+    pass "Prometheus: no active target with service=\"fault-injector\" or a fault-injector address"
+  else
+    fail "Prometheus: fault-injector is an active target, or the targets are unreadable: $targets"
+  fi
 }
 
 # The checks every verify script runs after its restore: the truth row, its isolation, and the injector's
-# invisibility in Loki.
+# invisibility in Loki and Prometheus.
 check_truth() {
   check_truth_row "$1" "$2"
   check_truth_isolation
@@ -312,9 +356,11 @@ is_uuid() { [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 # Exits on failure.
 start_lab() {
   info "starting or reusing the lab (docker compose up -d --build --wait)"
-  local up_errors
+  local up_errors unset_faults=() variable
+  for variable in "${FAULT_VARIABLES[@]}"; do unset_faults+=(-u "$variable"); done
   up_errors=$(mktemp)
-  if compose up -d --build --wait >/dev/null 2>"$up_errors"; then
+  # Without the fault variables, "up" also puts a service left faulted by an earlier run back on its defaults.
+  if env "${unset_faults[@]}" docker compose -f "$COMPOSE_FILE" up -d --build --wait >/dev/null 2>"$up_errors"; then
     rm -f "$up_errors"
     pass "every container is up and healthy"
   else

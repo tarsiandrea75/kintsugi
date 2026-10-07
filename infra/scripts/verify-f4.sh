@@ -38,16 +38,17 @@ EOF
 parse_args "$@"
 trap on_exit EXIT
 
-# 1. Start or reuse the lab ("up" puts inventory-service back on its defaults); a healthy order is paid.
+# 1. Start or reuse the lab ("up", run without the fault variables, puts inventory-service back on its defaults); a
+# healthy order is paid.
 start_lab
 expect_paid_order verify-f4 healthy
 
 # 2. Inject F4 through the fault injector: a redeploy of inventory-service with a tiny pool and a slow reservation query.
 injected_at=$SECONDS
 inject_fault F4
-configured=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
-  "$(compose ps -q inventory-service)" 2>/dev/null |
-  grep -E '^(SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE|KINTSUGI_INVENTORY_RESERVATIONDELAY)=' | sort | tr '\n' ' ' || true)
+environment=$(container_env inventory-service)
+configured=$(grep -E '^(SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE|KINTSUGI_INVENTORY_RESERVATIONDELAY)=' <<<"$environment" |
+  sort | tr '\n' ' ' || true)
 if [[ "$configured" == "KINTSUGI_INVENTORY_RESERVATIONDELAY=$F4_RESERVATION_DELAY SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE=$F4_POOL_SIZE " ]]; then
   pass "inventory-service was recreated with pool size $F4_POOL_SIZE and reservation delay $F4_RESERVATION_DELAY"
 else

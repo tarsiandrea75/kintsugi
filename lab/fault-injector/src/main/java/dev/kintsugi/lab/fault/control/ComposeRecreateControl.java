@@ -35,7 +35,8 @@ import dev.kintsugi.lab.fault.control.ProcessRunner.Result;
  * <li>Recreates of one service are serialized: two overlapping restores never run {@code up} on the same service at
  * once. Different services do not wait for each other.</li>
  * <li>A non-zero exit, a {@code --wait-timeout} expiry or a process that outlives {@code N} plus {@link #PROCESS_MARGIN}
- * is a failed step: {@link LabControlException} with the tail of stderr.</li>
+ * is a failed step: {@link LabControlException} with the tail of stderr. So is an interrupt, which kills the CLI;
+ * every message names the step and the fault.</li>
  * </ul>
  */
 public class ComposeRecreateControl implements LabControl {
@@ -45,10 +46,11 @@ public class ComposeRecreateControl implements LabControl {
 
 	/**
 	 * The only variables of the injector's environment the CLI sees, when set: the program search path, the home
-	 * directory, the daemon address and the CLI's config directory (the image points it at a writable place, because
-	 * the {@code app} user has no home).
+	 * directory, the daemon address, the CLI's config directory (the image points it at a writable place, because the
+	 * {@code app} user has no home), and {@code DOCKER_GID}: compose interpolates the whole file for any command, and
+	 * {@code infra/compose.yaml} requires it for the injector's own service.
 	 */
-	static final List<String> PASSED_THROUGH = List.of("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG");
+	static final List<String> PASSED_THROUGH = List.of("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_GID");
 
 	/** How much of stderr a failure message keeps: compose prints the reason last. */
 	private static final int STDERR_TAIL_CHARS = 600;
@@ -124,6 +126,11 @@ public class ComposeRecreateControl implements LabControl {
 			throw new LabControlException("compose " + step + " of " + fault.id() + " could not start: "
 					+ notStarted.getMessage(), notStarted);
 		}
+		catch (LabControlException interrupted) {
+			// The runner's contract: thrown only when this thread was interrupted; it has set the interrupt flag again.
+			throw new LabControlException("compose " + step + " of " + fault.id() + " was interrupted: "
+					+ interrupted.getMessage(), interrupted);
+		}
 		finally {
 			lock.unlock();
 		}
@@ -137,6 +144,7 @@ public class ComposeRecreateControl implements LabControl {
 		}
 		log.info("event=compose_recreate_done step={} fault={}", step, fault.id());
 	}
+
 	private List<String> argv(String service) {
 		return List.of("docker", "compose", "-p", project, "-f", composeFile.toString(), "up", "-d", "--no-deps",
 				"--no-build", "--wait", "--wait-timeout", Long.toString(waitTimeout.toSeconds()), service);

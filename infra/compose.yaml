@@ -13,7 +13,8 @@
 # injector recreates services from this same file and reads infra/.env too, but never sees the host shell.
 # - KINTSUGI_REPO_DIR: absolute host path of the repository, mounted read-only at that same path into fault-injector.
 #   Defaults to $PWD, which is right when compose runs from the repository root.
-# - DOCKER_GID: group id of /var/run/docker.sock on the host, added to fault-injector (default 1001).
+# - DOCKER_GID: group id of /var/run/docker.sock on the host, added to fault-injector. Required, with no default: a
+#   wrong gid would start an injector that cannot reach Docker, so compose refuses to run without it.
 # - POSTGRES_BOOTSTRAP_PASSWORD, LAB_APP_DB_PASSWORD, FAULTS_DB_PASSWORD: database passwords. They are applied only
 #   when the postgres volume is empty, so changing them needs a "down -v".
 # - GRAFANA_ADMIN_PASSWORD: Grafana's admin password.
@@ -139,10 +140,12 @@ services:
       KINTSUGI_LABCONTROL_MODE: docker
       KINTSUGI_LABCONTROL_COMPOSEFILE: ${KINTSUGI_REPO_DIR:-$PWD}/infra/compose.yaml
       KINTSUGI_LABCONTROL_GATEWAYBASEURL: http://gateway-mock:8082
+      # Passed on to the injector's compose CLI, which interpolates this whole file and needs it like any other run.
+      DOCKER_GID: ${DOCKER_GID:?set DOCKER_GID to the gid of /var/run/docker.sock}
     # The image runs as an unprivileged user; membership of the socket's group is what lets it use Docker. Like the
     # socket mount for Alloy, this is root-equivalent on the host, accepted for a loopback-only lab (ADR-008, ADR-009).
     group_add:
-      - "${DOCKER_GID:-1001}"
+      - "${DOCKER_GID:?set DOCKER_GID to the gid of /var/run/docker.sock}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # The repository, read-only, at its host path: compose resolves this file's relative bind mounts against its own

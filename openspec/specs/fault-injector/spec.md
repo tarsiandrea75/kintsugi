@@ -60,7 +60,7 @@ Properties of the `docker` mode:
 
 - **Gateway faults.** Activation is `PUT /admin/behavior` with the catalog parameters as the JSON body (F1 `{"latencyMs": 10000}`, F2 `{"latencyMs": 0, "errorStatus": 429}`). Restore is `DELETE /admin/behavior`. An error status, a timeout, a connection failure or a body that cannot be serialized is a failed step.
 - **Recreate faults.** The injector runs exactly this argv, with no shell: `docker`, `compose`, `-p`, `<compose-project>`, `-f`, `<compose-file>`, `up`, `-d`, `--no-deps`, `--no-build`, `--wait`, `--wait-timeout`, `<N>`, `<service>`. `--no-deps` and the single service name mean only that service is recreated: never its dependencies, the injector itself or the whole stack.
-  - The process gets a minimal environment, nothing inherited: `PATH`, `HOME`, `DOCKER_HOST` and `DOCKER_CONFIG` when the injector has them, plus, on activation, the fault's compose variables. The injector's datasource credentials never reach it. Restore runs the same argv without the fault variables, so compose falls back to its defaults.
+  - The process gets a minimal environment, nothing inherited: `PATH`, `HOME`, `DOCKER_HOST`, `DOCKER_CONFIG` and `DOCKER_GID` when the injector has them (`DOCKER_GID` because the compose file requires it for every command), plus, on activation, the fault's compose variables. The injector's datasource credentials never reach it. Restore runs the same argv without the fault variables, so compose falls back to its defaults.
   - Recreates of the same service are serialized: two overlapping restores never run `up` on one service at once.
   - The process is killed, with its children, if it runs longer than `<N>` plus 30 s or if the waiting thread is interrupted. A non-zero exit, a kill or an interruption is a failed step whose recorded cause ends with the tail of stderr when there is one.
 - **Docker access.** The image carries the Docker CLI 29.8.2 and the compose plugin v5.6.0 ([ADR-009](../../../docs/adr/ADR-009-fault-injector-docker-control.md)). It runs as an unprivileged user; the compose deployment mounts the Docker socket and adds the socket's group with `group_add`.
@@ -132,7 +132,7 @@ With `kintsugi.lab-control.mode=docker` the injector MUST apply and undo faults 
 #### Scenario: The CLI never sees the injector's credentials
 - GIVEN the injector's environment holds its datasource credentials
 - WHEN a recreate runs
-- THEN the process environment holds only `PATH`, `HOME`, `DOCKER_HOST`, `DOCKER_CONFIG` (those that are set) and the fault's compose variables
+- THEN the process environment holds only `PATH`, `HOME`, `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_GID` (those that are set) and the fault's compose variables
 
 #### Scenario: Overlapping restores of one service
 - GIVEN a restore of F3 is recreating order-service

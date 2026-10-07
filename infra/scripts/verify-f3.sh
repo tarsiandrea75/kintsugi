@@ -31,7 +31,7 @@ EOF
 parse_args "$@"
 trap on_exit EXIT
 
-# 1. Start or reuse the lab; "up" puts order-service back on its default payment URL.
+# 1. Start or reuse the lab; "up", run without the fault variables, puts order-service back on its default payment URL.
 start_lab
 
 # 2. A healthy order is paid.
@@ -43,8 +43,8 @@ expect_paid_order verify-f3 healthy
 sleep "$SCRAPE_SETTLE_SECONDS"
 injected_at=$SECONDS
 inject_fault F3
-configured=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
-  "$(compose ps -q order-service)" 2>/dev/null | grep '^KINTSUGI_PAYMENT_BASEURL=' || true)
+environment=$(container_env order-service)
+configured=$(grep '^KINTSUGI_PAYMENT_BASEURL=' <<<"$environment" || true)
 if [[ "$configured" == "KINTSUGI_PAYMENT_BASEURL=$F3_PAYMENT_BASEURL" ]]; then
   pass "order-service was recreated with $configured"
 else

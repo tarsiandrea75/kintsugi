@@ -42,11 +42,16 @@ class ComposeRecreateControlTest {
 
 		IOException failure;
 
+		RuntimeException interruption;
+
 		@Override
 		public Result run(Command command) throws IOException {
 			commands.add(command);
 			if (failure != null) {
 				throw failure;
+			}
+			if (interruption != null) {
+				throw interruption;
 			}
 			return answer;
 		}
@@ -60,12 +65,17 @@ class ComposeRecreateControlTest {
 	 * credentials) and a stale fault variable that a restore must not pick up.
 	 */
 	private static final Map<String, String> HOST_ENVIRONMENT = Map.of("PATH", "/usr/local/bin:/usr/bin:/bin", "HOME",
-			"/home/app", "DOCKER_HOST", "unix:///var/run/docker.sock", "DOCKER_CONFIG", "/tmp/.docker",
-			"SPRING_DATASOURCE_USERNAME", "faults", "SPRING_DATASOURCE_PASSWORD", "secret", "ORDER_PAYMENT_BASEURL",
+			"/home/app", "DOCKER_HOST", "unix:///var/run/docker.sock", "DOCKER_CONFIG", "/tmp/.docker", "DOCKER_GID",
+			"1001", "SPRING_DATASOURCE_USERNAME", "faults", "SPRING_DATASOURCE_PASSWORD", "secret", "ORDER_PAYMENT_BASEURL",
 			"http://stale:1");
 
+	/**
+	 * What the CLI gets. DOCKER_GID is there because compose interpolates the whole file for any command, and the file
+	 * requires it for the injector's own service.
+	 */
 	private static final Map<String, String> CLI_ENVIRONMENT = Map.of("PATH", "/usr/local/bin:/usr/bin:/bin", "HOME",
-			"/home/app", "DOCKER_HOST", "unix:///var/run/docker.sock", "DOCKER_CONFIG", "/tmp/.docker");
+			"/home/app", "DOCKER_HOST", "unix:///var/run/docker.sock", "DOCKER_CONFIG", "/tmp/.docker", "DOCKER_GID",
+			"1001");
 
 	private final ComposeRecreateControl control = new ComposeRecreateControl(runner, COMPOSE_FILE, "kintsugi-lab",
 			Duration.ofSeconds(120), HOST_ENVIRONMENT);
@@ -109,15 +119,16 @@ class ComposeRecreateControlTest {
 	void theCliGetsAMinimalEnvironmentWithoutTheInjectorsCredentials() {
 		control.restore(Fault.F3);
 
-		// Only PATH, HOME, DOCKER_HOST and DOCKER_CONFIG are passed through: no datasource credential, and no stale
+		// Only PATH, HOME, DOCKER_HOST, DOCKER_CONFIG and DOCKER_GID are passed through: no datasource credential, and no stale
 		// fault variable that would make a restore re-apply the fault.
 		assertThat(runner.commands.get(0).environment()).isEqualTo(CLI_ENVIRONMENT);
 	}
 
 	@Test
-	void anUnsetDockerHostIsNotPassedAsAnEmptyValue() {
+	void anEmptyOrUnsetDockerVariableIsNotPassed() {
+		// DOCKER_HOST is set but empty, DOCKER_CONFIG is not set at all: neither reaches the CLI.
 		ComposeRecreateControl withoutDockerHost = new ComposeRecreateControl(runner, COMPOSE_FILE, "kintsugi-lab",
-				Duration.ofSeconds(120), Map.of("PATH", "/usr/bin", "HOME", "/home/app"));
+				Duration.ofSeconds(120), Map.of("PATH", "/usr/bin", "HOME", "/home/app", "DOCKER_HOST", ""));
 
 		withoutDockerHost.restore(Fault.F3);
 
@@ -224,6 +235,54 @@ class ComposeRecreateControlTest {
 
 		assertThatExceptionOfType(LabControlException.class).isThrownBy(() -> control.activate(Fault.F3))
 			.withMessageContaining("Cannot run program");
+	}
+
+	@Test
+	void anInterruptedRunNamesTheStepAndTheFaultAndKeepsTheCause() {
+		LabControlException interrupted = new LabControlException(
+				"interrupted while waiting for docker; the process and its children were killed",
+				new InterruptedException());
+		runner.interruption = interrupted;
+
+		assertThatExceptionOfType(LabControlException.class).isThrownBy(() -> control.restore(Fault.F3))
+			.withMessage("compose restore of F3 was interrupted: interrupted while waiting for docker; the process and"
+					+ " its children were killed")
+			.withCause(interrupted);
+	}
+
+	/**
+	 * A recreate interrupted while another recreate of the same service holds the lock gives up without running
+	 * anything, and keeps the thread's interrupt flag set.
+	 */
+	@Test
+	void anInterruptWhileWaitingForTheServiceLockRunsNothing() throws Exception {
+		BlockingRunner blocking = new BlockingRunner();
+		ComposeRecreateControl serialized = new ComposeRecreateControl(blocking, COMPOSE_FILE, "kintsugi-lab",
+				Duration.ofSeconds(120), HOST_ENVIRONMENT);
+		ExecutorService pool = Executors.newSingleThreadExecutor();
+		try {
+			Future<?> holder = pool.submit(() -> serialized.restore(Fault.F3));
+			assertThat(blocking.entered.await(5, TimeUnit.SECONDS)).isTrue();
+
+			Thread.currentThread().interrupt();
+			try {
+				assertThatExceptionOfType(LabControlException.class).isThrownBy(() -> serialized.restore(Fault.F3))
+					.withMessageContaining("compose restore of F3 was interrupted while waiting")
+					.withCauseInstanceOf(InterruptedException.class);
+			}
+			finally {
+				assertThat(Thread.interrupted()).isTrue();
+			}
+			assertThat(blocking.servicesRun()).containsExactly("order-service");
+
+			blocking.release.countDown();
+			holder.get(5, TimeUnit.SECONDS);
+			assertThat(blocking.servicesRun()).containsExactly("order-service");
+		}
+		finally {
+			blocking.release.countDown();
+			pool.shutdownNow();
+		}
 	}
 
 	@Test

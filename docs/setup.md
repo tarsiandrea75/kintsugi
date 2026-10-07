@@ -121,6 +121,8 @@ docker compose -f infra/compose.yaml down                   # stop, keep the dat
 docker compose -f infra/compose.yaml down -v                # stop and delete the data volumes
 ```
 
+Run the `export` line first in every new shell. Every `docker compose -f infra/compose.yaml` command in this document needs it, including `exec`, `logs` and the "Reproduce by hand" recipes: compose reads the whole file for any command, and without `DOCKER_GID` it stops with `required variable DOCKER_GID is missing a value: set DOCKER_GID to the gid of /var/run/docker.sock`. The verify scripts export both variables themselves.
+
 The compose project is called `kintsugi-lab`, so these commands never touch other containers. Every port is bound to `127.0.0.1`, so the lab is reachable only from this machine:
 
 | What | URL |
@@ -137,12 +139,12 @@ PostgreSQL, Loki and Alloy have no host port.
 
 ### Variables
 
-Every variable has a lab default; nothing here is a secret. Put overrides in `infra/.env` (a template is `infra/.env.example`), not only in the shell: the fault injector recreates services from the same compose file and reads `infra/.env`, but it never sees your shell.
+Every variable except `DOCKER_GID` has a lab default; nothing here is a secret. Put overrides in `infra/.env` (a template is `infra/.env.example`), not only in the shell: the fault injector recreates services from the same compose file and reads `infra/.env`, but it never sees your shell.
 
 | Variable | Default | Used for |
 |----------|---------|----------|
 | `KINTSUGI_REPO_DIR` | `$PWD` | absolute host path of the repository; fault-injector mounts it read-only at that same path |
-| `DOCKER_GID` | `1001` | group id of `/var/run/docker.sock`, added to fault-injector so it can use Docker |
+| `DOCKER_GID` | none, required | group id of `/var/run/docker.sock`, added to fault-injector so it can use Docker; a guessed default would start an injector that cannot reach Docker |
 | `POSTGRES_BOOTSTRAP_PASSWORD` | `postgres` | the bootstrap superuser `postgres`, used only by the init script |
 | `LAB_APP_DB_PASSWORD` | `lab_app` | the role `lab_app`, which the four services connect as |
 | `FAULTS_DB_PASSWORD` | `faults` | the role `faults`, which the fault injector connects as |

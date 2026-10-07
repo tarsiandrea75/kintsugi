@@ -142,6 +142,15 @@ If an activation step fails partway, the injector attempts a restore, records `F
     - (1) The injector's Compose (v5.6.0) and the host's (v5.1.3) write different image-digest labels, so the host's next `up` recreates the touched services once. That is noise in the future deploy history; align the versions.
     - (2) `infra/.env.example` is protected by a user permission rule, so the human must add `KINTSUGI_REPO_DIR=`, `DOCKER_GID=`, `POSTGRES_BOOTSTRAP_PASSWORD=postgres`, `LAB_APP_DB_PASSWORD=lab_app`, `FAULTS_DB_PASSWORD=faults`.
     - (3) Unexplained rebuilds of gateway-mock and payment-service seen once with `up --build`; not caused by the injector.
+- 2026-10-07: T5 reviews (part A `review-d71571125eb78324`, part B `review-a96d92febbb5aa5a`; their captures were interrupted by the quota and relaunched) approved. WARNINGs fixed:
+  - `DOCKER_GID` is now required (`:?`), so a plain `up` fails clearly. This exposed a real bug: the injector's own compose call lacked the variable. It is now passed through, written test-first.
+  - A check that fault-injector is not a Prometheus target.
+  - A transport failure on inject now finds and restores the active injection.
+  - The fault-variable guard is back in `verify-f3`/`verify-f4`.
+  - ADR-008 now describes the right mitigation for the injector.
+  - The interrupt message names the step and the fault again.
+
+  88 tests. Real runs: F1 PASS in 110 s, F2 in 59 s, F3 in 91 s (stale fault variables exported on purpose), F4 in 79 s. ADR-009 and the spec list `DOCKER_GID` in the child environment.
 
 ## Next step
 
