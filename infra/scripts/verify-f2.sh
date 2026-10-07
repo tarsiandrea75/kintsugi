@@ -76,7 +76,7 @@ else
 fi
 
 # 5. Loki sees the payment-service WARN line for a failed order.
-if [[ "$failed_id" != none ]] && poll "$CHECK_WAIT_SECONDS" loki_has_warn payment-service "$failed_id"; then
+if [[ "$failed_id" != none ]] && poll "$CHECK_WAIT_SECONDS" loki_has_warn payment-service "$failed_id" "Gateway rejected the payment"; then
   pass "Loki: payment-service WARN line for order $failed_id"
 else
   fail "Loki: no payment-service WARN line for order $failed_id within ${CHECK_WAIT_SECONDS}s"

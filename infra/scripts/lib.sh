@@ -96,10 +96,12 @@ prom_int() {
 # Like prom_int, but only prints a value that two reads, one scrape interval apart, agree on. An order passes through
 # PAYMENT_PENDING for under a second, so a single scrape can catch a healthy order mid-flight; a baseline read from
 # that sample is one too high and the "rose by N" check then never passes.
+# The wait must exceed scrape_interval in infra/prometheus/prometheus.yml (5s); update both together.
+SCRAPE_SETTLE_SECONDS=6
 prom_stable_int() {
   local first second
   first=$(prom_int "$1") || return 1
-  sleep 6
+  sleep "$SCRAPE_SETTLE_SECONDS"
   second=$(prom_int "$1") || return 1
   [[ "$first" == "$second" ]] || return 1
   echo "$first"
@@ -118,11 +120,12 @@ loki_has_all_services() {
   done
 }
 
-# True when Loki has a line of service $1 that contains "WARN" and $2, logged in the last 10 minutes.
+# True when Loki has a line of service $1 that contains "WARN", $2 and, if given, the phrase $3, logged in the last
+# 10 minutes. Pass the phrase a dashboard panel counts, so the check also proves that panel's filter matches.
 loki_has_warn() {
-  local json
+  local json phrase=${3:+ |= \"$3\"}
   json=$(loki /loki/api/v1/query_range \
-    --data-urlencode "query={service=\"$1\"} |= \"WARN\" |= \"$2\"" \
+    --data-urlencode "query={service=\"$1\"} |= \"WARN\" |= \"$2\"$phrase" \
     --data-urlencode "since=10m" --data-urlencode "limit=5" 2>/dev/null) || return 1
   grep -q "$2" <<<"$json"
 }

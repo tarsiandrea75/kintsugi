@@ -94,6 +94,11 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
   - The scripts share `infra/scripts/lib.sh`.
   - Race fixed in `verify-f1.sh`: a healthy order is briefly `PAYMENT_PENDING`, so baselines now need two agreeing reads 6 s apart (`prom_stable_int`).
   - Real runs on a rebuilt stack: `verify-f2.sh` PASS in 94 s (3 orders `PAYMENT_FAILED`, both counters +3, Loki WARN, recovery `PAID`); `verify-f1.sh` PASS in 49 s on the same stack.
+- 2026-10-07: T4 review approved (4 lenses, `review-e00c539ed17c43b8`). WARNINGs fixed inline:
+  - The `verify-f2.sh` Loki check now also requires the phrase "Gateway rejected the payment", which proves the dashboard panel's filter matches.
+  - The `prom_stable_int` wait is a named constant, linked to the 5 s `scrape_interval`.
+  - Re-run: `verify-f2.sh` PASS in 100 s.
+  - Follow-ups (suggestions): `place_order` fails silently on a curl failure; `lib.sh`'s caller contract does not mention the `trap on_exit EXIT`; `expect_paid_order` takes a label fragment.
 
 ## Next step
 
