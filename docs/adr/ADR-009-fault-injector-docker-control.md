@@ -50,27 +50,40 @@ Nothing records what was injected, when, or why. Two questions follow: how a con
 - Why a real recreate:
   - It leaves real deploy evidence: the container is recreated at time T with a new configuration. The M2 `getDeployments` tool will read that evidence, as an SRE reads a deploy log.
   - F3 stays "wrong configuration via env", as the vision describes it. No fault hook is added to order-service's code.
-- `--no-build` was checked on 2026-10-07 with the local Compose v5.1.3: a service whose `build:` context does not exist starts from its existing image (`<project>-<service>`) with exit code 0. The injector therefore needs the compose file, not the services' source trees. T4 confirms it again with the pinned plugin.
+- `--no-build` was checked on 2026-10-07 with the local Compose v5.1.3: a service whose `build:` context does not exist starts from its existing image (`<project>-<service>`) with exit code 0. The injector therefore needs the compose file, not the services' source trees. T4 confirmed it with the pinned v5.6.0 inside the injector image: `up -d --no-deps --no-build --wait` of gateway-mock in a throwaway project, with the repository mounted read-only, exited 0 with the container healthy.
 
 ### Pinned versions (verified 2026-10-07)
 
 | Component | Version | Source |
 |-----------|---------|--------|
 | Docker CLI | 29.8.2 | `docker:29.8.2-cli`, the latest stable `-cli` tag (29.9.0 is still `rc.1`) |
-| Docker Compose plugin | v5.6.0 | the version bundled in `docker:29.8.2-cli` (`DOCKER_COMPOSE_VERSION 5.6.0`), also the latest GitHub release (2026-10-02) |
+| Docker Compose plugin | v5.6.0 | `docker/compose-bin:v5.6.0`, Compose's own binary image; the latest GitHub release (2026-10-02). Corrected in T4: the published `docker:29.8.2-cli` image (built 2026-09-30) still bundles v5.5.1, although docker-library's `versions.json` already names 5.6.0 |
 | Docker Engine on the development machine | 29.4.0, API 1.54 (minimum 1.40) | `docker version` on this machine |
 
 Sources:
 
 - <https://hub.docker.com/_/docker/tags?name=-cli> — tag list.
-- <https://github.com/docker-library/docker/blob/master/versions.json> and <https://github.com/docker-library/docker/blob/master/29/cli/Dockerfile> — the CLI and compose versions inside the image, and the binary paths `/usr/local/bin/docker` and `/usr/local/libexec/docker/cli-plugins/docker-compose`.
+- <https://github.com/docker-library/docker/blob/master/versions.json> and <https://github.com/docker-library/docker/blob/master/29/cli/Dockerfile> — the CLI version inside the image, and the binary paths `/usr/local/bin/docker` and `/usr/local/libexec/docker/cli-plugins/docker-compose`. The compose version there runs ahead of the published image: `docker run --rm docker:29.8.2-cli docker compose version` printed v5.5.1 on 2026-10-07.
+- <https://hub.docker.com/r/docker/compose-bin/tags> — `v5.6.0` holds the single static binary `/docker-compose`.
 - <https://github.com/docker/compose/releases/tag/v5.6.0> and <https://github.com/docker/cli/releases/tag/v29.8.2>.
 
 How the image uses them:
 
 - The injector's runtime stage stays `eclipse-temurin:21.0.12.1_1-jre-noble` ([ADR-008](ADR-008-lab-observability-stack.md)).
-- It copies the two static binaries from `docker:29.8.2-cli` (`COPY --from=docker:29.8.2-cli ...`), so the JVM base image is unchanged and no package repository is added.
+- It copies two static binaries, so the JVM base image is unchanged and no package repository is added: the CLI from `docker:29.8.2-cli` (`/usr/local/bin/docker`), and the compose plugin from `docker/compose-bin:v5.6.0` (`/docker-compose`) into `/usr/local/libexec/docker/cli-plugins/docker-compose`, one of the CLI's default plugin directories.
+- Checked in T4 inside the built image: `docker --version` is 29.8.2, `docker compose version` is v5.6.0, and through the mounted socket the client talks to the local Engine 29.4.0 (API 1.54).
 - API compatibility: the Docker CLI negotiates the API version down to the daemon's. A 29.8 client talks to the local 29.4 Engine (API 1.54).
+
+### Socket access without root
+
+The injector runs as the image's unprivileged `app` user, not as root. The Docker socket is `root:<docker group>` with mode `660`, so `app` can use it only as a member of the socket's group. That group id belongs to the host (1001 on the development machine) and differs between hosts, so the image does not hard-code it:
+
+- compose adds it at run time with `group_add`, from a variable such as `DOCKER_GID` set to the output of `stat -c %g /var/run/docker.sock` (task T5);
+- checked in T4: without the group, `docker compose ps` fails with "permission denied while trying to connect to the docker API"; with `--group-add 1001` it succeeds.
+
+Group membership on the socket is as root-equivalent as running as root (see Negative consequences); `group_add` only keeps the JVM process itself unprivileged inside its container.
+
+The compose file must be mounted **at its host path** (for example `/home/<user>/kintsugi:/home/<user>/kintsugi:ro`). Compose resolves the file's relative bind mounts (`./postgres/init`, `./alloy/config.alloy`, …) against the file's own directory, and the Docker daemon reads those resolved paths on the host. Mounted elsewhere, a recreate would hand the daemon paths that do not exist on the host.
 
 ### Isolation of the truth
 

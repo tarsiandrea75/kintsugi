@@ -12,8 +12,8 @@ import org.springframework.context.annotation.Import;
 import dev.kintsugi.lab.fault.catalog.Fault;
 
 /**
- * Until T4 adds the real Docker and gateway control, {@code kintsugi.lab-control.mode=unsupported} (the default) lets
- * the application start: activation fails before anything is applied, so the compensating restore has nothing to do.
+ * Without Docker or gateway-mock, {@code kintsugi.lab-control.mode=unsupported} (the default) lets the application
+ * start: activation fails before anything is applied, so the compensating restore has nothing to do.
  */
 class UnsupportedLabControlTest {
 

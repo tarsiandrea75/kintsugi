@@ -30,6 +30,14 @@ class FaultTest {
 		});
 	}
 
+	@Test
+	void gatewayFaultsUseTheAdminApiAndDeployFaultsARecreate() {
+		assertThat(Fault.F1.mechanism()).isEqualTo(LabMechanism.GATEWAY_BEHAVIOR);
+		assertThat(Fault.F2.mechanism()).isEqualTo(LabMechanism.GATEWAY_BEHAVIOR);
+		assertThat(Fault.F3.mechanism()).isEqualTo(LabMechanism.COMPOSE_RECREATE);
+		assertThat(Fault.F4.mechanism()).isEqualTo(LabMechanism.COMPOSE_RECREATE);
+	}
+
 	/** F3 and F4 use the compose variable names, which the injector sets; compose maps them to container variables. */
 	@Test
 	void parametersMatchTheCatalog() {

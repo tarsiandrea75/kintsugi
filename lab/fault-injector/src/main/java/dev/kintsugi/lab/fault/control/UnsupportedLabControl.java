@@ -6,8 +6,8 @@ import org.springframework.stereotype.Component;
 import dev.kintsugi.lab.fault.catalog.Fault;
 
 /**
- * Placeholder {@link LabControl} until T4 adds the real one, so the application context starts without it. Selected by
- * {@code kintsugi.lab-control.mode=unsupported}, the default.
+ * Placeholder {@link LabControl} for a context without Docker or gateway-mock (tests, a bare {@code java -jar}). Selected
+ * by {@code kintsugi.lab-control.mode=unsupported}, the default; the compose deployment selects {@code docker}.
  *
  * <p>
  * {@link #activate} fails before applying anything, so every activation is recorded as {@code FAILED}.

@@ -15,23 +15,25 @@ import java.util.Optional;
  */
 public enum Fault {
 
-	F1("gateway-mock", RootCauseCategory.DEPENDENCY_LATENCY,
+	F1("gateway-mock", LabMechanism.GATEWAY_BEHAVIOR, RootCauseCategory.DEPENDENCY_LATENCY,
 			"The payment gateway answers authorizations after 10 s, so payments and the orders waiting on them stay pending.",
 			Map.of("latencyMs", 10_000)),
 
-	F2("gateway-mock", RootCauseCategory.DEPENDENCY_REJECTING,
+	F2("gateway-mock", LabMechanism.GATEWAY_BEHAVIOR, RootCauseCategory.DEPENDENCY_REJECTING,
 			"The payment gateway rejects every authorization with 429 (rate limited), so payments fail.",
 			Map.of("latencyMs", 0, "errorStatus", 429)),
 
-	F3("order-service", RootCauseCategory.CONFIGURATION,
+	F3("order-service", LabMechanism.COMPOSE_RECREATE, RootCauseCategory.CONFIGURATION,
 			"order-service is deployed with a wrong payment-service URL (http://payment-service:9999), so its payment calls fail to connect.",
 			Map.of("ORDER_PAYMENT_BASEURL", "http://payment-service:9999")),
 
-	F4("inventory-service", RootCauseCategory.RESOURCE_EXHAUSTION,
+	F4("inventory-service", LabMechanism.COMPOSE_RECREATE, RootCauseCategory.RESOURCE_EXHAUSTION,
 			"inventory-service runs with a database pool of 2 and reservations that hold a connection for 5 s, so the pool is exhausted and reservations fail.",
 			Map.of("INVENTORY_POOL_SIZE", "2", "INVENTORY_RESERVATION_DELAY", "5s"));
 
 	private final String rootCauseService;
+
+	private final LabMechanism mechanism;
 
 	private final RootCauseCategory rootCauseCategory;
 
@@ -39,9 +41,10 @@ public enum Fault {
 
 	private final Map<String, Object> parameters;
 
-	Fault(String rootCauseService, RootCauseCategory rootCauseCategory, String rootCause,
+	Fault(String rootCauseService, LabMechanism mechanism, RootCauseCategory rootCauseCategory, String rootCause,
 			Map<String, Object> parameters) {
 		this.rootCauseService = rootCauseService;
+		this.mechanism = mechanism;
 		this.rootCauseCategory = rootCauseCategory;
 		this.rootCause = rootCause;
 		this.parameters = parameters;
@@ -59,6 +62,11 @@ public enum Fault {
 	/** The service the injector acts on. For F1–F4 it is also {@link #rootCauseService()}. */
 	public String targetService() {
 		return rootCauseService;
+	}
+
+	/** How the injector applies and undoes this fault on the lab. */
+	public LabMechanism mechanism() {
+		return mechanism;
 	}
 
 	public String rootCauseService() {

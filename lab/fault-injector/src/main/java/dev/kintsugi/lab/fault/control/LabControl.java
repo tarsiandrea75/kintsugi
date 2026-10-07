@@ -4,9 +4,9 @@ import dev.kintsugi.lab.fault.catalog.Fault;
 
 /**
  * The port through which the injector breaks and repairs the lab. Both methods either complete their steps or throw
- * {@link LabControlException}; the caller records the outcome. Tests use an in-memory fake; T4 adds the real
- * implementation (gateway-mock admin API for F1 and F2, a bounded compose recreate for F3 and F4) as a bean selected by
- * {@code kintsugi.lab-control.mode}.
+ * {@link LabControlException}; the caller records the outcome. {@code kintsugi.lab-control.mode} selects the bean:
+ * {@code docker} gives {@link RoutingLabControl} (gateway-mock admin API for F1 and F2, a bounded compose recreate for F3
+ * and F4), {@code unsupported} gives {@link UnsupportedLabControl}. Tests use an in-memory fake.
  */
 public interface LabControl {
 

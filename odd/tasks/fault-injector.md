@@ -87,7 +87,7 @@ If an activation step fails partway, the injector attempts a restore, records `F
 ## Delivery
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 1,500 lines.
-- Slices: tracker `feat/fault-injector` (doc, ADR-009, spec, skeleton); PR 1 `-01-core`: design fixes, catalog, domain, persistence; PR 2 `-02-api`: control port, service, API; then T4, then T5.
+- Slices: tracker `feat/fault-injector` (doc, ADR-009, spec, skeleton); PR 1 `-01-core`: design fixes, catalog, domain, persistence; PR 2 `-02-api`: control port, service, API; PR 3 `-03-lab-control`: restore-race fix plus T4. T4 is a size exception (about 940 lines): `RoutingLabControl` and `DockerLabControlConfiguration` wire both controls together, so no clean split exists. About a third is tests. Then T5.
 - RDD: on; consent is a standing grant.
 
 ## Tasks
@@ -95,7 +95,7 @@ If an activation step fails partway, the injector attempts a restore, records `F
 - [x] **T1 — ADR-009 and living spec.** ADR-009 covers the injector's Docker control, the version pins and the isolation of the truth. The spec is `openspec/specs/fault-injector/spec.md`. Route: delegated writer.
 - [x] **T2 — Generated skeleton.** Route: delegated writer.
 - [x] **T3 — Catalog, persistence and API**, with a fake `LabControl`, tests first. Route: delegated writer.
-- [ ] **T4 — Real `LabControl`**: a gateway REST client plus compose recreate, and the image with the Docker CLI. Route: delegated writer.
+- [x] **T4 — Real `LabControl`**: a gateway REST client plus compose recreate, and the image with the Docker CLI. Route: delegated writer.
 - [ ] **T5 — Compose wiring**: the `faults` database and user, the Alloy drop, the ports; the verify scripts switched to the injector with the truth and isolation assertions; docs and runbooks. Run every script for real. Route: delegated writer.
 
 ## Progress
@@ -120,7 +120,14 @@ If an activation step fails partway, the injector attempts a restore, records `F
   - A false positive (parameter "2" matching "F2") fixed the leak test.
   - mvn exit 0, 48 tests, two runs (parent re-run).
   - Accepted: if the `ACTIVATED` event cannot be written, the injector answers 201 and logs an ERROR; the row stays ACTIVE and blocking.
+- 2026-10-07: reviews of `-01-core` (`review-2b23fbe83be51ac9`; its WARNING came from the slicing) and `-02-api` (`review-88ac9cd2e949f559`) approved. The `-02-api` WARNING (a failed restore could overwrite RESTORED) is fixed with a conditional update. The guard already existed: a concurrent-restore test proves it, and a mutation check (removing the guard turns the test RED) shows the test catches it. `compensate()` now catches every RuntimeException.
+- 2026-10-07: T4 done by a delegated writer.
+  - `HttpGatewayControl` (F1/F2), `ComposeRecreateControl` (F3/F4, argv only, process timeout) and `RoutingLabControl`; mode `docker` vs `unsupported`.
+  - Image: Docker CLI 29.8.2, plus Compose v5.6.0 from `docker/compose-bin:v5.6.0`. The `docker:29.8.2-cli` image actually bundles v5.5.1; ADR-009 is corrected.
+  - The container runs as uid 999; with `--group-add <socket gid>` it reaches the Engine (client 29.8.2, server 29.4.0, API 1.54). `--no-build --wait` was verified on v5.6.0 in a throwaway project.
+  - 79 tests, two runs (parent re-run, mvn exit 0).
+  - T5 needs: `group_add` with the socket gid, the socket mount, the repo mounted read-only at its host path, `KINTSUGI_LABCONTROL_MODE=docker` and `KINTSUGI_LABCONTROL_COMPOSEFILE`.
 
 ## Next step
 
-T4 (real `LabControl`: gateway REST plus compose recreate, image with the Docker CLI) via a delegated writer.
+T5 (compose wiring, non-superuser roles, Alloy drop, verify scripts switched to the injector with truth and isolation assertions, docs) via a delegated writer.

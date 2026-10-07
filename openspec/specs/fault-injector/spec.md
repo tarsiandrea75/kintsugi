@@ -38,6 +38,30 @@ True causes:
 | F3 | order-service | `CONFIGURATION` | order-service is deployed with a wrong payment-service URL (`http://payment-service:9999`), so its payment calls fail to connect. |
 | F4 | inventory-service | `RESOURCE_EXHAUSTION` | inventory-service runs with a database pool of 2 and reservations that hold a connection for 5 s, so the pool is exhausted and reservations fail. |
 
+## Lab control
+
+`kintsugi.lab-control.mode` selects how the injector acts on the lab:
+
+| Mode | Used by | Behavior |
+|------|---------|----------|
+| `docker` | the compose deployment | F1 and F2 call gateway-mock's admin API; F3 and F4 run a compose recreate. Each fault goes to the control of its catalog mechanism (`GATEWAY_BEHAVIOR` or `COMPOSE_RECREATE`). |
+| `unsupported` (default) | tests, a bare `java -jar` | every activation fails before touching the lab and is recorded `FAILED`; restore does nothing |
+
+Properties of the `docker` mode:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `kintsugi.lab-control.gateway-base-url` | `http://gateway-mock:8082` | gateway-mock's base URL |
+| `kintsugi.lab-control.gateway-connect-timeout` | `2s` | connect timeout of each gateway-mock call |
+| `kintsugi.lab-control.gateway-read-timeout` | `5s` | read timeout of each gateway-mock call |
+| `kintsugi.lab-control.compose-file` | none, required | the lab's `infra/compose.yaml`, mounted at its host path |
+| `kintsugi.lab-control.compose-project` | `kintsugi-lab` | the `-p` project name |
+| `kintsugi.lab-control.recreate-wait-timeout` | `120s` | `--wait-timeout`, in whole seconds, at least 1 |
+
+- **Gateway faults.** Activation is `PUT /admin/behavior` with the catalog parameters as the JSON body (F1 `{"latencyMs": 10000}`, F2 `{"latencyMs": 0, "errorStatus": 429}`). Restore is `DELETE /admin/behavior`. An error status, a timeout or a connection failure is a failed step.
+- **Recreate faults.** The injector runs exactly this argv, with no shell: `docker`, `compose`, `-p`, `<compose-project>`, `-f`, `<compose-file>`, `up`, `-d`, `--no-deps`, `--no-build`, `--wait`, `--wait-timeout`, `<N>`, `<service>`. Activation adds the fault's compose variables to the inherited environment. Restore runs the same argv with those variables removed, so compose falls back to its defaults. The process is killed if it runs longer than `<N>` plus 30 s. A non-zero exit, or a kill, is a failed step whose recorded cause ends with the tail of stderr.
+- **Docker access.** The image carries the Docker CLI 29.8.2 and the compose plugin v5.6.0 ([ADR-009](../../../docs/adr/ADR-009-fault-injector-docker-control.md)). It runs as an unprivileged user; the compose deployment mounts the Docker socket and adds the socket's group with `group_add`.
+
 ## Requirements
 
 ### Requirement: List the catalog without the truth
@@ -87,6 +111,21 @@ The response MUST NOT contain the true cause.
 - WHEN `POST /faults` is called with each body
 - THEN each response status is 400
 - AND no `injections` row is written and the lab is not touched
+
+### Requirement: Real lab control
+
+With `kintsugi.lab-control.mode=docker` the injector MUST apply and undo faults as described in [Lab control](#lab-control): the gateway-mock admin API for F1 and F2, the recreate argv for F3 and F4. It MUST NOT start without `kintsugi.lab-control.compose-file`, and MUST NOT run any command through a shell.
+
+#### Scenario: Missing compose file
+- GIVEN `kintsugi.lab-control.mode=docker` and no `kintsugi.lab-control.compose-file`
+- WHEN the injector starts
+- THEN startup fails with an error naming `kintsugi.lab-control.compose-file`
+
+#### Scenario: F4 restore removes the fault variables
+- GIVEN F4 is active
+- WHEN its restore runs
+- THEN the recreate argv is the same as the activation's
+- AND `INVENTORY_POOL_SIZE` and `INVENTORY_RESERVATION_DELAY` are absent from the process environment
 
 ### Requirement: One blocking injection at a time
 
