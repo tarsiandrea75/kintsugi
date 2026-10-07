@@ -23,6 +23,8 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import io.micrometer.observation.ObservationRegistry;
+
 /** The payment client against a real HTTP server on loopback, with short timeouts so the failure cases stay fast. */
 class PaymentClientTest {
 
@@ -123,6 +125,31 @@ class PaymentClientTest {
 		}
 	}
 
+	// Fault F3: the WARN line is the evidence, so it must name the I/O failure and the URL that was called. The JDK
+	// client's ConnectException has no message, which Spring's default text would show as "null".
+	@Test
+	void unreachableServiceMessageNamesTheFailureAndTheUrl() throws IOException {
+		try (Socket portHolder = new Socket()) {
+			portHolder.bind(new InetSocketAddress(IPV4_LOOPBACK, 0));
+			String baseUrl = "http://127.0.0.1:" + portHolder.getLocalPort();
+			PaymentClient unreachable = clientFor(baseUrl);
+
+			assertThatExceptionOfType(PaymentUnavailableException.class).isThrownBy(() -> unreachable.pay(ORDER_ID))
+				.withMessageContaining("ConnectException")
+				.withMessageContaining(baseUrl + "/payments")
+				.withMessageNotContaining("null");
+		}
+	}
+
+	@Test
+	void slowResponseMessageNamesTheTimeout() {
+		server.replyAfter(Duration.ofSeconds(2));
+
+		assertThatExceptionOfType(PaymentUnavailableException.class).isThrownBy(() -> client.pay(ORDER_ID))
+			.withMessageContaining("HttpTimeoutException")
+			.withMessageContaining(server.baseUrl() + "/payments");
+	}
+
 	// Relies on Linux dropping SYNs when the accept queue is full; other OSes may refuse instead.
 	@Test
 	@EnabledOnOs(OS.LINUX)
@@ -131,7 +158,8 @@ class PaymentClientTest {
 		// HttpConnectTimeoutException while connecting, so the elapsed time is what proves the connect timeout applies.
 		try (SaturatedListener listener = SaturatedListener.open()) {
 			PaymentClient hanging = new PaymentClient(new PaymentProperties(
-					URI.create("http://127.0.0.1:" + listener.port()), TIMEOUT, Duration.ofSeconds(10)));
+					URI.create("http://127.0.0.1:" + listener.port()), TIMEOUT, Duration.ofSeconds(10)),
+					ObservationRegistry.NOOP);
 
 			long start = System.nanoTime();
 			assertThatExceptionOfType(PaymentUnavailableException.class).isThrownBy(() -> hanging.pay(ORDER_ID))
@@ -144,7 +172,7 @@ class PaymentClientTest {
 	}
 
 	private static PaymentClient clientFor(String baseUrl) {
-		return new PaymentClient(new PaymentProperties(URI.create(baseUrl), TIMEOUT, TIMEOUT));
+		return new PaymentClient(new PaymentProperties(URI.create(baseUrl), TIMEOUT, TIMEOUT), ObservationRegistry.NOOP);
 	}
 
 	private static List<Throwable> causesOf(Throwable ex) {

@@ -54,12 +54,13 @@ A misconfigured service URL is one of the most common real incidents. The agent 
 ## Delivery
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 450 lines.
+- Slices: tracker `feat/fault-f3` (doc `b55ef00`); PR 1 `-01-client-metrics` T1 (about 261 lines); PR 2 `-02-check` T2 (about 254 lines).
 - RDD: on; consent is a standing grant. Reviews are run per range.
 
 ## Tasks
 
-- [ ] **T1 — order-service client metrics.** Observation on `PaymentClient`, tests first, and the spec. Route: delegated writer.
-- [ ] **T2 — Compose variable, check, dashboard and docs.** `verify-f3.sh` run for real, with F1 and F2 rerun for regressions. Route: delegated writer.
+- [x] **T1 — order-service client metrics.** Observation on `PaymentClient`, tests first, and the spec. Route: delegated writer.
+- [x] **T2 — Compose variable, check, dashboard and docs.** `verify-f3.sh` run for real, with F1 and F2 rerun for regressions. Route: delegated writer.
 
 ## Checks
 
@@ -69,7 +70,14 @@ A misconfigured service URL is one of the most common real incidents. The agent 
 ## Progress
 
 - 2026-10-07: design decided autonomously (user away, autonomy authorized until the quota ends); branch created.
+- 2026-10-07: T1 + T2 done by a delegated writer. The real behavior found differs from the design:
+  - Spring Framework 7.0.9 tags every I/O failure `exception=ResourceAccessException`, so F3 and F1 would look identical. A small observation convention in `PaymentClient` tags the inner I/O exception instead: `ConnectException` for F3, `HttpTimeoutException` for F1. It also sets `client_name="payment-service"`.
+  - The JDK `ConnectException` has a null message, so no log ever says "Connection refused". The WARN line now names the exception and the URL (`failed: ConnectException calling POST http://payment-service:9999/payments`), and `verify-f3.sh` checks `ConnectException`.
+  - The baseline is read after the recreate, because recreating a container resets its counters. The in-flight window starts at injection time. `lib.sh` gained an optional `before_exit` hook, which restores order-service.
+
+  RED/GREEN: T1 failed with a compile error, then `MeterNotFoundException`, then the wrong tag; it is now green. mvn exit 0, 122 tests (parent re-run). Real runs on a fresh stack: `verify-f3.sh` PASS in 140 s (order answered in 0.23 s); `verify-f1.sh` PASS in 44 s; `verify-f2.sh` PASS in 57 s.
+- **To review with the human:** (1) the F3 evidence is `ConnectException` plus the wrong URL, not the literal "connection refused" text in the vision table; (2) whether `docs/vision.md:33` should say "connection errors (ConnectException) in logs"; (3) the T1 message change added a scenario to the order-service "Payment step" requirement.
 
 ## Next step
 
-T1 + T2 via one delegated writer.
+Feature done (pending the human's review of the decisions above). Next: F4 needs inventory-service.

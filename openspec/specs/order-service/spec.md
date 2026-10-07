@@ -31,7 +31,7 @@ After storing a new order, order-service MUST move it to `PAYMENT_PENDING`, save
 
 - when payment-service answers 2xx with status `AUTHORIZED`, the order MUST move to `PAID` and be saved;
 - when it answers 2xx with status `DECLINED` or `FAILED`, the order MUST move to `PAYMENT_FAILED` and be saved. `FAILED` means the gateway rejected the payment with a 429 (fault F2); the order ends as it does after a decline, and the difference stays in payment-service's record;
-- when the call times out (connect or read), cannot connect, gets a non-2xx response, or gets a body without a known status, the order MUST stay `PAYMENT_PENDING`, and order-service MUST log a `WARN` line with the order id and the cause. This is the visible symptom of fault F1 (slow gateway).
+- when the call times out (connect or read), cannot connect, gets a non-2xx response, or gets a body without a known status, the order MUST stay `PAYMENT_PENDING`, and order-service MUST log a `WARN` line with the order id and the cause. This is the visible symptom of fault F1 (slow gateway). For an I/O failure the cause MUST name the I/O exception and the URL called, for example `ConnectException calling POST http://payment-service:9999/payments`, because the JDK client's `ConnectException` carries no message; this line is the log evidence of fault F3 (wrong payment URL).
 
 The client MUST read its settings from these properties, so the fault injector can change them:
 
@@ -72,6 +72,12 @@ The client MUST read its settings from these properties, so the fault injector c
 - WHEN an order is placed
 - THEN the order stays `PAYMENT_PENDING`
 - AND `POST /orders` still returns 201
+
+#### Scenario: Refused connection names the failure (fault F3)
+- GIVEN the payment base URL points at a port where nothing listens
+- WHEN an order is placed
+- THEN the `WARN` line contains the order id, `ConnectException` and the URL called
+- AND it does not end in `null`
 
 #### Scenario: Settings are configurable
 - GIVEN no `kintsugi.payment.*` property is set
@@ -246,6 +252,42 @@ order-service MUST expose `/actuator/prometheus` and MUST export the gauge `lab.
 - WHEN `GET /actuator/prometheus` is called until the first refresh has completed
 - THEN the response status is 200
 - AND the body contains `lab_orders{status="CREATED"}`, `lab_orders{status="PAID"} 0.0` and `http_server_requests_seconds_count`
+
+### Requirement: Payment client metrics
+
+order-service MUST record every call to payment-service as the Micrometer observation `http.client.requests`, shown in Prometheus as `http_client_requests_seconds_count`, `_sum` and `_max` (plus `http_client_requests_active_seconds_*` while calls run). The series MUST carry these tags:
+
+| Tag | Value |
+|-----|-------|
+| `client_name` | always `payment-service`, whatever host the base URL names |
+| `method` | `POST` |
+| `uri` | `/payments` |
+| `status` | the HTTP status code, or `CLIENT_ERROR` when there is no response |
+| `outcome` | `SUCCESS`, `CLIENT_ERROR`, `SERVER_ERROR` and so on, or `UNKNOWN` when there is no response |
+| `exception` | `none`, or the simple class name of the failure; for an I/O failure, the I/O exception inside Spring's `ResourceAccessException` |
+| `error` | added by Micrometer: `none`, or the simple class name of the exception thrown, so `ResourceAccessException` for every I/O failure |
+
+The `exception` tag MUST name the I/O exception rather than `ResourceAccessException`, which is Spring's default for every I/O failure: that is how a refused connection (fault F3, `ConnectException`) differs from a read timeout (fault F1, `HttpTimeoutException`) in the metrics.
+
+#### Scenario: Successful call
+- GIVEN payment-service answers 201 `AUTHORIZED`
+- WHEN an order is placed
+- THEN one call is recorded with `client_name="payment-service"`, `uri="/payments"`, `status="201"`, `outcome="SUCCESS"` and `exception="none"`
+
+#### Scenario: Server error
+- GIVEN payment-service answers 503
+- WHEN an order is placed
+- THEN one call is recorded with `status="503"` and `outcome="SERVER_ERROR"`
+
+#### Scenario: Refused connection (fault F3)
+- GIVEN the payment base URL points at a port where nothing listens
+- WHEN an order is placed
+- THEN one call is recorded with `status="CLIENT_ERROR"`, `outcome="UNKNOWN"` and `exception="ConnectException"`
+
+#### Scenario: Read timeout (fault F1)
+- GIVEN payment-service answers only after the read timeout
+- WHEN an order is placed
+- THEN one call is recorded with `status="CLIENT_ERROR"`, `outcome="UNKNOWN"` and `exception="HttpTimeoutException"`
 
 ### Requirement: Schema and persistence tests
 
