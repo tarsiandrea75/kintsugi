@@ -31,6 +31,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.CannotCreateTransactionException;
 
+import dev.kintsugi.lab.inventory.application.DatabaseUnavailableException;
 import dev.kintsugi.lab.inventory.application.InventoryService;
 import dev.kintsugi.lab.inventory.domain.Reservation;
 import dev.kintsugi.lab.inventory.domain.ReservationLine;
@@ -97,14 +98,16 @@ class InventoryControllerTest {
 	}
 
 	/**
-	 * Spring would answer 500 without the handler too, so the status alone proves nothing: the ProblemDetail body and
-	 * the single WARN line with the pool's message are what only the handler produces.
+	 * Spring would answer 500 without the handler too, so the status alone proves nothing: the ProblemDetail body is
+	 * what only the handler produces. The service already logged the structured WARN line with the order id, so the
+	 * controller adds none.
 	 */
 	@Test
-	void exhaustedPoolIsInternalServerErrorWithOneWarnLine(CapturedOutput output) throws Exception {
-		given(service.reserve(any())).willThrow(new CannotCreateTransactionException("Could not open JDBC Connection",
-				new java.sql.SQLTransientConnectionException(
-						"HikariPool-1 - Connection is not available, request timed out after 250ms")));
+	void exhaustedPoolIsInternalServerErrorWithoutASecondWarnLine(CapturedOutput output) throws Exception {
+		given(service.reserve(any())).willThrow(new DatabaseUnavailableException(
+				new CannotCreateTransactionException("Could not open JDBC Connection",
+						new java.sql.SQLTransientConnectionException(
+								"HikariPool-1 - Connection is not available, request timed out after 250ms"))));
 
 		mvc.perform(post("/reservations").contentType(MediaType.APPLICATION_JSON).content(validBody()))
 			.andExpect(status().isInternalServerError())
@@ -112,11 +115,11 @@ class InventoryControllerTest {
 			.andExpect(jsonPath("$.status").value(500))
 			.andExpect(jsonPath("$.detail").value("No database connection available"));
 
-		assertThat(warnLines(output, "Connection is not available, request timed out after 250ms")).hasSize(1);
+		assertThat(output.getAll().lines().filter(line -> line.contains(" WARN "))).isEmpty();
 	}
 
 	@Test
-	void noConnectionOnReadIsInternalServerErrorWithOneWarnLine(CapturedOutput output) throws Exception {
+	void noConnectionOnReadIsInternalServerErrorWithOneStructuredWarnLine(CapturedOutput output) throws Exception {
 		given(service.stock("SKU-1")).willThrow(new CannotGetJdbcConnectionException("Failed to obtain JDBC Connection"));
 
 		mvc.perform(get("/stock/SKU-1"))
@@ -125,15 +128,12 @@ class InventoryControllerTest {
 			.andExpect(jsonPath("$.status").value(500))
 			.andExpect(jsonPath("$.detail").value("No database connection available"));
 
-		assertThat(warnLines(output, "Failed to obtain JDBC Connection")).hasSize(1);
-	}
-
-	private static List<String> warnLines(CapturedOutput output, String cause) {
-		return output.getAll()
+		assertThat(output.getAll()
 			.lines()
-			.filter(line -> line.contains(" WARN ") && line.contains("No database connection available: ")
-					&& line.contains(cause))
-			.toList();
+			.filter(line -> line.contains(" WARN ")
+					&& line.contains("No database connection available: path=/stock/SKU-1 outcome=DATABASE_UNAVAILABLE")
+					&& line.contains("cause=\"Failed to obtain JDBC Connection\"")))
+			.hasSize(1);
 	}
 
 	@Test

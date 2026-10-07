@@ -24,9 +24,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import dev.kintsugi.lab.inventory.TestcontainersConfiguration;
 import dev.kintsugi.lab.inventory.domain.Reservation;
+import dev.kintsugi.lab.inventory.domain.ReservationEvent;
 import dev.kintsugi.lab.inventory.domain.ReservationLine;
 import dev.kintsugi.lab.inventory.domain.ReservationStatus;
 import dev.kintsugi.lab.inventory.domain.Stock;
+import dev.kintsugi.lab.inventory.persistence.ReservationEventRepository;
 import dev.kintsugi.lab.inventory.persistence.StockRepository;
 
 /**
@@ -36,7 +38,8 @@ import dev.kintsugi.lab.inventory.persistence.StockRepository;
 @DataJdbcTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @EnableConfigurationProperties(InventoryProperties.class)
-@Import({ TestcontainersConfiguration.class, StockRepository.class, InventoryService.class })
+@Import({ TestcontainersConfiguration.class, StockRepository.class, ReservationEventRepository.class,
+		InventoryService.class })
 class InventoryServiceTest {
 
 	@Autowired
@@ -44,6 +47,9 @@ class InventoryServiceTest {
 
 	@Autowired
 	private StockRepository repository;
+
+	@Autowired
+	private ReservationEventRepository events;
 
 	@Autowired
 	private PlatformTransactionManager transactionManager;
@@ -61,6 +67,39 @@ class InventoryServiceTest {
 		assertThat(status).isEqualTo(ReservationStatus.RESERVED);
 		assertThat(available(a)).isEqualTo(3);
 		assertThat(available(b)).isZero();
+	}
+
+	@Test
+	void reservedAttemptLeavesExactlyOneEvent() {
+		String a = newSku(5);
+		Reservation reservation = reservationOf(new ReservationLine(a, 2));
+
+		assertThat(service.reserve(reservation)).isEqualTo(ReservationStatus.RESERVED);
+
+		assertThat(events.findByOrderId(reservation.orderId())).singleElement().satisfies(event -> {
+			assertThat(event.type()).isEqualTo(ReservationEvent.RESERVATION_ATTEMPT);
+			assertThat(event.outcome()).isEqualTo("RESERVED");
+			assertThat(event.detail()).isEqualTo("[{\"sku\":\"" + a + "\",\"quantity\":2}]");
+			assertThat(event.durationMs()).isNotNegative();
+		});
+	}
+
+	/** The stock decrement is rolled back, but the attempt is recorded in its own transaction and survives. */
+	@Test
+	void insufficientAttemptLeavesOneEventAndTheStockUnchanged() {
+		String a = newSku(5);
+		String b = newSku(1);
+		Reservation reservation = reservationOf(new ReservationLine(a, 2), new ReservationLine(b, 3));
+
+		assertThat(service.reserve(reservation)).isEqualTo(ReservationStatus.INSUFFICIENT_STOCK);
+
+		assertThat(available(a)).isEqualTo(5);
+		assertThat(available(b)).isEqualTo(1);
+		assertThat(events.findByOrderId(reservation.orderId())).singleElement().satisfies(event -> {
+			assertThat(event.outcome()).isEqualTo("INSUFFICIENT_STOCK");
+			assertThat(event.detail()).isEqualTo(
+					"[{\"sku\":\"" + a + "\",\"quantity\":2},{\"sku\":\"" + b + "\",\"quantity\":3}]");
+		});
 	}
 
 	@Test
@@ -139,7 +178,8 @@ class InventoryServiceTest {
 	@Test
 	void delayHookWaitsInsideTheReservation() {
 		Duration delay = Duration.ofMillis(300);
-		InventoryService delayed = new InventoryService(repository, transactionManager, new InventoryProperties(delay));
+		InventoryService delayed = new InventoryService(repository, events, transactionManager,
+				new InventoryProperties(delay));
 		String a = newSku(1);
 
 		long start = System.nanoTime();

@@ -43,7 +43,9 @@ class PoolExhaustionIntegrationTest {
 		HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
 
 		long start = System.nanoTime();
-		List<CompletableFuture<HttpResponse<String>>> calls = List.of(reserve(client), reserve(client));
+		UUID first = UUID.randomUUID();
+		UUID second = UUID.randomUUID();
+		List<CompletableFuture<HttpResponse<String>>> calls = List.of(reserve(client, first), reserve(client, second));
 		List<Integer> statuses = calls.stream().map(CompletableFuture::join).map(HttpResponse::statusCode).sorted().toList();
 		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
 
@@ -55,16 +57,19 @@ class PoolExhaustionIntegrationTest {
 		assertThat(output.getAll().lines()
 			.filter(line -> line.contains(" WARN ") && line.contains("No database connection available")
 					&& line.contains("Connection is not available, request timed out after")))
-			.hasSize(1);
+			.singleElement()
+			.satisfies(line -> assertThat(line).contains("event=RESERVATION_ATTEMPT")
+				.contains("outcome=DATABASE_UNAVAILABLE")
+				.containsAnyOf("order=" + first, "order=" + second));
 	}
 
-	private CompletableFuture<HttpResponse<String>> reserve(HttpClient client) {
+	private CompletableFuture<HttpResponse<String>> reserve(HttpClient client, UUID orderId) {
 		HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/reservations"))
 			.header("Content-Type", "application/json")
 			.timeout(Duration.ofSeconds(5))
 			.POST(HttpRequest.BodyPublishers.ofString("""
 					{"orderId": "%s", "items": [{"sku": "SKU-4", "quantity": 1}]}
-					""".formatted(UUID.randomUUID())))
+					""".formatted(orderId)))
 			.build();
 		return client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
 	}

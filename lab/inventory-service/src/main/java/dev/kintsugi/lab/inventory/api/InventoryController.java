@@ -1,5 +1,6 @@
 package dev.kintsugi.lab.inventory.api;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.slf4j.Logger;
@@ -17,7 +18,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import dev.kintsugi.lab.inventory.application.DatabaseUnavailableException;
 import dev.kintsugi.lab.inventory.application.InventoryService;
+import dev.kintsugi.lab.inventory.application.LogFmt;
 import dev.kintsugi.lab.inventory.domain.ReservationStatus;
 
 @RestController
@@ -45,15 +48,31 @@ class InventoryController {
 	}
 
 	/**
-	 * No database connection within the pool's connection timeout: the pool is exhausted (fault F4) or the database
-	 * is unreachable. A transaction that cannot start throws {@link CannotCreateTransactionException}; a query outside
-	 * one throws {@link CannotGetJdbcConnectionException}. Spring already answers both with 500; this handler keeps
-	 * the 500 and replaces the stack trace with one WARN line that carries the pool's own message (for example
-	 * "Connection is not available, request timed out after 2000ms"). Local to this controller.
+	 * A reservation found no database connection. {@link InventoryService} has already logged the attempt as one
+	 * structured WARN line with the order id, so this handler only answers: 500 with a ProblemDetail, as Spring would
+	 * for an unhandled exception, without a stack trace.
+	 */
+	@ExceptionHandler(DatabaseUnavailableException.class)
+	ResponseEntity<ProblemDetail> reservationWithoutDatabase(DatabaseUnavailableException ex) {
+		return noDatabaseConnectionResponse();
+	}
+
+	/**
+	 * No database connection within the pool's connection timeout on a read: the pool is exhausted (fault F4) or the
+	 * database is unreachable. A transaction that cannot start throws {@link CannotCreateTransactionException}; a query
+	 * outside one throws {@link CannotGetJdbcConnectionException}. Spring already answers both with 500; this handler
+	 * keeps the 500 and replaces the stack trace with one {@code key=value} WARN line that carries the path and the
+	 * pool's own message (for example "Connection is not available, request timed out after 2000ms"). Local to this
+	 * controller.
 	 */
 	@ExceptionHandler({ CannotCreateTransactionException.class, CannotGetJdbcConnectionException.class })
-	ResponseEntity<ProblemDetail> noDatabaseConnection(RuntimeException ex) {
-		log.warn("No database connection available: {}", NestedExceptionUtils.getMostSpecificCause(ex).getMessage());
+	ResponseEntity<ProblemDetail> noDatabaseConnection(RuntimeException ex, HttpServletRequest request) {
+		log.warn("No database connection available: path={} outcome=DATABASE_UNAVAILABLE cause={}",
+				request.getRequestURI(), LogFmt.quote(NestedExceptionUtils.getMostSpecificCause(ex).getMessage()));
+		return noDatabaseConnectionResponse();
+	}
+
+	private static ResponseEntity<ProblemDetail> noDatabaseConnectionResponse() {
 		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
 			.body(ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "No database connection available"));
 	}

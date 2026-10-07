@@ -74,19 +74,24 @@ The F4 stock leak shows the cost. Inventory commits a reservation for an order t
 ## Delivery
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 2,000 lines, sliced per service.
+- Slices: tracker `feat/event-recording` (doc `e357fa6`); PR 1 `-01-inventory` T1; PR 2 `-02-payment` T2; PR 3 `-03-order` T3; PR 4 `-04-gateway-check` T4.
 - RDD: on; consent is a standing grant.
 
 ## Tasks
 
-- [ ] **T1 — inventory-service reservation events.** Route: delegated writer.
-- [ ] **T2 — payment-service payment events.** Route: delegated writer.
+- [x] **T1 — inventory-service reservation events.** Route: delegated writer.
+- [x] **T2 — payment-service payment events.** Route: delegated writer.
 - [ ] **T3 — order-service rejected statuses and order events.** Route: delegated writer.
 - [ ] **T4 — gateway-mock structured logs, verify scripts and the F4 evidence check, runbooks and docs.** Route: delegated writer.
 
 ## Progress
 
 - 2026-10-07: requirement and design approved by the human; branch created.
+- 2026-10-07: T1 + T2 done by a delegated writer. RED: compile failures. GREEN (parent re-run, mvn exit 0): inventory-service 66 tests, payment-service 79.
+  - Event types: `RESERVATION_ATTEMPT` with outcome `RESERVED` (same transaction as the stock decrement) or `INSUFFICIENT_STOCK` (separate transaction after the rollback); `PAYMENT_ATTEMPT` with outcome `AUTHORIZED`, `DECLINED` or `FAILED` (same transaction as the payment row) or `GATEWAY_UNAVAILABLE` (own transaction, still 503).
+  - When the database is unavailable, the event becomes a structured key=value WARN line with `outcome=DATABASE_UNAVAILABLE`. The `No database connection available` prefix is kept, because the scripts and runbooks match on it.
+  - Open, added to T3/T4: a non-gateway exception during payment is still not recorded; the payment `Payment gateway unavailable` WARN line has no key=value pairs yet; the runbooks still show the old WARN format.
 
 ## Next step
 
-T1 and T2 via delegated writers. They run one after the other, because only one writer works at a time.
+T3 via a delegated writer, plus the payment open points.
