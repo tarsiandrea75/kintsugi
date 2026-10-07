@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -43,6 +44,9 @@ class OrderControllerTest {
 
 	@MockitoBean
 	private OrderService service;
+
+	/** The id of the order handed to the service, so a test can check the error body names it. */
+	private final AtomicReference<UUID> placedOrderId = new AtomicReference<>();
 
 	@Test
 	void validOrderIsCreatedWithItsPaymentOutcome() throws Exception {
@@ -79,6 +83,7 @@ class OrderControllerTest {
 	void insufficientStockIsConflict() throws Exception {
 		given(service.place(any(Order.class))).willAnswer(invocation -> {
 			Order order = invocation.getArgument(0);
+			placedOrderId.set(order.getId());
 			throw new InsufficientStockException(order.getId());
 		});
 
@@ -87,19 +92,25 @@ class OrderControllerTest {
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 			.andExpect(jsonPath("$.status").value(409))
 			.andExpect(jsonPath("$.detail").value("Insufficient stock"))
+			.andExpect(jsonPath("$.orderId").value(placedOrderId.get().toString()))
 			.andExpect(header().doesNotExist("Location"));
 	}
 
 	@Test
 	void unavailableInventoryIsServiceUnavailable() throws Exception {
-		given(service.place(any(Order.class)))
-			.willThrow(new InventoryUnavailableException("inventory-service answered 500", null));
+		given(service.place(any(Order.class))).willAnswer(invocation -> {
+			Order order = invocation.getArgument(0);
+			placedOrderId.set(order.getId());
+			throw new InventoryUnavailableException(order.getId(), "http://inventory-service:8083/reservations",
+					"inventory-service answered 500", null);
+		});
 
 		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(body("customer-1", "SKU-1", 1)))
 			.andExpect(status().isServiceUnavailable())
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
 			.andExpect(jsonPath("$.status").value(503))
 			.andExpect(jsonPath("$.detail").value("Inventory unavailable"))
+			.andExpect(jsonPath("$.orderId").value(placedOrderId.get().toString()))
 			.andExpect(header().doesNotExist("Location"));
 	}
 

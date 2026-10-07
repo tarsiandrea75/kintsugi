@@ -4,6 +4,8 @@ import static dev.kintsugi.lab.order.domain.OrderStatus.CREATED;
 import static dev.kintsugi.lab.order.domain.OrderStatus.PAID;
 import static dev.kintsugi.lab.order.domain.OrderStatus.PAYMENT_FAILED;
 import static dev.kintsugi.lab.order.domain.OrderStatus.PAYMENT_PENDING;
+import static dev.kintsugi.lab.order.domain.OrderStatus.REJECTED_INVENTORY_UNAVAILABLE;
+import static dev.kintsugi.lab.order.domain.OrderStatus.REJECTED_OUT_OF_STOCK;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
@@ -27,6 +29,8 @@ class OrderTest {
 	/** The transition table of the spec; every pair not listed here must be rejected. */
 	private static final Set<List<OrderStatus>> ALLOWED = Set.of(
 			List.of(CREATED, PAYMENT_PENDING),
+			List.of(CREATED, REJECTED_OUT_OF_STOCK),
+			List.of(CREATED, REJECTED_INVENTORY_UNAVAILABLE),
 			List.of(PAYMENT_PENDING, PAID),
 			List.of(PAYMENT_PENDING, PAYMENT_FAILED));
 

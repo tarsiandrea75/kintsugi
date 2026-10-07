@@ -102,6 +102,18 @@ class OrdersByStatusMetricsTest {
 		assertThat(gauge(OrderStatus.PAYMENT_FAILED)).isZero();
 	}
 
+	/** Rejected orders are stored, so the gauge reports their statuses too, 0 when there are none. */
+	@Test
+	void reportsTheRejectedStatuses() {
+		rows = List.of(new OrderStatusCount(OrderStatus.REJECTED_OUT_OF_STOCK, 4));
+		bind();
+		scrape();
+		runRefreshes();
+
+		assertThat(gauge(OrderStatus.REJECTED_OUT_OF_STOCK)).isEqualTo(4.0);
+		assertThat(gauge(OrderStatus.REJECTED_INVENTORY_UNAVAILABLE)).isZero();
+	}
+
 	@Test
 	void registersOneSeriesPerStatus() {
 		bind();

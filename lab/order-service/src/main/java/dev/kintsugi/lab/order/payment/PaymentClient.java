@@ -53,12 +53,13 @@ public class PaymentClient {
 				.body(PaymentReply.class);
 		}
 		catch (RestClientException ex) {
-			throw new PaymentUnavailableException(
+			throw new PaymentUnavailableException(orderId, paymentsUrl,
 					"Payment of order " + orderId + " failed: " + ServiceRestClients.describe(ex, "POST " + paymentsUrl),
 					ex);
 		}
 		if (reply == null || reply.status() == null) {
-			throw new PaymentUnavailableException("Payment of order " + orderId + " returned no status", null);
+			throw new PaymentUnavailableException(orderId, paymentsUrl, "Payment of order " + orderId + " returned no status",
+					null);
 		}
 		return reply.status();
 	}

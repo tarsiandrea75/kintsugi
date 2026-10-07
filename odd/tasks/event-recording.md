@@ -81,7 +81,7 @@ The F4 stock leak shows the cost. Inventory commits a reservation for an order t
 
 - [x] **T1 — inventory-service reservation events.** Route: delegated writer.
 - [x] **T2 — payment-service payment events.** Route: delegated writer.
-- [ ] **T3 — order-service rejected statuses and order events.** Route: delegated writer.
+- [x] **T3 — order-service rejected statuses and order events.** Route: delegated writer.
 - [ ] **T4 — gateway-mock structured logs, verify scripts and the F4 evidence check, runbooks and docs.** Route: delegated writer.
 
 ## Progress
@@ -91,7 +91,24 @@ The F4 stock leak shows the cost. Inventory commits a reservation for an order t
   - Event types: `RESERVATION_ATTEMPT` with outcome `RESERVED` (same transaction as the stock decrement) or `INSUFFICIENT_STOCK` (separate transaction after the rollback); `PAYMENT_ATTEMPT` with outcome `AUTHORIZED`, `DECLINED` or `FAILED` (same transaction as the payment row) or `GATEWAY_UNAVAILABLE` (own transaction, still 503).
   - When the database is unavailable, the event becomes a structured key=value WARN line with `outcome=DATABASE_UNAVAILABLE`. The `No database connection available` prefix is kept, because the scripts and runbooks match on it.
   - Open, added to T3/T4: a non-gateway exception during payment is still not recorded; the payment `Payment gateway unavailable` WARN line has no key=value pairs yet; the runbooks still show the old WARN format.
+- 2026-10-07: reviews of T1 (`review-d05f2b2f18e05ed0`) and T2 (`review-9523a64b33994c01`) approved. Their WARNINGs were fixed, together with the open payment points:
+  - `INSUFFICIENT_STOCK` is recorded through a savepoint on the same connection (a test proves only 1 connection is borrowed).
+  - Event-recording paths now catch broadly and never mask the primary outcome; a failure on a shared transaction rolls back and fails the request, and is logged.
+  - A payment-plus-event atomicity test was added.
+  - A payment `ERROR` outcome is recorded for unexpected exceptions.
+  - The payment gateway-unavailable WARN line uses key=value.
+  - The flaky `latest()` tests were fixed.
+
+  Tests: inventory-service 70, payment-service 84.
+- 2026-10-07: T3 done.
+  - order-service has the `REJECTED_OUT_OF_STOCK` and `REJECTED_INVENTORY_UNAVAILABLE` statuses (V2) and an append-only `order_events` table (V3) with 8 types; each status change and its event commit together.
+  - 409/503 bodies carry the `orderId`. 175 tests.
+  - Accepted: if storing a rejection fails, the request returns 500, because a shared transaction must fail as a whole.
+  - Known limitation: order-service's own database is now needed before inventory is called.
+  - T4 must update the runbooks and setup for the changed WARN lines (`order rejected:`, key=value pairs).
+
+  Parent re-run: all three suites green, mvn exit 0.
 
 ## Next step
 
-T3 via a delegated writer, plus the payment open points.
+T4 (gateway-mock structured logs, verify scripts including the F4 evidence check, runbooks and docs) via a delegated writer.

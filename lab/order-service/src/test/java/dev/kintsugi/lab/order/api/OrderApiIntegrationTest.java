@@ -112,36 +112,48 @@ class OrderApiIntegrationTest {
 			.list();
 		assertThat(row).containsEntry("customer_id", "customer-e2e").containsEntry("status", "PAID");
 		assertThat(skus).containsExactly("SKU-1", "SKU-2");
+		assertThat(eventTypes(id)).containsExactly("ORDER_RECEIVED", "INVENTORY_RESERVED", "PAYMENT_AUTHORIZED");
 		assertThat(INVENTORY.lastRequest().body()).contains(id).contains("SKU-1").contains("SKU-2");
 		assertThat(PAYMENT.lastRequest().body()).contains(id);
 	}
 
 	@Test
-	void insufficientStockIsConflictAndStoresNothing() throws Exception {
+	void insufficientStockIsConflictAndStoresARejectedOrder() throws Exception {
 		INVENTORY.replyWith(409, "INSUFFICIENT_STOCK");
-		long before = countOrders();
 		String paymentBefore = String.valueOf(PAYMENT.lastRequest());
 
-		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
+		String body = mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
 			.andExpect(status().isConflict())
-			.andExpect(jsonPath("$.detail").value("Insufficient stock"));
+			.andExpect(jsonPath("$.detail").value("Insufficient stock"))
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
 
-		assertThat(countOrders()).isEqualTo(before);
+		String id = JsonPath.read(body, "$.orderId");
+		assertThat(storedStatus(id)).isEqualTo("REJECTED_OUT_OF_STOCK");
+		assertThat(eventTypes(id)).containsExactly("ORDER_RECEIVED", "INVENTORY_REJECTED");
 		assertThat(String.valueOf(PAYMENT.lastRequest())).isEqualTo(paymentBefore);
 	}
 
 	// Fault F4 as order-service sees it: inventory-service answers 500 because its pool is exhausted.
 	@Test
-	void inventoryServerErrorIsServiceUnavailableAndStoresNothing() throws Exception {
+	void inventoryServerErrorIsServiceUnavailableAndStoresARejectedOrder() throws Exception {
 		INVENTORY.replyWithBody(500, "{}");
-		long before = countOrders();
 		String paymentBefore = String.valueOf(PAYMENT.lastRequest());
 
-		mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
+		String body = mvc.perform(post("/orders").contentType(MediaType.APPLICATION_JSON).content(validOrder()))
 			.andExpect(status().isServiceUnavailable())
-			.andExpect(jsonPath("$.detail").value("Inventory unavailable"));
+			.andExpect(jsonPath("$.detail").value("Inventory unavailable"))
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
 
-		assertThat(countOrders()).isEqualTo(before);
+		String id = JsonPath.read(body, "$.orderId");
+		assertThat(storedStatus(id)).isEqualTo("REJECTED_INVENTORY_UNAVAILABLE");
+		assertThat(eventTypes(id)).containsExactly("ORDER_RECEIVED", "INVENTORY_UNAVAILABLE");
+		Map<String, Object> event = lastEvent(id);
+		assertThat((String) event.get("detail")).contains("\"exception\":").contains("/reservations");
+		assertThat(event.get("duration_ms")).isNotNull();
 		assertThat(String.valueOf(PAYMENT.lastRequest())).isEqualTo(paymentBefore);
 	}
 
@@ -171,6 +183,10 @@ class OrderApiIntegrationTest {
 
 		assertThat(storedStatus(id)).isEqualTo("PAYMENT_PENDING");
 		mvc.perform(get("/orders/{id}", id)).andExpect(jsonPath("$.status").value("PAYMENT_PENDING"));
+		assertThat(eventTypes(id)).containsExactly("ORDER_RECEIVED", "INVENTORY_RESERVED", "PAYMENT_UNAVAILABLE");
+		Map<String, Object> event = lastEvent(id);
+		assertThat((String) event.get("detail")).contains("HttpTimeoutException").contains("/payments");
+		assertThat((Long) event.get("duration_ms")).isGreaterThanOrEqualTo(READ_TIMEOUT.toMillis());
 	}
 
 	@Test
@@ -255,6 +271,21 @@ class OrderApiIntegrationTest {
 
 	private String storedStatus(String id) {
 		return jdbc.sql("select status from orders where id = ?").param(UUID.fromString(id)).query(String.class).single();
+	}
+
+	/** The event types of order {@code id}, oldest first. */
+	private List<String> eventTypes(String id) {
+		return jdbc.sql("select type from order_events where order_id = ? order by occurred_at, id")
+			.param(UUID.fromString(id))
+			.query(String.class)
+			.list();
+	}
+
+	private Map<String, Object> lastEvent(String id) {
+		return jdbc.sql("select detail, duration_ms from order_events where order_id = ? order by occurred_at desc limit 1")
+			.param(UUID.fromString(id))
+			.query()
+			.singleRow();
 	}
 
 	private long countOrders() {

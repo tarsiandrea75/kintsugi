@@ -37,7 +37,8 @@ class OrderController {
 
 	/**
 	 * 201 once the order is stored: the body carries the payment outcome as the order's final status. 409 when the
-	 * stock is short and 503 when inventory-service is unavailable; nothing is stored then (see the handlers below).
+	 * stock is short and 503 when inventory-service is unavailable; the order is stored as rejected then, and the
+	 * problem body carries its id (see the handlers below).
 	 */
 	@PostMapping
 	ResponseEntity<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request) {
@@ -66,23 +67,30 @@ class OrderController {
 		}
 	}
 
-	/** The stock for the order could not be reserved, so the order was refused. Local to this controller. */
+	/**
+	 * The stock for the order could not be reserved, so the order was refused and stored as
+	 * {@code REJECTED_OUT_OF_STOCK}. Local to this controller.
+	 */
 	@ExceptionHandler(InsufficientStockException.class)
 	ResponseEntity<ProblemDetail> insufficientStock(InsufficientStockException ex) {
-		return problem(HttpStatus.CONFLICT, "Insufficient stock");
+		return problem(HttpStatus.CONFLICT, "Insufficient stock", ex.getOrderId());
 	}
 
 	/**
-	 * Inventory-service gave no usable answer, so the order was refused; the service already logged the WARN line
-	 * with the order id and the cause. 503 because the client may retry later. Local to this controller.
+	 * Inventory-service gave no usable answer, so the order was refused and stored as
+	 * {@code REJECTED_INVENTORY_UNAVAILABLE}; the service already logged the WARN line with the order id and the cause.
+	 * 503 because the client may retry later. Local to this controller.
 	 */
 	@ExceptionHandler(InventoryUnavailableException.class)
 	ResponseEntity<ProblemDetail> inventoryUnavailable(InventoryUnavailableException ex) {
-		return problem(HttpStatus.SERVICE_UNAVAILABLE, "Inventory unavailable");
+		return problem(HttpStatus.SERVICE_UNAVAILABLE, "Inventory unavailable", ex.getOrderId());
 	}
 
-	private static ResponseEntity<ProblemDetail> problem(HttpStatus status, String detail) {
-		return ResponseEntity.status(status).body(ProblemDetail.forStatusAndDetail(status, detail));
+	/** A problem body that names the stored order, so the caller can read it back. */
+	private static ResponseEntity<ProblemDetail> problem(HttpStatus status, String detail, UUID orderId) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+		problem.setProperty("orderId", orderId);
+		return ResponseEntity.status(status).body(problem);
 	}
 
 	@GetMapping("/{id}")

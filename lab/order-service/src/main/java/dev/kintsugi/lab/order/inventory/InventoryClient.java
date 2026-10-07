@@ -62,8 +62,10 @@ public class InventoryClient {
 				.toEntity(ReservationReply.class);
 		}
 		catch (RestClientException ex) {
-			throw new InventoryUnavailableException("Reservation for order " + orderId + " failed: "
-					+ ServiceRestClients.describe(ex, "POST " + reservationsUrl), ex);
+			throw new InventoryUnavailableException(orderId, reservationsUrl,
+					"Reservation for order " + orderId + " failed: "
+							+ ServiceRestClients.describe(ex, "POST " + reservationsUrl),
+					ex);
 		}
 		HttpStatusCode code = response.getStatusCode();
 		ReservationOutcome outcome = response.getBody() == null ? null : response.getBody().status();
@@ -73,8 +75,8 @@ public class InventoryClient {
 		if (code.isSameCodeAs(HttpStatus.CONFLICT) && outcome == ReservationOutcome.INSUFFICIENT_STOCK) {
 			return ReservationOutcome.INSUFFICIENT_STOCK;
 		}
-		throw new InventoryUnavailableException("Reservation for order " + orderId + " answered " + code.value()
-				+ " with status " + outcome + " from POST " + reservationsUrl, null);
+		throw new InventoryUnavailableException(orderId, reservationsUrl, "Reservation for order " + orderId + " answered "
+				+ code.value() + " with status " + outcome + " from POST " + reservationsUrl, null);
 	}
 
 	private record ReservationRequest(UUID orderId, List<Item> items) {

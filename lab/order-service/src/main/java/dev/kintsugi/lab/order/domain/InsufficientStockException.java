@@ -4,7 +4,7 @@ import java.util.UUID;
 
 /**
  * The order cannot be placed because inventory-service could not reserve every item: one was short or unknown.
- * Nothing was reserved and nothing was stored.
+ * Nothing was reserved; the order was stored as {@code REJECTED_OUT_OF_STOCK}.
  */
 public class InsufficientStockException extends RuntimeException {
 
