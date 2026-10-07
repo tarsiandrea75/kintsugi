@@ -117,6 +117,13 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
   - Two new panels: inventory DB pool and inventory 5xx rate.
   - `verify-f4.sh`. Real runs on a fresh stack: F4 PASS in 109 s, with all 6 orders 503, pending 4, 4 Hikari timeouts and 4 inventory 500s. F1 PASS in 77 s, F2 PASS in 60 s, F3 PASS in 70 s.
   - **To review:** under F4 even the orders whose reservation got a connection answer 503, because the 5 s delay exceeds order-service's 3 s read timeout. Inventory probably still commits those reservations, so stock leaks (not confirmed). This belongs to the reconciliation/release known limitation.
+- 2026-10-07: T4 review (4 lenses, `review-5a682c0af4040742`) approved. WARNINGs fixed:
+  - `reserveStock` is now a switch expression, so the compiler checks it covers every case;
+  - the setup docs explain that an old lab volume needs `down -v` once to get the `inventory` database;
+  - the F4 docs and the script comment say all orders usually answer 503;
+  - stock consumption and the F4 leak are written into the inventory spec's known limitations.
+
+  order-service: 148 tests, mvn exit 0.
 
 ## Next step
 

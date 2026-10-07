@@ -92,6 +92,8 @@ for ((i = 1; i <= F4_ORDERS; i++)); do
   read -r code id status seconds <"$results/$i" || code=000
   if [[ "$code" == 503 ]]; then
     unavailable=$((unavailable + 1))
+  # Rarely reached with these settings: the 5 s query outlasts order-service's 3 s inventory read timeout, so even an
+  # order that got a pooled connection answers 503. Kept so a faster delay or a longer timeout does not fail the check.
   elif [[ "$code" == 201 && "$status" == PAID ]]; then
     info "order $id under F4 got a connection and is PAID"
   else

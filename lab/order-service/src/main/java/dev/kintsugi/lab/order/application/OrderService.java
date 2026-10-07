@@ -87,11 +87,13 @@ public class OrderService {
 			log.warn("Inventory unavailable for order {}, order not stored: {}", order.getId(), ex.getMessage());
 			throw ex;
 		}
-		// Exhaustive on purpose: a new outcome must be handled here before an order can be accepted with it.
-		switch (outcome) {
-			case RESERVED -> {
-			}
-			case INSUFFICIENT_STOCK -> throw new InsufficientStockException(order.getId());
+		// A switch expression, so the compiler rejects a new outcome until it is handled here.
+		boolean reserved = switch (outcome) {
+			case RESERVED -> true;
+			case INSUFFICIENT_STOCK -> false;
+		};
+		if (!reserved) {
+			throw new InsufficientStockException(order.getId());
 		}
 	}
 

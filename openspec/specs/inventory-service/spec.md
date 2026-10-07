@@ -150,6 +150,6 @@ The service listens on port 8083. Persistence and end-to-end tests MUST run agai
 
 ## Known limitations
 
-- **Reservations are never released.** Nothing gives stock back when the payment fails or the order is abandoned; there is no release endpoint and no expiry. The seed is large enough that the lab never runs out.
+- **Reservations are never released.** Nothing gives stock back when the payment fails or the order is abandoned; there is no release endpoint and no expiry. The seed is large enough that the lab never runs out. Every lab order consumes stock, and under F4 a reservation that commits after order-service has timed out also leaks its units; with 1,000,000 units per SKU this is negligible, and a release mechanism belongs with the future reconciliation feature.
 - **No prices.** Stock carries no price or product catalog yet; prices come with fault F6.
 - **No idempotency.** Calling `POST /reservations` twice with the same order id reserves the stock twice. Reservations are not stored, so there is no record to deduplicate against.
