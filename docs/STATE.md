@@ -4,29 +4,33 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-07 (session 04)
+2026-10-07 (session 05)
 
 ## Milestone
 
-M1 — The lab (Oct 5–25). **The M1 check is met:** F1–F4 are visible in Grafana, and each fault has a passing verify script. The service runbooks are done. **One M1 item is still open:** the fault injector with the true cause recorded (`docs/vision.md:148`). It is required before M2's check (F1–F3 correctly diagnosed), because diagnoses are scored against that recorded truth.
+**M1 — The lab: complete.** Every M1 item is done, and the check "every fault F1–F4 is visible in Grafana" passes through four verify scripts. Next milestone: M2 — First agent.
 
 ## Last action
 
-`event-recording` is done ([feature document](../odd/tasks/event-recording.md)). It implements the human's requirement that every attempt and every event is recorded.
-- **order-service:** rejected orders are stored as `REJECTED_OUT_OF_STOCK` or `REJECTED_INVENTORY_UNAVAILABLE`. An append-only `order_events` table has 8 event types.
-- **inventory-service:** append-only `reservation_events`. A rejection is recorded through a savepoint on the same connection.
-- **payment-service:** append-only `payment_events`, with the outcomes AUTHORIZED, DECLINED, FAILED, GATEWAY_UNAVAILABLE, ERROR and COMMIT_UNKNOWN.
-- **gateway-mock:** one key=value log line per call and per behavior change.
-- **Database unreachable:** the event goes to a structured WARN line in Loki. Nothing is dropped silently.
-- **F4 stock leak:** it can now be proven from data. `verify-f4.sh` step 8 finds an order that order-service rejected but inventory-service still reserved.
-- **Living docs:** `docs/vision.md:33` (F3 symptom), the specs, the runbooks (section "Where the evidence is") and setup all match the code.
-- **Tests:** order-service 175, payment-service 86, inventory-service 70, gateway-mock 76. All four verify scripts pass.
-- **Status:** every range is reviewed and approved. Nothing is pushed.
+`fault-injector` is done ([feature document](../odd/tasks/fault-injector.md), [ADR-009](adr/ADR-009-fault-injector-docker-control.md), [spec](../openspec/specs/fault-injector/spec.md)).
+- **What it is:** `lab/fault-injector` on `127.0.0.1:18084`. F1 and F2 go through the gateway-mock admin API; F3 and F4 are real compose redeploys through the Docker socket.
+- **Truth:** the true cause is stored in the `faults` database, owned by a non-superuser `faults` role. No API ever returns it.
+- **Database roles:** the services moved to a non-superuser `lab_app` role. `postgres` is the bootstrap superuser, used only by the init scripts.
+- **Invisible to the agent:** Alloy drops the injector's logs and Prometheus does not scrape it.
+- **Checks:** `verify-f1.sh` … `verify-f4.sh` inject through the injector. They assert the truth row, that `lab_app` is not a superuser and cannot connect to `faults`, and that the injector is absent from Loki and Prometheus. All pass.
+- **Tests:** fault-injector 89, order-service 175, payment-service 86, inventory-service 70, gateway-mock 76, agent 37.
+- **Status:** every range is reviewed and approved. Nothing is pushed (local only).
+- **Running the lab by hand now needs** `export DOCKER_GID=$(stat -c %g /var/run/docker.sock)` and `export KINTSUGI_REPO_DIR=$(git rev-parse --show-toplevel)` before any `docker compose` command. An old lab volume needs `down -v` once (new roles).
 
 ## Next action
 
-1. `fault-injector` (closes M1). A REST service that activates a fault through the existing mechanisms (the gateway-mock admin API, and compose environment variables plus a recreate), records the true cause in its own database that the agent cannot read, and restores the lab.
-2. M2, in this order: MCP server with read-only tools (Loki logs, Prometheus metrics, `queryDb` on the event tables); RAG on the runbooks with pgvector (ADR-002); the agent loop with `IncidentState` and a JSON report with cited evidence; the Python eval harness for the M2 check.
+1. Waiting for the human: align Docker Compose versions. The injector ships v5.6.0 and the host has v5.1.3; the two write different image-digest labels, so the host's next `up` recreates the services the injector touched once. That is noise in the future deploy history.
+2. Waiting for the human: add the new variables to the protected `infra/.env.example` (`KINTSUGI_REPO_DIR`, `DOCKER_GID`, `POSTGRES_BOOTSTRAP_PASSWORD`, `LAB_APP_DB_PASSWORD`, `FAULTS_DB_PASSWORD`).
+3. M2, in this order:
+   - the MCP server with read-only tools: Loki logs, Prometheus metrics, `queryDb` on the event tables through a non-superuser read-only role with no access to `faults`, and deploy history;
+   - RAG on `docs/runbooks/` with pgvector (ADR-002);
+   - the agent loop with `IncidentState` and a JSON report with cited evidence;
+   - the Python eval harness, which reads the truth with the `faults` role, for the M2 check (F1–F3 correctly diagnosed).
 
 ## Local branch chains (not pushed)
 
@@ -40,6 +44,7 @@ M1 — The lab (Oct 5–25). **The M1 check is met:** F1–F4 are visible in Gra
 - `feat/fault-f4` → `-01-inventory-data` → `-02-inventory-api` → `-03-order-inventory` → `-04-check`
 - `feat/service-runbooks`
 - `feat/event-recording` → `-01-inventory` → `-02-payment` → `-03-order` → `-04-gateway-check`
+- `feat/fault-injector` → `-01-core` → `-02-api` → `-03-lab-control` → `-04-wiring`
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -69,6 +74,7 @@ Lab services:
 - No retry or `Retry-After` handling on a 429; this is out of scope for F2.
 
 Verify scripts (review suggestions):
+- The fault-variable list in `lib.sh` duplicates the catalog; `start_lab` bypasses the compose helper; the Prometheus invisibility check is a substring match; a 204 race can follow an injector transport failure.
 - `LEAK_WAIT_SECONDS` in `verify-f4.sh` is not derived from `F4_RESERVATION_DELAY`.
 - The `lib.sh` caller contract does not mention `trap on_exit EXIT`.
 - `expect_paid_order` takes an awkward label fragment.

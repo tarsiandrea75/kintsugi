@@ -155,4 +155,4 @@ If an activation step fails partway, the injector attempts a restore, records `F
 
 ## Next step
 
-Feature done: M1 complete. Next: resolve the open points, then M2.
+Feature done: M1 complete. Open for the human: Compose version alignment and `infra/.env.example`. Then M2.
