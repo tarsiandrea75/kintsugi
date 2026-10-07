@@ -6,12 +6,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Duration;
 import java.util.UUID;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -46,6 +48,9 @@ class AuthorizeControllerTest {
 
 	@Autowired
 	private MeterRegistry registry;
+
+	@Autowired
+	private BehaviorStore store;
 
 	@Test
 	void inflightGaugeIsBackToZeroAfterAuthorizeCompletes() throws Exception {
@@ -84,6 +89,39 @@ class AuthorizeControllerTest {
 			.andExpect(content().json("""
 					{"status": "AUTHORIZED"}
 					""", true));
+	}
+
+	@ParameterizedTest
+	@CsvSource({ "429, rate limited", "500, internal error", "503, unavailable" })
+	void configuredErrorStatusIsReturnedWithAnErrorBody(int errorStatus, String error) throws Exception {
+		store.set(new GatewayBehavior(0, errorStatus));
+		try {
+			mvc.perform(post("/authorize").contentType(MediaType.APPLICATION_JSON).content("""
+					{"orderId": "11111111-1111-1111-1111-111111111111"}
+					"""))
+				.andExpect(status().is(errorStatus))
+				.andExpect(content().json("""
+						{"error": "%s"}
+						""".formatted(error), true));
+		}
+		finally {
+			store.reset();
+		}
+		assertThat(registry.get(AuthorizeController.INFLIGHT_GAUGE).gauge().value()).isZero();
+	}
+
+	@Test
+	void errorStatusIsAnsweredOnlyAfterTheLatency() {
+		BehaviorStore slowStore = new BehaviorStore();
+		slowStore.set(new GatewayBehavior(200, 429));
+		AuthorizeController controller = new AuthorizeController(slowStore, new SimpleMeterRegistry());
+
+		long start = System.nanoTime();
+		var response = controller.authorize(new AuthorizeRequest(UUID.randomUUID()));
+		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+		assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(200));
 	}
 
 	@ParameterizedTest

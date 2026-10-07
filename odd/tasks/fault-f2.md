@@ -65,13 +65,14 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
 ## Delivery
 
 - Strategy: `auto-chain` with `feature-branch-chain` (the user's standing default). Forecast: about 800 authored lines.
+- Slices (feature-branch-chain): tracker `feat/fault-f2` (feature doc `058f524`); PR 1 `-01-gateway` T1 (about 365 lines); PR 2 `-02-payment-failed` T2 status, V2 migration and mapping; PR 3 `-03-payment-gauge` the `lab_payments` gauge (copied pattern, about 560 lines with tests); PR 4 `-04-order` T3 (about 58 lines).
 - RDD: on (global); consent is a standing grant. Reviews run per range with `--base-ref`.
 
 ## Tasks
 
-- [ ] **T1 — gateway-mock error behavior.** The `errorStatus` behavior, the admin API and `/authorize`; tests first; the spec. Route: delegated writer.
-- [ ] **T2 — payment-service FAILED.** The status, the `V2` migration, the gateway mapping, the WARN log, the `lab_payments` gauge; tests first; the spec. Route: delegated writer.
-- [ ] **T3 — order-service mapping.** `FAILED` → `PAYMENT_FAILED`; tests first; the spec. Route: delegated writer.
+- [x] **T1 — gateway-mock error behavior.** The `errorStatus` behavior, the admin API and `/authorize`; tests first; the spec. Route: delegated writer.
+- [x] **T2 — payment-service FAILED.** The status, the `V2` migration, the gateway mapping, the WARN log, the `lab_payments` gauge; tests first; the spec. Route: delegated writer.
+- [x] **T3 — order-service mapping.** `FAILED` → `PAYMENT_FAILED`; tests first; the spec. Route: delegated writer.
 - [ ] **T4 — Observability and check.** The dashboard panels, `verify-f2.sh`, the lab-observability spec and the docs. Run both verify scripts. Route: delegated writer.
 
 ## Checks
@@ -82,7 +83,12 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
 ## Progress
 
 - 2026-10-07: meaning of F2 decided (failed payment, `FAILED` status); design approved; branch created.
+- 2026-10-07: T1–T3 done by a delegated writer. RED: compile failures in each service. GREEN, parent re-run with mvn exit codes checked: gateway-mock 71, payment-service 74, order-service 116. Notes:
+  - `RestClient` raises `HttpClientErrorException.TooManyRequests` on a 429, which is caught first.
+  - V2 drops and re-creates `payments_status_check` (PostgreSQL's default name, confirmed on Testcontainers).
+  - A 200 response with a `FAILED` body is treated as unavailable.
+  - The 429 WARN is logged in `HttpPaymentGateway`, the only place that sees the HTTP status, so it is also logged if the later save fails.
 
 ## Next step
 
-T1–T3 via a delegated writer, then T4.
+T4 (dashboard, `verify-f2.sh`, docs) via a delegated writer.

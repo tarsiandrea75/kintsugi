@@ -27,15 +27,23 @@ public class BehaviorStore {
 	/** Replaces the behavior with {@code behavior} and returns it. */
 	public GatewayBehavior set(GatewayBehavior behavior) {
 		GatewayBehavior previous = current.getAndSet(behavior);
-		log.info("Gateway behavior changed: latencyMs {} -> {}", previous.latencyMs(), behavior.latencyMs());
+		log.info("Gateway behavior changed: latencyMs {} -> {}, errorStatus {} -> {}", previous.latencyMs(),
+				behavior.latencyMs(), describe(previous.errorStatus()), describe(behavior.errorStatus()));
 		return behavior;
 	}
 
 	/** Restores {@link GatewayBehavior#DEFAULT} and returns it. */
 	public GatewayBehavior reset() {
 		GatewayBehavior previous = current.getAndSet(GatewayBehavior.DEFAULT);
-		log.info("Gateway behavior reset: latencyMs {} -> {}", previous.latencyMs(), GatewayBehavior.DEFAULT.latencyMs());
+		log.info("Gateway behavior reset: latencyMs {} -> {}, errorStatus {} -> {}", previous.latencyMs(),
+				GatewayBehavior.DEFAULT.latencyMs(), describe(previous.errorStatus()),
+				describe(GatewayBehavior.DEFAULT.errorStatus()));
 		return GatewayBehavior.DEFAULT;
+	}
+
+	/** Renders a missing error status as {@code none}, which reads better in a log line than {@code null}. */
+	private static String describe(Integer errorStatus) {
+		return errorStatus == null ? "none" : errorStatus.toString();
 	}
 
 }

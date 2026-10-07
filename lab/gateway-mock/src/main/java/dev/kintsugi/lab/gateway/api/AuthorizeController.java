@@ -7,14 +7,19 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import dev.kintsugi.lab.gateway.behavior.BehaviorStore;
+import dev.kintsugi.lab.gateway.behavior.GatewayBehavior;
 
-/** The gateway API that payment-service calls: authorizes every payment after the configured latency. */
+/**
+ * The gateway API that payment-service calls: after the configured latency it authorizes the payment, or answers with
+ * the configured error status.
+ */
 @RestController
 class AuthorizeController {
 
@@ -37,13 +42,16 @@ class AuthorizeController {
 
 	/**
 	 * Sleeps on the request thread on purpose: that is what a slow upstream looks like to the caller, and it is how
-	 * fault F1 reaches payment-service.
+	 * fault F1 reaches payment-service. A configured error status is answered only after the latency, as a real gateway
+	 * still takes time to reject; a 429 is how fault F2 reaches payment-service.
 	 */
 	@PostMapping("/authorize")
-	AuthorizeResponse authorize(@Valid @RequestBody AuthorizeRequest request) {
+	ResponseEntity<?> authorize(@Valid @RequestBody AuthorizeRequest request) {
+		// Read once, so the latency and the error status come from the same behavior.
+		GatewayBehavior behavior = store.get();
 		inflight.incrementAndGet();
 		try {
-			Thread.sleep(store.get().latencyMs());
+			Thread.sleep(behavior.latencyMs());
 		}
 		catch (InterruptedException ex) {
 			Thread.currentThread().interrupt();
@@ -53,7 +61,11 @@ class AuthorizeController {
 		finally {
 			inflight.decrementAndGet();
 		}
-		return AuthorizeResponse.AUTHORIZED;
+		Integer errorStatus = behavior.errorStatus();
+		if (errorStatus != null) {
+			return ResponseEntity.status(errorStatus).body(GatewayErrorResponse.forStatus(errorStatus));
+		}
+		return ResponseEntity.ok(AuthorizeResponse.AUTHORIZED);
 	}
 
 }

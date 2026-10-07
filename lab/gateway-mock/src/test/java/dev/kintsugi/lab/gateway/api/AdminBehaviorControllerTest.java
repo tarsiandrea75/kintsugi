@@ -45,7 +45,7 @@ class AdminBehaviorControllerTest {
 		mvc.perform(get("/admin/behavior"))
 			.andExpect(status().isOk())
 			.andExpect(content().json("""
-					{"latencyMs": 0}
+					{"latencyMs": 0, "errorStatus": null}
 					""", true));
 	}
 
@@ -54,13 +54,13 @@ class AdminBehaviorControllerTest {
 		putLatency("{\"latencyMs\": 10000}")
 			.andExpect(status().isOk())
 			.andExpect(content().json("""
-					{"latencyMs": 10000}
+					{"latencyMs": 10000, "errorStatus": null}
 					""", true));
 
 		mvc.perform(get("/admin/behavior"))
 			.andExpect(status().isOk())
 			.andExpect(content().json("""
-					{"latencyMs": 10000}
+					{"latencyMs": 10000, "errorStatus": null}
 					""", true));
 		assertThat(store.get()).isEqualTo(new GatewayBehavior(10_000));
 	}
@@ -80,9 +80,66 @@ class AdminBehaviorControllerTest {
 		mvc.perform(delete("/admin/behavior"))
 			.andExpect(status().isOk())
 			.andExpect(content().json("""
-					{"latencyMs": 0}
+					{"latencyMs": 0, "errorStatus": null}
 					""", true));
 		assertThat(store.get()).isEqualTo(GatewayBehavior.DEFAULT);
+	}
+
+	@Test
+	void errorStatusIsSetAndReadBack() throws Exception {
+		putLatency("{\"latencyMs\": 0, \"errorStatus\": 429}")
+			.andExpect(status().isOk())
+			.andExpect(content().json("""
+					{"latencyMs": 0, "errorStatus": 429}
+					""", true));
+
+		mvc.perform(get("/admin/behavior"))
+			.andExpect(status().isOk())
+			.andExpect(content().json("""
+					{"latencyMs": 0, "errorStatus": 429}
+					""", true));
+		assertThat(store.get()).isEqualTo(new GatewayBehavior(0, 429));
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 429, 500, 503 })
+	void allowedErrorStatusesAreAccepted(int errorStatus) throws Exception {
+		putLatency("{\"latencyMs\": 0, \"errorStatus\": " + errorStatus + "}").andExpect(status().isOk());
+
+		assertThat(store.get().errorStatus()).isEqualTo(errorStatus);
+	}
+
+	@Test
+	void putWithoutErrorStatusReplacesTheWholeBehavior() throws Exception {
+		store.set(new GatewayBehavior(0, 429));
+
+		putLatency("{\"latencyMs\": 200}").andExpect(status().isOk());
+
+		assertThat(store.get()).isEqualTo(new GatewayBehavior(200, null));
+	}
+
+	@Test
+	void deleteResetsTheErrorStatus() throws Exception {
+		store.set(new GatewayBehavior(300, 503));
+
+		mvc.perform(delete("/admin/behavior"))
+			.andExpect(status().isOk())
+			.andExpect(content().json("""
+					{"latencyMs": 0, "errorStatus": null}
+					""", true));
+		assertThat(store.get()).isEqualTo(GatewayBehavior.DEFAULT);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "{\"latencyMs\": 0, \"errorStatus\": 200}",
+			"{\"latencyMs\": 0, \"errorStatus\": 404}", "{\"latencyMs\": 0, \"errorStatus\": 502}",
+			"{\"latencyMs\": 0, \"errorStatus\": -1}", "{\"latencyMs\": 0, \"errorStatus\": \"busy\"}" })
+	void invalidErrorStatusIsRejectedAndKeepsTheBehavior(String body) throws Exception {
+		GatewayBehavior before = store.set(new GatewayBehavior(500, 503));
+
+		putLatency(body).andExpect(status().isBadRequest());
+
+		assertThat(store.get()).isEqualTo(before);
 	}
 
 	@ParameterizedTest
