@@ -108,7 +108,7 @@ Its latency is the fault F1 control point, and its error status is the fault F2 
 | `GET /admin/behavior` | Returns the current behavior |
 | `DELETE /admin/behavior` | Resets the latency to 0 and clears the error status |
 
-Each change is logged at `INFO`. The behavior is in the [living spec](../openspec/specs/gateway-mock/spec.md).
+Each change is logged as one `INFO` line with `key=value` pairs (`Gateway behavior changed: event=BEHAVIOR_CHANGED ...` or `Gateway behavior reset: event=BEHAVIOR_RESET ...`), and so is every `POST /authorize` (`Authorize answered: event=AUTHORIZE order=<id> latency_ms=<configured> answered=<status> duration_ms=<actual>`): the gateway has no database, so these lines are its record. The behavior is in the [living spec](../openspec/specs/gateway-mock/spec.md).
 
 ## Lab with Docker Compose
 
@@ -199,7 +199,7 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F3, "o
    ORDER_PAYMENT_BASEURL=http://payment-service:9999 docker compose -f infra/compose.yaml up -d --no-deps --wait order-service
    ```
 
-2. Place an order. The response comes at once, 201 with status `PAYMENT_PENDING`, and order-service logs a `WARN` line such as `Payment of order <id> unavailable, leaving it in PAYMENT_PENDING: Payment of order <id> failed: ConnectException calling POST http://payment-service:9999/payments`:
+2. Place an order. The response comes at once, 201 with status `PAYMENT_PENDING`, and order-service logs a `WARN` line such as `Payment of order <id> unavailable, leaving it in PAYMENT_PENDING: event=PAYMENT_UNAVAILABLE order=<id> outcome=PAYMENT_PENDING duration_ms=<ms> url="http://payment-service:9999/payments" exception=java.net.ConnectException cause="Payment of order <id> failed: ConnectException calling POST http://payment-service:9999/payments"`:
 
    ```bash
    curl -s -X POST localhost:18080/orders -H 'Content-Type: application/json' \
@@ -221,7 +221,7 @@ infra/scripts/verify-f4.sh          # start or reuse the lab, run the checks, le
 infra/scripts/verify-f4.sh --down   # the same, then `down -v`
 ```
 
-The script places a healthy order (`PAID`), then recreates inventory-service with a pool of 2 connections and a 5 s reservation query (`INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s`). It fires six concurrent orders and checks that at least one answers 503 and that every answer is either 503 or 201 `PAID`. With these settings all six usually answer 503: the 5 s query outlasts order-service's 3 s inventory read timeout, so even an order that got a connection times out. It then checks that Prometheus sees inventory's 5xx count on `/reservations` rise and the pool's pending connections reach 1 or its timeouts rise, and that Loki has order-service's `Inventory unavailable` or inventory-service's `No database connection available` `WARN` line. Last, it recreates inventory-service with its defaults and checks that a new order is `PAID` again. It always restores inventory-service on exit, even when a check fails. Output and exit status work as in the F1 check. It takes about 2 minutes on a fresh stack.
+The script places a healthy order (`PAID`), then recreates inventory-service with a pool of 2 connections and a 5 s reservation query (`INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s`). It fires six concurrent orders and checks that at least one answers 503 and that every answer is either 503 or 201 `PAID`. With these settings all six usually answer 503: the 5 s query outlasts order-service's 3 s inventory read timeout, so even an order that got a connection times out. It then checks that Prometheus sees inventory's 5xx count on `/reservations` rise and the pool's pending connections reach 1 or its timeouts rise, and that Loki has order-service's `Inventory unavailable` or inventory-service's `No database connection available` `WARN` line. Before restoring inventory-service, it checks the stored evidence in PostgreSQL: every order answered 503 is stored as `REJECTED_INVENTORY_UNAVAILABLE` with an `INVENTORY_UNAVAILABLE` row in `order_events`, and at least one of them also has a `RESERVED` row in inventory's `reservation_events`, committed after order-service gave up (it polls for up to 12 s). That pair is the stock leak: stock reserved for an order that was rejected. It prints the order id and both rows. Last, it recreates inventory-service with its defaults and checks that a new order is `PAID` again. It always restores inventory-service on exit, even when a check fails. Output and exit status work as in the F1 check. It takes about 2 minutes on a fresh stack.
 
 Upgrading an existing lab: the `inventory` database is created by a PostgreSQL init script, and init scripts only run on an empty data volume. A lab volume created before inventory-service existed has no `inventory` database, so run `docker compose -f infra/compose.yaml down -v` once before the first start with inventory-service. `verify-*.sh --down` is not a substitute: it tears the lab down only after its checks have run.
 
@@ -235,7 +235,7 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F4, "i
    INVENTORY_POOL_SIZE=2 INVENTORY_RESERVATION_DELAY=5s docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service
    ```
 
-2. Place six orders at once. Every one answers 503 and nothing is stored. Four fail after about 2 s: inventory finds no free connection within its 2 s connection timeout, answers 500, and logs `No database connection available: HikariPool-1 - Connection is not available, request timed out after 2001ms`. The two that got a connection fail after 3 s, order-service's inventory read timeout. order-service logs `Inventory unavailable for order <id>, order not stored: ...` for each:
+2. Place six orders at once. Every one answers 503, with the order id in the problem body, and every order is stored as `REJECTED_INVENTORY_UNAVAILABLE`. Four fail after about 2 s: inventory finds no free connection within its 2 s connection timeout, answers 500, and logs `No database connection available: event=RESERVATION_ATTEMPT order=<id> outcome=DATABASE_UNAVAILABLE ... cause="HikariPool-1 - Connection is not available, request timed out after 2001ms"`. The two that got a connection fail after 3 s, order-service's inventory read timeout, but inventory still commits their reservations 5 s after they started. order-service logs `Inventory unavailable for order <id>, order rejected: event=INVENTORY_UNAVAILABLE ...` for each:
 
    ```bash
    for i in 1 2 3 4 5 6; do
@@ -244,7 +244,16 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F4, "i
    done; wait
    ```
 
-3. Restore inventory-service with its defaults (pool of 10, no delay); the next order is `PAID` again:
+3. Within a few seconds, compare the two databases. order-service has the rejected orders; inventory-service has `RESERVED` rows for the two that got a connection:
+
+   ```bash
+   docker compose -f infra/compose.yaml exec -T postgres psql -U lab -d orders -Atc \
+     "select o.id, o.status from orders o join order_events e on e.order_id = o.id where e.type = 'INVENTORY_UNAVAILABLE' order by e.occurred_at desc limit 6"
+   docker compose -f infra/compose.yaml exec -T postgres psql -U lab -d inventory -Atc \
+     "select order_id, outcome, duration_ms from reservation_events order by occurred_at desc limit 6"
+   ```
+
+4. Restore inventory-service with its defaults (pool of 10, no delay); the next order is `PAID` again:
 
    ```bash
    docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service

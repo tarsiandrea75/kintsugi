@@ -31,7 +31,7 @@ order-service, payment-service, gateway-mock and inventory-service MUST expose `
 
 ### Requirement: Orders-by-status gauge
 
-order-service MUST export the gauge `lab_orders` (Micrometer name `lab.orders`) with one series per order status, tag `status` in `CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`. Each series MUST hold the number of stored orders in that status, read from the database at scrape time; a status with no orders MUST report 0. The exact contract is in the [order-service spec](../order-service/spec.md).
+order-service MUST export the gauge `lab_orders` (Micrometer name `lab.orders`) with one series per order status, tag `status` in `CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`, `REJECTED_OUT_OF_STOCK`, `REJECTED_INVENTORY_UNAVAILABLE`. Each series MUST hold the number of stored orders in that status, read from the database at scrape time; a status with no orders MUST report 0. The exact contract is in the [order-service spec](../order-service/spec.md).
 
 #### Scenario: F1 raises the pending series
 - GIVEN the compose stack is up and the gateway latency is above payment-service's read timeout
@@ -160,10 +160,11 @@ Fault F4 is an exhausted database connection pool in inventory-service. `infra/c
 2. inject F4 by recreating inventory-service with both variables (`docker compose up -d --no-deps --wait inventory-service`);
 3. read the baselines of inventory's 5xx count on `/reservations` and of `hikaricp_connections_timeout_total` after the recreate, because the new process starts its counters from zero;
 4. place six orders concurrently;
-5. assert that at least one answers 503 and that every answer is either 503 or 201 `PAID`;
+5. assert that at least one answers 503, that every answer is either 503 or 201 `PAID`, and that every 503 body carries the stored order's `orderId`;
 6. assert through the Prometheus HTTP API that inventory's 5xx count rose by at least 1, and that `hikaricp_connections_pending` reached at least 1 since the injection or the timeout count rose;
 7. assert through the Loki API that, since the injection, order-service logged its `Inventory unavailable` `WARN` line or inventory-service logged its `No database connection available` `WARN` line;
-8. recreate inventory-service without the variables and assert that a new order is `PAID` again.
+8. before restoring inventory-service, assert in PostgreSQL (through `docker compose exec -T postgres psql -U lab`) that every order answered 503 is stored in `orders` as `REJECTED_INVENTORY_UNAVAILABLE` with an `INVENTORY_UNAVAILABLE` row in `order_events`, and that at least one of them also has a `RESERVED` row in inventory's `reservation_events`, polling for up to 12 s because inventory commits that row after its 5 s delay; print that order id and both rows. Not every 503 order has a `RESERVED` row: an order whose reservation found no connection reserved nothing. The check runs before the restore because recreating inventory-service kills a reservation still sleeping on its connection;
+9. recreate inventory-service without the variables and assert that a new order is `PAID` again.
 
 It MUST exit non-zero when any assertion fails, and MUST restore inventory-service whatever the outcome.
 
@@ -172,6 +173,11 @@ It MUST exit non-zero when any assertion fails, and MUST restore inventory-servi
 - WHEN `infra/scripts/verify-f4.sh` runs
 - THEN it exits 0
 - AND inventory-service runs with a pool of 10 connections and no reservation delay afterwards
+
+#### Scenario: F4 leaves cross-service evidence of the stock leak
+- GIVEN F4 is injected and six orders are placed concurrently
+- WHEN `infra/scripts/verify-f4.sh` checks PostgreSQL
+- THEN at least one order id answered 503 has an `order_events` row of type `INVENTORY_UNAVAILABLE`, status `REJECTED_INVENTORY_UNAVAILABLE` in `orders`, and a `reservation_events` row with outcome `RESERVED`
 
 ### Requirement: Compose startup and host ports
 

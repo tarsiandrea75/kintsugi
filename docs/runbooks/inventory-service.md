@@ -4,13 +4,13 @@
 
 inventory-service holds the available stock per SKU in PostgreSQL and reserves the items of an order. order-service calls it before storing an order. A reservation is atomic: either every line is reserved or none is.
 
-The seed holds `SKU-1` to `SKU-5`, 1,000,000 units each. Reservations are never released and are not stored, so stock only decreases and a repeated call reserves twice.
+The seed holds `SKU-1` to `SKU-5`, 1,000,000 units each. Reservations are never released, so stock only decreases and a repeated call reserves twice. Every reservation attempt is recorded in `reservation_events` with its order id (see section 8).
 
 ## 2. Dependencies
 
 | Dependency | Use | Limits |
 |------------|-----|--------|
-| PostgreSQL | database `inventory` on `postgres:5432`, table `stock` | Hikari pool of 10 connections; a request waits at most 2000 ms for a free connection |
+| PostgreSQL | database `inventory` on `postgres:5432`, tables `stock` and `reservation_events` | Hikari pool of 10 connections; a request waits at most 2000 ms for a free connection |
 
 It calls no other service. Each reservation holds one pooled connection for its whole transaction.
 
@@ -53,7 +53,11 @@ Host port 18083 (container port 8083).
 
 | Level | Message |
 |-------|---------|
-| WARN | `No database connection available: <pool message>`, for example `... Connection is not available, request timed out after 2000ms` |
+| WARN | `No database connection available: event=RESERVATION_ATTEMPT order=<id> outcome=DATABASE_UNAVAILABLE duration_ms=<ms> detail="<lines JSON>" cause="<pool message>"`, for a reservation that found no connection |
+| WARN | `No database connection available: path=<path> outcome=DATABASE_UNAVAILABLE cause="<pool message>"`, for any other request that found no connection |
+| WARN | `Reservation event not stored: event=RESERVATION_ATTEMPT order=<id> outcome=<outcome> duration_ms=<ms> detail="<lines JSON>" record_failure=<class> cause="<database message>"` |
+
+The pool message reads, for example, `... Connection is not available, request timed out after 2000ms`. The values are `key=value` pairs, readable by Loki's `logfmt` parser. A reservation attempt that could not reach the database exists only in these lines.
 
 ## 6. Symptoms
 
@@ -94,3 +98,18 @@ Not an error of this service. Check `curl -s localhost:18083/stock/<sku>`: `avai
 - **Restart:** `docker compose -f infra/compose.yaml restart inventory-service`. In-flight reservations fail; stock already reserved stays reserved.
 - **Inspect database sessions:** `docker compose -f infra/compose.yaml exec postgres psql -U lab -d inventory -c "SELECT pid, state, wait_event_type, now() - query_start AS age, query FROM pg_stat_activity WHERE datname = 'inventory'"`.
 - Do not raise the pool size as a first response: it hides slow queries and moves load onto the database.
+
+## 8. Where the evidence is
+
+Database `inventory` on the `postgres` container. Run SQL with `docker compose -f infra/compose.yaml exec postgres psql -U lab -d inventory -c "<sql>"`.
+
+| Table | Columns | Content |
+|-------|---------|---------|
+| `stock` | `sku`, `available` | current units per SKU |
+| `reservation_events` | `id`, `order_id`, `occurred_at`, `type`, `outcome`, `detail`, `duration_ms` | append-only: one row per reservation attempt that reached the database, never updated or deleted |
+
+`reservation_events.type` is `RESERVATION_ATTEMPT`. `outcome` is `RESERVED` (committed with the stock decrement, so it exists only if the decrement does) or `INSUFFICIENT_STOCK` (nothing changed). `detail` holds the requested lines as compact JSON. `duration_ms` is how long the reservation took, any wait for its statements included. `occurred_at` is when the outcome was recorded, near the end of the transaction.
+
+- **One order's reservations:** `SELECT occurred_at, outcome, duration_ms, detail FROM reservation_events WHERE order_id = '<id>' ORDER BY occurred_at`.
+- **Slow reservations:** `SELECT occurred_at, order_id, outcome, duration_ms FROM reservation_events WHERE duration_ms > 1000 ORDER BY occurred_at DESC LIMIT 20`.
+- **Reservations for orders the caller rejected:** order ids are shared with order-service's `orders` table, in the `orders` database. List the `RESERVED` order ids here, then look them up there: `SELECT order_id FROM reservation_events WHERE outcome = 'RESERVED' AND occurred_at > now() - interval '15 minutes'`. A `RESERVED` row for an order stored as `REJECTED_INVENTORY_UNAVAILABLE` is stock taken for an order that does not proceed.

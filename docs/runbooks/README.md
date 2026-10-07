@@ -26,7 +26,7 @@ Where to run queries:
 | LogQL | Grafana Explore, Loki datasource (Loki has no host port) |
 | Service APIs | `curl` on the host ports above |
 
-Every runbook has the same sections: 1 Purpose, 2 Dependencies, 3 Endpoints, 4 Configuration, 5 Key signals, 6 Symptoms, 7 Safe actions.
+Every runbook has the same sections: 1 Purpose, 2 Dependencies, 3 Endpoints, 4 Configuration, 5 Key signals, 6 Symptoms, 7 Safe actions, 8 Where the evidence is (the tables or log lines that record each request, with example queries).
 
 ## Authoring rule
 

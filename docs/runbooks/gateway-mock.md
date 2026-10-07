@@ -59,10 +59,12 @@ The admin API changes how `POST /authorize` answers, at runtime and without a re
 
 | Level | Message |
 |-------|---------|
-| INFO | `Gateway behavior changed: latencyMs <old> -> <new>, errorStatus <old> -> <new>` |
-| INFO | `Gateway behavior reset: latencyMs <old> -> 0, errorStatus <old> -> none` |
+| INFO | `Authorize answered: event=AUTHORIZE order=<id> latency_ms=<configured ms> answered=<200, 429, 500 or 503> duration_ms=<actual ms>` |
+| WARN | `Authorize interrupted: event=AUTHORIZE order=<id> latency_ms=<configured ms> answered=503 duration_ms=<actual ms> interrupted=true` |
+| INFO | `Gateway behavior changed: event=BEHAVIOR_CHANGED previous_latency_ms=<old> latency_ms=<new> previous_error_status=<old> error_status=<new>` |
+| INFO | `Gateway behavior reset: event=BEHAVIOR_RESET previous_latency_ms=<old> latency_ms=0 previous_error_status=<old> error_status=none` |
 
-`none` means no error status.
+`none` means no error status. The values are `key=value` pairs, readable by Loki's `logfmt` parser.
 
 ## 6. Symptoms
 
@@ -100,3 +102,14 @@ Check `sum by (status) (rate(http_server_requests_seconds_count{service="gateway
 - **Restore the normal behavior:** `curl -s -X DELETE localhost:18082/admin/behavior`. Requests already waiting finish with the old behavior; new ones see the reset.
 - **Restart:** `docker compose -f infra/compose.yaml restart gateway-mock`. The behavior returns to its normal values.
 - **Check health:** `curl -s localhost:18082/actuator/health`.
+
+## 8. Where the evidence is
+
+gateway-mock has no database. Its log lines in Loki are its only record:
+
+- **Every authorization:** one `Authorize answered` line per `POST /authorize`, with the order id, the configured latency, the status answered and the actual duration. LogQL: `{service="gateway-mock"} |= "event=AUTHORIZE" | logfmt | order="<id>"`.
+- **Answers by status:** `sum by (answered) (count_over_time({service="gateway-mock"} |= "event=AUTHORIZE" | logfmt [5m]))`.
+- **Slow answers:** `{service="gateway-mock"} |= "event=AUTHORIZE" | logfmt | duration_ms > 1000`.
+- **Behavior history:** `{service="gateway-mock"} |~ "Gateway behavior (changed|reset)"`.
+
+The order id matches payment-service's `payment_events` and order-service's `order_events`.

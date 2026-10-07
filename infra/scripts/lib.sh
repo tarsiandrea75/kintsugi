@@ -140,7 +140,9 @@ loki_has_warn() {
 json_field() { grep -o "\"$1\":\"[^\"]*\"" <<<"$2" | head -n1 | cut -d'"' -f4 || true; }
 
 # POST /orders as customer $1; always prints "<http code> <order id> <status> <seconds>", one line, even when curl
-# fails: a transport failure (refused, timed out) prints "000 none none <seconds>". Callers read it with
+# fails: a transport failure (refused, timed out) prints "000 none none <seconds>". The order id is the "id" of a 201
+# body, or the "orderId" of a 409 or 503 ProblemDetail body (the rejected order is stored too); a ProblemDetail has no
+# order status, so status is "none" then. Callers read it with
 #   read -r code id status seconds <<<"$(place_order customer)"
 # and report a FAIL themselves, so a broken request never aborts the script before the exit trap restores the lab.
 place_order() {
@@ -151,9 +153,16 @@ place_order() {
   body=${out%$'\n'*}
   (( rc == 0 )) || code=000
   id=$(json_field id "$body")
+  [[ -n "$id" ]] || id=$(json_field orderId "$body")
   status=$(json_field status "$body")
   echo "${code:-000} ${id:-none} ${status:-none} ${seconds:-none}"
 }
+
+# Runs SQL $2 in database $1 (orders, payments or inventory) as the lab user; prints unaligned rows, "|" between columns.
+psql_lab() { compose exec -T postgres psql -U lab -d "$1" -Atc "$2"; }
+
+# True when $1 is a UUID, so it is safe to put in SQL between quotes.
+is_uuid() { [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
 
 # Starts or reuses the lab, waits for Loki, and resets the gateway. Exits on failure.
 start_lab() {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Checks that fault F4 (inventory DB pool exhausted) is visible in Prometheus and Loki. Run with --help for usage.
+# Checks that fault F4 (inventory DB pool exhausted) is visible in Prometheus and Loki, and that its cross-service
+# evidence is stored in PostgreSQL. Run with --help for usage.
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -16,7 +17,8 @@ POOL_PENDING='hikaricp_connections_pending{service="inventory-service"}'
 
 usage() {
   cat <<'EOF'
-Checks that fault F4 (inventory DB pool exhausted) is visible in Prometheus and Loki
+Checks that fault F4 (inventory DB pool exhausted) is visible in Prometheus and Loki, and that PostgreSQL holds the
+evidence of the leak: an order rejected by order-service whose reservation inventory-service still committed
 (openspec/specs/lab-observability).
 
   infra/scripts/verify-f4.sh          # start or reuse the lab, run the checks, leave the lab running
@@ -24,7 +26,7 @@ Checks that fault F4 (inventory DB pool exhausted) is visible in Prometheus and 
 
 F4 is injected by recreating inventory-service with INVENTORY_POOL_SIZE=2 and INVENTORY_RESERVATION_DELAY=5s.
 Exits 0 when every check passes, non-zero otherwise. inventory-service is recreated without the variables on every
-exit. Needs docker (with compose) and curl on the host.
+exit. Needs docker (with compose) and curl on the host; PostgreSQL is queried through the postgres container.
 EOF
 }
 
@@ -86,12 +88,18 @@ for ((i = 1; i <= F4_ORDERS; i++)); do
 done
 wait
 
-# 5. At least one order is refused with 503; every answer is either 201 PAID or 503.
+# 5. At least one order is refused with 503; every answer is either 201 PAID or 503. The 503 order ids feed step 8.
 unavailable=0
+unavailable_ids=()
 for ((i = 1; i <= F4_ORDERS; i++)); do
   read -r code id status seconds <"$results/$i" || code=000
   if [[ "$code" == 503 ]]; then
     unavailable=$((unavailable + 1))
+    if is_uuid "$id"; then
+      unavailable_ids+=("$id")
+    else
+      fail "order $i under F4 answered 503 without an orderId in its body"
+    fi
   # Rarely reached with these settings: the 5 s query outlasts order-service's 3 s inventory read timeout, so even an
   # order that got a pooled connection answers 503. Kept so a faster delay or a longer timeout does not fail the check.
   elif [[ "$code" == 201 && "$status" == PAID ]]; then
@@ -146,7 +154,53 @@ else
   fail "Loki: no F4 WARN line in order-service or inventory-service within ${CHECK_WAIT_SECONDS}s"
 fi
 
-# 8. Recovery: inventory-service back on its defaults; the trap restores it again on every exit.
+# 8. PostgreSQL evidence of the leak, checked before the restore: recreating inventory-service now would kill a
+# reservation still sleeping on its connection, and its RESERVED row would never commit.
+# Every 503 order must be stored by order-service as REJECTED_INVENTORY_UNAVAILABLE with an INVENTORY_UNAVAILABLE event:
+# order-service commits both before it answers, so this holds for each of them at once.
+rejected_ok=0
+for id in "${unavailable_ids[@]}"; do
+  order_status=$(psql_lab orders "select status from orders where id = '$id'" 2>/dev/null || true)
+  order_event=$(psql_lab orders "select type, outcome, duration_ms from order_events
+    where order_id = '$id' and type = 'INVENTORY_UNAVAILABLE'" 2>/dev/null || true)
+  if [[ "$order_status" == REJECTED_INVENTORY_UNAVAILABLE && -n "$order_event" ]]; then
+    rejected_ok=$((rejected_ok + 1))
+  else
+    fail "PostgreSQL: 503 order $id has status '${order_status:-none}' and order_events '${order_event:-none}'"
+  fi
+done
+if (( ${#unavailable_ids[@]} > 0 && rejected_ok == ${#unavailable_ids[@]} )); then
+  pass "PostgreSQL: all $rejected_ok orders answered 503 are REJECTED_INVENTORY_UNAVAILABLE with an INVENTORY_UNAVAILABLE event"
+fi
+
+# The leak: at least one of those orders also has a RESERVED reservation_events row, because inventory-service kept its
+# connection, slept past order-service's 3 s read timeout and then committed the decrement. Not every 503 order has one:
+# an order whose reservation never got a pooled connection was refused by inventory-service and reserved nothing. So
+# the check is "at least one 503 order has both records". The reservation commits 5 s after it started, so poll.
+leaked_id=""
+find_leaked_order() {
+  local id
+  for id in "${unavailable_ids[@]}"; do
+    if [[ -n "$(psql_lab inventory "select 1 from reservation_events
+      where order_id = '$id' and outcome = 'RESERVED'" 2>/dev/null || true)" ]]; then
+      leaked_id=$id
+      return 0
+    fi
+  done
+  return 1
+}
+if (( ${#unavailable_ids[@]} > 0 )) && poll 12 find_leaked_order; then
+  pass "PostgreSQL: order $leaked_id was rejected by order-service and reserved by inventory-service"
+  info "orders:             $(psql_lab orders "select id, status from orders where id = '$leaked_id'")"
+  info "order_events:       $(psql_lab orders "select type, outcome, duration_ms, occurred_at from order_events
+    where order_id = '$leaked_id' and type = 'INVENTORY_UNAVAILABLE'")"
+  info "reservation_events: $(psql_lab inventory "select outcome, duration_ms, occurred_at, detail from reservation_events
+    where order_id = '$leaked_id' and outcome = 'RESERVED'")"
+else
+  fail "PostgreSQL: no order answered 503 has a RESERVED reservation_events row within 12s"
+fi
+
+# 9. Recovery: inventory-service back on its defaults; the trap restores it again on every exit.
 if restore_inventory_service; then
   pass "inventory-service recreated with its default pool and no reservation delay"
 else
@@ -154,7 +208,7 @@ else
   exit 1
 fi
 
-# 9. A new order is paid again.
+# 10. A new order is paid again.
 expect_paid_order verify-f4 "after the restore, the"
 
 info "checks finished in $((SECONDS - started))s"

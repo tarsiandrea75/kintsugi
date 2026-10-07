@@ -82,7 +82,7 @@ The F4 stock leak shows the cost. Inventory commits a reservation for an order t
 - [x] **T1 — inventory-service reservation events.** Route: delegated writer.
 - [x] **T2 — payment-service payment events.** Route: delegated writer.
 - [x] **T3 — order-service rejected statuses and order events.** Route: delegated writer.
-- [ ] **T4 — gateway-mock structured logs, verify scripts and the F4 evidence check, runbooks and docs.** Route: delegated writer.
+- [x] **T4 — gateway-mock structured logs, verify scripts and the F4 evidence check, runbooks and docs.** Route: delegated writer.
 
 ## Progress
 
@@ -108,7 +108,13 @@ The F4 stock leak shows the cost. Inventory commits a reservation for an order t
   - T4 must update the runbooks and setup for the changed WARN lines (`order rejected:`, key=value pairs).
 
   Parent re-run: all three suites green, mvn exit 0.
+- 2026-10-07: reviews of the fixes (`review-ff1b88ef94bd4ebe`) and of T3 (`review-f0d4588adc82cca5`) approved. Their WARNING about commit ambiguity is fixed in T4 part A.
+- 2026-10-07: T4 done by a delegated writer.
+  - A: payment-service records `COMMIT_UNKNOWN` instead of `ERROR` when the commit fails after both rows were written. 86 tests.
+  - B: gateway-mock logs one key=value line per `/authorize` and per behavior change (Loki's `| logfmt` parses them). 76 tests.
+  - C: scripts, runbooks (new section "Where the evidence is"), setup and the lab-observability spec are aligned with the new log lines and statuses. `verify-f4.sh` step 8 checks the database evidence: every 503 order is `REJECTED_INVENTORY_UNAVAILABLE` with an `INVENTORY_UNAVAILABLE` event, and at least one of them also has a `RESERVED` reservation event. This is the F4 stock leak, now provable from data (example: order `7993d1bf…`, order-service gave up at 3002 ms, inventory reserved at 5024 ms).
+  - Real runs: F4 PASS in 140 s, F1 in 59 s, F2 in 62 s, F3 in 70 s. The leakage grep is clean. Parent re-run: payment 86, gateway 76, script syntax OK.
 
 ## Next step
 
-T4 (gateway-mock structured logs, verify scripts including the F4 evidence check, runbooks and docs) via a delegated writer.
+Feature done: every attempt and every event is recorded.
