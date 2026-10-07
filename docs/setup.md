@@ -152,7 +152,7 @@ infra/scripts/verify-f2.sh          # start or reuse the lab, run the checks, le
 infra/scripts/verify-f2.sh --down   # the same, then `down -v`
 ```
 
-The script places a healthy order (`PAID`), reads the `FAILED` payment and `PAYMENT_FAILED` order counts, makes the gateway answer 429, and places three orders that each end `PAYMENT_FAILED`. It then checks that Prometheus sees both counts rise by at least 3 and that Loki has payment-service's `WARN` line for one of those orders. Last, it resets the gateway and checks that a new order is `PAID` again. Output, exit status and the reset on exit work as in the F1 check. It takes about 1.5 minutes on a fresh stack and under a minute on a running one. Both scripts share their helpers in `infra/scripts/lib.sh`.
+The script places a healthy order (`PAID`), reads the `FAILED` payment and `PAYMENT_FAILED` order counts, makes the gateway answer 429, and places three orders that each end `PAYMENT_FAILED`. It then checks that Prometheus sees both counts rise by at least 3 and that Loki has payment-service's `WARN` line for one of those orders. Last, it resets the gateway and checks that a new order is `PAID` again. Output, exit status and the reset on exit work as in the F1 check. It takes about 1.5 minutes on a fresh stack and under a minute on a running one. The scripts share their helpers in `infra/scripts/lib.sh`.
 
 ### Reproduce F2 by hand
 
@@ -178,6 +178,40 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F2, `F
    ```
 
 Why F2 looks different from F1: a 429 is an answer, not a timeout. payment-service stores a `FAILED` payment and answers at once, so the order fails fast instead of staying `PAYMENT_PENDING`. The agent tells the two faults apart by that symptom.
+
+### Check that F3 is visible
+
+```bash
+infra/scripts/verify-f3.sh          # start or reuse the lab, run the checks, leave it running
+infra/scripts/verify-f3.sh --down   # the same, then `down -v`
+```
+
+The script places a healthy order (`PAID`), then recreates order-service with a wrong payment URL (`ORDER_PAYMENT_BASEURL=http://payment-service:9999`) and places an order that ends `PAYMENT_PENDING` in under 2 s. It then checks that Prometheus sees the refused-connection series (`http_client_requests_seconds_count{exception="ConnectException"}`) rise and the gateway in-flight gauge stay 0, and that Loki has order-service's `WARN` line with the order id and `ConnectException`. Last, it recreates order-service with its default URL and checks that a new order is `PAID` again. It always restores order-service on exit, even when a check fails. Output and exit status work as in the F1 check. It needs `docker`, `curl` and `awk`.
+
+### Reproduce F3 by hand
+
+With the compose lab running, watch the "Lab — Faults" dashboard: under F3, "order-service → payment calls by outcome" shows `UNKNOWN ConnectException`, `PAYMENT_PENDING` rises in "Orders by status", and "Gateway in-flight authorizations" stays 0.
+
+1. Redeploy order-service with a payment URL where nothing listens:
+
+   ```bash
+   ORDER_PAYMENT_BASEURL=http://payment-service:9999 docker compose -f infra/compose.yaml up -d --no-deps --wait order-service
+   ```
+
+2. Place an order. The response comes at once, 201 with status `PAYMENT_PENDING`, and order-service logs a `WARN` line such as `Payment of order <id> unavailable, leaving it in PAYMENT_PENDING: Payment of order <id> failed: ConnectException calling POST http://payment-service:9999/payments`:
+
+   ```bash
+   curl -s -X POST localhost:18080/orders -H 'Content-Type: application/json' \
+     -d '{"customerId": "customer-1", "items": [{"sku": "SKU-1", "quantity": 2}]}'
+   ```
+
+3. Restore order-service with its default URL; the next order is `PAID` again:
+
+   ```bash
+   docker compose -f infra/compose.yaml up -d --no-deps --wait order-service
+   ```
+
+Why F3 looks different from F1: both leave the order `PAYMENT_PENDING`, but under F3 no request reaches payment-service. The call fails at once with `ConnectException` instead of waiting 3 s for `HttpTimeoutException`, and the gateway in-flight gauge stays 0.
 
 ## Run the lab services without Docker Compose
 

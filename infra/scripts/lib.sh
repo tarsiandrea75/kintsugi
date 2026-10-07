@@ -1,4 +1,4 @@
-# Shared helpers for the fault visibility checks (verify-f1.sh, verify-f2.sh). Source it; do not run it.
+# Shared helpers for the fault visibility checks (verify-f1.sh, verify-f2.sh, verify-f3.sh). Source it; do not run it.
 # The caller sets "set -euo pipefail", defines usage(), then calls parse_args "$@" and start_lab.
 
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose.yaml"
@@ -47,8 +47,13 @@ set_gateway_behavior() {
     -H 'Content-Type: application/json' -d "$1"
 }
 
+# A check that changes more than the gateway defines before_exit(); it runs first on every exit, so its restore
+# happens even when a check fails or the script is interrupted.
 on_exit() {
   local status=$?
+  if declare -F before_exit >/dev/null; then
+    before_exit || echo "WARN  before_exit failed" >&2
+  fi
   reset_gateway
   if [[ "$down" == true ]]; then
     info "tearing the lab down"

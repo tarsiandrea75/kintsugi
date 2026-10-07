@@ -68,7 +68,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orders
       SPRING_DATASOURCE_USERNAME: lab
       SPRING_DATASOURCE_PASSWORD: lab
-      KINTSUGI_PAYMENT_BASEURL: http://payment-service:8081
+      # Fault F3 (wrong configuration) sets ORDER_PAYMENT_BASEURL to a port where nothing listens; see verify-f3.sh.
+      KINTSUGI_PAYMENT_BASEURL: ${ORDER_PAYMENT_BASEURL:-http://payment-service:8081}
     ports:
       - "127.0.0.1:18080:8080"
     depends_on:

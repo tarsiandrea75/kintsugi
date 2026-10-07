@@ -300,6 +300,50 @@
           "legendFormat": "429 rejections per minute"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "order-service → payment calls by outcome",
+      "description": "order-service's calls to payment-service per second, by outcome and exception (http.client.requests). Under F3 (wrong payment URL) the calls fail at once with exception ConnectException; under F1 (slow gateway) they end after the read timeout with HttpTimeoutException.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome, exception) (rate(http_client_requests_seconds_count{service=\"order-service\",client_name=\"payment-service\"}[1m]))",
+          "legendFormat": "{{outcome}} {{exception}}"
+        }
+      ]
     }
   ]
 }

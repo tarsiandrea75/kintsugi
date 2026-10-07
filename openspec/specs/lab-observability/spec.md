@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The lab observability stack makes injected faults visible. One Docker Compose command starts the M1 lab (PostgreSQL, order-service, payment-service, gateway-mock) with Prometheus, Loki, Alloy and Grafana. A provisioned dashboard shows faults F1 and F2 while they are active. Prometheus (PromQL) and Loki (LogQL) are also the query APIs the agent will use in M2. Design: [feature document](../../../odd/tasks/lab-observability.md) and, for F2, [fault F2](../../../odd/tasks/fault-f2.md). Stack and versions: [ADR-008](../../../docs/adr/ADR-008-lab-observability-stack.md). Verified by `./mvnw test` in each `lab/*` service and by `infra/scripts/verify-f1.sh` and `infra/scripts/verify-f2.sh`.
+The lab observability stack makes injected faults visible. One Docker Compose command starts the M1 lab (PostgreSQL, order-service, payment-service, gateway-mock) with Prometheus, Loki, Alloy and Grafana. A provisioned dashboard shows faults F1, F2 and F3 while they are active. Prometheus (PromQL) and Loki (LogQL) are also the query APIs the agent will use in M2. Design: [feature document](../../../odd/tasks/lab-observability.md) and, for F2 and F3, [fault F2](../../../odd/tasks/fault-f2.md) and [fault F3](../../../odd/tasks/fault-f3.md). Stack and versions: [ADR-008](../../../docs/adr/ADR-008-lab-observability-stack.md). Verified by `./mvnw test` in each `lab/*` service and by `infra/scripts/verify-f1.sh`, `infra/scripts/verify-f2.sh` and `infra/scripts/verify-f3.sh`.
 
 ## Requirements
 
@@ -72,13 +72,16 @@ Grafana MUST start with the Prometheus and Loki datasources and the "Lab — Fau
 | order-service WARN lines | Loki, `{service="order-service"}` filtered to `WARN` |
 | Payments by status | `lab_payments` by `status` |
 | Gateway rejections | Loki, per-minute count of payment-service's "Gateway rejected the payment" `WARN` lines |
+| order-service → payment calls by outcome | rate of `http_client_requests_seconds_count` of order-service with `client_name="payment-service"`, by `outcome` and `exception` |
 
 "Gateway rejections" counts log lines rather than reusing `lab_payments`: it names the cause (the gateway's 429) from a second, independent source, while "Payments by status" shows the effect.
+
+"order-service → payment calls by outcome" tells F3 from F1, which both leave orders in `PAYMENT_PENDING`: under F3 the calls fail at once with `exception="ConnectException"`, under F1 they end after the read timeout with `exception="HttpTimeoutException"`.
 
 #### Scenario: Open the dashboard
 - GIVEN the compose stack is up
 - WHEN `http://localhost:13000` is opened without logging in
-- THEN the "Lab — Faults" dashboard is listed and shows the six panels
+- THEN the "Lab — Faults" dashboard is listed and shows the seven panels
 - AND both datasources are configured
 
 ### Requirement: F1 visibility check
@@ -112,13 +115,35 @@ It MUST exit non-zero when any assertion fails, and MUST reset the gateway whate
 6. assert through the Loki API that payment-service logged the `WARN` line for one of those orders;
 7. reset the gateway and assert that a new order is `PAID` again.
 
-It MUST exit non-zero when any assertion fails, and MUST reset the gateway whatever the outcome. Both check scripts share their helpers through `infra/scripts/lib.sh`.
+It MUST exit non-zero when any assertion fails, and MUST reset the gateway whatever the outcome. The check scripts share their helpers through `infra/scripts/lib.sh`.
 
 #### Scenario: F2 is visible and the lab recovers
 - GIVEN Docker is running
 - WHEN `infra/scripts/verify-f2.sh` runs
 - THEN it exits 0
 - AND the gateway has no error status afterwards
+
+### Requirement: F3 visibility check
+
+Fault F3 is a wrong payment URL in order-service. `infra/compose.yaml` MUST set order-service's `KINTSUGI_PAYMENT_BASEURL` from `ORDER_PAYMENT_BASEURL`, defaulting to `http://payment-service:8081`; F3 recreates order-service with `ORDER_PAYMENT_BASEURL=http://payment-service:9999`, a port where nothing listens.
+
+`infra/scripts/verify-f3.sh` MUST bring the compose stack up, or use a running one, and wait until it is healthy. It then MUST:
+
+1. place a healthy order and assert it is `PAID`;
+2. inject F3 by recreating order-service with the wrong URL (`docker compose up -d --no-deps --wait order-service`);
+3. read the baseline of the refused-connection series, `http_client_requests_seconds_count{service="order-service",client_name="payment-service",exception="ConnectException"}`, after the recreate, because the new process starts its counters from zero;
+4. place an order and assert it answers 201 `PAYMENT_PENDING` in under 2 s;
+5. assert through the Prometheus HTTP API that the refused-connection series rose by at least 1 and that `gateway_authorize_inflight` stayed 0 since the injection;
+6. assert through the Loki API that order-service logged a `WARN` line with the order id and `ConnectException`;
+7. recreate order-service without the variable and assert that a new order is `PAID` again.
+
+It MUST exit non-zero when any assertion fails, and MUST restore order-service whatever the outcome.
+
+#### Scenario: F3 is visible and the lab recovers
+- GIVEN Docker is running
+- WHEN `infra/scripts/verify-f3.sh` runs
+- THEN it exits 0
+- AND order-service runs with `KINTSUGI_PAYMENT_BASEURL=http://payment-service:8081` afterwards
 
 ### Requirement: Compose startup and host ports
 
@@ -143,4 +168,5 @@ PostgreSQL, Loki and Alloy MUST NOT be published on the host.
 
 - **No traces.** Cross-service latency is inferred from metrics and logs; OTLP and Tempo come with the agent in M2+ (ADR-008).
 - **No alerting.** Nothing fires when a fault is active; alerting comes with the agent's perception module.
-- **Only F1 and F2 are visible.** Faults F3 and F4 and their panels are not built yet.
+- **Only F1, F2 and F3 are visible.** Fault F4 and its panel are not built yet.
+- **F3 is injected by hand.** Until the fault injector exists, `verify-f3.sh` and the manual recipe in `docs/setup.md` recreate order-service with `ORDER_PAYMENT_BASEURL` set.
