@@ -1,5 +1,5 @@
 # Prometheus scrape config for the M1 lab (ADR-008).
-# A 5 s interval makes fault F1 show within seconds on the "Lab — F1" dashboard.
+# A 5 s interval makes faults show within seconds on the "Lab — Faults" dashboard.
 global:
   scrape_interval: 5s
   evaluation_interval: 5s

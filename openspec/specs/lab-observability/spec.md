@@ -2,13 +2,13 @@
 
 ## Purpose
 
-The lab observability stack makes injected faults visible. One Docker Compose command starts the M1 lab (PostgreSQL, order-service, payment-service, gateway-mock) with Prometheus, Loki, Alloy and Grafana. A provisioned dashboard shows fault F1 while it is active. Prometheus (PromQL) and Loki (LogQL) are also the query APIs the agent will use in M2. Design: [feature document](../../../odd/tasks/lab-observability.md). Stack and versions: [ADR-008](../../../docs/adr/ADR-008-lab-observability-stack.md). Verified by `./mvnw test` in each `lab/*` service and by `infra/scripts/verify-f1.sh`.
+The lab observability stack makes injected faults visible. One Docker Compose command starts the M1 lab (PostgreSQL, order-service, payment-service, gateway-mock) with Prometheus, Loki, Alloy and Grafana. A provisioned dashboard shows faults F1 and F2 while they are active. Prometheus (PromQL) and Loki (LogQL) are also the query APIs the agent will use in M2. Design: [feature document](../../../odd/tasks/lab-observability.md) and, for F2, [fault F2](../../../odd/tasks/fault-f2.md). Stack and versions: [ADR-008](../../../docs/adr/ADR-008-lab-observability-stack.md). Verified by `./mvnw test` in each `lab/*` service and by `infra/scripts/verify-f1.sh` and `infra/scripts/verify-f2.sh`.
 
 ## Requirements
 
 ### Requirement: Every service exposes Prometheus metrics
 
-order-service, payment-service and gateway-mock MUST expose `/actuator/prometheus` in the Prometheus text format, with the actuator exposure set to `health,prometheus`. Each MUST export the Spring HTTP server timer `http_server_requests_seconds`. gateway-mock MUST also export `gateway_authorize_inflight`, and order-service MUST export `lab_orders` (see "Orders-by-status gauge").
+order-service, payment-service and gateway-mock MUST expose `/actuator/prometheus` in the Prometheus text format, with the actuator exposure set to `health,prometheus`. Each MUST export the Spring HTTP server timer `http_server_requests_seconds`. gateway-mock MUST also export `gateway_authorize_inflight`, order-service MUST export `lab_orders` (see "Orders-by-status gauge"), and payment-service MUST export `lab_payments` (see "Payments-by-status gauge").
 
 #### Scenario: Scrape a service
 - GIVEN a running service that has served at least one HTTP request
@@ -17,10 +17,11 @@ order-service, payment-service and gateway-mock MUST expose `/actuator/prometheu
 - AND the body contains `http_server_requests_seconds_count`
 
 #### Scenario: Service-specific metrics
-- GIVEN gateway-mock and order-service are running
+- GIVEN gateway-mock, order-service and payment-service are running
 - WHEN each is scraped
 - THEN gateway-mock's body contains `gateway_authorize_inflight`
 - AND order-service's body contains `lab_orders`
+- AND payment-service's body contains `lab_payments`
 
 #### Scenario: Prometheus scrapes every service
 - GIVEN the compose stack is up
@@ -36,6 +37,20 @@ order-service MUST export the gauge `lab_orders` (Micrometer name `lab.orders`) 
 - WHEN an order is placed
 - THEN `lab_orders{status="PAYMENT_PENDING"}` rises by 1 at the next scrape
 
+#### Scenario: F2 raises the payment-failed series
+- GIVEN the compose stack is up and the gateway answers 429
+- WHEN an order is placed
+- THEN `lab_orders{status="PAYMENT_FAILED"}` rises by 1 within a few scrapes
+
+### Requirement: Payments-by-status gauge
+
+payment-service MUST export the gauge `lab_payments` (Micrometer name `lab.payments`) with one series per payment status, tag `status` in `AUTHORIZED`, `DECLINED`, `FAILED`. Each series MUST hold the number of stored payments in that status; a status with no payments MUST report 0. The exact contract is in the [payment-service spec](../payment-service/spec.md).
+
+#### Scenario: F2 raises the failed series
+- GIVEN the compose stack is up and the gateway answers 429
+- WHEN an order is placed
+- THEN `lab_payments{status="FAILED"}` rises by 1 within a few scrapes
+
 ### Requirement: Logs reach Loki labelled by service
 
 Alloy MUST read the Docker logs of the three services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`).
@@ -47,7 +62,7 @@ Alloy MUST read the Docker logs of the three services and push them to Loki with
 
 ### Requirement: Grafana is provisioned
 
-Grafana MUST start with the Prometheus and Loki datasources and the "Lab — F1" dashboard provisioned from files in `infra/grafana/`, with anonymous viewer access; the admin password MUST come from `GRAFANA_ADMIN_PASSWORD`, with a lab default. The dashboard MUST have these panels:
+Grafana MUST start with the Prometheus and Loki datasources and the "Lab — Faults" dashboard (uid `lab-f1`, kept so existing links work) provisioned from files in `infra/grafana/`, with anonymous viewer access; the admin password MUST come from `GRAFANA_ADMIN_PASSWORD`, with a lab default. The dashboard MUST have these panels:
 
 | Panel | Source |
 |-------|--------|
@@ -55,11 +70,15 @@ Grafana MUST start with the Prometheus and Loki datasources and the "Lab — F1"
 | Gateway in-flight authorizations | `gateway_authorize_inflight` |
 | payment-service request latency and 503 rate | `http_server_requests_seconds` of payment-service |
 | order-service WARN lines | Loki, `{service="order-service"}` filtered to `WARN` |
+| Payments by status | `lab_payments` by `status` |
+| Gateway rejections | Loki, per-minute count of payment-service's "Gateway rejected the payment" `WARN` lines |
+
+"Gateway rejections" counts log lines rather than reusing `lab_payments`: it names the cause (the gateway's 429) from a second, independent source, while "Payments by status" shows the effect.
 
 #### Scenario: Open the dashboard
 - GIVEN the compose stack is up
 - WHEN `http://localhost:13000` is opened without logging in
-- THEN the "Lab — F1" dashboard is listed and shows the four panels
+- THEN the "Lab — Faults" dashboard is listed and shows the six panels
 - AND both datasources are configured
 
 ### Requirement: F1 visibility check
@@ -80,6 +99,26 @@ It MUST exit non-zero when any assertion fails, and MUST reset the gateway whate
 - WHEN `infra/scripts/verify-f1.sh` runs
 - THEN it exits 0
 - AND the gateway latency is 0 afterwards
+
+### Requirement: F2 visibility check
+
+`infra/scripts/verify-f2.sh` MUST bring the compose stack up, or use a running one, and wait until it is healthy. It then MUST:
+
+1. place a healthy order and assert it is `PAID`;
+2. read the baselines of `lab_payments{status="FAILED"}` and `lab_orders{status="PAYMENT_FAILED"}`;
+3. make the gateway answer 429 (`PUT /admin/behavior {"latencyMs":0,"errorStatus":429}`);
+4. place three orders and assert each answers 201 `PAYMENT_FAILED`;
+5. assert through the Prometheus HTTP API that both series rose by at least 3;
+6. assert through the Loki API that payment-service logged the `WARN` line for one of those orders;
+7. reset the gateway and assert that a new order is `PAID` again.
+
+It MUST exit non-zero when any assertion fails, and MUST reset the gateway whatever the outcome. Both check scripts share their helpers through `infra/scripts/lib.sh`.
+
+#### Scenario: F2 is visible and the lab recovers
+- GIVEN Docker is running
+- WHEN `infra/scripts/verify-f2.sh` runs
+- THEN it exits 0
+- AND the gateway has no error status afterwards
 
 ### Requirement: Compose startup and host ports
 
@@ -104,4 +143,4 @@ PostgreSQL, Loki and Alloy MUST NOT be published on the host.
 
 - **No traces.** Cross-service latency is inferred from metrics and logs; OTLP and Tempo come with the agent in M2+ (ADR-008).
 - **No alerting.** Nothing fires when a fault is active; alerting comes with the agent's perception module.
-- **Only F1 is visible.** Faults F2–F4 and their panels are not built yet.
+- **Only F1 and F2 are visible.** Faults F3 and F4 and their panels are not built yet.

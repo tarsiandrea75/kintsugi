@@ -4,7 +4,7 @@
 #   docker compose -f infra/compose.yaml down -v
 #
 # Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082,
-# Grafana 13000 (dashboard "Lab — F1"), Prometheus 19090. Every port is bound to 127.0.0.1 only.
+# Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090. Every port is bound to 127.0.0.1 only.
 # Grafana's admin password comes from GRAFANA_ADMIN_PASSWORD (see infra/.env.example).
 # PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by service name.
 name: kintsugi-lab

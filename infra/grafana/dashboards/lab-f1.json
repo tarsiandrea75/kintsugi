@@ -1,15 +1,16 @@
 {
   "uid": "lab-f1",
-  "title": "Lab — F1",
+  "title": "Lab — Faults",
   "tags": [
     "kintsugi",
     "lab",
-    "f1"
+    "f1",
+    "f2"
   ],
-  "description": "Fault F1 (gateway latency): pending orders pile up, gateway authorizations stay in flight, payment-service slows and returns 503, order-service logs WARN.",
+  "description": "Fault F1 (gateway latency): pending orders pile up, gateway authorizations stay in flight, payment-service slows and returns 503, order-service logs WARN. Fault F2 (gateway 429): failed payments and PAYMENT_FAILED orders rise, payment-service logs a WARN line per rejected payment.",
   "editable": false,
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "refresh": "5s",
   "time": {
     "from": "now-15m",
@@ -27,7 +28,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Orders by status",
-      "description": "Stored orders per status. Under F1, PAYMENT_PENDING rises.",
+      "description": "Stored orders per status. Under F1, PAYMENT_PENDING rises; under F2, PAYMENT_FAILED rises.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -209,6 +210,94 @@
             "uid": "loki"
           },
           "expr": "{service=\"order-service\"} |= \"WARN\""
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Payments by status",
+      "description": "Stored payments per status. Under F2, FAILED rises.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (lab_payments)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Gateway rejections",
+      "description": "payment-service WARN lines for a gateway 429, per minute. Above 0 while F2 is active. From the logs, so it names the cause (the gateway's 429), not only the effect.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"payment-service\"} |= \"Gateway rejected the payment\" [1m]))",
+          "legendFormat": "429 rejections per minute"
         }
       ]
     }

@@ -100,13 +100,13 @@ payment-service reaches gateway-mock through these properties (set them like the
 cd lab/gateway-mock && ./mvnw test
 ```
 
-Its latency is the fault F1 control point. The admin API has no authentication, and the state is lost on restart:
+Its latency is the fault F1 control point, and its error status is the fault F2 control point. The admin API has no authentication, and the state is lost on restart:
 
 | Call | Effect |
 |------|--------|
-| `PUT /admin/behavior` with `{"latencyMs": <0..60000>}` | Every `POST /authorize` now waits that long |
+| `PUT /admin/behavior` with `{"latencyMs": <0..60000>, "errorStatus": <429, 500 or 503>}` | Replaces the whole behavior: every `POST /authorize` waits `latencyMs`, then answers `errorStatus` if it is set. A missing `errorStatus` means no error |
 | `GET /admin/behavior` | Returns the current behavior |
-| `DELETE /admin/behavior` | Resets the latency to 0 |
+| `DELETE /admin/behavior` | Resets the latency to 0 and clears the error status |
 
 Each change is logged at `INFO`. The behavior is in the [living spec](../openspec/specs/gateway-mock/spec.md).
 
@@ -132,9 +132,9 @@ The compose project is called `kintsugi-lab`, so these commands never touch othe
 
 PostgreSQL, Loki and Alloy have no host port.
 
-Grafana opens on the "Lab — F1" dashboard without a login (anonymous Viewer). To edit, log in as `admin`. The password comes from `GRAFANA_ADMIN_PASSWORD` and defaults to `kintsugi-lab`. To change it, set the variable in your shell or in `infra/.env` before `up`.
+Grafana opens on the "Lab — Faults" dashboard (uid `lab-f1`) without a login (anonymous Viewer). To edit, log in as `admin`. The password comes from `GRAFANA_ADMIN_PASSWORD` and defaults to `kintsugi-lab`. To change it, set the variable in your shell or in `infra/.env` before `up`.
 
-Loki needs about a minute after startup before it answers queries. Until then, the WARN-lines panel can stay empty.
+Loki needs about a minute after startup before it answers queries. Until then, the WARN-lines and gateway-rejections panels can stay empty.
 
 ### Check that F1 is visible
 
@@ -144,6 +144,40 @@ infra/scripts/verify-f1.sh --down   # the same, then `down -v`
 ```
 
 The script waits for Loki, places a healthy order (`PAID`), sets the gateway latency to 10 s, and places an order that ends `PAYMENT_PENDING`. It then checks that Prometheus sees the pending count rise and the in-flight gauge above 0, and that Loki has order-service's `WARN` line for that order. It prints one `PASS` or `FAIL` line per check and exits non-zero on any failure. It always resets the gateway on exit, even when a check fails. It needs `docker` and `curl`. It takes about 1.5 minutes on a fresh stack and under a minute on a running one.
+
+### Check that F2 is visible
+
+```bash
+infra/scripts/verify-f2.sh          # start or reuse the lab, run the checks, leave it running
+infra/scripts/verify-f2.sh --down   # the same, then `down -v`
+```
+
+The script places a healthy order (`PAID`), reads the `FAILED` payment and `PAYMENT_FAILED` order counts, makes the gateway answer 429, and places three orders that each end `PAYMENT_FAILED`. It then checks that Prometheus sees both counts rise by at least 3 and that Loki has payment-service's `WARN` line for one of those orders. Last, it resets the gateway and checks that a new order is `PAID` again. Output, exit status and the reset on exit work as in the F1 check. It takes about 1.5 minutes on a fresh stack and under a minute on a running one. Both scripts share their helpers in `infra/scripts/lib.sh`.
+
+### Reproduce F2 by hand
+
+With the compose lab running, watch the "Lab — Faults" dashboard: under F2, `FAILED` rises in "Payments by status", `PAYMENT_FAILED` rises in "Orders by status", and "Gateway rejections" goes above 0.
+
+1. Make the gateway reject every authorization with 429:
+
+   ```bash
+   curl -s -X PUT localhost:18082/admin/behavior -H 'Content-Type: application/json' -d '{"latencyMs": 0, "errorStatus": 429}'
+   ```
+
+2. Place an order. The response is 201 with status `PAYMENT_FAILED`, and payment-service logs a `WARN` line with the order id and status 429:
+
+   ```bash
+   curl -s -X POST localhost:18080/orders -H 'Content-Type: application/json' \
+     -d '{"customerId": "customer-1", "items": [{"sku": "SKU-1", "quantity": 2}]}'
+   ```
+
+3. Restore the gateway; the next order is `PAID` again:
+
+   ```bash
+   curl -s -X DELETE localhost:18082/admin/behavior
+   ```
+
+Why F2 looks different from F1: a 429 is an answer, not a timeout. payment-service stores a `FAILED` payment and answers at once, so the order fails fast instead of staying `PAYMENT_PENDING`. The agent tells the two faults apart by that symptom.
 
 ## Run the lab services without Docker Compose
 
@@ -185,7 +219,7 @@ To debug one service from the IDE, run each service by hand, each with its own P
 
 ### Reproduce F1 by hand
 
-The quickest route is the compose lab: start it as in [Lab with Docker Compose](#lab-with-docker-compose) and use ports 18080 (orders) and 18082 (gateway) in the commands below. Watch the "Lab — F1" dashboard while the fault is active: the `PAYMENT_PENDING` series rises, the gateway in-flight panel shows the waiting authorization, and the WARN line appears. `infra/scripts/verify-f1.sh` runs the same steps and checks them.
+The quickest route is the compose lab: start it as in [Lab with Docker Compose](#lab-with-docker-compose) and use ports 18080 (orders) and 18082 (gateway) in the commands below. Watch the "Lab — Faults" dashboard while the fault is active: the `PAYMENT_PENDING` series rises, the gateway in-flight panel shows the waiting authorization, and the WARN line appears. `infra/scripts/verify-f1.sh` runs the same steps and checks them.
 
 > Run by hand on 2026-10-06 (WSL, Docker Engine 29.4.0), on alternative ports (databases 55432/55433, services 18080/18081/18082) because other local projects held 5432 and 8080. Observed:
 > - a healthy order returned `PAID` in 0.48 s;

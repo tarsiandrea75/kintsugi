@@ -65,7 +65,7 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
 ## Delivery
 
 - Strategy: `auto-chain` with `feature-branch-chain` (the user's standing default). Forecast: about 800 authored lines.
-- Slices (feature-branch-chain): tracker `feat/fault-f2` (feature doc `058f524`); PR 1 `-01-gateway` T1 (about 365 lines); PR 2 `-02-payment-failed` T2 status, V2 migration and mapping; PR 3 `-03-payment-gauge` the `lab_payments` gauge (copied pattern, about 560 lines with tests); PR 4 `-04-order` T3 (about 58 lines).
+- Slices (feature-branch-chain): tracker `feat/fault-f2` (feature doc `058f524`); PR 1 `-01-gateway` T1 (about 365 lines); PR 2 `-02-payment-failed` T2 status, V2 migration and mapping; PR 3 `-03-payment-gauge` the `lab_payments` gauge (copied pattern, about 560 lines with tests); PR 4 `-04-order` T3 (about 58 lines); PR 5 `-05-check` T4: shared `lib.sh` with the F1 baseline fix, plus `verify-f2.sh`, the dashboard and docs (about 640 lines, mostly code moved into `lib.sh`).
 - RDD: on (global); consent is a standing grant. Reviews run per range with `--base-ref`.
 
 ## Tasks
@@ -73,7 +73,7 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
 - [x] **T1 — gateway-mock error behavior.** The `errorStatus` behavior, the admin API and `/authorize`; tests first; the spec. Route: delegated writer.
 - [x] **T2 — payment-service FAILED.** The status, the `V2` migration, the gateway mapping, the WARN log, the `lab_payments` gauge; tests first; the spec. Route: delegated writer.
 - [x] **T3 — order-service mapping.** `FAILED` → `PAYMENT_FAILED`; tests first; the spec. Route: delegated writer.
-- [ ] **T4 — Observability and check.** The dashboard panels, `verify-f2.sh`, the lab-observability spec and the docs. Run both verify scripts. Route: delegated writer.
+- [x] **T4 — Observability and check.** The dashboard panels, `verify-f2.sh`, the lab-observability spec and the docs. Run both verify scripts. Route: delegated writer.
 
 ## Checks
 
@@ -88,7 +88,13 @@ Today any non-2xx gateway answer becomes a 503 in payment-service, so the order 
   - V2 drops and re-creates `payments_status_check` (PostgreSQL's default name, confirmed on Testcontainers).
   - A 200 response with a `FAILED` body is treated as unavailable.
   - The 429 WARN is logged in `HttpPaymentGateway`, the only place that sees the HTTP status, so it is also logged if the later save fails.
+- 2026-10-07: reviews of `058f524..a6b66b0` (`review-9e71e3e7381733a0`; its WARNINGs came only from the slicing) and `a6b66b0..4079d65` (`review-6742a3278d5d3646`) approved. Follow-ups: the gauge test's 100 ms wall-clock bound; an unknown status row is untested.
+- 2026-10-07: T4 done by a delegated writer.
+  - The dashboard is now "Lab — Faults" (uid `lab-f1`), with new panels: payments by status, and gateway rejections as a Loki count of the payment-service 429 WARN lines (payment-service has no HTTP client metrics).
+  - The scripts share `infra/scripts/lib.sh`.
+  - Race fixed in `verify-f1.sh`: a healthy order is briefly `PAYMENT_PENDING`, so baselines now need two agreeing reads 6 s apart (`prom_stable_int`).
+  - Real runs on a rebuilt stack: `verify-f2.sh` PASS in 94 s (3 orders `PAYMENT_FAILED`, both counters +3, Loki WARN, recovery `PAID`); `verify-f1.sh` PASS in 49 s on the same stack.
 
 ## Next step
 
-T4 (dashboard, `verify-f2.sh`, docs) via a delegated writer.
+Feature done. F2 is visible in Grafana. Next: F3 (wrong configuration).
