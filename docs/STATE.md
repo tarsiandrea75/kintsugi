@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-07
+2026-10-07 (session 02, autonomous)
 
 ## Milestone
 
@@ -12,16 +12,23 @@ M1 — The lab (Oct 5–25)
 
 ## Last action
 
-`fault-f2` is done ([feature document](../odd/tasks/fault-f2.md)).
-- **Behavior:** when gateway-mock answers 429 (`PUT /admin/behavior {"errorStatus":429}`), payment-service stores a `FAILED` payment and order-service ends the order in `PAYMENT_FAILED`. This is a burst of failed payments, the symptom the vision describes for F2. F1 still shows a different symptom: orders stuck in `PAYMENT_PENDING`.
-- **Dashboard:** the Grafana dashboard is now "Lab — Faults". It has two new panels: payments by status, and gateway rejections from Loki.
-- **Checks:** `infra/scripts/verify-f1.sh` and `verify-f2.sh` both pass on the live lab.
-- **Tests:** gateway-mock 71, payment-service 74, order-service 116.
-- **Status:** every committed range is reviewed and approved. All work is local and unpushed.
+`fault-f3` is done ([feature document](../odd/tasks/fault-f3.md)), built autonomously while the user was away.
+- **What F3 breaks:** a wrong order-service payment URL, set with `ORDER_PAYMENT_BASEURL=http://payment-service:9999` and a recreate of order-service. Orders stay `PAYMENT_PENDING` but answer in about 0.3 s instead of 3 s.
+- **Evidence:**
+  - the client metric `http_client_requests_seconds_count{client_name="payment-service",exception="ConnectException"}`;
+  - zero gateway in-flight;
+  - a WARN line naming `ConnectException` and the wrong URL.
+- **How F1 and F3 differ:** under F1 the same metric has `exception="HttpTimeoutException"`.
+- **Dashboard:** a new panel, "order-service → payment calls by outcome".
+- **Checks:** `verify-f1.sh`, `verify-f2.sh` and `verify-f3.sh` all pass on one fresh stack.
+- **Tests:** order-service 122.
+- **Status:** every range is reviewed and approved. Nothing is pushed.
+
+**To review with the human (decided autonomously):** see "To review with the human" in `odd/tasks/fault-f3.md`. In short: the F3 evidence is `ConnectException` plus the URL, not the literal "connection refused" text in the vision table, so the vision line may need rewording.
 
 ## Next action
 
-Continue the M1 check ("every fault F1–F4 is visible in Grafana") with F3, a wrong configuration: a wrong service URL via env, with the symptom "connection refused in logs" (`docs/vision.md:33`). Decide which service URL to break. The candidate is order-service's `kintsugi.payment.base-url`, which makes orders stay pending with a connection-refused WARN; this needs a way to tell it apart from F1. Then F4 (DB pool exhausted on inventory), which needs `inventory-service`.
+Last fault of the M1 check: F4, "DB pool exhausted", with the symptom "500 errors on inventory" (`docs/vision.md:34`). It needs a new `inventory-service`, an order → inventory call, which also prepares F8, and a pool of 2 plus a slow query.
 
 ## Local branch chains (not pushed)
 
@@ -31,6 +38,7 @@ Continue the M1 check ("every fault F1–F4 is visible in Grafana") with F3, a w
 - `feat/gateway-mock` → `-01-behavior` → `-02-authorize` → `-03-payment-gateway`
 - `feat/lab-observability` → `-01-decisions` → `-02-metrics` → `-03-stack`
 - `feat/fault-f2` → `-01-gateway` → `-02-payment-failed` → `-03-payment-gauge` → `-04-order` → `-05-check`
+- `feat/fault-f3` → `-01-client-metrics` → `-02-check`
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -44,7 +52,7 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - When to make the GitHub repository public. It is private for now; the vision assumes it is public from week 1.
 - Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service still stores an AUTHORIZED payment after order-service has timed out (observed).
 - Datasource socket timeout. Without one, a database that stops responding keeps the count refresh busy until TCP gives up. The gauges still show NaN after 10 s. A socket timeout would apply to every query, including F4's slow queries.
-- F3: how to make it diagnosable apart from F1, given that both leave orders `PAYMENT_PENDING`. The logs differ ("Connection refused" versus "Request cancelled").
+- F3 decisions taken autonomously (see `odd/tasks/fault-f3.md`): whether to accept `ConnectException` as the evidence and reword `docs/vision.md:33`.
 
 ## Follow-ups
 
@@ -58,7 +66,6 @@ Lab services:
 - No retry or `Retry-After` handling on a 429; this is out of scope for F2.
 
 Verify scripts (review suggestions):
-- `place_order` aborts silently when curl fails.
 - The `lib.sh` caller contract does not mention `trap on_exit EXIT`.
 - `expect_paid_order` takes an awkward label fragment.
 - The rejection phrase is a literal that is not linked to the panel filter, and it is not escaped.
