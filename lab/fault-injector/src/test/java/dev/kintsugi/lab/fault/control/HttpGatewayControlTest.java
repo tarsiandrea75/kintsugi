@@ -2,6 +2,10 @@ package dev.kintsugi.lab.fault.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -106,6 +110,21 @@ class HttpGatewayControlTest {
 		server.stop(0);
 
 		assertThatExceptionOfType(LabControlException.class).isThrownBy(() -> control.restore(Fault.F2));
+	}
+
+	@Test
+	void aBodyThatCannotBeSerializedIsAFailedStepWithoutAnyCall() {
+		JsonMapper failing = mock(JsonMapper.class);
+		when(failing.writeValueAsString(any())).thenThrow(new IllegalArgumentException("not serializable"));
+		HttpGatewayControl withFailingJson = new HttpGatewayControl(
+				URI.create("http://127.0.0.1:" + server.getAddress().getPort()), Duration.ofSeconds(2),
+				Duration.ofMillis(500), failing);
+
+		assertThatExceptionOfType(LabControlException.class).isThrownBy(() -> withFailingJson.activate(Fault.F1))
+			.withMessageContaining("not serializable")
+			.withCauseInstanceOf(IllegalArgumentException.class);
+		verify(failing).writeValueAsString(any());
+		assertThat(received).isEmpty();
 	}
 
 	@Test

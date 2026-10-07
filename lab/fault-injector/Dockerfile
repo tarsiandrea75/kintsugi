@@ -16,8 +16,11 @@ FROM eclipse-temurin:21.0.12.1_1-jre-noble
 # The two static binaries F3 and F4 need (ADR-009), so the JVM base image is unchanged and no package repository is
 # added. The Docker CLI 29.8.2 comes from the official CLI image. The compose plugin v5.6.0 comes from Compose's own
 # binary image: docker:29.8.2-cli still bundles v5.5.1. The plugin path is one of the CLI's default plugin directories.
-COPY --from=docker:29.8.2-cli /usr/local/bin/docker /usr/local/bin/docker
-COPY --from=docker/compose-bin:v5.6.0 /docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+# Both are pinned by the digest of their multi-platform index (ADR-009), so a re-pushed tag cannot change the binaries.
+COPY --from=docker:29.8.2-cli@sha256:b1805116a6a86cc591b5d5f60a910a0715cdcc9d18d866ad68b1457ead25c35c \
+	/usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker/compose-bin:v5.6.0@sha256:db34ebea4a1acd4b130e9abc305cdb51b3fe53b9116a6c2ac268a451eb308bed \
+	/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 # Dedicated unprivileged user; the image's own "ubuntu" user belongs to the sudo group. It is not in any group that
 # owns the Docker socket: the socket's group id differs per host, so compose adds it at run time with group_add
 # (ADR-009, "Socket access without root").

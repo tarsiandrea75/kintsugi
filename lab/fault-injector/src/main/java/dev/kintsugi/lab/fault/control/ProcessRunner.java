@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Runs one external program from an argv list, never through a shell. Injectable so that {@link ComposeRecreateControl}
@@ -15,23 +14,23 @@ public interface ProcessRunner {
 	/**
 	 * Runs {@code command} to completion, or kills it when it outlives {@link Command#timeout()}.
 	 * @throws IOException the program could not be started
-	 * @throws InterruptedException the calling thread was interrupted while waiting
+	 * @throws LabControlException the calling thread was interrupted while waiting; the program and its children were
+	 * killed and the thread's interrupt flag is set again
 	 */
-	Result run(Command command) throws IOException, InterruptedException;
+	Result run(Command command) throws IOException;
 
 	/**
 	 * One program run.
 	 * @param argv the program and its arguments, passed as they are
-	 * @param setEnv variables added to the inherited environment
-	 * @param unsetEnv variables removed from the inherited environment (applied before {@code setEnv})
+	 * @param environment the program's complete environment: nothing is inherited from the calling process, so the
+	 * injector's own variables (its datasource credentials among them) never reach the program
 	 * @param timeout how long the program may run before it is killed
 	 */
-	record Command(List<String> argv, Map<String, String> setEnv, Set<String> unsetEnv, Duration timeout) {
+	record Command(List<String> argv, Map<String, String> environment, Duration timeout) {
 
 		public Command {
 			argv = List.copyOf(argv);
-			setEnv = Map.copyOf(setEnv);
-			unsetEnv = Set.copyOf(unsetEnv);
+			environment = Map.copyOf(environment);
 		}
 
 	}

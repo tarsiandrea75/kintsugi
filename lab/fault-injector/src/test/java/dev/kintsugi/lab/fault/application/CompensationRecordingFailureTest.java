@@ -8,6 +8,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.function.Consumer;
@@ -58,6 +61,8 @@ class CompensationRecordingFailureTest {
 		assertThatExceptionOfType(ActivationFailedException.class).isThrownBy(() -> service.activate("F3"))
 			.withCauseInstanceOf(dev.kintsugi.lab.fault.control.LabControlException.class);
 		assertThat(lab.calls()).containsExactly("activate F3", "restore F3");
+		// The throwing stub really ran: without this, a change that skipped the recording would pass unnoticed.
+		verify(events).append(any(), eq(InjectionEventType.ACTIVATION_FAILED), any(), any());
 	}
 
 	@Test
@@ -70,6 +75,10 @@ class CompensationRecordingFailureTest {
 
 		assertThatExceptionOfType(ActivationFailedException.class).isThrownBy(() -> service.activate("F4"))
 			.withCauseInstanceOf(dev.kintsugi.lab.fault.control.LabControlException.class);
+		// The second serialization (the failure detail) is the one that threw, so nothing was appended for the failure.
+		verify(json, times(2)).writeValueAsString(anyMap());
+		verify(events, never()).append(any(), eq(InjectionEventType.ACTIVATION_FAILED), any(), any());
+		assertThat(lab.calls()).containsExactly("activate F4", "restore F4");
 	}
 
 }

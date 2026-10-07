@@ -2,11 +2,14 @@ package dev.kintsugi.lab.fault.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import dev.kintsugi.lab.fault.catalog.Fault;
@@ -18,10 +21,13 @@ class DockerLabControlConfigurationTest {
 	private final ApplicationContextRunner runner = new ApplicationContextRunner()
 		.withUserConfiguration(DockerLabControlConfiguration.class, UnsupportedLabControl.class);
 
+	@TempDir
+	Path repo;
+
 	@Test
-	void dockerModeSelectsTheRoutingControlOnly() {
-		runner.withPropertyValues("kintsugi.lab-control.mode=docker",
-				"kintsugi.lab-control.compose-file=/repo/infra/compose.yaml")
+	void dockerModeSelectsTheRoutingControlOnly() throws Exception {
+		Path composeFile = Files.writeString(repo.resolve("compose.yaml"), "name: kintsugi-lab\n");
+		runner.withPropertyValues("kintsugi.lab-control.mode=docker", "kintsugi.lab-control.compose-file=" + composeFile)
 			.run(context -> {
 				assertThat(context).hasSingleBean(LabControl.class);
 				assertThat(context).getBean(LabControl.class).isInstanceOf(RoutingLabControl.class);
@@ -39,6 +45,24 @@ class DockerLabControlConfigurationTest {
 			.run(context -> assertThat(context).hasFailed()
 				.getFailure()
 				.hasStackTraceContaining("kintsugi.lab-control.compose-file"));
+	}
+
+	@Test
+	void dockerModeWithAMissingComposeFileFailsAtStartup() {
+		// A typo or a repository mounted at the wrong path must stop the injector at startup, not at the first F3.
+		runner.withPropertyValues("kintsugi.lab-control.mode=docker",
+				"kintsugi.lab-control.compose-file=" + repo.resolve("missing/compose.yaml"))
+			.run(context -> assertThat(context).hasFailed()
+				.getFailure()
+				.hasStackTraceContaining("does not exist or is not readable"));
+	}
+
+	@Test
+	void dockerModeWithADirectoryAsComposeFileFailsAtStartup() {
+		runner.withPropertyValues("kintsugi.lab-control.mode=docker", "kintsugi.lab-control.compose-file=" + repo)
+			.run(context -> assertThat(context).hasFailed()
+				.getFailure()
+				.hasStackTraceContaining("does not exist or is not readable"));
 	}
 
 	@Test

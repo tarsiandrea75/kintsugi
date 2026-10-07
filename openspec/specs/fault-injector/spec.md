@@ -58,8 +58,11 @@ Properties of the `docker` mode:
 | `kintsugi.lab-control.compose-project` | `kintsugi-lab` | the `-p` project name |
 | `kintsugi.lab-control.recreate-wait-timeout` | `120s` | `--wait-timeout`, in whole seconds, at least 1 |
 
-- **Gateway faults.** Activation is `PUT /admin/behavior` with the catalog parameters as the JSON body (F1 `{"latencyMs": 10000}`, F2 `{"latencyMs": 0, "errorStatus": 429}`). Restore is `DELETE /admin/behavior`. An error status, a timeout or a connection failure is a failed step.
-- **Recreate faults.** The injector runs exactly this argv, with no shell: `docker`, `compose`, `-p`, `<compose-project>`, `-f`, `<compose-file>`, `up`, `-d`, `--no-deps`, `--no-build`, `--wait`, `--wait-timeout`, `<N>`, `<service>`. Activation adds the fault's compose variables to the inherited environment. Restore runs the same argv with those variables removed, so compose falls back to its defaults. The process is killed if it runs longer than `<N>` plus 30 s. A non-zero exit, or a kill, is a failed step whose recorded cause ends with the tail of stderr.
+- **Gateway faults.** Activation is `PUT /admin/behavior` with the catalog parameters as the JSON body (F1 `{"latencyMs": 10000}`, F2 `{"latencyMs": 0, "errorStatus": 429}`). Restore is `DELETE /admin/behavior`. An error status, a timeout, a connection failure or a body that cannot be serialized is a failed step.
+- **Recreate faults.** The injector runs exactly this argv, with no shell: `docker`, `compose`, `-p`, `<compose-project>`, `-f`, `<compose-file>`, `up`, `-d`, `--no-deps`, `--no-build`, `--wait`, `--wait-timeout`, `<N>`, `<service>`. `--no-deps` and the single service name mean only that service is recreated: never its dependencies, the injector itself or the whole stack.
+  - The process gets a minimal environment, nothing inherited: `PATH`, `HOME`, `DOCKER_HOST` and `DOCKER_CONFIG` when the injector has them, plus, on activation, the fault's compose variables. The injector's datasource credentials never reach it. Restore runs the same argv without the fault variables, so compose falls back to its defaults.
+  - Recreates of the same service are serialized: two overlapping restores never run `up` on one service at once.
+  - The process is killed, with its children, if it runs longer than `<N>` plus 30 s or if the waiting thread is interrupted. A non-zero exit, a kill or an interruption is a failed step whose recorded cause ends with the tail of stderr when there is one.
 - **Docker access.** The image carries the Docker CLI 29.8.2 and the compose plugin v5.6.0 ([ADR-009](../../../docs/adr/ADR-009-fault-injector-docker-control.md)). It runs as an unprivileged user; the compose deployment mounts the Docker socket and adds the socket's group with `group_add`.
 
 ## Requirements
@@ -114,12 +117,34 @@ The response MUST NOT contain the true cause.
 
 ### Requirement: Real lab control
 
-With `kintsugi.lab-control.mode=docker` the injector MUST apply and undo faults as described in [Lab control](#lab-control): the gateway-mock admin API for F1 and F2, the recreate argv for F3 and F4. It MUST NOT start without `kintsugi.lab-control.compose-file`, and MUST NOT run any command through a shell.
+With `kintsugi.lab-control.mode=docker` the injector MUST apply and undo faults as described in [Lab control](#lab-control): the gateway-mock admin API for F1 and F2, the recreate argv for F3 and F4. It MUST NOT start without a readable `kintsugi.lab-control.compose-file`, MUST NOT run any command through a shell, and MUST NOT pass its own environment to the CLI beyond the variables listed there.
 
 #### Scenario: Missing compose file
 - GIVEN `kintsugi.lab-control.mode=docker` and no `kintsugi.lab-control.compose-file`
 - WHEN the injector starts
 - THEN startup fails with an error naming `kintsugi.lab-control.compose-file`
+
+#### Scenario: Compose file that does not exist
+- GIVEN `kintsugi.lab-control.mode=docker` and a `kintsugi.lab-control.compose-file` that does not exist, is a directory or is not readable
+- WHEN the injector starts
+- THEN startup fails with an error saying the compose file does not exist or is not readable
+
+#### Scenario: The CLI never sees the injector's credentials
+- GIVEN the injector's environment holds its datasource credentials
+- WHEN a recreate runs
+- THEN the process environment holds only `PATH`, `HOME`, `DOCKER_HOST`, `DOCKER_CONFIG` (those that are set) and the fault's compose variables
+
+#### Scenario: Overlapping restores of one service
+- GIVEN a restore of F3 is recreating order-service
+- WHEN a second restore of F3 starts
+- THEN its `up` runs only after the first has finished
+- AND a recreate of inventory-service meanwhile is not held up
+
+#### Scenario: Interrupted recreate
+- GIVEN a recreate is running
+- WHEN the thread waiting for it is interrupted
+- THEN the CLI process and its children are killed
+- AND the step fails, with the thread's interrupt flag set again
 
 #### Scenario: F4 restore removes the fault variables
 - GIVEN F4 is active

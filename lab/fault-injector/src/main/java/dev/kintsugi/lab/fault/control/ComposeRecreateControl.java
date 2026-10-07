@@ -6,7 +6,8 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,20 +19,36 @@ import dev.kintsugi.lab.fault.control.ProcessRunner.Result;
 
 /**
  * Applies F3 and F4 as a real redeploy (ADR-009): recreates the target service with the fault's compose variables set,
- * and restores it with the same command and those variables removed, so compose falls back to the defaults in
+ * and restores it with the same command without those variables, so compose falls back to the defaults in
  * {@code infra/compose.yaml}.
  *
  * <pre>
  * docker compose -p &lt;project&gt; -f &lt;compose file&gt; up -d --no-deps --no-build --wait --wait-timeout &lt;N&gt; &lt;service&gt;
  * </pre>
  *
- * The command is an argv list, never a shell line. A non-zero exit, a {@code --wait-timeout} expiry or a process that
- * outlives {@code N} plus {@link #PROCESS_MARGIN} is a failed step: {@link LabControlException} with the tail of stderr.
+ * <ul>
+ * <li>The command is an argv list, never a shell line. {@code --no-deps} plus the one explicit service name means compose
+ * recreates that service only: never its dependencies, never the injector itself, never the whole stack.</li>
+ * <li>The CLI gets a minimal environment: {@link #PASSED_THROUGH} from the injector's own environment, plus the fault
+ * variables on activation. The injector's datasource credentials never reach it, and a restore never inherits a fault
+ * variable.</li>
+ * <li>Recreates of one service are serialized: two overlapping restores never run {@code up} on the same service at
+ * once. Different services do not wait for each other.</li>
+ * <li>A non-zero exit, a {@code --wait-timeout} expiry or a process that outlives {@code N} plus {@link #PROCESS_MARGIN}
+ * is a failed step: {@link LabControlException} with the tail of stderr.</li>
+ * </ul>
  */
 public class ComposeRecreateControl implements LabControl {
 
 	/** Extra time the CLI gets beyond {@code --wait-timeout} (pulling nothing, stopping the old container) before a kill. */
 	static final Duration PROCESS_MARGIN = Duration.ofSeconds(30);
+
+	/**
+	 * The only variables of the injector's environment the CLI sees, when set: the program search path, the home
+	 * directory, the daemon address and the CLI's config directory (the image points it at a writable place, because
+	 * the {@code app} user has no home).
+	 */
+	static final List<String> PASSED_THROUGH = List.of("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG");
 
 	/** How much of stderr a failure message keeps: compose prints the reason last. */
 	private static final int STDERR_TAIL_CHARS = 600;
@@ -46,7 +63,16 @@ public class ComposeRecreateControl implements LabControl {
 
 	private final Duration waitTimeout;
 
-	public ComposeRecreateControl(ProcessRunner runner, Path composeFile, String project, Duration waitTimeout) {
+	private final Map<String, String> baseEnvironment;
+
+	private final Map<String, ReentrantLock> serviceLocks = new ConcurrentHashMap<>();
+
+	/**
+	 * @param hostEnvironment the injector's own environment ({@link System#getenv()}); only {@link #PASSED_THROUGH} is
+	 * kept from it
+	 */
+	public ComposeRecreateControl(ProcessRunner runner, Path composeFile, String project, Duration waitTimeout,
+			Map<String, String> hostEnvironment) {
 		if (waitTimeout.toSeconds() < 1) {
 			throw new IllegalArgumentException("kintsugi.lab-control.recreate-wait-timeout must be at least 1s");
 		}
@@ -54,24 +80,43 @@ public class ComposeRecreateControl implements LabControl {
 		this.composeFile = composeFile;
 		this.project = project;
 		this.waitTimeout = waitTimeout;
+		Map<String, String> base = new LinkedHashMap<>();
+		for (String name : PASSED_THROUGH) {
+			String value = hostEnvironment.get(name);
+			if (value != null && !value.isEmpty()) {
+				base.put(name, value);
+			}
+		}
+		this.baseEnvironment = Map.copyOf(base);
 	}
 
 	@Override
 	public void activate(Fault fault) {
-		run(fault, "activate", composeVariables(fault), Set.of());
+		run(fault, "activate", composeVariables(fault));
 	}
 
 	@Override
 	public void restore(Fault fault) {
-		run(fault, "restore", Map.of(), composeVariables(fault).keySet());
+		run(fault, "restore", Map.of());
 	}
 
-	private void run(Fault fault, String step, Map<String, String> setEnv, Set<String> unsetEnv) {
+	private void run(Fault fault, String step, Map<String, String> faultVariables) {
 		if (fault.mechanism() != LabMechanism.COMPOSE_RECREATE) {
 			throw new LabControlException(fault.id() + " is not applied by a compose recreate");
 		}
-		Command command = new Command(argv(fault.targetService()), setEnv, unsetEnv, waitTimeout.plus(PROCESS_MARGIN));
+		Map<String, String> environment = new LinkedHashMap<>(baseEnvironment);
+		environment.putAll(faultVariables);
+		Command command = new Command(argv(fault.targetService()), environment, waitTimeout.plus(PROCESS_MARGIN));
+		ReentrantLock lock = serviceLocks.computeIfAbsent(fault.targetService(), service -> new ReentrantLock());
 		Result result;
+		try {
+			lock.lockInterruptibly();
+		}
+		catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+			throw new LabControlException("compose " + step + " of " + fault.id()
+					+ " was interrupted while waiting for another recreate of the same service", interrupted);
+		}
 		try {
 			result = runner.run(command);
 		}
@@ -79,9 +124,8 @@ public class ComposeRecreateControl implements LabControl {
 			throw new LabControlException("compose " + step + " of " + fault.id() + " could not start: "
 					+ notStarted.getMessage(), notStarted);
 		}
-		catch (InterruptedException interrupted) {
-			Thread.currentThread().interrupt();
-			throw new LabControlException("compose " + step + " of " + fault.id() + " was interrupted", interrupted);
+		finally {
+			lock.unlock();
 		}
 		if (result.timedOut()) {
 			throw new LabControlException("compose " + step + " of " + fault.id() + " timed out after "
@@ -93,7 +137,6 @@ public class ComposeRecreateControl implements LabControl {
 		}
 		log.info("event=compose_recreate_done step={} fault={}", step, fault.id());
 	}
-
 	private List<String> argv(String service) {
 		return List.of("docker", "compose", "-p", project, "-f", composeFile.toString(), "up", "-d", "--no-deps",
 				"--no-build", "--wait", "--wait-timeout", Long.toString(waitTimeout.toSeconds()), service);

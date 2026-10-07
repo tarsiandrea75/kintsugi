@@ -46,7 +46,10 @@ Nothing records what was injected, when, or why. Two questions follow: how a con
   ```
 
   first with the fault variables set, then again without them to restore. The compose project files are mounted read-only.
-- **Bounded recreate.** `<N>` is the property `kintsugi.lab-control.recreate-wait-timeout`, default `120s`: a Spring service in this lab becomes healthy in well under a minute, and its healthcheck allows `start_period` 60 s. The injector also kills the CLI process if it outlives the timeout plus a small margin. A non-zero exit, including a `--wait-timeout` expiry, is a failed step: activation then follows the failed-activation rule, and a restore keeps the injection blocking.
+- **Only the named service.** `--no-deps` plus one explicit service name recreates that service alone: never its dependencies, never the injector itself, never the stack as a whole.
+- **Minimal environment.** The CLI process inherits nothing. It gets `PATH`, `HOME`, `DOCKER_HOST` and `DOCKER_CONFIG` when the injector has them (the image sets `DOCKER_CONFIG` because its user has no home), plus the fault variables on activation. The injector's datasource credentials for `faults` never reach a process that could print them, and a restore can never inherit a fault variable.
+- **One recreate per service at a time.** A lock per service serializes recreates, so two overlapping restores of the same injection never run `up` on one service concurrently. Different services do not wait for each other.
+- **Bounded recreate.** `<N>` is the property `kintsugi.lab-control.recreate-wait-timeout`, default `120s`: a Spring service in this lab becomes healthy in well under a minute, and its healthcheck allows `start_period` 60 s. The injector also kills the CLI process and its children if it outlives the timeout plus a small margin, or if the waiting thread is interrupted (for example at shutdown), so no recreate keeps running unobserved. A non-zero exit, including a `--wait-timeout` expiry, is a failed step: activation then follows the failed-activation rule, and a restore keeps the injection blocking.
 - Why a real recreate:
   - It leaves real deploy evidence: the container is recreated at time T with a new configuration. The M2 `getDeployments` tool will read that evidence, as an SRE reads a deploy log.
   - F3 stays "wrong configuration via env", as the vision describes it. No fault hook is added to order-service's code.
@@ -56,9 +59,11 @@ Nothing records what was injected, when, or why. Two questions follow: how a con
 
 | Component | Version | Source |
 |-----------|---------|--------|
-| Docker CLI | 29.8.2 | `docker:29.8.2-cli`, the latest stable `-cli` tag (29.9.0 is still `rc.1`) |
-| Docker Compose plugin | v5.6.0 | `docker/compose-bin:v5.6.0`, Compose's own binary image; the latest GitHub release (2026-10-02). Corrected in T4: the published `docker:29.8.2-cli` image (built 2026-09-30) still bundles v5.5.1, although docker-library's `versions.json` already names 5.6.0 |
+| Docker CLI | 29.8.2 | `docker:29.8.2-cli@sha256:b1805116a6a86cc591b5d5f60a910a0715cdcc9d18d866ad68b1457ead25c35c`, the latest stable `-cli` tag (29.9.0 is still `rc.1`) |
+| Docker Compose plugin | v5.6.0 | `docker/compose-bin:v5.6.0@sha256:db34ebea4a1acd4b130e9abc305cdb51b3fe53b9116a6c2ac268a451eb308bed`, Compose's own binary image; the latest GitHub release (2026-10-02). Corrected in T4: the published `docker:29.8.2-cli` image (built 2026-09-30) still bundles v5.5.1, although docker-library's `versions.json` already names 5.6.0 |
 | Docker Engine on the development machine | 29.4.0, API 1.54 (minimum 1.40) | `docker version` on this machine |
+
+The digests are those of each tag's multi-platform image index, read with `docker buildx imagetools inspect <tag>` on 2026-10-07. The Dockerfile names both the tag and the digest: the tag says which version it is, the digest makes a re-pushed tag unable to change the binaries.
 
 Sources:
 

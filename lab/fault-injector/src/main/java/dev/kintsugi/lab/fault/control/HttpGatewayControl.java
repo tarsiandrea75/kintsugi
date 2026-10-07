@@ -7,7 +7,6 @@ import java.time.Duration;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import dev.kintsugi.lab.fault.catalog.Fault;
 import dev.kintsugi.lab.fault.catalog.LabMechanism;
@@ -16,7 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Applies F1 and F2 through gateway-mock's admin API: {@code PUT /admin/behavior} with the fault's catalog parameters
  * as the body, and {@code DELETE /admin/behavior} to restore. Connect and read timeouts bound every call; any error
- * answer, timeout or connection failure is a failed step.
+ * answer, timeout, connection failure or serialization error is a failed step ({@link LabControlException}).
  */
 public class HttpGatewayControl implements LabControl {
 
@@ -26,7 +25,15 @@ public class HttpGatewayControl implements LabControl {
 
 	private final RestClient http;
 
+	private final JsonMapper json;
+
 	public HttpGatewayControl(URI baseUrl, Duration connectTimeout, Duration readTimeout) {
+		this(baseUrl, connectTimeout, readTimeout, JSON);
+	}
+
+	/** @param json serializes the behavior body; injectable so a test can make it fail */
+	HttpGatewayControl(URI baseUrl, Duration connectTimeout, Duration readTimeout, JsonMapper json) {
+		this.json = json;
 		HttpClient client = HttpClient.newBuilder()
 			.version(HttpClient.Version.HTTP_1_1)
 			.connectTimeout(connectTimeout)
@@ -39,11 +46,10 @@ public class HttpGatewayControl implements LabControl {
 	@Override
 	public void activate(Fault fault) {
 		requireGatewayFault(fault);
-		String behavior = JSON.writeValueAsString(fault.parameters());
 		call(fault, "PUT", () -> http.put()
 			.uri(BEHAVIOR)
 			.contentType(MediaType.APPLICATION_JSON)
-			.body(behavior)
+			.body(json.writeValueAsString(fault.parameters()))
 			.retrieve()
 			.toBodilessEntity());
 	}
@@ -54,11 +60,16 @@ public class HttpGatewayControl implements LabControl {
 		call(fault, "DELETE", () -> http.delete().uri(BEHAVIOR).retrieve().toBodilessEntity());
 	}
 
+	/**
+	 * Runs one step, body serialization included, and turns any failure (an error answer, a timeout, a refused
+	 * connection, a body that cannot be serialized) into {@link LabControlException}, as the {@link LabControl} contract
+	 * requires.
+	 */
 	private static void call(Fault fault, String method, Runnable request) {
 		try {
 			request.run();
 		}
-		catch (RestClientException failure) {
+		catch (RuntimeException failure) {
 			throw new LabControlException("gateway-mock " + method + " " + BEHAVIOR + " for " + fault.id() + " failed: "
 					+ failure.getMessage(), failure);
 		}
