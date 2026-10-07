@@ -30,7 +30,7 @@ Fault catalog (start with F1, add about one per week):
 |----|-------|--------------------|-----------------|-----------|
 | F1 | Slow payment gateway | 10 s latency on gateway-mock | orders stuck in PAYMENT_PENDING | easy |
 | F2 | Gateway rejecting | 429 responses from gateway | burst of failed payments | easy |
-| F3 | Wrong configuration | wrong service URL via env | connection refused in logs | easy |
+| F3 | Wrong configuration | wrong service URL via env | connection errors (`ConnectException`) in logs and client metrics, failing fast | easy |
 | F4 | DB pool exhausted | pool of 2 + slow query | 500 errors on inventory | medium |
 | F5 | Bad deploy | new version with a bug behind a feature flag | errors starting right after deploy | medium |
 | F6 | Corrupted data | negative price on a product | validation fails only for some orders | medium |

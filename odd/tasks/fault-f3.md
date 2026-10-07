@@ -4,7 +4,7 @@ Locator: `odd/tasks/fault-f3.md` · Engram mirror: `odd/fault-f3/tasks` · Branc
 
 ## Objective
 
-Make fault F3, "wrong configuration", injectable and visible in Grafana. Per the vision it is a wrong service URL set through the environment, and its symptom is "connection refused" in the logs (`docs/vision.md:33`). This is the third fault of the M1 check (`docs/vision.md:152`).
+Make fault F3, "wrong configuration", injectable and visible in Grafana. Per the vision it is a wrong service URL set through the environment, and its symptom is connection errors (`ConnectException`) in the logs and client metrics, failing fast (`docs/vision.md:33`, updated 2026-10-08). This is the third fault of the M1 check (`docs/vision.md:152`).
 
 ## Problem and why
 
@@ -40,7 +40,7 @@ A misconfigured service URL is one of the most common real incidents. The agent 
   2. injects F3 by recreating order-service;
   3. places an order and checks it returns 201 `PAYMENT_PENDING` in under 2 s;
   4. checks in Prometheus that the client-request series with the connect exception rose and that `gateway_authorize_inflight` stayed 0;
-  5. checks in Loki that the order-service WARN line contains the order id and "Connection refused";
+  5. checks in Loki that the order-service WARN line contains the order id and `ConnectException`;
   6. restores, always, through a trap, by recreating order-service without the variable;
   7. places a final order and checks it is `PAID`.
 
@@ -77,6 +77,7 @@ A misconfigured service URL is one of the most common real incidents. The agent 
 
   RED/GREEN: T1 failed with a compile error, then `MeterNotFoundException`, then the wrong tag; it is now green. mvn exit 0, 122 tests (parent re-run). Real runs on a fresh stack: `verify-f3.sh` PASS in 140 s (order answered in 0.23 s); `verify-f1.sh` PASS in 44 s; `verify-f2.sh` PASS in 57 s.
 - 2026-10-07: F3 review (4 lenses, `review-e24f82dcc85609e3`) approved. Its WARNINGs were fixed: the verify helpers always print a parseable line (`000 none none` on a transport failure) and the callers report FAIL and continue; the in-flight window waits one scrape interval after the healthy order; `F3_FAST_FAIL_SECONDS` is renamed; inject and restore share `recreate_order_service`. Real runs: F3 PASS in 146 s, F1 PASS in 52 s, F2 PASS in 60 s; failure reporting proven against a closed port.
+- 2026-10-08: **decided by the human**: `ConnectException` plus the wrong URL is the F3 evidence. `docs/vision.md:33` was updated to match, so the living documentation is the single source of truth. Points (1) and (2) below are resolved.
 - **To review with the human:** (1) the F3 evidence is `ConnectException` plus the wrong URL, not the literal "connection refused" text in the vision table; (2) whether `docs/vision.md:33` should say "connection errors (ConnectException) in logs"; (3) the T1 message change added a scenario to the order-service "Payment step" requirement.
 
 ## Next step
