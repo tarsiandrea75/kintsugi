@@ -78,7 +78,7 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
 
 ## Tasks
 
-- [ ] **T1 — inventory-service skeleton.** Initializr skeleton with the same ids as payment-service, the image pinned, `TestcontainersConfiguration` made public, and the pom tidied. Route: delegated writer.
+- [x] **T1 — inventory-service skeleton.** Initializr skeleton with the same ids as payment-service, the image pinned, `TestcontainersConfiguration` made public, and the pom tidied. Route: delegated writer.
 - [ ] **T2 — inventory-service domain, persistence and API.** Spec first, tests first, the seed migration, atomic reservation, the delay hook and explicit pool settings. Route: delegated writer.
 - [ ] **T3 — order-service inventory step.** `InventoryClient` with metrics, `OrderService` reserve-before-save, 409 and 503 handling, and the spec. Route: delegated writer.
 - [ ] **T4 — Compose, dashboard, verify-f4 and docs.** The inventory service and its database in compose; the F4 variables; the panels; `verify-f4.sh`; all four verify scripts run for real. Route: delegated writer.
@@ -91,7 +91,8 @@ The lab has no inventory, so F4 and F8 cannot exist. F4 is the first fault whose
 ## Progress
 
 - 2026-10-07: design decided autonomously (the user was away, autonomy authorized until the quota ends); branch created.
+- 2026-10-07: T1 done: the Initializr skeleton with the same ids as payment-service, tidied the same way (image pinned and public test config, pom description, Prometheus registry and exposure, port 8083, Dockerfile). mvn exit 0, 1 test against PostgreSQL 18.6. Generated scaffolding has no meaningful RED.
 
 ## Next step
 
-T1 via a delegated writer.
+T2 via the same writer.
