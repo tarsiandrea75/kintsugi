@@ -25,8 +25,10 @@ Write one Markdown runbook per lab service in `docs/runbooks/`. This covers the 
 
 ## Tasks
 
-- [ ] **T1 — Runbooks and index.** Passive documentation: there is no runnable RED, and the checks are structural. Route: delegated writer.
+- [x] **T1 — Runbooks and index.** Passive documentation: there is no runnable RED, and the checks are structural. Route: delegated writer.
 
 ## Progress
 
 - 2026-10-07: design decided autonomously; branch created.
+- 2026-10-07: T1 done by a delegated writer. Five files: README with the authoring rule, plus four runbooks of 96–119 lines each. The leakage grep matches only the README's rule. The parent spot-checked 3 signals against the code and the dashboard.
+- Open (to review): runbooks avoid the word "default" and the dashboard title/uid ("Lab — Faults", `lab-f1`) because they would trip the leakage grep, so renaming the dashboard to a neutral name would let runbooks link to it. Two cited series (`hikaricp_connections_pending` for order-service and payment-service, the `HttpConnectTimeoutException` tag) come from Spring auto-instrumentation and are not written anywhere in the repo. The lab-observability spec gives the payment latency panel an older name.

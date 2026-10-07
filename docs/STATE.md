@@ -31,7 +31,7 @@ M1 — The lab (Oct 5–25). **The M1 check is met: faults F1–F4 are visible i
 ## Next action
 
 Finish M1:
-1. Write the service runbooks in Markdown (vision M1 bullet).
+1. ~~Service runbooks~~: done (`docs/runbooks/`, no fault leakage; see `odd/tasks/service-runbooks.md` for the open points).
 2. Prepare the M1 LinkedIn post, "I built a system designed to break", with a dashboard screenshot. This is a human task.
 3. Decide on pushing the local chains.
 

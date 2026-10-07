@@ -1,0 +1,96 @@
+# Runbook: inventory-service
+
+## 1. Purpose
+
+inventory-service holds the available stock per SKU in PostgreSQL and reserves the items of an order. order-service calls it before storing an order. A reservation is atomic: either every line is reserved or none is.
+
+The seed holds `SKU-1` to `SKU-5`, 1,000,000 units each. Reservations are never released and are not stored, so stock only decreases and a repeated call reserves twice.
+
+## 2. Dependencies
+
+| Dependency | Use | Limits |
+|------------|-----|--------|
+| PostgreSQL | database `inventory` on `postgres:5432`, table `stock` | Hikari pool of 10 connections; a request waits at most 2000 ms for a free connection |
+
+It calls no other service. Each reservation holds one pooled connection for its whole transaction.
+
+## 3. Endpoints
+
+Host port 18083 (container port 8083).
+
+| Endpoint | Status codes |
+|----------|--------------|
+| `POST /reservations` | 201 `{"orderId": ..., "status": "RESERVED"}`; 409 `INSUFFICIENT_STOCK` (short or unknown SKU, nothing changed); 400 invalid body; 500 `No database connection available` |
+| `GET /stock/{sku}` | 200 `{"sku": ..., "available": ...}`; 404 unknown SKU |
+| `GET /actuator/health` | 200 when up |
+| `GET /actuator/prometheus` | 200, Prometheus text format |
+
+## 4. Configuration
+
+| Property | Value when unset | Set by compose |
+|----------|------------------|----------------|
+| `spring.datasource.hikari.maximum-pool-size` | `10` | `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: ${INVENTORY_POOL_SIZE:-10}` |
+| `spring.datasource.hikari.connection-timeout` | `2000` (ms) | — |
+| `kintsugi.inventory.reservation-delay` | `0s` | `KINTSUGI_INVENTORY_RESERVATIONDELAY: ${INVENTORY_RESERVATION_DELAY:-0s}` |
+| `spring.datasource.url` | — | `SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory` |
+| `server.port` | `8083` | — |
+
+### Lab control: reservation delay
+
+`kintsugi.inventory.reservation-delay` exists only in the lab; a production service would not have it. When above zero, every reservation runs `SELECT pg_sleep(<seconds>)` inside its transaction before updating stock, so it holds a pooled connection for the whole delay. In a healthy lab it is `0s`. Treat any other value as a configuration change to review.
+
+## 5. Key signals
+
+**Metrics** (Prometheus label `service="inventory-service"`):
+
+- `hikaricp_connections_active`, `hikaricp_connections_idle`, `hikaricp_connections_pending`, `hikaricp_connections_max`: pool state.
+- `hikaricp_connections_timeout_total`: requests that found no free connection within the connection timeout.
+- `http_server_requests_seconds_count|_sum|_max` with `uri` (`/reservations`, `/stock/{sku}`) and `status`.
+
+**Grafana panels:** "inventory DB pool", "inventory 5xx rate".
+
+**Log lines** (Loki stream `{service="inventory-service"}`):
+
+| Level | Message |
+|-------|---------|
+| WARN | `No database connection available: <pool message>`, for example `... Connection is not available, request timed out after 2000ms` |
+
+## 6. Symptoms
+
+Run PromQL in Grafana Explore or with `curl -s localhost:19090/api/v1/query --data-urlencode 'query=<expr>'`. Run LogQL in Grafana Explore.
+
+### 500 on `POST /reservations`
+
+Check `sum by (uri, status) (rate(http_server_requests_seconds_count{service="inventory-service",status=~"5.."}[1m]))` and LogQL `{service="inventory-service"} |= "No database connection available"`.
+
+| Possible cause | How to check | Points to it |
+|----------------|--------------|--------------|
+| Pool too small for the load | `hikaricp_connections_max` and `hikaricp_connections_active`; `docker compose -f infra/compose.yaml config inventory-service` | active equals max, pending above 0, a pool size lower than expected |
+| Slow queries holding connections | `pg_stat_activity` query below; `rate(http_server_requests_seconds_sum{service="inventory-service",uri="/reservations"}[1m]) / rate(http_server_requests_seconds_count{service="inventory-service",uri="/reservations"}[1m])` | long-running `active` sessions; successful reservations take seconds |
+| Locks on `stock` rows | `pg_stat_activity` with `wait_event_type = 'Lock'` | sessions waiting on locks |
+| Traffic spike | `sum(rate(http_server_requests_seconds_count{service="inventory-service",uri="/reservations"}[1m]))` | request rate well above its usual level |
+| Database down or unreachable | `docker compose -f infra/compose.yaml exec postgres pg_isready -U lab -d inventory` | not accepting connections; the WARN message names a connection error rather than a timeout on a busy pool |
+| Other server error | LogQL `{service="inventory-service"} \|= "ERROR"` | stack traces without the WARN line above |
+
+### Slow `POST /reservations`
+
+| Possible cause | How to check | Points to it |
+|----------------|--------------|--------------|
+| Waiting for a pool connection | `hikaricp_connections_pending` | above 0; latency near 2s |
+| Slow statements in the transaction | `pg_stat_activity` | `active` sessions with a large age |
+| Database host saturated | `docker stats --no-stream` | the postgres container near its limits |
+
+Callers see a slow inventory as 503 on `POST /orders` once order-service's 3s read timeout fires (see the order-service runbook).
+
+### 409 on `POST /reservations`
+
+Not an error of this service. Check `curl -s localhost:18083/stock/<sku>`: `available` lower than the requested quantity, or 404 for an unknown SKU.
+
+## 7. Safe actions
+
+- **Check status:** `docker compose -f infra/compose.yaml ps inventory-service` and `curl -s localhost:18083/actuator/health`.
+- **Check configuration:** `docker compose -f infra/compose.yaml config inventory-service`. Expect `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: "10"` and `KINTSUGI_INVENTORY_RESERVATIONDELAY: 0s`.
+- **Roll back a configuration change:** `unset INVENTORY_POOL_SIZE INVENTORY_RESERVATION_DELAY`, then `docker compose -f infra/compose.yaml up -d --no-deps --wait inventory-service`.
+- **Restart:** `docker compose -f infra/compose.yaml restart inventory-service`. In-flight reservations fail; stock already reserved stays reserved.
+- **Inspect database sessions:** `docker compose -f infra/compose.yaml exec postgres psql -U lab -d inventory -c "SELECT pid, state, wait_event_type, now() - query_start AS age, query FROM pg_stat_activity WHERE datname = 'inventory'"`.
+- Do not raise the pool size as a first response: it hides slow queries and moves load onto the database.
