@@ -150,6 +150,14 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Choices to review: port 8086; the stricter CHECK constraints; the restart reason keeps the spec's wording.
   - **The human must add** `AGENT_DB_PASSWORD=agent_app` to `infra/.env.example`. An existing store volume needs `down -v` and a re-index.
 
+- 2026-10-08: T2 range reviewed (high risk, 4 lenses), approved and acknowledged (`review-6b85d9eefa655835`). Folded into T3 part A:
+  - WARNING (R3/R4): if `runner.start(id)` throws after the `RUNNING` row is committed, the incident stays `RUNNING` and blocks every later POST. Mark it `FAILED` on a runner failure;
+  - a 409 may carry no id when the running incident ends between the two queries;
+  - the repository uses status string literals instead of the enum;
+  - the concurrency test's barrier has no timeout.
+
+  For T5: publish the incident API only on `127.0.0.1`, because it has no authentication and `?full=true` returns full tool outputs.
+
 ## Next step
 
 Review the T2 range. Then branch `feat/agent-loop-02-tools` and start T3.
