@@ -15,8 +15,10 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | Index | HNSW, cosine distance (`vector_cosine_ops`), on `embedding vector(<dimensions>)` |
 | Schema owner | the init script; Spring AI never creates it (`spring.ai.vectorstore.pgvector.initialize-schema=false`) |
 | Embedding model | configurable: name (default `nomic-embed-text`), dimensions (default 768), document prefix (default `search_document: `), query prefix (default `search_query: `) |
+| Model digest | read from Ollama, never configured: `GET /api/tags`, the entry whose `name` equals the configured model; a configured name without a tag means `:latest` (`nomic-embed-text` is matched as `nomic-embed-text:latest`) |
+| Chunk size | at most 800 tokens of text per chunk |
 | Indexed files | `docs/runbooks/*.md` only, read from a read-only mount of that directory |
-| Leakage pattern | `\bF[1-8]\b|fault|inject`, case-insensitive: the runbook authoring rule's check |
+| Leakage pattern | `\b(F[1-8]\b\|fault\|inject)`, case-insensitive: the runbook authoring rule's check. A match is a fault id, or a word that starts with `fault` or `inject`; a word that only contains them, such as `default`, does not match |
 | Chunk metadata | `service`, `section`, `source`, `content_hash` |
 
 ## Requirements
@@ -103,13 +105,18 @@ Before embedding anything, the indexer MUST scan every allowed file for the leak
 - WHEN the indexer runs
 - THEN the gate stops the run
 
+#### Scenario: A word that only contains the pattern
+- GIVEN a runbook contains "the default pool size" and no other match
+- WHEN the indexer runs
+- THEN the gate passes, because "default" does not start with `fault`
+
 #### Scenario: Authoring rule is not indexed
 - WHEN the indexer completes
 - THEN no chunk has `section` "Authoring rule"
 
 ### Requirement: Chunks carry their metadata
 
-The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. Every chunk MUST carry:
+The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. No chunk MUST hold more than 800 tokens of text, so a single chunk stays well under mcp-tools' 8 KB output cap in the common case. Every chunk MUST carry:
 
 | Field | Value |
 |-------|-------|
@@ -125,7 +132,7 @@ The indexer MUST split each file by Markdown heading, then split any section lon
 #### Scenario: Long section
 - GIVEN a section longer than the splitter's token limit
 - WHEN it is indexed
-- THEN it becomes several chunks, each with the same `service`, `section` and `source`
+- THEN it becomes several chunks, each with the same `service`, `section` and `source`, and none longer than 800 tokens
 
 ### Requirement: Unchanged files are skipped
 
@@ -148,11 +155,26 @@ The indexer MUST compare each file's content hash with the stored one. An unchan
 
 ### Requirement: The index records its model
 
-The index metadata table MUST hold the embedding model's name, its digest and the dimensions the chunks were embedded with. The indexer MUST write them on every run that changes the chunks. A run whose configured model, digest or dimensions differ from the recorded ones MUST re-embed every file, not only the changed ones.
+The index metadata table MUST hold the embedding model's name, its digest, the dimensions the chunks were embedded with, and both the document and the query prefix. The indexer MUST read the digest from Ollama (`GET /api/tags`, the entry whose name matches the configured model, where a name without a tag means `:latest`) before embedding, and MUST stop with a non-zero code when the model is not listed. It MUST write the metadata on every run that changes the chunks. A run whose configured model, prefixes or dimensions, or whose live digest, differ from the recorded ones MUST re-embed every file, not only the changed ones. mcp-tools reads the same metadata and refuses to search on any difference ([mcp-tools spec](../mcp-tools/spec.md), "Runbook search refuses a model mismatch").
 
 #### Scenario: Metadata after a run
 - WHEN the indexer completes with the default configuration
-- THEN the metadata table holds `nomic-embed-text`, digest `0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f` and dimensions 768
+- THEN the metadata table holds `nomic-embed-text`, digest `0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f`, dimensions 768, document prefix `search_document: ` and query prefix `search_query: `
+
+#### Scenario: Digest read from Ollama
+- GIVEN a fake Ollama HTTP endpoint whose `GET /api/tags` lists `nomic-embed-text:latest` with digest `d1`
+- WHEN the indexer runs with model `nomic-embed-text`
+- THEN the metadata table records digest `d1`
+
+#### Scenario: Digest changed
+- GIVEN the index was built with digest `d1`, and the fake Ollama endpoint now lists `nomic-embed-text:latest` with digest `d2`
+- WHEN the indexer runs
+- THEN every file is embedded again and the metadata table records `d2`
+
+#### Scenario: Model not in Ollama
+- GIVEN the fake Ollama endpoint does not list the configured model
+- WHEN the indexer runs
+- THEN it exits with a non-zero code naming the model, and the index is unchanged
 
 #### Scenario: Model changed
 - GIVEN the index was built with `nomic-embed-text`
@@ -175,12 +197,19 @@ The indexer MUST send each chunk to the embedding model as the configured docume
 - THEN the model receives `search_document: Key signals`
 - AND the stored `content` is `Key signals`
 
-### Requirement: An Ollama failure leaves the index consistent
+### Requirement: A run commits atomically
 
-When the embedding model cannot be reached or fails, the indexer MUST exit with a non-zero code and MUST NOT leave a file half-indexed: a file's old chunks and metadata are replaced only after all its new embeddings were computed.
+A run that re-embeds anything MUST commit as a whole: every chunk insert and delete of the run and the metadata row MUST be written in one database transaction, after all the run's embeddings were computed. The index is small (a few hundred chunks), so one transaction is cheap. A failure at any point, from Ollama or the store, MUST roll the whole run back: the previous index stays fully intact and never mixes chunks from two models or two digests. The indexer then exits with a non-zero code.
 
 #### Scenario: Ollama down
 - GIVEN Ollama is unreachable
 - WHEN the indexer runs on a changed runbook
 - THEN it exits with a non-zero code naming the embedding model
 - AND the old chunks of that runbook are still in the index
+
+#### Scenario: Failure in the middle of a full re-index
+- GIVEN the index was built with model A, and the indexer runs with model B, so every file is re-embedded
+- AND the embedding model fails on the third file
+- WHEN the run ends
+- THEN it exits with a non-zero code
+- AND every chunk row and the metadata row are exactly as they were before the run, all from model A

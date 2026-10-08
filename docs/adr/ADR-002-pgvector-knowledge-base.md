@@ -63,7 +63,7 @@ Constraints:
 - The schema is created by the init script, not by Spring AI: `spring.ai.vectorstore.pgvector.initialize-schema=false`. Why: schema creation needs `CREATE` on the database and, with Spring AI's default DDL, `CREATE EXTENSION`, which only the superuser may run. Keeping DDL in the init script keeps both application roles unprivileged.
 - The chunk table follows the layout Spring AI's `PgVectorStore` reads (`id`, `content`, `metadata` as JSON, `embedding vector(768)`).
 - **HNSW index with cosine distance** (`vector_cosine_ops`). HNSW needs no training step, unlike IVFFlat, so it works on an almost empty table and on a re-index. Cosine is the distance Nomic's embeddings are meant for.
-- An index metadata table records the model name, its digest and the dimensions the index was built with.
+- An index metadata table records the model name, its digest, the dimensions and both prefixes the index was built with.
 
 ### Embedding model and the coupling to the data
 
@@ -71,17 +71,19 @@ Constraints:
 - Nomic needs task prefixes: documents are embedded as `search_document: <text>` and queries as `search_query: <text>`. Without them the retrieval quality drops.
 - **The model is configurable**: its name, dimensions and both prefixes are properties, not constants.
 - **The data is not.** Vectors from different models live in different spaces and cannot be compared, and the column has a fixed `vector(768)`. So:
-  - the indexer records the model name, digest and dimensions in the index metadata table;
-  - `search_runbooks` compares the recorded name and dimensions with its own configuration before every search and **refuses** on a mismatch, with `UPSTREAM_ERROR` and the reason `index built with model X, configured Y`. A mismatch never returns wrong results silently;
+  - the digest is never configured: both the indexer and mcp-tools read it from Ollama's `GET /api/tags`, taking the entry whose name matches the configured model (a name without a tag means `:latest`);
+  - the indexer records the model name, digest, dimensions and both prefixes in the index metadata table;
+  - `search_runbooks` compares all five with its own configuration and Ollama's current digest before every search, and **refuses** on any difference, with `UPSTREAM_ERROR` and a reason such as `index built with model X, configured Y`. It caches Ollama's digest for at most 60 s, so a model re-pulled under the same name is refused within a minute. A mismatch never returns wrong results silently;
   - changing the model means a property change plus a re-index, and a different dimension also means a schema change.
 
 ### Indexer
 
 - The `knowledge/` module is a Spring Boot one-shot job. It runs as a compose service and exits.
 - **Allow-list:** it reads only `docs/runbooks/*.md`, from a read-only mount of that directory alone. `openspec/` and `odd/` are not mounted.
-- **Leakage gate:** before embedding anything, it scans every file with the runbook authoring rule's pattern (`\bF[1-8]\b|fault|inject`, case-insensitive). Any match outside the README's own "Authoring rule" section stops the run with a non-zero exit, and nothing is written.
-- It splits by heading with the Markdown reader, then with `TokenTextSplitter` for long sections. Each chunk carries `service` (from the file name), `section` (its heading), `source` (the repository path) and `content_hash`.
+- **Leakage gate:** before embedding anything, it scans every file with the runbook authoring rule's pattern (`\b(F[1-8]\b|fault|inject)`, case-insensitive: a fault id, or a word that starts with `fault` or `inject`, so "default" does not match). Any match outside the README's own "Authoring rule" section stops the run with a non-zero exit, and nothing is written.
+- It splits by heading with the Markdown reader, then with `TokenTextSplitter` for long sections, so no chunk holds more than 800 tokens. That keeps a single chunk well under the tool's 8 KB cap; if one still exceeds it, `search_runbooks` returns it cut with `[truncated]`, never an empty `OK`. Each chunk carries `service` (from the file name), `section` (its heading), `source` (the repository path) and `content_hash`.
 - It stores each file's content hash and skips files that have not changed.
+- **A run commits atomically.** All of a run's chunk changes and the metadata row are written in one transaction, after every embedding was computed. The index is a few hundred rows, so this is cheap, and a failure mid-run leaves the previous index fully intact, never a mix of two models.
 
 ### Retrieval
 

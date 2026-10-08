@@ -22,7 +22,7 @@ These apply to every tool.
 | Backends | `kintsugi.mcp.loki.base-url` (default `http://loki:3100`) and `kintsugi.mcp.prometheus.base-url` (default `http://prometheus:9090`), each with `connect-timeout` (2 s) and `read-timeout` (5 s) |
 | Hosts | `kintsugi.mcp.allowed-hosts`, comma-separated, default `mcp-tools:8085,localhost:18085,127.0.0.1:18085`; an entry ending in `:*` accepts any port. An empty list stops the startup |
 | Database | `kintsugi.mcp.postgres.host` (default `postgres`), `port` (5432), `username` (`kintsugi_agent`), `password` (required, from the `KINTSUGI_AGENT_DB_PASSWORD` environment variable; no default), `connection-timeout` (2 s), `maximum-pool-size` (2). One read-only pool per database; the database names `orders`, `payments` and `inventory` are fixed in code, not configurable |
-| Knowledge store | its own host, credentials and read-only pool, as `kintsugi_agent` on the knowledge store, database `knowledge` (fixed in code). The embedding model's name, dimensions and query prefix are properties and must match the index ([knowledge-base spec](../knowledge-base/spec.md)); Ollama is reached with the same `connect-timeout` and `read-timeout` rule as the other backends |
+| Knowledge store | its own host, credentials and read-only pool, as `kintsugi_agent` on the knowledge store, database `knowledge` (fixed in code). The embedding model's name, dimensions, document prefix and query prefix are properties and must match the index; the model's digest is read from Ollama's `GET /api/tags` and cached for at most 60 s ([knowledge-base spec](../knowledge-base/spec.md)); Ollama is reached with the same `connect-timeout` and `read-timeout` rule as the other backends |
 
 ## Tools
 
@@ -34,7 +34,7 @@ These apply to every tool.
 | `get_order_trace` | `orderId` | the order row, plus `order_events`, `payment_events` and `reservation_events` for that order (the oldest 50 per table, by `occurred_at`) | first the order, `kind` `order` with `id`, `status`, `createdAt`, `updatedAt` (absent when no row exists); then the events of the three tables in one time-ordered list, each `kind` `event` with `source` (`order`, `payment`, `reservation`), `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` (the `detail`, cut at 1000 characters with `[truncated]`). Null fields are left out. More than 50 events in a table sets `truncated` |
 | `recent_events` | `source`, `type?`, `outcome?`, `minDurationMs?`, `sinceMinutes`, `limit?` | `order_events`, `payment_events` or `reservation_events`, rows with `occurred_at` in the window and `duration_ms >= minDurationMs` | events, newest first: `orderId`, `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` |
 | `status_summary` | `table`, `sinceMinutes?` | `orders`, `payments` or `stock` | aggregates only: `status` and `count` per status (`orders`, `payments`; `sinceMinutes` counts only rows with `created_at` in the window), or `sku` and `available` per SKU (`stock`, at most 100 SKUs; `sinceMinutes` is rejected, since stock has no times) |
-| `search_runbooks` | `query`, `service?`, `limit?` | the `knowledge` database on the knowledge store: the query, with the query prefix, is embedded by the configured model, then the nearest chunks by cosine distance are read, filtered on `service` when given | chunks, nearest first: `service` (absent for README chunks), `section`, `score` (1 minus the cosine distance, rounded to 3 decimals), `untrustedText` (the chunk text). Whole chunks are dropped from the end to fit the output cap |
+| `search_runbooks` | `query`, `service?`, `limit?` | the `knowledge` database on the knowledge store: the query, with the query prefix, is embedded by the configured model, then the nearest chunks by cosine distance are read, filtered on `service` when given | chunks, nearest first: `service` (absent for README chunks), `section`, `score` (1 minus the cosine distance, rounded to 3 decimals), `untrustedText` (the chunk text). Whole chunks are dropped from the end to fit the output cap; when the nearest chunk alone exceeds it, its text is cut and ends with `[truncated]` |
 | `service_restarts` | `sinceMinutes` | Prometheus `max by (service) (process_start_time_seconds{service=~"<allowed services>"})`, same step as `query_metric` | per service: `startTimes` seen in the window, oldest first, and `restartsInWindow`, the start times inside the window (each a restart or deploy). Two restarts within one step show as one |
 
 Parameter domains:
@@ -299,19 +299,36 @@ The tables are created after the role, by each service's Flyway as `lab_app`, so
 - WHEN `search_runbooks` runs
 - THEN whole chunks are dropped from the end, the output is at most 8 KB and the result reports `truncated: true`
 
+#### Scenario: Nearest chunk larger than the output cap
+- GIVEN the nearest chunk alone exceeds 8 KB (rare: the indexer bounds chunks at 800 tokens)
+- WHEN `search_runbooks` runs
+- THEN the result is `OK` with that one chunk, its `untrustedText` cut and ending with `[truncated]`, the output at most 8 KB, and `truncated: true`
+- AND the result never reports `OK` with zero items because of the cap
+
 #### Scenario: Read-only
 - WHEN `search_runbooks` runs
 - THEN no row of the knowledge store is inserted, updated or deleted, and no document is embedded
 
 ### Requirement: Runbook search refuses a model mismatch
 
-Before searching, `search_runbooks` MUST compare the configured embedding model name and dimensions with those recorded in the index metadata table. On any difference, or when no index has been built, it MUST NOT search and MUST return `UPSTREAM_ERROR`. A mismatch MUST never return results.
+Before searching, `search_runbooks` MUST compare the index metadata table's model name, digest, dimensions, document prefix and query prefix with the configured name, dimensions and prefixes and with the digest Ollama reports now. The digest comes from Ollama's `GET /api/tags`: the entry whose `name` equals the configured model, where a name without a tag means `:latest`. mcp-tools MAY cache that digest for at most 60 s, so a model re-pulled under the same name is refused within a minute. On any difference, when the model is not listed, or when no index has been built, it MUST NOT search and MUST return `UPSTREAM_ERROR`. A mismatch MUST never return results.
 
 #### Scenario: Different model
 - GIVEN the index was built with `nomic-embed-text` and mcp-tools is configured with `mxbai-embed-large`
 - WHEN `search_runbooks` runs
 - THEN the result has `outcome` `UPSTREAM_ERROR` and `reason` `index built with model nomic-embed-text, configured mxbai-embed-large`
 - AND no query embedding is requested
+
+#### Scenario: Digest changed in Ollama
+- GIVEN the index was built with digest `d1`, and a fake Ollama HTTP endpoint's `GET /api/tags` lists `nomic-embed-text:latest` with digest `d2`
+- WHEN `search_runbooks` runs with model `nomic-embed-text`, after the cached digest expired
+- THEN the result has `outcome` `UPSTREAM_ERROR` and a `reason` naming both digests
+- AND no query embedding is requested
+
+#### Scenario: Prefix differs
+- GIVEN the index records query prefix `search_query: ` and mcp-tools is configured with an empty query prefix
+- WHEN `search_runbooks` runs
+- THEN the result has `outcome` `UPSTREAM_ERROR` and no query embedding is requested
 
 #### Scenario: Empty index
 - GIVEN the index metadata table holds no model
