@@ -61,7 +61,7 @@ mcp-tools MUST serve the 7 tools above over MCP Streamable HTTP. `initialize`, `
 
 ### Requirement: No free query language
 
-No tool MUST accept SQL, LogQL, PromQL or any other query text. Every query MUST be built from a fixed template filled with validated parameters. `contains` MUST be escaped so that it matches literally.
+Tools MUST NOT accept SQL, LogQL, PromQL or any other query text. Every query MUST be built from a fixed template filled with validated parameters. `contains` MUST be escaped so that it matches literally.
 
 #### Scenario: Query syntax in contains is matched literally
 - GIVEN `search_logs` with `contains` = `"} |= "" or 1=1`
@@ -108,7 +108,7 @@ Every tool MUST cap its rows, points, series and output size as the shared rules
 
 ### Requirement: The fault-injector and mcp-tools are out of reach
 
-`search_logs` and `count_logs` MUST only select streams of the allowed services. `fault-injector` and `mcp-tools` are not in the enum, so their logs, including mcp-tools' own tool-call records, can never be returned. No tool MUST read the `faults` database.
+`search_logs` and `count_logs` MUST only select streams of the allowed services. `fault-injector` and `mcp-tools` are not in the enum, so their logs, including mcp-tools' own tool-call records, can never be returned. Tools MUST NOT read the `faults` database.
 
 #### Scenario: Own logs excluded
 - WHEN `search_logs` is called with `service` = `mcp-tools`
