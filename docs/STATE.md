@@ -24,7 +24,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Next action
 
-1. Waiting for the human: align Docker Compose versions. The injector ships v5.6.0 and the host has v5.1.3; the two write different image-digest labels, so the host's next `up` recreates the services the injector touched once. That is noise in the future deploy history.
+1. Waiting for the human (approved 2026-10-08, needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, so the host's Compose matches the injector's. After that, verify the version and record "host Compose = v5.6.0" in ADR-009 and setup. Background: The injector ships v5.6.0 and the host has v5.1.3; the two write different image-digest labels, so the host's next `up` recreates the services the injector touched once. That is noise in the future deploy history.
 2. Waiting for the human: add the new variables to the protected `infra/.env.example` (`KINTSUGI_REPO_DIR`, `DOCKER_GID`, `POSTGRES_BOOTSTRAP_PASSWORD`, `LAB_APP_DB_PASSWORD`, `FAULTS_DB_PASSWORD`).
 3. M2, in this order:
    - the MCP server with read-only tools: Loki logs, Prometheus metrics, `queryDb` on the event tables through a non-superuser read-only role with no access to `faults`, and deploy history;
