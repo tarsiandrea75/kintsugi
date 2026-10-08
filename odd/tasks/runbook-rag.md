@@ -80,7 +80,7 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
 - [x] **T1 — ADR-002, living spec `openspec/specs/knowledge-base/spec.md`,** the mcp-tools spec entry for `search_runbooks`, and a stale-version fix in ADR-006 (local Ollama is 0.31.1). Route: delegated writer.
 - [x] **T2 — The knowledge store:** the pgvector container's init script (database, extension, roles, schema), tested with Testcontainers on the same image. Route: delegated writer.
 - [x] **T3 — The indexer (`knowledge/`):** allow-list, leakage check, splitting with metadata, model metadata and content hashes, tested with a fake embedding model. Route: delegated writer.
-- [ ] **T4 — `search_runbooks` in mcp-tools,** with the model-mismatch guard, tested with Testcontainers and a fake embedding model. Route: delegated writer.
+- [x] **T4 — `search_runbooks` in mcp-tools,** with the model-mismatch guard, tested with Testcontainers and a fake embedding model. Route: delegated writer.
 - [ ] **T5 — Compose wiring, Ollama reachability (needs the human), `verify-rag.sh` run for real, docs.** Route: delegated writer.
 
 ## Progress
@@ -139,6 +139,26 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
   - **Size exception:** Part B is about 1,800 lines (620 main, 900 tests). It is a whole new module with one test per spec scenario, and splitting it would leave an indexer that cannot run.
   - Decided for T4: search uses `JdbcTemplate` as well, for the query prefix and the digest guard. The mcp-tools spec's mention of `PgVectorStore` is corrected in T4.
 
+- 2026-10-08: T3 range reviewed (high risk, 4 lenses), approved and acknowledged (`review-04b87f81b77827a2`). Its warnings are fixed in T4 part A:
+  - the health check read an unset `POSTGRES_USER`: it now connects as `kintsugi_agent` over loopback;
+  - a chunkless runbook was re-processed on every run: a new `indexed_files` table holds per-file hashes, readable by the indexer only;
+  - an unexplained `subList` in a test;
+  - a misleading pom comment: the unused Markdown reader is dropped, and CommonMark 0.30.0 is declared directly, giving the same chunk counts;
+  - the -1 dimension sentinel: a missing schema now throws.
+
+  Part A passes alone: `knowledge` 31 and mcp-tools 164 tests, exit 0, run by the parent.
+- 2026-10-08: T4 done by a delegated writer: `search_runbooks` in mcp-tools.
+  - mcp-tools has 193 tests, exit 0: two runs by the writer, one by the parent.
+  - **No real RED:** the code was written before the tests. As a substitute, the writer removed the digest check and the chunk cut on purpose; 4 tests failed, then passed when restored. This is a process deviation from tests-first, recorded honestly.
+  - Design, decided by the writer, to review:
+    - search with `JdbcClient` and `<=>`;
+    - `hnsw.iterative_scan=strict_order` on each connection, so a service filter still fills `limit`;
+    - the guard checks configuration fields first, then the digest from `/api/tags`, cached 60 s;
+    - the Ollama starter with chat off, no model pull, and JDK HTTP clients with 2 s connect and 5 s read timeouts (the WebClient starter is excluded).
+  - **Accepted (parent):** `KNOWLEDGE_AGENT_DB_PASSWORD` is not required at startup. Without it, only `search_runbooks` fails, with a reason naming the variable, and the other 7 tools keep working. This matches the rule that an unavailable source is evidence, not a reason to stop.
+  - **Size exception:** about 1,470 lines (520 main, 770 tests), one cohesive tool with its own datasource, guard and fake Ollama.
+  - Open: the Ollama timeouts are untested. T5 must set `spring.ai.ollama.base-url` and `KNOWLEDGE_AGENT_DB_PASSWORD`.
+
 ## Next step
 
-Review the T3 range, then T4 (`search_runbooks`), via a delegated writer.
+Review the T4 range, then T5: compose wiring, Ollama reachability (needs the human) and `verify-rag.sh`.

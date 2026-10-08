@@ -52,6 +52,21 @@
 			<groupId>org.springframework.ai</groupId>
 			<artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
 		</dependency>
+		<dependency>
+			<!-- Query embeddings for search_runbooks through Ollama's /api/embed, and the model digest from /api/tags
+			     (ADR-002). Only the embedding model is on: spring.ai.model.chat=none, and no model is pulled at startup.
+			     The WebClient starter (Reactor Netty) is excluded: the Ollama client calls through RestClient, and
+			     without Netty both RestClient and the unused WebClient fall back to the JDK HttpClient, like the
+			     Loki and Prometheus clients. -->
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-ollama</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.springframework.boot</groupId>
+					<artifactId>spring-boot-starter-webclient</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
 
 		<dependency>
 			<!-- Prometheus registry for /actuator/prometheus; version managed by Spring Boot (ADR-008). -->

@@ -41,6 +41,7 @@ The tools must satisfy three constraints:
 | Starter | `spring-ai-starter-mcp-server-webmvc` | Spring Initializr's `spring-ai-mcp-server` dependency resolves to it when `web` is selected |
 | MCP Java SDK | 2.0.0 | `io.modelcontextprotocol.sdk:mcp` and `mcp-core`, managed by the Spring AI BOM |
 | MCP protocol | 2025-11-25 | the version the SDK negotiates; the smoke test asserts it in the `initialize` answer |
+| Embeddings | `spring-ai-starter-model-ollama`, for `search_runbooks` only | embedding model only (`spring.ai.model.chat=none`), no model pull at startup, its WebClient starter (Reactor Netty) excluded; see [ADR-002](ADR-002-pgvector-knowledge-base.md) |
 
 Checked with `./mvnw dependency:tree` in `mcp-tools/`.
 
@@ -85,7 +86,8 @@ The model never writes SQL, LogQL or PromQL. Every tool fills a fixed template f
 | Status, outcome, source, metric, table | enums or allow-lists |
 | Order id | UUID |
 | Time window (`sinceMinutes`) | 1 to 360 |
-| Row limit | default 50, maximum 100 |
+| Row limit | default 50, maximum 100 (`search_runbooks`: default 5, maximum 10) |
+| Free text (`contains`, `query`) | plain text of bounded length, no control characters; `contains` is matched literally, `query` is only embedded |
 | Output | a few KB at most, truncated with a marker |
 
 An invalid parameter is an error returned to the model, and no query runs.
@@ -103,6 +105,7 @@ An invalid parameter is an error returned to the model, and no query runs.
 | `recent_events` | the event tables |
 | `status_summary` | aggregates of `orders`, `payments` or `stock` |
 | `service_restarts` | changes of Prometheus `process_start_time_seconds` per service |
+| `search_runbooks` | added by the [runbook-rag feature](../../odd/tasks/runbook-rag.md) as the 8th tool: semantic search over `docs/runbooks/` in the separate pgvector knowledge store, read as that store's own `kintsugi_agent` through one more read-only pool; the query is embedded by the local Ollama ([ADR-002](ADR-002-pgvector-knowledge-base.md)) |
 
 The contract of each tool is in the [living spec](../../openspec/specs/mcp-tools/spec.md).
 

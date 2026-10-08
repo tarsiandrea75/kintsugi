@@ -33,7 +33,7 @@ Constraints:
 |-----------|---------|-------|
 | Store image | `pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0` | pgvector 0.8.7, the latest release, on PostgreSQL 18. The digest is the multi-platform index, read with `docker buildx imagetools inspect` without pulling. The trixie variant matches the Debian base of the lab's `postgres:18.6` |
 | Spring AI | 2.0.1 | as in [ADR-006](ADR-006-stack-versions.md) |
-| Vector store | `spring-ai-starter-vector-store-pgvector`; not used by the indexer, which writes with `JdbcTemplate` (see Indexer) | [PGvector docs](https://docs.spring.io/spring-ai/reference/api/vectordbs/pgvector.html) |
+| Vector store | none: Spring AI's `PgVectorStore` is not used. The indexer writes and mcp-tools searches with plain SQL through `JdbcTemplate`/`JdbcClient` (see Indexer and Retrieval) | [PGvector docs](https://docs.spring.io/spring-ai/reference/api/vectordbs/pgvector.html) |
 | Markdown parser | `org.commonmark:commonmark` 0.30.0, the latest release (checked on Maven Central, 2026-10-08), declared directly and pinned in `knowledge/pom.xml`, since neither Spring Boot nor Spring AI manages it. `spring-ai-markdown-document-reader` was tried and dropped (see Indexer) | [commonmark-java](https://github.com/commonmark/commonmark-java) |
 | Splitter | `TokenTextSplitter` | same ETL docs |
 | Embeddings | `spring-ai-starter-model-ollama` with `spring.ai.model.embedding=ollama` | [Ollama embeddings docs](https://docs.spring.io/spring-ai/reference/api/embeddings/ollama-embeddings.html) |
@@ -64,8 +64,8 @@ Constraints:
 
 ### Schema and index
 
-- The schema is created by the init script, not by Spring AI: `spring.ai.vectorstore.pgvector.initialize-schema=false`. Why: schema creation needs `CREATE` on the database and, with Spring AI's default DDL, `CREATE EXTENSION`, which only the superuser may run. Keeping DDL in the init script keeps both application roles unprivileged.
-- The chunk table, `runbook_chunks`, follows the layout Spring AI's `PgVectorStore` reads (`id`, `content`, `metadata` as JSON, `embedding vector(768)`); the indexer and mcp-tools name it in configuration. The 768 is fixed in the schema, not a variable: a model with other dimensions means a migration.
+- The schema is created by the init script, not by Spring AI: no module uses `PgVectorStore`, so nothing could create it, and none should. Why: schema creation needs `CREATE` on the database and, with Spring AI's default DDL, `CREATE EXTENSION`, which only the superuser may run. Keeping DDL in the init script keeps both application roles unprivileged.
+- The chunk table, `runbook_chunks`, keeps the layout Spring AI's `PgVectorStore` uses (`id`, `content`, `metadata` as JSON, `embedding vector(768)`), so a later switch to it stays possible; the indexer and mcp-tools name it in their SQL. The 768 is fixed in the schema, not a variable: a model with other dimensions means a migration.
 - **HNSW index with cosine distance** (`runbook_chunks_embedding_hnsw`, `vector_cosine_ops`). HNSW needs no training step, unlike IVFFlat, so it works on an almost empty table and on a re-index. Cosine is the distance Nomic's embeddings are meant for.
 - An index metadata table, `index_metadata`, holds exactly one row and records the model name, its digest, the dimensions and both prefixes the index was built with.
 
@@ -97,7 +97,16 @@ Constraints:
 
 ### Retrieval
 
-`search_runbooks(query, service?, limit?)` is the 8th mcp-tools tool, under the same contract as the other seven ([ADR-004](ADR-004-tools-via-mcp.md)): validated parameters, an 8 KB cap, chunks returned as `untrustedText`, one log line per call. It searches only; it never indexes or writes. The contract is in the [mcp-tools spec](../../openspec/specs/mcp-tools/spec.md); the store and the indexer are in the [knowledge-base spec](../../openspec/specs/knowledge-base/spec.md).
+`search_runbooks(query, service?, limit?)` is the 8th mcp-tools tool, under the same contract as the other seven ([ADR-004](ADR-004-tools-via-mcp.md)): validated parameters, an 8 KB cap, chunks returned as `untrustedText`, one log line per call. It searches only; it never indexes or writes.
+
+**Implementation (T4).** Verified by Testcontainers tests on the pinned image with the real init script, known vectors and a fake Ollama, and by an MCP endpoint test. Choices made while building it:
+
+- **Plain SQL through `JdbcClient`, not `PgVectorStore`**, for the same reasons as the indexer: the store would embed the query itself, without the query prefix, and the model guard reads `index_metadata` before any embedding. The query is `ORDER BY embedding <=> CAST(:vector AS vector) LIMIT :limit`, with a fixed `metadata->>'service' = :service` clause when a service is given.
+- **Its own read-only pool**, built like the lab pools (Hikari `readOnly`, pgjdbc `readOnlyMode=always`, 2 connections, 2 s timeout, no connection at startup), as `kintsugi_agent` on `kintsugi.mcp.knowledge.host` (default `knowledge-db`), database `knowledge` fixed in code. Its password, `KNOWLEDGE_AGENT_DB_PASSWORD`, has no default but is **not required at startup**: a missing one fails only `search_runbooks`, with a reason naming the variable, so the seven evidence tools never depend on the knowledge store. Failures are classified like the lab's (authentication failed, connection pool busy, unreachable).
+- **Each connection turns on pgvector's iterative index scan** (`SET hnsw.iterative_scan = strict_order`, pgvector 0.8): with a service filter, a plain HNSW scan stops after `hnsw.ef_search` (40) candidates and could return fewer than `limit` chunks.
+- **The Ollama starter is configured down to what search needs**: `spring.ai.model.chat=none`, `spring.ai.model.embedding=ollama`, `spring.ai.ollama.init.pull-model-strategy=never` (no pull at startup, so mcp-tools starts while Ollama is down), and `spring.http.clients` connect and read timeouts of 2 s and 5 s, the other backends' values. Its WebClient starter is excluded, so no Reactor Netty runs in mcp-tools; both HTTP clients fall back to the JDK's.
+- **The model guard compares the configured values first** (name, dimensions, both prefixes) and the digest last, so a different model name is refused without calling Ollama. Only a found digest is cached (60 s), so an unlisted model or an Ollama failure is asked again on the next search.
+- **An oversized nearest chunk** is cut by the tool itself to fit the 8 KB cap, ending with `[truncated]`, since the shared runner can only drop whole items. The contract is in the [mcp-tools spec](../../openspec/specs/mcp-tools/spec.md); the store and the indexer are in the [knowledge-base spec](../../openspec/specs/knowledge-base/spec.md).
 
 ## Alternatives considered
 

@@ -94,6 +94,16 @@ public class ToolCallRunner {
 		}
 	}
 
+	/**
+	 * The size in bytes of an {@code OK} result holding {@code items}, as {@link #run} renders it before any cut. A
+	 * tool that must keep its first item checks it here and cuts that item's text itself, since the runner can only
+	 * drop whole items.
+	 */
+	public static int renderedBytes(List<?> items, boolean truncated) {
+		return JSON.writeValueAsString(body(Outcome.OK, null, new ArrayList<>(items), truncated))
+			.getBytes(StandardCharsets.UTF_8).length;
+	}
+
 	private static Map<String, Object> body(Outcome outcome, String reason, List<Object> items, boolean truncated) {
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("outcome", outcome);

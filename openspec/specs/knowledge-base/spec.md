@@ -19,7 +19,7 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | File table | `indexed_files`: `source text` (primary key), `content_hash text NOT NULL`; one row per file the last run indexed, including a file that yields no chunk. Owned and read by `knowledge_indexer` only: `kintsugi_agent` has no grant on it. Added after the first volumes were made: a store created before it needs `docker compose down -v` and a fresh init |
 | Index metadata table | `index_metadata`, exactly one row (`id` 1): `model_name`, `model_digest`, `dimensions`, `document_prefix`, `query_prefix`, `indexed_at` |
 | Index | `runbook_chunks_embedding_hnsw`: HNSW, cosine distance (`vector_cosine_ops`), on `embedding`. The column's 768 is fixed in the schema: a model with other dimensions needs a migration and a full re-index |
-| Schema owner | the init script; Spring AI never creates it (the indexer writes with plain SQL; any `PgVectorStore` runs with `spring.ai.vectorstore.pgvector.initialize-schema=false`) |
+| Schema owner | the init script; Spring AI never creates it: no module uses `PgVectorStore`. The indexer writes and `search_runbooks` reads with plain SQL |
 | Embedding model | configurable: name (default `nomic-embed-text`), dimensions (default 768), document prefix (default `search_document: `), query prefix (default `search_query: `) |
 | Model digest | read from Ollama, never configured: `GET /api/tags`, the entry whose `name` equals the configured model; a configured name without a tag means `:latest` (`nomic-embed-text` is matched as `nomic-embed-text:latest`) |
 | Chunk size | at most 800 tokens of text per chunk, counted with `TokenTextSplitter`'s tokenizer (cl100k_base) |

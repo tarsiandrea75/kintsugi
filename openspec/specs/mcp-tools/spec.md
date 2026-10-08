@@ -22,7 +22,9 @@ These apply to every tool.
 | Backends | `kintsugi.mcp.loki.base-url` (default `http://loki:3100`) and `kintsugi.mcp.prometheus.base-url` (default `http://prometheus:9090`), each with `connect-timeout` (2 s) and `read-timeout` (5 s) |
 | Hosts | `kintsugi.mcp.allowed-hosts`, comma-separated, default `mcp-tools:8085,localhost:18085,127.0.0.1:18085`; an entry ending in `:*` accepts any port. An empty list stops the startup |
 | Database | `kintsugi.mcp.postgres.host` (default `postgres`), `port` (5432), `username` (`kintsugi_agent`), `password` (required, from the `KINTSUGI_AGENT_DB_PASSWORD` environment variable; no default), `connection-timeout` (2 s), `maximum-pool-size` (2). One read-only pool per database; the database names `orders`, `payments` and `inventory` are fixed in code, not configurable |
-| Knowledge store | its own host, credentials and read-only pool, as `kintsugi_agent` on the knowledge store, database `knowledge` (fixed in code). The embedding model's name, dimensions, document prefix and query prefix are properties and must match the index; the model's digest is read from Ollama's `GET /api/tags` and cached for at most 60 s ([knowledge-base spec](../knowledge-base/spec.md)); Ollama is reached with the same `connect-timeout` and `read-timeout` rule as the other backends |
+| Knowledge store | `kintsugi.mcp.knowledge.host` (default `knowledge-db`), `port` (5432), `username` (`kintsugi_agent`), `password` (from `KNOWLEDGE_AGENT_DB_PASSWORD`, the knowledge store's own password for that role; no default, but not required at startup: without it only `search_runbooks` fails), `connection-timeout` (2 s), `maximum-pool-size` (2). One read-only pool, built like the lab ones, on database `knowledge` (fixed in code); each connection runs `SET hnsw.iterative_scan = strict_order` so a filtered search still returns up to `limit` chunks. Searched with plain SQL, never through Spring AI's `PgVectorStore` |
+| Embedding model | `kintsugi.mcp.knowledge.model.name` (default `nomic-embed-text`), `dimensions` (768), `document-prefix` (`search_document: `), `query-prefix` (`search_query: `); they must match the index. The model's digest is read from Ollama's `GET /api/tags` and cached for at most 60 s ([knowledge-base spec](../knowledge-base/spec.md)) |
+| Ollama | `spring.ai.ollama.base-url` (default `http://localhost:11434`, set by compose), through Spring AI's Ollama starter with `spring.ai.model.chat=none`, `spring.ai.model.embedding=ollama` and `spring.ai.ollama.init.pull-model-strategy=never`; the same 2 s connect and 5 s read timeouts as the other backends (`spring.http.clients.*`) |
 
 ## Tools
 
@@ -335,6 +337,22 @@ Before searching, `search_runbooks` MUST compare the index metadata table's mode
 - WHEN `search_runbooks` runs
 - THEN the result has `outcome` `UPSTREAM_ERROR` and a `reason` saying the runbook index has not been built
 
+#### Scenario: Model not listed by Ollama
+- GIVEN the fake Ollama endpoint's `GET /api/tags` does not list the configured model
+- WHEN `search_runbooks` runs
+- THEN the result has `outcome` `UPSTREAM_ERROR` and `reason` `model nomic-embed-text is not listed by Ollama`, and no query embedding is requested
+
+#### Scenario: Digest cache
+- GIVEN a search read the digest from Ollama
+- WHEN `search_runbooks` runs again within 60 s
+- THEN Ollama's `GET /api/tags` is not called again
+- AND a search more than 60 s after the read calls it again and compares the new digest
+
+#### Scenario: Configured values compared first
+- GIVEN the configured model name, dimensions or either prefix differs from the index's
+- WHEN `search_runbooks` runs
+- THEN the result is `UPSTREAM_ERROR` with a `reason` naming the field and both values, and Ollama is not called
+
 ### Requirement: Runbook search failures are reported
 
 When Ollama or the knowledge store fails, `search_runbooks` MUST end with `UPSTREAM_ERROR` and a short `reason`, and the other seven tools MUST keep working.
@@ -342,8 +360,19 @@ When Ollama or the knowledge store fails, `search_runbooks` MUST end with `UPSTR
 #### Scenario: Ollama down
 - GIVEN Ollama is unreachable or answers an error
 - WHEN `search_runbooks` runs
-- THEN the result has `outcome` `UPSTREAM_ERROR` and a `reason` such as `Ollama is unreachable`
+- THEN the result has `outcome` `UPSTREAM_ERROR` and `reason` `Ollama is unreachable`, or `Ollama answered an error` for an HTTP error
 - AND `search_logs` still answers `OK`
+
+#### Scenario: Embedding of the wrong length
+- GIVEN Ollama answers the query with an embedding of 384 dimensions while 768 are configured
+- WHEN `search_runbooks` runs
+- THEN the result has `outcome` `UPSTREAM_ERROR` and the chunks are not searched
+
+#### Scenario: Wrong or missing knowledge password
+- GIVEN `KNOWLEDGE_AGENT_DB_PASSWORD` is wrong
+- WHEN `search_runbooks` runs
+- THEN the result has `outcome` `UPSTREAM_ERROR` and `reason` `PostgreSQL knowledge authentication failed`
+- AND when it is unset or empty, mcp-tools still starts, and the `reason` is `PostgreSQL knowledge password is not set (KNOWLEDGE_AGENT_DB_PASSWORD)`, with no connection attempted
 
 #### Scenario: Knowledge store down
 - GIVEN the knowledge store is unreachable

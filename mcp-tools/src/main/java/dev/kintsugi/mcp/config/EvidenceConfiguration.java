@@ -50,10 +50,18 @@ public class EvidenceConfiguration {
 	 * database is down and its tools answer {@code UPSTREAM_ERROR} until it is back.
 	 */
 	public static HikariDataSource dataSource(DatabaseProperties properties, Database database) {
+		return dataSource(properties, database.databaseName(), null);
+	}
+
+	/**
+	 * The same read-only pool for a database named in code, such as the knowledge store's {@code knowledge}, with an
+	 * optional statement each new connection runs first.
+	 */
+	static HikariDataSource dataSource(DatabaseProperties properties, String databaseName, String connectionInitSql) {
 		HikariConfig config = new HikariConfig();
-		config.setPoolName("mcp-tools-" + database.databaseName());
-		config.setJdbcUrl("jdbc:postgresql://" + properties.host() + ":" + properties.port() + "/"
-				+ database.databaseName());
+		config.setConnectionInitSql(connectionInitSql);
+		config.setPoolName("mcp-tools-" + databaseName);
+		config.setJdbcUrl("jdbc:postgresql://" + properties.host() + ":" + properties.port() + "/" + databaseName);
 		config.setUsername(properties.username());
 		config.setPassword(properties.password());
 		config.setReadOnly(true);

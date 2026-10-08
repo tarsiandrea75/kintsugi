@@ -17,7 +17,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Runs the event and summary tools' fixed SQL on one lab database. Every failure becomes an {@link UpstreamException}
- * with a short reason the model can read, like the Loki and Prometheus clients.
+ * with a short reason the model can read, like the Loki and Prometheus clients. The knowledge store's searches use the
+ * same classification ({@link #connectionFailure}, {@link #queryFailure}).
  */
 public class LabDatabases {
 
@@ -51,9 +52,13 @@ public class LabDatabases {
 			throw new UpstreamException("PostgreSQL " + database.databaseName() + connectionFailure(ex), ex);
 		}
 		catch (DataAccessException ex) {
-			String reason = QUERY_CANCELED.equals(sqlState(ex)) ? " did not answer in time" : " query failed";
-			throw new UpstreamException("PostgreSQL " + database.databaseName() + reason, ex);
+			throw new UpstreamException("PostgreSQL " + database.databaseName() + queryFailure(ex), ex);
 		}
+	}
+
+	/** Why a statement failed once connected: the role's 3 s timeout, or anything else, never the SQL itself. */
+	public static String queryFailure(Throwable ex) {
+		return QUERY_CANCELED.equals(sqlState(ex)) ? " did not answer in time" : " query failed";
 	}
 
 	/**
@@ -67,7 +72,7 @@ public class LabDatabases {
 	 * <li>a pool timeout with no SQLState had no failed attempt: every connection was in use, so the pool is busy.</li>
 	 * </ul>
 	 */
-	static String connectionFailure(Throwable ex) {
+	public static String connectionFailure(Throwable ex) {
 		String state = sqlState(ex);
 		if (INVALID_PASSWORD.equals(state) || INVALID_AUTHORIZATION.equals(state)) {
 			return " authentication failed";

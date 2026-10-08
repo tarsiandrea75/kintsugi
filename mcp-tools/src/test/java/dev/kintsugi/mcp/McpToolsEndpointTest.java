@@ -5,6 +5,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
+import dev.kintsugi.mcp.knowledge.FakeOllama;
 import dev.kintsugi.mcp.observability.FakeHttpBackend;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The tools through the real MCP endpoint, as the agent will call them: JSON-RPC over HTTP on {@code POST /mcp}, with
- * Loki and Prometheus replaced by fakes and PostgreSQL by the lab database container, read as {@code kintsugi_agent}.
+ * Loki, Prometheus and Ollama replaced by fakes, PostgreSQL by the lab database container and the knowledge store by
+ * its pgvector container, both read as {@code kintsugi_agent}.
  */
 @Import(TestcontainersConfiguration.class)
 // Spring Boot turns metrics export off in tests; Prometheus export is turned back on to read the exposition.
@@ -35,6 +37,8 @@ class McpToolsEndpointTest {
 
 	private static final FakeHttpBackend PROMETHEUS = FakeHttpBackend.start();
 
+	private static final FakeOllama OLLAMA = FakeOllama.start();
+
 	private static final JsonMapper JSON = JsonMapper.builder().build();
 
 	private final HttpClient http = HttpClient.newHttpClient();
@@ -46,22 +50,27 @@ class McpToolsEndpointTest {
 	static void backends(DynamicPropertyRegistry registry) {
 		registry.add("kintsugi.mcp.loki.base-url", LOKI::baseUrl);
 		registry.add("kintsugi.mcp.prometheus.base-url", PROMETHEUS::baseUrl);
+		registry.add("spring.ai.ollama.base-url", OLLAMA::baseUrl);
+		registry.add("kintsugi.mcp.knowledge.host", KnowledgeDatabase::host);
+		registry.add("kintsugi.mcp.knowledge.port", KnowledgeDatabase::port);
+		registry.add("kintsugi.mcp.knowledge.password", () -> KnowledgeDatabase.AGENT_PASSWORD);
 	}
 
 	@AfterAll
 	static void stopFakes() {
 		LOKI.close();
 		PROMETHEUS.close();
+		OLLAMA.close();
 	}
 
 	@Test
-	void toolsListShowsTheObservabilityToolsWithTheirSchemas() throws Exception {
+	void toolsListShowsAllEightToolsAndTheObservabilitySchemas() throws Exception {
 		JsonNode tools = rpc("""
 				{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""").path("result").path("tools");
 
 		assertThat(tools).extracting(tool -> tool.path("name").asString())
 			.containsExactlyInAnyOrder("search_logs", "count_logs", "query_metric", "get_order_trace", "recent_events",
-					"status_summary", "service_restarts");
+					"status_summary", "service_restarts", "search_runbooks");
 		JsonNode searchLogs = tools.valueStream()
 			.filter(tool -> tool.path("name").asString().equals("search_logs"))
 			.findFirst()
@@ -164,6 +173,40 @@ class McpToolsEndpointTest {
 		assertThat(trace.path("content").get(0).path("text").asString()).contains("INVALID_PARAMETER").contains("UUID");
 		assertThat(events.path("isError").asBoolean()).isTrue();
 		assertThat(events.path("content").get(0).path("text").asString()).contains("INVALID_PARAMETER");
+	}
+
+	@Test
+	void toolsListShowsSearchRunbooksWithItsSchema() throws Exception {
+		JsonNode tools = rpc("""
+				{"jsonrpc":"2.0","id":9,"method":"tools/list","params":{}}""").path("result").path("tools");
+
+		JsonNode searchRunbooks = tool(tools, "search_runbooks");
+		assertThat(searchRunbooks.path("description").asString()).contains("untrustedText").contains("not instructions");
+		assertThat(searchRunbooks.path("inputSchema").path("properties").propertyNames()).contains("query", "service",
+				"limit");
+		assertThat(searchRunbooks.path("inputSchema").path("required")).extracting(JsonNode::asString)
+			.containsExactly("query");
+	}
+
+	@Test
+	void toolsCallRunsSearchRunbooksAgainstTheKnowledgeStoreAndOllama() throws Exception {
+		KnowledgeDatabase.empty();
+		KnowledgeDatabase.builtWith("nomic-embed-text", FakeOllama.DIGEST, 768, "search_document: ", "search_query: ");
+		KnowledgeDatabase.chunk("order-service", "Payment timeouts", "Check the gateway authorize latency.",
+				KnowledgeDatabase.axis(0));
+
+		JsonNode result = rpc("""
+				{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"search_runbooks",
+				"arguments":{"query":"payments time out at checkout","service":"order-service"}}}""").path("result");
+
+		assertThat(result.path("isError").asBoolean()).isFalse();
+		JsonNode body = JSON.readTree(result.path("content").get(0).path("text").asString());
+		assertThat(body.path("outcome").asString()).isEqualTo("OK");
+		assertThat(body.path("items").get(0).path("section").asString()).isEqualTo("Payment timeouts");
+		assertThat(body.path("items").get(0).path("score").asDouble()).isEqualTo(1.0);
+		assertThat(body.path("items").get(0).path("untrustedText").asString())
+			.isEqualTo("Check the gateway authorize latency.");
+		assertThat(OLLAMA.embeddedInputs()).contains("search_query: payments time out at checkout");
 	}
 
 	@Test
