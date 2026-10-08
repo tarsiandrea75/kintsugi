@@ -183,6 +183,21 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
     - (1) No lab service has a restart policy or a memory limit. mcp-tools matches them; add both everywhere, or nowhere.
     - (2) The `PAYMENT_PENDING` rise check compares the first and last points of a 10-minute window. In theory, an order caught mid-flight could hide the rise.
 
+- 2026-10-08: T5 range `23cc9cb..6bed135` reviewed (high risk, 4 lenses), approved and acknowledged (`review-61e248221220d832`).
+  - Fixed in the next commit: WARNING (R3/R4), `verify-mcp.sh` ran `down -v` whenever its role probe failed, including while postgres was still starting.
+    - Now it wipes the volume only when a successful query finds no role.
+    - If the probe does not succeed within 30 s, the script stops instead.
+    - Re-run: exit 0.
+  - Follow-ups (not fixed):
+    - WARNING (R4): "connection pool busy" is also reported when the connection attempts are still running at the 2 s timeout, for example with a paused postgres.
+    - Suggestions:
+      - compose repeats the defaults from `application.properties`;
+      - the Javadoc of `McpTransportConfigurationTest` is garbled;
+      - the `DatabaseProperties` password Javadoc says the value comes "only" from the variable;
+      - ADR-004 still says the override matches the bean "by name";
+      - no test reads the shipped allowed-hosts default;
+      - the health test's "no db entry" assertion proves nothing on its own.
+
 ## Next step
 
-Review the T5 range. Then the human reviews the autonomous decisions, and the next M2 feature (the agent) starts.
+The human reviews the autonomous decisions, and the next M2 feature (the agent) starts.

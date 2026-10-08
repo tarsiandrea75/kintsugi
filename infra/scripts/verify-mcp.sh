@@ -95,9 +95,18 @@ mcp_sees_pending_rise() {
 psql_agent() { compose exec -T postgres psql -U kintsugi_agent -d "$1" -v ON_ERROR_STOP=1 -Atc "$2" "${@:3}"; }
 
 # 0. A volume created before mcp-tools has no kintsugi_agent role, and the init script runs only on an empty volume.
+# Only a successful query that finds no role wipes the volume: a probe that fails (postgres still starting or
+# recovering) must never be read as "role missing", so the script stops instead.
 if [[ -n "$(compose ps -q postgres 2>/dev/null || true)" ]]; then
-  role=$(psql_lab orders "select count(*) from pg_roles where rolname = 'kintsugi_agent'" 2>/dev/null || true)
-  if [[ "$role" != 1 ]]; then
+  role=""
+  for _ in $(seq 1 30); do
+    if role=$(psql_lab orders "select count(*) from pg_roles where rolname = 'kintsugi_agent'"); then break; fi
+    role=""; sleep 1
+  done
+  if [[ -z "$role" ]]; then
+    echo "FAIL  postgres is running but did not answer the role probe within 30s; refusing to recreate the volume" >&2
+    exit 1
+  elif [[ "$role" == 0 ]]; then
     info "the postgres volume predates kintsugi_agent; recreating the lab (docker compose down -v)"
     compose down -v >/dev/null 2>&1
   fi
