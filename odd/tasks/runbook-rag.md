@@ -65,7 +65,8 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
 
 - Only `docs/runbooks/*.md` is indexed. A runbook that fails the leakage check stops the indexer.
 - `search_runbooks` returns the right runbook section for symptom-worded queries.
-  - The live check script asserts at least: the order-service payment-timeout section, the inventory-service slow-reservation section, and the gateway rate-limit section.
+  - The live check script asserts at least: the order-service payment-timeout section, the inventory-service slow-reservation section, and the gateway runbook in the top 3 for a rate-limit query.
+  - Amended 2026-10-08, T5: the gateway runbook has no rate-limit section; 429 appears only in its tables. On "gateway answering too many requests" it ranks 2nd, after payment-service "503 on POST /payments". This is a retrieval-quality follow-up, not hidden.
 - A model mismatch between the configuration and the index is refused with a clear error.
 - Neither the store nor the tool can reach `faults`. `kintsugi_agent` cannot write the knowledge base.
 - `./mvnw test` passes in `knowledge` and `mcp-tools`. The verify scripts still pass.
@@ -81,7 +82,7 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
 - [x] **T2 — The knowledge store:** the pgvector container's init script (database, extension, roles, schema), tested with Testcontainers on the same image. Route: delegated writer.
 - [x] **T3 — The indexer (`knowledge/`):** allow-list, leakage check, splitting with metadata, model metadata and content hashes, tested with a fake embedding model. Route: delegated writer.
 - [x] **T4 — `search_runbooks` in mcp-tools,** with the model-mismatch guard, tested with Testcontainers and a fake embedding model. Route: delegated writer.
-- [ ] **T5 — Compose wiring, Ollama reachability (needs the human), `verify-rag.sh` run for real, docs.** Route: delegated writer.
+- [x] **T5 — Compose wiring, Ollama reachability (needs the human), `verify-rag.sh` run for real, docs.** Route: delegated writer.
 
 ## Progress
 
@@ -159,6 +160,43 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
   - **Size exception:** about 1,470 lines (520 main, 770 tests), one cohesive tool with its own datasource, guard and fake Ollama.
   - Open: the Ollama timeouts are untested. T5 must set `spring.ai.ollama.base-url` and `KNOWLEDGE_AGENT_DB_PASSWORD`.
 
+- 2026-10-08: T4 range reviewed (high risk, 4 lenses), approved and acknowledged (`review-cd4ca8ca85ecb951`).
+- 2026-10-08: T5 done by a delegated writer. It stopped once on the session limit and was resumed from the same state.
+  - **Part A** fixes the T4 review findings:
+    - a Spring-context test proves the 5 s Ollama read timeout, with no retry;
+    - nested tests prove `/actuator/health` stays UP with the lab DB down, the knowledge store down, or its password unset;
+    - the misleading test is renamed, and a real "embed unreachable" case is added;
+    - a null `models` list gives `UPSTREAM_ERROR`;
+    - `section` stays outside `untrustedText`, but control characters are stripped, it is cut at 100 characters, and the tool description and spec call it untrusted.
+
+    The tests were mutation-checked: re-enabling db health and raising the timeout make them fail.
+  - **Part B:**
+    - an `ollama-proxy` service (`alpine/socat:1.8.1.3` pinned by digest), `network_mode: host`, bound only to `172.17.0.1:11434`, chosen by the human; Ollama stays on loopback;
+    - `knowledge-db`, not published on the host;
+    - the one-shot `knowledge-indexer`, with only `docs/runbooks` mounted read-only;
+    - mcp-tools depends on the indexer with `required: false`, so the 7 evidence tools never depend on Ollama. `up --wait` then exits 1 when only the indexer failed, and `start_lab` accepts that case with a WARN;
+    - `verify-rag.sh`;
+    - the indexer logs a fully skipped run.
+  - **Parent:** updated `verify-mcp.sh` and `docs/setup.md` to 8 tools (the writer's surface did not include them).
+  - **Results:**
+    - mcp-tools: 200 tests (XML reports), exit 0;
+    - knowledge: 31 tests, exit 0;
+    - `verify-rag.sh`: exit 0, twice by the writer and once in the parent's spot check (21 PASS lines);
+    - `verify-mcp.sh`: exit 0 after the parent's fix;
+    - `verify-f1.sh` … `verify-f4.sh`: exit 0 (writer).
+  - **Model mismatch, live:** a one-off mcp-tools configured with `mxbai-embed-large` was refused.
+  - **Indexing:** 51 chunks, about 38 s of embedding and about 50 s overall. A second run skips every file.
+  - **Live top hits:**
+    - "orders stuck waiting for payment after a timeout": order-service "Orders stuck in PAYMENT_PENDING" (0.78);
+    - "reservations are very slow": inventory-service "Slow POST /reservations" (0.754);
+    - "gateway answering too many requests": gateway-mock 2nd (0.687), after payment-service 503 (0.704).
+  - **Risk accepted and recorded in ADR-002:** any container on this host can reach Ollama through the proxy.
+  - **The human must add** to `infra/.env.example`:
+    - `KNOWLEDGE_BOOTSTRAP_PASSWORD=postgres`
+    - `KNOWLEDGE_INDEXER_DB_PASSWORD=knowledge_indexer`
+    - `KNOWLEDGE_AGENT_DB_PASSWORD=knowledge_agent`
+    - `OLLAMA_PROXY_BIND_IP=172.17.0.1`
+
 ## Next step
 
-Review the T4 range, then T5: compose wiring, Ollama reachability (needs the human) and `verify-rag.sh`.
+Review the T5 range. Then the human reviews the decisions marked "to review", and M2 continues with the agent loop.

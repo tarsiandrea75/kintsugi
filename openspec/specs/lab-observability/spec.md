@@ -59,7 +59,7 @@ payment-service MUST export the gauge `lab_payments` (Micrometer name `lab.payme
 
 ### Requirement: Logs reach Loki labelled by service
 
-Alloy MUST read the Docker logs of the four services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`, `inventory-service`). It also ships the logs of `mcp-tools` (label `service="mcp-tools"`) and of the observability containers, as it does for every container of the compose project. Alloy MUST drop the logs of the `fault-injector` container, so Loki never has a `service="fault-injector"` stream; the operator reads them with `docker logs`.
+Alloy MUST read the Docker logs of the four services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`, `inventory-service`). It also ships the logs of `mcp-tools` (label `service="mcp-tools"`), of `knowledge-db`, `knowledge-indexer` and `ollama-proxy`, and of the observability containers, as it does for every container of the compose project; none of them is in the tools' service enum, so no tool can read them. Alloy MUST drop the logs of the `fault-injector` container, so Loki never has a `service="fault-injector"` stream; the operator reads them with `docker logs`.
 
 #### Scenario: Query a service's logs
 - GIVEN the compose stack is up and order-service has logged a line
@@ -223,7 +223,7 @@ It MUST exit non-zero when any assertion fails, and MUST restore the injection w
 | Grafana | 13000 |
 | Prometheus | 19090 |
 
-PostgreSQL, Loki and Alloy MUST NOT be published on the host.
+PostgreSQL, the knowledge store (`knowledge-db`), Loki and Alloy MUST NOT be published on the host. `ollama-proxy` runs on the host network and MUST listen only on the Docker bridge gateway, never on `0.0.0.0` ([knowledge-base spec](../knowledge-base/spec.md)). The one-shot `knowledge-indexer` exits after its run; when it fails (Ollama down), every other container MUST still start healthy, and the verify scripts accept that state with a warning.
 
 #### Scenario: A healthy lab pays an order
 - GIVEN the stack was started with `docker compose -f infra/compose.yaml up -d`

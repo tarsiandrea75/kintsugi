@@ -12,7 +12,7 @@ Checks mcp-tools (openspec/specs/mcp-tools, ADR-004) through MCP while F1 (slow 
   infra/scripts/verify-mcp.sh --down   # same, then tear the lab down (containers and volumes)
 
 It speaks JSON-RPC over HTTP to http://127.0.0.1:18085/mcp, as the agent will: initialize, tools/list (exactly the
-seven tools), then tools/call. Under F1 it checks that search_logs finds order-service's WARN line for a pending
+eight tools), then tools/call. Under F1 it checks that search_logs finds order-service's WARN line for a pending
 order, that query_metric shows the PAYMENT_PENDING orders rising, and that get_order_trace returns the order's
 PAYMENT_UNAVAILABLE event. It checks that an invalid parameter answers INVALID_PARAMETER, that an Origin header gets
 403 and an unknown Host 421, and, with psql as kintsugi_agent, that the role cannot connect to faults, cannot insert
@@ -27,7 +27,7 @@ EOF
 MCP=http://127.0.0.1:18085/mcp
 # Transport cap for one MCP call: the tools' own backend timeouts are at most 5 s.
 MCP_MAX_SECONDS=15
-TOOLS="count_logs get_order_trace query_metric recent_events search_logs service_restarts status_summary"
+TOOLS="count_logs get_order_trace query_metric recent_events search_logs search_runbooks service_restarts status_summary"
 
 parse_args "$@"
 trap on_exit EXIT
@@ -128,7 +128,7 @@ fi
 read -r code body <<<"$(mcp_call tools/list '{}')" || true
 listed=$(grep -o '"name":"[a-z_]*"' <<<"$body" | cut -d'"' -f4 | sort | tr '\n' ' ' | sed 's/ $//' || true)
 if [[ "$code" == 200 && "$listed" == "$TOOLS" ]]; then
-  pass "MCP tools/list: exactly the 7 tools ($listed)"
+  pass "MCP tools/list: exactly the 8 tools ($listed)"
 else
   fail "MCP tools/list: expected '$TOOLS', got $code '$listed'"
 fi

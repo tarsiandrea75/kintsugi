@@ -352,6 +352,16 @@ check_truth() {
 # True when $1 is a UUID, so it is safe to put in SQL between quotes.
 is_uuid() { [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
 
+# True when every service but the one-shot knowledge-indexer is running and none is unhealthy or still starting: the
+# state "up --wait" leaves when only the indexer failed, for example because Ollama is down.
+lab_up_without_indexer() {
+  local expected running
+  expected=$(compose config --services 2>/dev/null | grep -vx knowledge-indexer | sort) || return 1
+  running=$(compose ps --status running --format '{{.Service}}' 2>/dev/null | sort) || return 1
+  [[ -n "$expected" && "$expected" == "$running" ]] || return 1
+  ! compose ps --format '{{.Service}} {{.Health}}' 2>/dev/null | grep -qE ' (unhealthy|starting)$'
+}
+
 # Starts or reuses the lab, waits for Loki, restores any injection an earlier run left blocking, and resets the gateway.
 # Exits on failure.
 start_lab() {
@@ -363,6 +373,12 @@ start_lab() {
   if env "${unset_faults[@]}" docker compose -f "$COMPOSE_FILE" up -d --build --wait >/dev/null 2>"$up_errors"; then
     rm -f "$up_errors"
     pass "every container is up and healthy"
+  elif lab_up_without_indexer; then
+    # The one-shot indexer needs Ollama; mcp-tools depends on it only optionally (compose.yaml), so the lab still runs.
+    rm -f "$up_errors"
+    echo "WARN  knowledge-indexer did not exit 0 (is Ollama up?); search_runbooks refuses until it runs." \
+      "Every other container is up and healthy. Logs: docker compose -f infra/compose.yaml logs knowledge-indexer" >&2
+    pass "every container but knowledge-indexer is up and healthy"
   else
     cat "$up_errors" >&2
     rm -f "$up_errors"

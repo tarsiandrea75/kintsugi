@@ -112,7 +112,7 @@ Each change is logged as one `INFO` line with `key=value` pairs (`Gateway behavi
 
 ## Lab with Docker Compose
 
-One command starts the whole M1 lab: PostgreSQL, the four services, the fault injector, Prometheus, Loki, Alloy and Grafana (ADR-008, ADR-009, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
+One command starts the whole lab: PostgreSQL, the four services, the fault injector, Prometheus, Loki, Alloy, Grafana, mcp-tools and the runbook knowledge base (the `knowledge-db` store, the one-shot `knowledge-indexer` and `ollama-proxy`) (ADR-008, ADR-009, ADR-004, ADR-002, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
 
 ```bash
 export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
@@ -136,7 +136,7 @@ The compose project is called `kintsugi-lab`, so these commands never touch othe
 | Grafana | <http://localhost:13000> |
 | Prometheus | <http://localhost:19090> |
 
-PostgreSQL, Loki and Alloy have no host port.
+PostgreSQL, `knowledge-db`, Loki and Alloy have no host port. `ollama-proxy` listens on the Docker bridge gateway (`172.17.0.1:11434`), not on `127.0.0.1`; see [The runbook knowledge base](#the-runbook-knowledge-base).
 
 ### Variables
 
@@ -151,6 +151,10 @@ Every variable except `DOCKER_GID` has a lab default; nothing here is a secret. 
 | `FAULTS_DB_PASSWORD` | `faults` | the role `faults`, which the fault injector connects as |
 | `KINTSUGI_AGENT_DB_PASSWORD` | `kintsugi_agent` | the read-only role `kintsugi_agent`, which mcp-tools connects as; mcp-tools does not start without it |
 | `GRAFANA_ADMIN_PASSWORD` | `kintsugi-lab` | Grafana's `admin` login |
+| `KNOWLEDGE_BOOTSTRAP_PASSWORD` | `postgres` | the knowledge store's bootstrap superuser, used only by its init script |
+| `KNOWLEDGE_INDEXER_DB_PASSWORD` | `knowledge_indexer` | the role `knowledge_indexer`, which owns the knowledge tables; only the indexer connects as it |
+| `KNOWLEDGE_AGENT_DB_PASSWORD` | `knowledge_agent` | `kintsugi_agent` on the knowledge store (a separate server, so a separate password); without it mcp-tools still starts and only `search_runbooks` fails |
+| `OLLAMA_PROXY_BIND_IP` | `172.17.0.1` | the address `ollama-proxy` listens on: the default bridge's gateway (`docker0`), which is what `host-gateway` resolves to |
 
 `KINTSUGI_REPO_DIR` defaults to the current directory, which is right only from the repository root. From anywhere else, export it as above; the verify scripts set it themselves. With a wrong value the injector does not start, because it cannot read the compose file.
 
@@ -167,6 +171,8 @@ One PostgreSQL instance holds four databases (ADR-007, ADR-009):
 docker compose -f infra/compose.yaml exec -T postgres psql -U lab_app -d orders -c "select count(*) from orders"
 docker compose -f infra/compose.yaml exec -T postgres psql -U faults -d faults -c "select fault_id, status from injections"
 ```
+
+The knowledge store is a second server, `knowledge-db` (ADR-002): `knowledge_indexer` owns the `knowledge` database's tables, and `kintsugi_agent` there has `CONNECT` and `SELECT` only; it holds no `faults` database. Its init script runs only on an empty `knowledge-data` volume too.
 
 The init script runs only on an empty data volume. **Upgrading a lab created before the fault injector:** its volume has the old `lab` superuser and no `lab_app` or `faults`, so run `docker compose -f infra/compose.yaml down -v` once before the first start. The same applies to a lab created before mcp-tools, whose volume has no `kintsugi_agent`, and after changing any database password.
 
@@ -329,7 +335,27 @@ infra/scripts/verify-mcp.sh          # start or reuse the lab, run the checks, l
 infra/scripts/verify-mcp.sh --down   # the same, then `down -v`
 ```
 
-The script recreates the lab with `down -v` when its volume has no `kintsugi_agent` role. It sends `initialize` and `tools/list` (exactly the seven tools), places a healthy order, injects F1 through the fault injector and places an order that ends `PAYMENT_PENDING`. Through `tools/call` it checks that `search_logs` finds order-service's `WARN` line for that order, that `query_metric` shows `lab_orders{status="PAYMENT_PENDING"}` rising, and that `get_order_trace` returns the order with its `PAYMENT_UNAVAILABLE` event. It checks that `search_logs` on `fault-injector` answers `INVALID_PARAMETER`, that an `Origin` header gets 403 and an unknown `Host` 421, and, with `psql` as `kintsugi_agent`, that the role cannot connect to `faults`, cannot insert into `orders`, and is not a superuser. Last, it checks that mcp-tools logged the calls, restores F1 and runs the same truth checks as the F1 script. Output, exit status and the restore on exit work as in the F1 check. It needs `docker`, `curl` and `awk`, and takes about 2 minutes on a fresh stack.
+The script recreates the lab with `down -v` when its volume has no `kintsugi_agent` role. It sends `initialize` and `tools/list` (exactly the eight tools), places a healthy order, injects F1 through the fault injector and places an order that ends `PAYMENT_PENDING`. Through `tools/call` it checks that `search_logs` finds order-service's `WARN` line for that order, that `query_metric` shows `lab_orders{status="PAYMENT_PENDING"}` rising, and that `get_order_trace` returns the order with its `PAYMENT_UNAVAILABLE` event. It checks that `search_logs` on `fault-injector` answers `INVALID_PARAMETER`, that an `Origin` header gets 403 and an unknown `Host` 421, and, with `psql` as `kintsugi_agent`, that the role cannot connect to `faults`, cannot insert into `orders`, and is not a superuser. Last, it checks that mcp-tools logged the calls, restores F1 and runs the same truth checks as the F1 script. Output, exit status and the restore on exit work as in the F1 check. It needs `docker`, `curl` and `awk`, and takes about 2 minutes on a fresh stack.
+
+### The runbook knowledge base
+
+`search_runbooks`, the eighth tool, searches `docs/runbooks/*.md` by meaning ([knowledge-base spec](../openspec/specs/knowledge-base/spec.md), [ADR-002](adr/ADR-002-pgvector-knowledge-base.md)). It needs the local Ollama with `nomic-embed-text` (`ollama pull nomic-embed-text`), listening as usual on `127.0.0.1:11434`.
+
+- `ollama-proxy` (socat, on the host's network) listens on the Docker bridge gateway `172.17.0.1:11434` only and forwards to `127.0.0.1:11434`. Containers reach Ollama as `http://host.docker.internal:11434` (`extra_hosts: host-gateway`). Ollama's own configuration is unchanged and it stays on loopback.
+- `knowledge-db` is the pgvector store; it has no host port. Read it with `docker compose -f infra/compose.yaml exec -T knowledge-db psql -U kintsugi_agent -d knowledge`.
+- `knowledge-indexer` runs once at every `up`, embeds the changed runbooks (about 40 s for all five on a laptop CPU; unchanged ones are skipped) and exits. mcp-tools waits for it, but only as an optional dependency: when Ollama is down the indexer exits 1, compose warns, `up --wait` exits non-zero, and mcp-tools starts anyway; `search_runbooks` then refuses with `UPSTREAM_ERROR` until the index is built. The verify scripts accept that state and print a `WARN`. Re-index by hand with `docker compose -f infra/compose.yaml run --rm --no-deps knowledge-indexer`.
+
+```bash
+curl -s localhost:18085/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_runbooks","arguments":{"query":"reservations are very slow"}}}'
+```
+
+```bash
+infra/scripts/verify-rag.sh          # start or reuse the lab, run the checks, leave it running
+infra/scripts/verify-rag.sh --down   # the same, then `down -v`
+```
+
+The script waits for `knowledge-indexer` to exit 0, then checks with `psql` that `index_metadata` records `nomic-embed-text`, its digest and 768 dimensions and that every service runbook has chunks. Through MCP it asks four symptom-worded questions and expects the right runbook in the top 3 and no hit from the README's "Authoring rule", and checks the `service` filter. It checks that `kintsugi_agent` cannot insert into the knowledge store, that the store has no `faults` database, and that `kintsugi_agent` cannot connect to `faults` on the lab's postgres. It runs the indexer again and expects every runbook skipped, then starts a one-off mcp-tools configured with `mxbai-embed-large` and expects `search_runbooks` to refuse the index. No fault is injected. It needs `docker`, `curl` and Ollama, and takes about a minute on a running lab.
 
 ## Run the lab services without Docker Compose
 

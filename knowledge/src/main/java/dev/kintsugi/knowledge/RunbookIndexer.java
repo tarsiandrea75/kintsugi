@@ -76,7 +76,10 @@ public class RunbookIndexer {
 			.map(Runbook::source)
 			.toList();
 		if (!everything && changed.isEmpty() && removed.isEmpty()) {
-			return new IndexReport(List.of(), skipped, List.of(), false, 0);
+			IndexReport unchanged = new IndexReport(List.of(), skipped, List.of(), false, 0);
+			log.info("Index unchanged, every runbook skipped, with {} ({}): {}", wanted.name(), wanted.digest(),
+					unchanged);
+			return unchanged;
 		}
 
 		List<KnowledgeStore.EmbeddedChunk> chunks = new ArrayList<>();

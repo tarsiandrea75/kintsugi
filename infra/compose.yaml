@@ -1,5 +1,6 @@
-# Kintsugi lab: PostgreSQL, the four services, the fault injector, the observability stack and mcp-tools, the agent's
-# tools (ADR-007, ADR-008, ADR-009, ADR-004).
+# Kintsugi lab: PostgreSQL, the four services, the fault injector, the observability stack, mcp-tools, the agent's
+# tools, and the runbook knowledge base: the pgvector store, its one-shot indexer and the Ollama proxy (ADR-007, ADR-008,
+# ADR-009, ADR-004, ADR-002).
 #
 #   export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
 #   docker compose -f infra/compose.yaml up -d --build --wait
@@ -8,7 +9,8 @@
 # Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082, inventory-service 18083,
 # fault-injector 18084, mcp-tools 18085 (MCP on /mcp), Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090.
 # Every port is bound to 127.0.0.1.
-# PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by service name.
+# PostgreSQL, the knowledge store, Loki and Alloy are not published on the host; containers reach each other by service
+# name. Ollama stays on the host's loopback; ollama-proxy exposes it on the Docker bridge gateway only (ADR-002).
 #
 # Variables (lab defaults; see infra/.env.example). Put overrides in infra/.env rather than in the shell: the fault
 # injector recreates services from this same file and reads infra/.env too, but never sees the host shell.
@@ -19,6 +21,11 @@
 # - POSTGRES_BOOTSTRAP_PASSWORD, LAB_APP_DB_PASSWORD, FAULTS_DB_PASSWORD, KINTSUGI_AGENT_DB_PASSWORD: database
 #   passwords. They are applied only when the postgres volume is empty, so changing them needs a "down -v".
 # - GRAFANA_ADMIN_PASSWORD: Grafana's admin password.
+# - KNOWLEDGE_BOOTSTRAP_PASSWORD, KNOWLEDGE_INDEXER_DB_PASSWORD, KNOWLEDGE_AGENT_DB_PASSWORD: the knowledge store's
+#   passwords (its superuser, the indexer's owner role, and kintsugi_agent on that server). Applied only when the
+#   knowledge-data volume is empty, like the lab's.
+# - OLLAMA_PROXY_BIND_IP: the address ollama-proxy listens on, the default bridge's gateway (docker0), which is what
+#   "host-gateway" resolves to. Change it only if the Docker daemon uses another bridge address.
 name: kintsugi-lab
 
 services:
@@ -185,6 +192,13 @@ services:
       KINTSUGI_MCP_POSTGRES_PORT: "5432"
       KINTSUGI_AGENT_DB_PASSWORD: ${KINTSUGI_AGENT_DB_PASSWORD:-kintsugi_agent}
       KINTSUGI_MCP_ALLOWEDHOSTS: mcp-tools:8085,localhost:18085,127.0.0.1:18085
+      # search_runbooks (ADR-002): the knowledge store as its own kintsugi_agent, and Ollama through ollama-proxy.
+      KINTSUGI_MCP_KNOWLEDGE_HOST: knowledge-db
+      KINTSUGI_MCP_KNOWLEDGE_PORT: "5432"
+      KNOWLEDGE_AGENT_DB_PASSWORD: ${KNOWLEDGE_AGENT_DB_PASSWORD:-knowledge_agent}
+      SPRING_AI_OLLAMA_BASEURL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:18085:8085"
     depends_on:
@@ -194,6 +208,15 @@ services:
         condition: service_healthy
       loki:
         condition: service_started
+      knowledge-db:
+        condition: service_healthy
+      # Search waits for the indexer's run, so it does not start on an index being built. "required: false": when the
+      # run fails (Ollama down, a runbook failing the leakage gate), compose warns and starts mcp-tools anyway, so the
+      # seven evidence tools never depend on Ollama; search_runbooks then refuses with UPSTREAM_ERROR ("the runbook
+      # index has not been built", or a model mismatch), never with results from a missing or foreign index.
+      knowledge-indexer:
+        condition: service_completed_successfully
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8085/actuator/health"]
       interval: 5s
@@ -201,6 +224,65 @@ services:
       retries: 5
       start_period: 60s
       start_interval: 2s
+
+  # The runbook knowledge store (ADR-002): pgvector on PostgreSQL 18, a server of its own, so a fault in the lab's
+  # postgres never cuts the agent off from its runbooks. Not published on the host: verify-rag.sh uses psql inside it.
+  knowledge-db:
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0
+    environment:
+      # Lab-only credentials. The bootstrap superuser is used only by the init script, which creates knowledge_indexer
+      # (the owner) and kintsugi_agent (read-only); see knowledge-db/init/01-knowledge.sh.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${KNOWLEDGE_BOOTSTRAP_PASSWORD:-postgres}
+      KNOWLEDGE_INDEXER_DB_PASSWORD: ${KNOWLEDGE_INDEXER_DB_PASSWORD:-knowledge_indexer}
+      KINTSUGI_AGENT_DB_PASSWORD: ${KNOWLEDGE_AGENT_DB_PASSWORD:-knowledge_agent}
+    volumes:
+      - ./knowledge-db/init:/docker-entrypoint-initdb.d:ro
+      - ./knowledge-db/healthcheck.sh:/usr/local/bin/knowledge-healthcheck.sh:ro
+      - knowledge-data:/var/lib/postgresql
+    healthcheck:
+      # Healthy only after a complete init: kintsugi_agent can read index_metadata, the init script's last grant.
+      test: ["CMD", "/usr/local/bin/knowledge-healthcheck.sh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  # Ollama listens only on the host's loopback (127.0.0.1:11434). This proxy, on the host's network, listens on the
+  # default bridge's gateway address alone and forwards to that loopback, so containers reach Ollama as
+  # host.docker.internal:11434 (extra_hosts: host-gateway) while it stays off every other interface. Chosen by the
+  # human on 2026-10-08 over OLLAMA_HOST=0.0.0.0 and a containerised Ollama (ADR-002).
+  ollama-proxy:
+    image: alpine/socat:1.8.1.3@sha256:82ad20f6f6e29b91ff33b6662d24063522b1378f08fd8569cd3ab412cac13f50
+    network_mode: host
+    command: ["TCP-LISTEN:11434,bind=${OLLAMA_PROXY_BIND_IP:-172.17.0.1},fork,reuseaddr", "TCP:127.0.0.1:11434"]
+    healthcheck:
+      # The listener only, with busybox's nc: whether Ollama answers is search_runbooks' and the indexer's to report.
+      test: ["CMD", "nc", "-z", "${OLLAMA_PROXY_BIND_IP:-172.17.0.1}", "11434"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+      start_interval: 1s
+
+  # The one-shot runbook indexer (ADR-002): embeds docs/runbooks/*.md through Ollama into the knowledge store, then
+  # exits 0, or 1 on any failure, leaving the previous index intact. Only docs/runbooks is mounted, read-only; never
+  # openspec/ or odd/, which name the faults. Unchanged runbooks are skipped, so a re-run is cheap.
+  knowledge-indexer:
+    build: ../knowledge
+    environment:
+      SPRING_AI_OLLAMA_BASEURL: http://host.docker.internal:11434
+      KNOWLEDGE_INDEXER_DB_PASSWORD: ${KNOWLEDGE_INDEXER_DB_PASSWORD:-knowledge_indexer}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../docs/runbooks:/runbooks:ro
+    restart: "no"
+    depends_on:
+      knowledge-db:
+        condition: service_healthy
+      ollama-proxy:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:v3.15.0
@@ -274,5 +356,6 @@ services:
 
 volumes:
   postgres-data:
+  knowledge-data:
   prometheus-data:
   loki-data:

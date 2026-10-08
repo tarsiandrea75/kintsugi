@@ -20,6 +20,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,6 +28,8 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.ollama.OllamaEmbeddingModel;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.ollama.api.OllamaEmbeddingOptions;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -35,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
  * The indexer against the real knowledge store and a fake Ollama: every scenario of the knowledge-base spec's indexer
  * requirements (openspec/specs/knowledge-base/spec.md).
  */
+@ExtendWith(OutputCaptureExtension.class)
 class RunbookIndexerTest {
 
 	private static final KnowledgeProperties.Model DEFAULT_MODEL = new KnowledgeProperties.Model("nomic-embed-text",
@@ -239,7 +243,7 @@ class RunbookIndexerTest {
 	}
 
 	@Test
-	void aSecondRunWithNoChangesEmbedsNothing() {
+	void aSecondRunWithNoChangesEmbedsNothing(CapturedOutput output) {
 		indexer(DEFAULT_MODEL).index();
 		List<String> before = KnowledgeStoreContainer.snapshot();
 		ollama.reset();
@@ -250,6 +254,9 @@ class RunbookIndexerTest {
 		assertThat(report.embedded()).isEmpty();
 		assertThat(report.skipped()).hasSize(4);
 		assertThat(KnowledgeStoreContainer.snapshot()).isEqualTo(before);
+		// The operator (and verify-rag.sh) reads that the run skipped everything in the log.
+		assertThat(output.getOut()).contains("Index unchanged, every runbook skipped, with nomic-embed-text")
+			.contains("embedded=[]");
 	}
 
 	@Test

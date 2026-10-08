@@ -26,6 +26,7 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | Indexed files | `docs/runbooks/*.md` only, read from a read-only mount of that directory |
 | Leakage pattern | `\b(F[1-8]\b\|fault\|inject)`, case-insensitive: the runbook authoring rule's check. A match is a fault id, or a word that starts with `fault` or `inject`; a word that only contains them, such as `default`, does not match |
 | Chunk metadata | `service`, `section`, `source`, `content_hash` |
+| Compose wiring | services `knowledge-db` (volume `knowledge-data`, no host port; compose passes `KNOWLEDGE_AGENT_DB_PASSWORD` to the init script as `KINTSUGI_AGENT_DB_PASSWORD`), `knowledge-indexer` (one-shot, `restart: "no"`, only `docs/runbooks` mounted read-only at `/runbooks`, after `knowledge-db` is healthy) and `ollama-proxy` (socat on the host network, listening on the Docker bridge gateway only and forwarding to Ollama on `127.0.0.1:11434`). Containers reach Ollama as `http://host.docker.internal:11434`. mcp-tools waits for the indexer's run as an optional dependency, so a failed run never keeps the evidence tools down. Verified by `infra/scripts/verify-rag.sh` |
 
 ## Requirements
 
@@ -166,12 +167,13 @@ The indexer MUST split each file by Markdown heading, then split any section lon
 
 ### Requirement: Unchanged files are skipped
 
-The indexer MUST compare each file's content hash with the one recorded in `indexed_files` by the last run. An unchanged file MUST NOT be embedded again, including a file that yields no chunk. A changed file MUST have all its old chunks replaced. A file no longer present MUST have its chunks removed.
+The indexer MUST compare each file's content hash with the one recorded in `indexed_files` by the last run. An unchanged file MUST NOT be embedded again, including a file that yields no chunk. A changed file MUST have all its old chunks replaced. A file no longer present MUST have its chunks removed. A run that changes nothing MUST say so in its log, with the model, its digest and the skipped files.
 
 #### Scenario: Second run with no changes
 - GIVEN the index was built from the current runbooks
 - WHEN the indexer runs again
 - THEN no embedding is requested and the chunk rows are unchanged
+- AND its log reads `Index unchanged, every runbook skipped, with nomic-embed-text (<digest>)` with `embedded=[]`
 
 #### Scenario: A file with no chunks
 - GIVEN `docs/runbooks/payment-service.md` holds only its title heading, so it yields no chunk, and the index was built from the current runbooks

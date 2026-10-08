@@ -106,7 +106,24 @@ Constraints:
 - **Each connection turns on pgvector's iterative index scan** (`SET hnsw.iterative_scan = strict_order`, pgvector 0.8): with a service filter, a plain HNSW scan stops after `hnsw.ef_search` (40) candidates and could return fewer than `limit` chunks.
 - **The Ollama starter is configured down to what search needs**: `spring.ai.model.chat=none`, `spring.ai.model.embedding=ollama`, `spring.ai.ollama.init.pull-model-strategy=never` (no pull at startup, so mcp-tools starts while Ollama is down), and `spring.http.clients` connect and read timeouts of 2 s and 5 s, the other backends' values. Its WebClient starter is excluded, so no Reactor Netty runs in mcp-tools; both HTTP clients fall back to the JDK's.
 - **The model guard compares the configured values first** (name, dimensions, both prefixes) and the digest last, so a different model name is refused without calling Ollama. Only a found digest is cached (60 s), so an unlisted model or an Ollama failure is asked again on the next search.
+- **Timeouts and health, proven in T5.** A Spring context test (`OllamaTimeoutTest`) shows that the auto-configured `OllamaApi` and `EmbeddingModel` get the 5 s read timeout from `spring.http.clients.read-timeout`: an Ollama that accepts a request and never answers ends the search with `UPSTREAM_ERROR` (`Ollama did not answer in time`) in about 5 s, for `/api/tags` and `/api/embed`, with no retry. `management.health.db.enabled=false` keeps `/actuator/health` UP when the knowledge store is down or its password unset (`HealthWithoutDatabaseTest`).
+- **`section` is untrusted too.** A heading is runbook text. It stays outside `untrustedText` as a label, but the tool replaces its control characters with spaces and cuts it at 100 characters (the longest real heading has 45), and the tool description says it is runbook text. Moving it into the envelope would lose the heading of a section's later chunks, which do not repeat it in their text.
 - **An oversized nearest chunk** is cut by the tool itself to fit the 8 KB cap, ending with `[truncated]`, since the shared runner can only drop whole items. The contract is in the [mcp-tools spec](../../openspec/specs/mcp-tools/spec.md); the store and the indexer are in the [knowledge-base spec](../../openspec/specs/knowledge-base/spec.md).
+
+### Compose wiring and reaching Ollama (T5)
+
+**Ollama stays on the host's loopback; a socat proxy exposes it on the Docker bridge only.** The human chose this on 2026-10-08 over `OLLAMA_HOST=0.0.0.0` and over a containerised Ollama. `OLLAMA_HOST=0.0.0.0` would change a host service (with sudo) and make Ollama listen on every interface; the proxy changes nothing on the host and listens on the bridge address alone.
+
+| Service | Facts (verified 2026-10-08) |
+|---------|-----------------------------|
+| `ollama-proxy` | `alpine/socat:1.8.1.3@sha256:82ad20f6f6e29b91ff33b6662d24063522b1378f08fd8569cd3ab412cac13f50` (index digest read with `docker buildx imagetools inspect`), `network_mode: host`, `TCP-LISTEN:11434,bind=172.17.0.1,fork,reuseaddr TCP:127.0.0.1:11434`. 172.17.0.1 is the default bridge's gateway (`docker0`), which `host-gateway` resolves to; `OLLAMA_PROXY_BIND_IP` overrides it. Containers on the compose network (172.20.0.0/16) reach it as `host.docker.internal:11434` through `extra_hosts: host-gateway`; `ss -ltn` shows only `127.0.0.1:11434` (Ollama) and `172.17.0.1:11434` (the proxy). Its health check is busybox `nc -z` on the listener only: whether Ollama answers is the indexer's and the tool's to report |
+| `knowledge-db` | the pinned pgvector image, volume `knowledge-data`, the init script and `healthcheck.sh` mounted read-only. Not published on the host: `verify-rag.sh` and an operator use `psql` inside it |
+| `knowledge-indexer` | built from `knowledge/`, one-shot (`restart: "no"`), only `docs/runbooks` mounted read-only, after `knowledge-db` is healthy and `ollama-proxy` is listening. First run on the five runbooks: 51 chunks (README 2, order-service 13, the other three 12 each) in about 38 s of embedding on a laptop CPU, about 50 s from container start to exit. A second run skips every file and logs `Index unchanged, every runbook skipped` |
+| `mcp-tools` | knowledge datasource `knowledge-db:5432`, `KNOWLEDGE_AGENT_DB_PASSWORD`, `spring.ai.ollama.base-url` `http://host.docker.internal:11434` |
+
+**mcp-tools waits for the indexer, but only optionally.** It depends on `knowledge-indexer` with `service_completed_successfully` and `required: false`. Measured with the indexer pointed at a closed port: compose warns `optional dependency "knowledge-indexer" didn't complete successfully: exit 1` and starts mcp-tools healthy, while `up --wait` itself exits 1. The strict form (`required: true`) would keep the seven evidence tools down whenever Ollama is down, against the rule that an unavailable source is evidence, not a reason to stop. Search still never runs on an unbuilt index: the model guard refuses it ("the runbook index has not been built"). So `start_lab` in the verify scripts accepts an `up` failure when every service but the indexer is running and healthy, and prints a `WARN`.
+
+Alloy keeps its rules: the three new containers' logs reach Loki like any compose service's, and no tool can select them, since none is in the tools' `service` enum. Prometheus scrapes none of them.
 
 ## Alternatives considered
 
@@ -133,7 +150,8 @@ Constraints:
 ### Negative
 
 - **One more container** to run, pin and keep in step with the stack versions.
-- **Ollama reachability from containers is open.** Today Ollama listens only on `127.0.0.1:11434` inside WSL, so neither the indexer nor mcp-tools in compose can reach it. The fix (an `OLLAMA_HOST` the Docker bridge can reach, or a loopback-preserving proxy) touches a host service and needs the human; it is decided in T5 of the feature.
+- **A proxy in front of Ollama.** One more container, on the host network, bound to the bridge gateway address; if the Docker daemon used another bridge address, `OLLAMA_PROXY_BIND_IP` would have to follow it. Any container of any project on this host can reach Ollama through it, which the loopback-only Ollama did not allow.
+- **When Ollama is down, `up --wait` exits non-zero** because the indexer failed, although every other container is healthy; the verify scripts tolerate exactly that case.
 - **Any model change needs a re-index**, and a dimension change needs a schema change too.
 - **Leakage is controlled, not impossible.** The allow-list and the grep gate stop the known patterns (fault ids, "fault", "inject"). A runbook that hints at a cause in other words would pass; the authoring rule and review remain the main defence.
 - **Retrieved text is untrusted.** Runbooks are written by us, but they are still returned as `untrustedText`, so a bad edit cannot become an instruction to the model.
