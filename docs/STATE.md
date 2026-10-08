@@ -4,42 +4,38 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-08 (session 01, autonomous work while the human was away)
+2026-10-08 (session 02)
 
 ## Milestone
 
-**M2 — First agent: in progress.** M1 is complete. The first M2 item, the MCP tools server, is done.
+**M2 — First agent: in progress.** M1 is complete. Two M2 items are done: the MCP tools server and RAG on the runbooks.
 
 ## Last action
 
-`mcp-tools` is done ([feature document](../odd/tasks/mcp-tools.md), [ADR-004](adr/ADR-004-tools-via-mcp.md), [spec](../openspec/specs/mcp-tools/spec.md)).
-- **What it is:** an MCP server on Spring AI 2.0.1 with MCP SDK 2.0.0 and protocol 2025-11-25. It uses STATELESS Streamable HTTP on `/mcp`, published only on `127.0.0.1:18085`.
-  - Origin validation is on: any request with an `Origin` header gets 403.
-  - Host allow-list: `mcp-tools:8085`, `localhost:18085`, `127.0.0.1:18085`; any other Host gets 421.
-- **7 read-only tools:**
-  - `search_logs`, `count_logs`, `query_metric` and `service_restarts` read Loki and Prometheus;
-  - `get_order_trace`, `recent_events` and `status_summary` read the event tables.
-  - Every query is a fixed template. Parameters are validated enums with caps, output is capped at 8 KB, log and event text is returned as `untrustedText`, and each call writes one INFO line.
-- **`kintsugi_agent` role:**
-  - not a superuser; CONNECT on `orders`, `payments` and `inventory` only, never `faults`;
-  - SELECT on the six evidence tables only, granted by an event trigger as Flyway creates them;
-  - read-only and timeout settings, plus read-only connections from mcp-tools.
+`runbook-rag` is done ([feature document](../odd/tasks/runbook-rag.md), [ADR-002](adr/ADR-002-pgvector-knowledge-base.md), [spec](../openspec/specs/knowledge-base/spec.md)).
+- **Embedding model:** `nomic-embed-text`, chosen by the human, at digest `0a109f42…`, 768 dimensions.
+  - It is configurable, but the index records the model name, digest, dimensions and prefixes.
+  - `search_runbooks` refuses to search on any mismatch. This was verified live with `mxbai-embed-large`.
+- **Store:** a separate pgvector container, `knowledge-db` (`0.8.7-pg18-trixie` pinned by digest), not published on the host.
+  - `knowledge_indexer` owns the data; `kintsugi_agent` has SELECT only.
+  - Neither role is a superuser, and the store holds no `faults` database.
+- **Indexer:** `knowledge/`, a one-shot job.
+  - It indexes only `docs/runbooks/*.md`, mounted read-only, behind a leakage gate `\b(F[1-8]\b|fault|inject)`.
+  - It splits by heading, with at most 800 tokens per chunk, and skips files whose hash is unchanged. A run commits atomically.
+  - 51 chunks in about 50 s.
+- **Tool:** `search_runbooks` is the 8th mcp-tools tool. Chunks come back as `untrustedText`; the `section` field is sanitized and marked untrusted.
+- **Ollama from containers:** an `ollama-proxy` socat container, chosen by the human, binds only to `172.17.0.1:11434`; Ollama stays on loopback. A failed bind leaves the rest of the lab working.
 - **Checks:**
-  - `verify-mcp.sh` calls the tools through MCP under F1 and checks the role isolation;
-  - mcp-tools has 140 tests;
-  - `verify-mcp.sh` and `verify-f1.sh` … `verify-f4.sh` all pass.
+  - mcp-tools: 212 tests; knowledge: 31;
+  - `verify-rag.sh`, `verify-mcp.sh` and `verify-f1.sh` … `verify-f4.sh` pass.
 - **Status:** every range is reviewed and approved. Nothing is pushed.
-- **Running the lab by hand** needs one `down -v` on an old volume, because the role is new.
+- **Process deviations:**
+  - the feature stayed on one branch, `feat/runbook-rag`, with per-range reviews, instead of a feature-branch chain;
+  - T4's tool code was written before its tests; a mutation check replaced RED.
 
 ## Next action
 
-1. Waiting for the human: review the decisions taken autonomously in `odd/tasks/mcp-tools.md` (marked "to review"), mainly:
-   - the design and its STATELESS transport (ADR-004);
-   - the event-trigger grant;
-   - `latency_avg`/`latency_max` instead of p95;
-   - the `get_order_trace` shape;
-   - the size exceptions of T3 and T4;
-   - the disabled database health check.
+1. Waiting for the human: review the decisions marked "to review" in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
 2. Waiting for the human (approved, needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
 3. Waiting for the human: add these lines to the protected `infra/.env.example`:
    - `KINTSUGI_REPO_DIR=`
@@ -48,10 +44,13 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
    - `LAB_APP_DB_PASSWORD=lab_app`
    - `FAULTS_DB_PASSWORD=faults`
    - `KINTSUGI_AGENT_DB_PASSWORD=kintsugi_agent`
+   - `KNOWLEDGE_BOOTSTRAP_PASSWORD=postgres`
+   - `KNOWLEDGE_INDEXER_DB_PASSWORD=knowledge_indexer`
+   - `KNOWLEDGE_AGENT_DB_PASSWORD=knowledge_agent`
+   - `OLLAMA_PROXY_BIND_IP=172.17.0.1`
 4. M2 continues:
-   - RAG on `docs/runbooks/` with pgvector (ADR-002);
    - the agent loop with `IncidentState` and a JSON report with cited evidence, calling mcp-tools as an MCP client;
-   - the Python eval harness for the M2 check (F1–F3 correctly diagnosed).
+   - then the Python eval harness for the M2 check (F1–F3 correctly diagnosed).
 
 ## Local branch chains (not pushed)
 
@@ -67,6 +66,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 - `feat/event-recording` → `-01-inventory` → `-02-payment` → `-03-order` → `-04-gateway-check`
 - `feat/fault-injector` → `-01-core` → `-02-api` → `-03-lab-control` → `-04-wiring`
 - `feat/mcp-tools` → `-01-observability-tools` → `-02-evidence-tools` → `-03-wiring`
+- `feat/runbook-rag` (one branch; see the process deviation above)
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -85,6 +85,13 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+runbook-rag (details in the feature document):
+- Retrieval: the gateway runbook has no rate-limit section, so a 429-worded query ranks it 2nd.
+- `start_lab`'s `knowledge_only_failure` may read a stale indexer state, and it has no test.
+- The separator test uses invisible Unicode literals.
+- Token counts use cl100k as an approximation of nomic's tokenizer.
+- Any container on this host can reach Ollama through the proxy (accepted, recorded in ADR-002).
 
 mcp-tools (details in the feature document):
 - "connection pool busy" is also reported when connection attempts are still running at the 2 s timeout (WARNING).
