@@ -198,6 +198,13 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
       - no test reads the shipped allowed-hosts default;
       - the health test's "no db entry" assertion proves nothing on its own.
 
+- 2026-10-08: the probe fix (`6080c20`) reviewed (high risk, 4 lenses), approved and acknowledged (`review-0ee4208ffbb5bf06`). Its suggestions are follow-ups:
+  - the 30 s literal is written twice;
+  - psql errors now show while postgres starts;
+  - the probe has no wall-clock bound;
+  - its failure branches were never exercised.
+- 2026-10-08: session closed. STATE and journal `2026-10-08-01` are written. The bundle `kintsugi-2026-10-08-full.bundle` (sha256 `8961b531…a18de774`, 53 refs) is verified.
+
 ## Next step
 
 The human reviews the autonomous decisions, and the next M2 feature (the agent) starts.
