@@ -6,9 +6,16 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStatelessServerTransport;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.config.BeanDefinition;
 
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Import;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +40,9 @@ class McpEndpointSmokeTest {
 	@LocalServerPort
 	int port;
 
+	@Autowired
+	ConfigurableApplicationContext context;
+
 	@Test
 	void initializeAnswersWithServerInfoAndProtocolVersion() throws Exception {
 		HttpResponse<String> response = post(INITIALIZE, null);
@@ -40,6 +50,7 @@ class McpEndpointSmokeTest {
 		assertThat(response.statusCode()).isEqualTo(200);
 		assertThat(response.body()).contains("\"protocolVersion\":\"2025-11-25\"")
 			.contains("\"name\":\"mcp-tools\"")
+			.contains("\"version\":\"0.0.1-SNAPSHOT\"")
 			.contains("\"tools\"");
 	}
 
@@ -51,11 +62,33 @@ class McpEndpointSmokeTest {
 		assertThat(response.body()).contains("\"id\":2").contains("\"tools\":[");
 	}
 
-	@Test
-	void requestWithABrowserOriginIsRejected() throws Exception {
-		HttpResponse<String> response = post(INITIALIZE, "http://evil.example");
+	@ParameterizedTest
+	@ValueSource(strings = { "http://evil.example", "http://localhost:18085", "null" })
+	void requestWithAnyOriginIsRejected(String origin) throws Exception {
+		HttpResponse<String> response = post(INITIALIZE, origin);
 
 		assertThat(response.statusCode()).isEqualTo(403);
+	}
+
+	@Test
+	void getIsNotAllowedOnTheStatelessEndpoint() throws Exception {
+		HttpResponse<String> response = this.http.send(
+				HttpRequest.newBuilder(URI.create("http://localhost:" + this.port + "/mcp"))
+					.header("Accept", "text/event-stream")
+					.GET()
+					.build(),
+				HttpResponse.BodyHandlers.ofString());
+
+		assertThat(response.statusCode()).isEqualTo(405);
+	}
+
+	@Test
+	void theActiveTransportIsTheOneWithOriginValidation() {
+		BeanDefinition transport = this.context.getBeanFactory().getBeanDefinition("webMvcStatelessServerTransport");
+
+		assertThat(transport.getFactoryBeanName()).isEqualTo("mcpTransportConfiguration");
+		assertThat(this.context.getBeanNamesForType(WebMvcStatelessServerTransport.class))
+			.containsExactly("webMvcStatelessServerTransport");
 	}
 
 	private HttpResponse<String> post(String body, String origin) throws Exception {

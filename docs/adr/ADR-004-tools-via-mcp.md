@@ -58,7 +58,9 @@ Verified in the 2.0.1 sources:
 
 - The MCP SDK 2.0.0 has a `ServerTransportSecurityValidator` hook and a `DefaultServerTransportSecurityValidator` that checks `Origin` and `Host` against allow-lists.
 - **Spring AI 2.0.1 does not enable it.** `McpServerStatelessWebMvcAutoConfiguration` builds `WebMvcStatelessServerTransport` without a validator, so the builder's default `ServerTransportSecurityValidator.NOOP` applies. No `spring.ai.mcp.server.*` property changes that.
-- **How mcp-tools enables it:** `McpTransportConfiguration` declares its own `webMvcStatelessServerTransport` bean, so the auto-configured one backs off (`@ConditionalOnMissingBean`), with `DefaultServerTransportSecurityValidator` and an **empty origin allow-list**.
+- **How mcp-tools enables it:** `McpTransportConfiguration` declares its own `WebMvcStatelessServerTransport` bean with `DefaultServerTransportSecurityValidator` and an **empty origin allow-list**, set explicitly rather than left to the builder's default.
+  - The auto-configured bean backs off because its `@ConditionalOnMissingBean` has no attributes, so it matches **by type** (the method's return type), not by name.
+  - The validator exists only on the STATELESS transport. Our bean is conditional on `spring.ai.mcp.server.protocol=STATELESS`, and a guard bean fails the startup for any other protocol, so a protocol switch cannot silently drop validation.
 
 With that configuration:
 
@@ -67,7 +69,7 @@ With that configuration:
 | No `Origin` header (the agent, `curl`) | accepted |
 | Any `Origin` header (a browser page) | 403 |
 
-That blocks DNS-rebinding from a page open in the developer's browser. The smoke test asserts the 403. `Host` is not restricted yet (see Consequences).
+That blocks DNS-rebinding from a page open in the developer's browser. The smoke test asserts the 403 for `http://evil.example`, `http://localhost:18085` and `null`, that the active transport bean is ours, and that `GET /mcp` answers 405. `Host` is not restricted yet (see Consequences).
 
 ### No free query language
 
