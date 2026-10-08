@@ -14,12 +14,12 @@ final class IncidentViews {
 	}
 
 	/** 202 of {@code POST /incidents}. */
-	record Opened(UUID id, String status) {
+	record Opened(UUID id, IncidentStatus status) {
 	}
 
 	/** 200 of {@code GET /incidents/{id}}. */
 	@JsonInclude(JsonInclude.Include.NON_NULL)
-	record Incident(UUID id, String symptom, Integer sinceMinutes, String status, String failureReason,
+	record Incident(UUID id, String symptom, Integer sinceMinutes, IncidentStatus status, String failureReason,
 			Instant startedAt, Instant endedAt, JsonNode report, List<Step> steps) {
 
 		Incident withSteps(List<Step> steps) {
@@ -44,7 +44,10 @@ final class IncidentViews {
 
 	}
 
-	/** Every error answer: a fixed rule or message, the offending field for a 400, the running incident for a 409. */
+	/**
+	 * Every error answer: a fixed rule or message, the offending field for a 400, and the incident concerned: the
+	 * running one for a 409 (absent when it ended before it could be read), the one that failed for a 500.
+	 */
 	@JsonInclude(JsonInclude.Include.NON_NULL)
 	record Error(String error, String field, UUID id) {
 	}

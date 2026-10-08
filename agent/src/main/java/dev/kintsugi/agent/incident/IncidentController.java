@@ -2,6 +2,7 @@ package dev.kintsugi.agent.incident;
 
 import java.net.URI;
 import java.time.Clock;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -32,6 +33,14 @@ import dev.kintsugi.agent.incident.IncidentViews.Opened;
 @ConditionalOnWebApplication
 public class IncidentController {
 
+	static final String ALREADY_RUNNING = "an incident is already running";
+
+	/** The 500 message and the {@code failure_reason} of an incident whose runner threw on start. */
+	static final String RUNNER_FAILED = "the loop could not be started";
+
+	/** The first insert, and one more when the running incident ended before its id could be read. */
+	private static final int MAX_INSERT_ATTEMPTS = 2;
+
 	private static final Logger log = LoggerFactory.getLogger(IncidentController.class);
 
 	private final IncidentRepository incidents;
@@ -51,26 +60,41 @@ public class IncidentController {
 
 	/**
 	 * Validates the body, then inserts the incident as {@code RUNNING} without checking first: the database's
-	 * one-{@code RUNNING} index decides between concurrent requests, and a unique violation is the 409.
+	 * one-{@code RUNNING} index decides between concurrent requests, and a unique violation is the 409. The id of the
+	 * running incident is read after the failed insert; when that incident has ended in between, the slot is free, so
+	 * the insert is tried once more. A runner that fails to start ends the incident {@code FAILED} at once, so it
+	 * never holds the slot.
 	 */
 	@PostMapping
 	ResponseEntity<?> open(@RequestBody(required = false) String body) {
 		IncidentSignal signal = IncidentSignal.from(parse(body));
 		UUID id = UUID.randomUUID();
-		try {
-			incidents.insertRunning(id, signal, clock.instant());
-		}
-		catch (DuplicateKeyException running) {
-			UUID runningId = incidents.findRunningId().orElse(null);
-			log.info("event=incident_rejected reason=already_running running={}", runningId);
-			return ResponseEntity.status(HttpStatus.CONFLICT)
-				.body(new Error("an incident is already running", null, runningId));
+		for (int attempt = 1;; attempt++) {
+			try {
+				incidents.insertRunning(id, signal, clock.instant());
+				break;
+			}
+			catch (DuplicateKeyException running) {
+				Optional<UUID> runningId = incidents.findRunningId();
+				if (runningId.isPresent() || attempt == MAX_INSERT_ATTEMPTS) {
+					log.info("event=incident_rejected reason=already_running running={}", runningId.orElse(null));
+					return ResponseEntity.status(HttpStatus.CONFLICT)
+						.body(new Error(ALREADY_RUNNING, null, runningId.orElse(null)));
+				}
+			}
 		}
 		log.info("incident={} event=incident_opened sinceMinutes={}", id, signal.sinceMinutes());
-		runner.start(id);
+		try {
+			runner.start(id);
+		}
+		catch (RuntimeException failed) {
+			log.error("incident={} event=runner_failed reason=\"{}\"", id, RUNNER_FAILED, failed);
+			incidents.fail(id, RUNNER_FAILED, clock.instant());
+			return ResponseEntity.internalServerError().body(new Error(RUNNER_FAILED, null, id));
+		}
 		return ResponseEntity.accepted()
 			.location(URI.create("/incidents/" + id))
-			.body(new Opened(id, IncidentStatus.RUNNING.name()));
+			.body(new Opened(id, IncidentStatus.RUNNING));
 	}
 
 	/** The incident with its steps: summaries by default, the full tool outputs and model answers with {@code full}. */

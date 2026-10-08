@@ -1,6 +1,9 @@
 package dev.kintsugi.agent.incident;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 
 import java.net.URI;
@@ -12,6 +15,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import dev.kintsugi.agent.AgentDatabase;
 
@@ -167,29 +173,62 @@ class IncidentApiTest {
 	}
 
 	@Test
-	void ofTwoParallelRequestsExactlyOneWins() throws Exception {
-		for (int round = 0; round < 10; round++) {
-			AgentDatabase.empty();
-			CyclicBarrier start = new CyclicBarrier(2);
-			List<CompletableFuture<Integer>> calls = new ArrayList<>();
-			for (int i = 0; i < 2; i++) {
-				calls.add(CompletableFuture.supplyAsync(() -> {
-					try {
-						start.await();
-						return post(VALID).statusCode();
-					}
-					catch (Exception e) {
-						throw new IllegalStateException(e);
-					}
-				}));
-			}
-			List<Integer> statuses = calls.stream().map(CompletableFuture::join).sorted().toList();
+	void aRunnerThatFailsToStartFailsTheIncidentAndFreesTheSlot() throws Exception {
+		doThrow(new IllegalStateException("no executor")).when(runner).start(any());
 
-			assertThat(statuses).as("round " + round).containsExactly(202, 409);
-			assertThat(AgentDatabase.admin()
-				.sql("SELECT count(*) FROM incidents WHERE status = 'RUNNING'")
-				.query(Integer.class)
-				.single()).as("round " + round).isEqualTo(1);
+		HttpResponse<String> response = post(VALID);
+
+		assertThat(response.statusCode()).isEqualTo(500);
+		JsonNode error = JSON.readTree(response.body());
+		assertThat(error.get("error").asString()).isEqualTo(IncidentController.RUNNER_FAILED);
+		UUID id = UUID.fromString(error.get("id").asString());
+		var row = AgentDatabase.admin()
+			.sql("SELECT status, failure_reason, ended_at IS NOT NULL AS ended FROM incidents WHERE id = ?")
+			.param(id)
+			.query()
+			.singleRow();
+		assertThat(row).containsEntry("status", "FAILED")
+			.containsEntry("failure_reason", IncidentController.RUNNER_FAILED)
+			.containsEntry("ended", true);
+
+		reset(runner);
+		assertThat(post(VALID).statusCode()).isEqualTo(202);
+	}
+
+	@Test
+	void ofTwoParallelRequestsExactlyOneWins() throws Exception {
+		ExecutorService pool = Executors.newFixedThreadPool(2);
+		try {
+			for (int round = 0; round < 10; round++) {
+				AgentDatabase.empty();
+				CyclicBarrier start = new CyclicBarrier(2);
+				List<CompletableFuture<Integer>> calls = new ArrayList<>();
+				for (int i = 0; i < 2; i++) {
+					calls.add(CompletableFuture.supplyAsync(() -> {
+						try {
+							// A timeout, so a request that never reaches the barrier fails the test instead of hanging.
+							start.await(10, TimeUnit.SECONDS);
+							return post(VALID).statusCode();
+						}
+						catch (Exception e) {
+							throw new IllegalStateException(e);
+						}
+					}, pool));
+				}
+				List<Integer> statuses = calls.stream()
+					.map(call -> call.orTimeout(30, TimeUnit.SECONDS).join())
+					.sorted()
+					.toList();
+
+				assertThat(statuses).as("round " + round).containsExactly(202, 409);
+				assertThat(AgentDatabase.admin()
+					.sql("SELECT count(*) FROM incidents WHERE status = 'RUNNING'")
+					.query(Integer.class)
+					.single()).as("round " + round).isEqualTo(1);
+			}
+		}
+		finally {
+			pool.shutdownNow();
 		}
 	}
 

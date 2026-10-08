@@ -33,6 +33,10 @@ An invalid body MUST answer 400 with `{"error": <the rule>, "field": <the field>
 
 One incident runs at a time, and the database enforces it atomically: a partial unique index on the constant `((true)) WHERE status = 'RUNNING'` (see "State tables") admits at most one `RUNNING` row, the pattern the fault-injector uses for its one blocking injection. The endpoint MUST NOT check first and insert after; it inserts, and a unique violation on that index MUST answer 409. So two concurrent requests can never both start an incident.
 
+The 409 names the running incident, read after the failed insert. That read is a second statement, so the running incident may end in between: then the slot is free, and the endpoint MUST try the insert once more. If that second insert also fails and no running incident can be read, the 409 has no `id`; the client may simply retry.
+
+If the `IncidentRunner` throws while starting the loop, the endpoint MUST end the incident `FAILED` with `failure_reason` `the loop could not be started`, log the error, and answer 500 with `{"error": "the loop could not be started", "id": <the incident's id>}`. So a runner failure never leaves a `RUNNING` row that would block every later request.
+
 #### Scenario: Valid incident
 - GIVEN no incident is running
 - WHEN `POST /incidents` is called with `{"symptom": "Checkout orders stay pending for a long time", "sinceMinutes": 15}`
@@ -53,6 +57,19 @@ One incident runs at a time, and the database enforces it atomically: a partial 
 - WHEN `POST /incidents` is called with a valid body
 - THEN the insert fails on the one-`RUNNING` unique index, and the response status is 409 with `{"error", "id"}`, `id` being the running incident's
 - AND no incident is created
+
+#### Scenario: The running incident ends during the conflict
+- GIVEN the insert failed on the one-`RUNNING` index
+- WHEN the running incident has ended before its id is read
+- THEN the insert is tried once more, and the request answers 202 when it succeeds
+- AND when the second insert also fails and no running incident can be read, the response is 409 with `error` and without `id`
+
+#### Scenario: The runner fails to start
+- GIVEN an `IncidentRunner` that throws on start
+- WHEN `POST /incidents` is called with a valid body
+- THEN the response status is 500 with `error` and the incident's `id`
+- AND that incident has status `FAILED`, `failure_reason` `the loop could not be started` and an `ended_at`
+- AND a later valid `POST /incidents` answers 202
 
 #### Scenario: Two requests at once
 - GIVEN no incident is running
@@ -89,7 +106,7 @@ An incident MUST have exactly one of these statuses, and every end MUST record `
 | `INVALID_REPORT` | two report attempts failed the schema or the evidence check |
 | `BUDGET_EXCEEDED` | the model-call budget was used up |
 | `TIMED_OUT` | one model call or the whole incident ran past its time budget |
-| `FAILED` | anything else: a plan invalid twice, the model unreachable, an unexpected error, or an agent restart during the run |
+| `FAILED` | anything else: a plan invalid twice, the model unreachable, an unexpected error, a runner that failed to start, or an agent restart during the run |
 
 #### Scenario: Agent restarted during a run (chosen)
 - GIVEN an incident with status `RUNNING` when the agent stops

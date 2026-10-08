@@ -38,14 +38,17 @@ class IncidentRepository {
 	 * statement.
 	 */
 	void insertRunning(UUID id, IncidentSignal signal, Instant startedAt) {
-		jdbc.sql("INSERT INTO incidents (id, signal, status, started_at) VALUES (?, CAST(? AS jsonb), 'RUNNING', ?)")
-			.params(id, json.writeValueAsString(signal), Timestamp.from(startedAt))
+		jdbc.sql("INSERT INTO incidents (id, signal, status, started_at) VALUES (?, CAST(? AS jsonb), ?, ?)")
+			.params(id, json.writeValueAsString(signal), IncidentStatus.RUNNING.name(), Timestamp.from(startedAt))
 			.update();
 	}
 
 	/** The running incident, if any; there is at most one. */
 	Optional<UUID> findRunningId() {
-		return jdbc.sql("SELECT id FROM incidents WHERE status = 'RUNNING'").query(UUID.class).optional();
+		return jdbc.sql("SELECT id FROM incidents WHERE status = ?")
+			.param(IncidentStatus.RUNNING.name())
+			.query(UUID.class)
+			.optional();
 	}
 
 	/** The incident and its steps in step order. */
@@ -62,9 +65,16 @@ class IncidentRepository {
 
 	/** Fails every {@code RUNNING} incident with {@code reason}; returns how many there were. */
 	int failRunning(String reason, Instant endedAt) {
-		return jdbc.sql("UPDATE incidents SET status = 'FAILED', failure_reason = ?, ended_at = ? WHERE status = 'RUNNING'")
-			.params(reason, Timestamp.from(endedAt))
+		return jdbc.sql("UPDATE incidents SET status = ?, failure_reason = ?, ended_at = ? WHERE status = ?")
+			.params(IncidentStatus.FAILED.name(), reason, Timestamp.from(endedAt), IncidentStatus.RUNNING.name())
 			.update();
+	}
+
+	/** Fails the incident {@code id} with {@code reason} if it is still {@code RUNNING}; returns whether it was. */
+	boolean fail(UUID id, String reason, Instant endedAt) {
+		return jdbc.sql("UPDATE incidents SET status = ?, failure_reason = ?, ended_at = ? WHERE id = ? AND status = ?")
+			.params(IncidentStatus.FAILED.name(), reason, Timestamp.from(endedAt), id, IncidentStatus.RUNNING.name())
+			.update() == 1;
 	}
 
 	private List<Step> steps(UUID id) {
@@ -79,7 +89,8 @@ class IncidentRepository {
 
 	private Incident incident(ResultSet rs, int rowNum) throws SQLException {
 		return new Incident(rs.getObject("id", UUID.class), rs.getString("symptom"),
-				rs.getObject("since_minutes", Integer.class), rs.getString("status"), rs.getString("failure_reason"),
+				rs.getObject("since_minutes", Integer.class), IncidentStatus.valueOf(rs.getString("status")),
+				rs.getString("failure_reason"),
 				instant(rs, "started_at"), instant(rs, "ended_at"), tree(rs.getString("report")), List.of());
 	}
 
