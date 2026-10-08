@@ -48,8 +48,11 @@ public enum MetricCatalog {
 	CLIENT_REQUEST_OUTCOMES("client_request_outcomes", "sum by (service, client_name, outcome, exception)"
 			+ " (rate(http_client_requests_seconds_count{{sel}}[{w}]))");
 
-	/** At most this many points per series: the step is chosen so that the window holds no more. */
-	public static final int MAX_POINTS = 200;
+	/**
+	 * At most this many points per series: the step is chosen so that the window holds no more. 60 compact points of a
+	 * typical series take about 1.5 KB, so several series fit in the 8 KB result.
+	 */
+	public static final int MAX_POINTS = 60;
 
 	/** Prometheus scrapes every 5 s, so a shorter step adds no information. */
 	static final long MIN_STEP_SECONDS = 5;

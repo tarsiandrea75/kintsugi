@@ -60,7 +60,7 @@ Verified in the 2.0.1 sources:
 - **Spring AI 2.0.1 does not enable it.** `McpServerStatelessWebMvcAutoConfiguration` builds `WebMvcStatelessServerTransport` without a validator, so the builder's default `ServerTransportSecurityValidator.NOOP` applies. No `spring.ai.mcp.server.*` property changes that.
 - **How mcp-tools enables it:** `McpTransportConfiguration` declares its own `WebMvcStatelessServerTransport` bean with `DefaultServerTransportSecurityValidator` and an **empty origin allow-list**, set explicitly rather than left to the builder's default.
   - The auto-configured bean backs off because its `@ConditionalOnMissingBean` has no attributes, so it matches **by type** (the method's return type), not by name.
-  - The validator exists only on the STATELESS transport. Our bean is conditional on `spring.ai.mcp.server.protocol=STATELESS`, and a guard bean fails the startup for any other protocol, so a protocol switch cannot silently drop validation.
+  - The validator exists only on the STATELESS transport. Our bean is conditional on `spring.ai.mcp.server.protocol=STATELESS`, and a guard bean fails the startup for any other protocol, so a protocol switch cannot silently drop validation. Both compare the value ignoring case, as Spring's relaxed enum binding does, so `stateless` works too.
 
 With that configuration:
 
@@ -94,7 +94,7 @@ An invalid parameter is an error returned to the model, and no query runs.
 |------|--------|
 | `search_logs` | Loki `query_range`, newest first |
 | `count_logs` | Loki `count_over_time` |
-| `query_metric` | Prometheus `query_range`; at most 200 points per series and 10 series |
+| `query_metric` | Prometheus `query_range`; at most 60 compact `[unixSeconds, value]` points per series and 10 series, so several series fit in the 8 KB result |
 | `get_order_trace` | the order row plus its order, payment and reservation events (at most 50 rows each) |
 | `recent_events` | the event tables |
 | `status_summary` | aggregates of `orders`, `payments` or `stock` |

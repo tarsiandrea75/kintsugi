@@ -53,12 +53,16 @@ public class McpTransportConfiguration {
 			.build();
 	}
 
-	/** Fails the startup unless the protocol is STATELESS, the only one whose transport carries the validator. */
+	/**
+	 * Fails the startup unless the protocol is STATELESS, the only one whose transport carries the validator. The
+	 * value is compared ignoring case, like {@code @ConditionalOnProperty} above and Spring's relaxed enum binding, so
+	 * {@code stateless} keeps both the validated transport and a running server.
+	 */
 	@Bean
 	InitializingBean statelessProtocolGuard(Environment environment) {
 		return () -> {
 			String protocol = environment.getProperty(PROTOCOL_PROPERTY);
-			if (!"STATELESS".equals(protocol)) {
+			if (!"STATELESS".equalsIgnoreCase(protocol)) {
 				throw new IllegalStateException("Origin validation is wired only for " + PROTOCOL_PROPERTY
 						+ "=STATELESS, but the protocol is " + protocol + " (ADR-004)");
 			}

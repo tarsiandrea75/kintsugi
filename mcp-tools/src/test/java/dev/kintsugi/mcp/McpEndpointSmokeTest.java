@@ -45,12 +45,17 @@ class McpEndpointSmokeTest {
 
 	@Test
 	void initializeAnswersWithServerInfoAndProtocolVersion() throws Exception {
+		// Set by Surefire from the pom (see pom.xml), so the check follows any version bump.
+		String pomVersion = System.getProperty("mcp-tools.pom-version");
+		assertThat(pomVersion).as("mcp-tools.pom-version system property").isNotBlank();
+
 		HttpResponse<String> response = post(INITIALIZE, null);
 
 		assertThat(response.statusCode()).isEqualTo(200);
 		assertThat(response.body()).contains("\"protocolVersion\":\"2025-11-25\"")
 			.contains("\"name\":\"mcp-tools\"")
-			.contains("\"version\":\"0.0.1-SNAPSHOT\"")
+			.contains("\"version\":\"" + pomVersion + "\"")
+			.doesNotContain("@project.version@")
 			.contains("\"tools\"");
 	}
 

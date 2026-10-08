@@ -164,25 +164,55 @@ class ObservabilityToolsTest {
 	// query_metric
 
 	@Test
-	void queryMetricFillsTheTemplateAndKeepsAtMost200PointsPerSeries() {
-		this.prometheus.replyWith(200, matrix(1, 250));
+	void queryMetricFillsTheTemplateAndKeepsAtMost60CompactPointsPerSeries() {
+		this.prometheus.replyWith(200, matrix(1, 80));
 
 		JsonNode body = body(this.tools.queryMetric("lab_orders", "order-service", 360));
 
 		FakeHttpBackend.RecordedRequest request = this.prometheus.lastRequest();
 		assertThat(request.path()).isEqualTo("/api/v1/query_range");
 		assertThat(request.params()).containsEntry("query", "sum by (service, status) (lab_orders{service=\"order-service\"})")
-			.containsEntry("step", "109")
+			.containsEntry("step", "367")
 			.containsEntry("start", String.valueOf(NOW.minusSeconds(360 * 60).getEpochSecond()))
 			.containsEntry("end", String.valueOf(NOW.getEpochSecond()));
-		long points = Duration.ofMinutes(360).toSeconds() / 109 + 1;
-		assertThat(points).isLessThanOrEqualTo(200);
+		long points = Duration.ofMinutes(360).toSeconds() / 367 + 1;
+		assertThat(points).isLessThanOrEqualTo(60);
 		JsonNode series = body.path("items").get(0);
 		assertThat(series.path("labels").path("status").asString()).isEqualTo("S0");
-		assertThat(series.path("points").size()).isEqualTo(200);
-		assertThat(series.path("points").get(0).get(0).asString()).isEqualTo("2026-10-08T04:00:00Z");
-		assertThat(series.path("points").get(0).get(1).asString()).isEqualTo("0");
+		assertThat(series.path("points").size()).isEqualTo(60);
+		JsonNode first = series.path("points").get(0);
+		assertThat(first.get(0).isIntegralNumber()).isTrue();
+		assertThat(first.get(0).asLong()).isEqualTo(NOW.minusSeconds(360 * 60).getEpochSecond());
+		assertThat(first.get(1).asString()).isEqualTo("0");
 		assertThat(body.path("truncated").asBoolean()).isTrue();
+	}
+
+	@Test
+	void queryMetricKeepsTheNewestPointsOfASeriesThatAloneExceedsTheOutputCap() {
+		String bigValue = "1." + "2".repeat(300);
+		this.prometheus.replyWith(200, """
+				{"status":"success","data":{"resultType":"matrix","result":[
+				 {"metric":{"service":"order-service"},"values":[%s]},
+				 {"metric":{"service":"payment-service"},"values":[[%d,"1"]]}]}}"""
+			.formatted(String.join(",", java.util.stream.IntStream.range(0, 60)
+				.mapToObj(p -> "[" + (NOW.getEpochSecond() - (59 - p) * 5L) + ",\"" + bigValue + "\"]")
+				.toList()), NOW.getEpochSecond()));
+
+		CallToolResult result = this.tools.queryMetric("request_rate", null, 5);
+
+		assertThat(result.isError()).isFalse();
+		String text = text(result);
+		assertThat(text.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(8192);
+		JsonNode body = JSON.readTree(text);
+		assertThat(body.path("outcome").asString()).isEqualTo("OK");
+		assertThat(body.path("truncated").asBoolean()).isTrue();
+		assertThat(body.path("returned").asInt()).isEqualTo(1);
+		JsonNode series = body.path("items").get(0);
+		assertThat(series.path("labels").path("service").asString()).isEqualTo("order-service");
+		int kept = series.path("points").size();
+		assertThat(kept).isBetween(1, 59);
+		assertThat(series.path("points").get(kept - 1).get(0).asLong()).isEqualTo(NOW.getEpochSecond());
+		assertThat(series.path("truncated").asString()).isEqualTo("[truncated] oldest " + (60 - kept) + " points dropped");
 	}
 
 	@Test
@@ -196,7 +226,8 @@ class ObservabilityToolsTest {
 		assertThat(this.prometheus.lastRequest().params()).containsEntry("query",
 				"sum by (service, uri) (rate(http_server_requests_seconds_count"
 						+ "{service=~\"order-service|payment-service|inventory-service|gateway-mock\"}[60s]))")
-			.containsEntry("step", "5");
+			// 300 s over at most 60 points: ceil(300 / 59) = 6 s.
+			.containsEntry("step", "6");
 	}
 
 	@Test
@@ -348,6 +379,38 @@ class ObservabilityToolsTest {
 			.isEqualTo("Loki returned an unreadable answer");
 	}
 
+	@Test
+	void unreachableBackendIsAnUpstreamError() throws Exception {
+		int closedPort;
+		try (java.net.ServerSocket socket = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+			closedPort = socket.getLocalPort();
+		}
+		ObservabilityTools unreachable = new ObservabilityTools(
+				new LokiClient(BackendClients.restClient(new BackendProperties.Backend(
+						URI.create("http://localhost:" + closedPort), Duration.ofSeconds(1), Duration.ofMillis(300)))),
+				new PrometheusClient(client(this.prometheus)), new ToolCallRunner(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+		JsonNode body = body(unreachable.searchLogs("order-service", null, null, 15, null));
+
+		assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
+		assertThat(body.path("reason").asString()).isEqualTo("Loki is unreachable");
+	}
+
+	@Test
+	void malformedNumericBackendDataIsAnUnexpectedUpstreamError(CapturedOutput output) {
+		this.loki.replyWith(200, """
+				{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1791453600,"many"]}]}}""");
+
+		CallToolResult result = this.tools.countLogs("order-service", null, null, 15);
+
+		assertThat(result.isError()).isTrue();
+		JsonNode body = body(result);
+		assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
+		assertThat(body.path("reason").asString()).isEqualTo("unexpected failure: NumberFormatException");
+		assertThat(callLines(output, "count_logs")).singleElement()
+			.satisfies(line -> assertThat(line).contains("outcome=UPSTREAM_ERROR"));
+	}
+
 	// helpers
 
 	private static org.springframework.web.client.RestClient client(FakeHttpBackend fake) {
@@ -381,7 +444,7 @@ class ObservabilityToolsTest {
 		for (int s = 0; s < series; s++) {
 			List<String> values = new ArrayList<>();
 			for (int p = 0; p < points; p++) {
-				values.add("[" + (start + p * 109L) + ",\"" + p + "\"]");
+				values.add("[" + (start + p * 367L) + ",\"" + p + "\"]");
 			}
 			result.add("{\"metric\":{\"service\":\"order-service\",\"status\":\"S" + s + "\"},\"values\":["
 					+ String.join(",", values) + "]}");

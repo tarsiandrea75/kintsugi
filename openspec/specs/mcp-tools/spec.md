@@ -27,7 +27,7 @@ These apply to every tool.
 |------|-----------------------------|--------|--------|
 | `search_logs` | `service`, `contains?`, `level?`, `sinceMinutes`, `limit?` | Loki `query_range`, direction backward | lines, newest first: `timestamp`, `service`, `level`, `untrustedText` (a line longer than 1000 characters is cut and ends with `[truncated]`); plus `returned` and `truncated` |
 | `count_logs` | `service`, `contains?`, `level?`, `sinceMinutes` | Loki `count_over_time` over the window | `service`, `count` |
-| `query_metric` | `metric`, `service?`, `sinceMinutes` | Prometheus `query_range`, step `max(5 s, ceil(window / 199))` | at most 10 series, each with its `labels` and at most 200 `[timestamp, value]` `points` (value as Prometheus writes it, such as `"0.5"` or `"NaN"`) |
+| `query_metric` | `metric`, `service?`, `sinceMinutes` | Prometheus `query_range`, step `max(5 s, ceil(window / 59))` | at most 10 series, each with its `labels` and at most 60 compact `points`, oldest first: `[unixSeconds, value]`, the time an integer and the value as Prometheus writes it (such as `"0.5"` or `"NaN"`). When the series exceed the output cap, whole series are dropped from the end; if the first series alone exceeds it, its oldest points are dropped and it carries `truncated`: `"[truncated] oldest <n> points dropped"`. Either way the result reports `truncated: true` |
 | `get_order_trace` | `orderId` | the order row, plus `order_events`, `payment_events` and `reservation_events` for that order | the order (`id`, `status`, `createdAt`, `updatedAt`) and per table at most 50 events: `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` |
 | `recent_events` | `source`, `type?`, `outcome?`, `minDurationMs?`, `sinceMinutes`, `limit?` | `order_events`, `payment_events` or `reservation_events` | events, newest first, with the same fields as above plus `orderId` |
 | `status_summary` | `table`, `sinceMinutes?` | `orders`, `payments` or `stock` | aggregates only: counts per status (`orders`, `payments`) or per SKU available quantity (`stock`) |
@@ -124,8 +124,14 @@ Every tool MUST cap its rows, points, series and output size as the shared rules
 #### Scenario: Metric points
 - GIVEN `sinceMinutes` = 360
 - WHEN `query_metric` runs
-- THEN the step is chosen so that each series has at most 200 points
+- THEN the step is 367 s, so that each series has at most 60 points
 - AND at most 10 series are returned
+
+#### Scenario: One series larger than the output cap
+- GIVEN Prometheus returns a first series whose points alone exceed 8 KB
+- WHEN `query_metric` runs
+- THEN the result is `OK` with that series and its newest points, not an empty list
+- AND the series carries `truncated` with the number of oldest points dropped, and the result reports `truncated: true`
 
 ### Requirement: Backend failures are reported, not thrown
 
@@ -198,9 +204,14 @@ mcp-tools MUST connect to PostgreSQL only as `kintsugi_agent`, and MUST open its
 - THEN the response status is 403
 
 #### Scenario: Protocol switch
-- GIVEN `spring.ai.mcp.server.protocol` is not `STATELESS`
+- GIVEN `spring.ai.mcp.server.protocol` is not `STATELESS` in any letter case, or is missing
 - WHEN mcp-tools starts
 - THEN the startup fails, because only the stateless transport carries the Origin validator
+
+#### Scenario: Protocol in lower case
+- GIVEN `spring.ai.mcp.server.protocol` = `stateless`
+- WHEN mcp-tools starts
+- THEN it starts with the Origin-validating transport, since Spring binds the value ignoring case
 
 #### Scenario: GET on the endpoint
 - WHEN a client sends `GET /mcp`
