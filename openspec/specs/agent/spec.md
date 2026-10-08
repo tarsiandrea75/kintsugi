@@ -14,7 +14,9 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 | Tool execution | the loop calls `ChatModel` directly (in Spring AI 2.0.1 it never executes tools) and runs each checked tool call itself through the MCP `ToolCallback` of that name |
 | MCP client | `spring-ai-starter-mcp-client`, `SYNC`, one Streamable HTTP connection `mcp-tools` to `http://mcp-tools:8085`, endpoint `/mcp`, request timeout 20 s (the default) |
 | Structured output | plan and report calls carry their JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned |
-| State store | database `agent` on the `knowledge-db` instance, owner `agent_app`; schema by Flyway in `agent/` |
+| State store | database `agent` on the `knowledge-db` instance, owned by the bootstrap superuser; the agent connects as `agent_app` (password `AGENT_DB_PASSWORD`), which has `USAGE, CREATE` on its schema `public` and owns the tables its Flyway creates there |
+| HTTP port **(chosen)** | 8086, next to mcp-tools' 8085 |
+| `demo` profile | the one-shot question of the hello-tool demo: no web server, no database, no incident API |
 | One incident at a time **(chosen)** | a laptop CPU serves one model call at a time |
 | Leakage | no prompt, schema, tool description or log line of the agent names a fault id (F1 to F8), the fault catalog, the fault-injector or a symptom-to-cause mapping |
 
@@ -22,12 +24,12 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 ### Requirement: Open an incident
 
-`POST /incidents` with body `{"symptom": <string>, "sinceMinutes": <integer>}` MUST validate the body, create an incident with status `RUNNING`, start the loop in the background and answer 202 with `{"id": <uuid>, "status": "RUNNING"}` and a `Location` header `/incidents/<id>`.
+`POST /incidents` with body `{"symptom": <string>, "sinceMinutes": <integer>}` MUST validate the body, create an incident with status `RUNNING`, hand it to the `IncidentRunner` (which starts the loop in the background and returns at once; until the loop exists it does nothing, so the incident stays `RUNNING`) and answer 202 with `{"id": <uuid>, "status": "RUNNING"}` and a `Location` header `/incidents/<id>`.
 
 - `symptom`: 10 to 500 characters after trimming, with no control characters **(chosen)**.
 - `sinceMinutes`: integer, 1 to 360, the same range as the tools'. It is the default window offered to the model; a tool call may still use its own valid window.
 
-An invalid body MUST answer 400 naming the field and its allowed range, and MUST NOT create an incident.
+An invalid body MUST answer 400 with `{"error": <the rule>, "field": <the field>}`, naming the field and its allowed range, and MUST NOT create an incident. A body that is not a JSON object answers 400 with the expected shape and no `field`. The symptom is checked first, then the window; validation comes before the one-incident rule, so an invalid body is a 400 even while an incident runs. The stored symptom is the trimmed one.
 
 One incident runs at a time, and the database enforces it atomically: a partial unique index on the constant `((true)) WHERE status = 'RUNNING'` (see "State tables") admits at most one `RUNNING` row, the pattern the fault-injector uses for its one blocking injection. The endpoint MUST NOT check first and insert after; it inserts, and a unique violation on that index MUST answer 409. So two concurrent requests can never both start an incident.
 
@@ -43,13 +45,13 @@ One incident runs at a time, and the database enforces it atomically: a partial 
 - AND no incident is created
 
 #### Scenario: Window out of range
-- WHEN `POST /incidents` is called with `sinceMinutes` = 0, 361, a decimal or a missing value
+- WHEN `POST /incidents` is called with `sinceMinutes` = 0, 361, a decimal (`15.5` or `15.0`), a string, a number beyond the integer range or a missing value
 - THEN the response status is 400 and states the range 1 to 360
 
 #### Scenario: Another incident is running (chosen)
 - GIVEN an incident with status `RUNNING`
 - WHEN `POST /incidents` is called with a valid body
-- THEN the insert fails on the one-`RUNNING` unique index, and the response status is 409 with the id of the running incident
+- THEN the insert fails on the one-`RUNNING` unique index, and the response status is 409 with `{"error", "id"}`, `id` being the running incident's
 - AND no incident is created
 
 #### Scenario: Two requests at once
@@ -60,12 +62,17 @@ One incident runs at a time, and the database enforces it atomically: a partial 
 
 ### Requirement: Read an incident
 
-`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order, each with every column of its step row, the full tool output included. An unknown or malformed id MUST answer 404.
+`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
 
 #### Scenario: Completed incident
 - GIVEN an incident whose run completed
 - WHEN `GET /incidents/{id}` is called
-- THEN the response has `status` `COMPLETED`, a `report` and every step with its `toolOutput` and `summary`
+- THEN the response has `status` `COMPLETED`, a `report` and every step with its `summary` and without `toolOutput` or `modelOutput`
+
+#### Scenario: Full outputs on request
+- GIVEN an incident with recorded steps
+- WHEN `GET /incidents/{id}?full=true` is called
+- THEN every step also carries its `toolOutput` and `modelOutput` when the row has them
 
 #### Scenario: Unknown incident
 - WHEN `GET /incidents/{id}` is called with a random UUID, or with `abc`
@@ -88,6 +95,8 @@ An incident MUST have exactly one of these statuses, and every end MUST record `
 - GIVEN an incident with status `RUNNING` when the agent stops
 - WHEN the agent starts again
 - THEN that incident has status `FAILED`, `failure_reason` `agent restarted during the run` and an `ended_at`
+- AND this happens after the migrations and before the API accepts a request, so a stale `RUNNING` row never answers a `POST` with 409
+- AND an incident that had already ended is unchanged
 
 #### Scenario: Model unreachable
 - GIVEN Ollama is unreachable
@@ -295,9 +304,22 @@ Flyway in `agent/` MUST create, in the `agent` database:
 | Table | Columns |
 |-------|---------|
 | `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
-| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident), `kind text` (`PLAN`, `TOOL_CALL`, `REPORT`, `BUDGET`) **(chosen)**, `phase text`, `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`), `summary text` **(chosen)**, `model_output text` (the raw plan or report answer) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
+| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `TOOL_CALL`, `REPORT`, `BUDGET`) **(chosen)**, `phase text` (the four phases), `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`), `summary text` **(chosen)**, `model_output text` (the raw plan or report answer) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
 
-A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident").
+A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident"). Its name is `incidents_one_running_idx`.
+
+`CHECK` constraints keep every row consistent with the spec's values, so a bug in the loop fails its write instead of storing a state the API could not explain:
+
+- `status`, `kind`, `phase` and `tool_outcome` hold only the values listed above (`tool_outcome` may be null, for a step that is not a tool call);
+- `ended_at` is null exactly while `RUNNING`;
+- `failure_reason` is set exactly when the status is neither `RUNNING` nor `COMPLETED`;
+- `report` is set exactly when `COMPLETED`.
+
+The migrations live in `agent/src/main/resources/db/migration` and run at startup as `agent_app`; the agent starts only when the store is reachable, and does not need Ollama to start.
+
+#### Scenario: A state outside the spec
+- WHEN a row is written with status `DONE`, a `FAILED` incident without `failure_reason`, a `RUNNING` one with an `ended_at`, or a step with `tool_outcome` `SKIPPED`
+- THEN the database rejects it with a `CHECK` violation
 
 A step is written when it ends, before the next one starts, so a crash loses at most the step in progress.
 
@@ -308,7 +330,7 @@ A step is written when it ends, before the next one starts, so a crash loses at 
 
 ### Requirement: Isolation
 
-The agent MUST reach the lab only through mcp-tools: it has no datasource, HTTP client or credentials for the lab services, Loki, Prometheus, the lab's postgres or the fault-injector. `agent_app` MUST be `NOSUPERUSER NOCREATEDB NOCREATEROLE`, MUST exist only on `knowledge-db`, and MUST have `CONNECT` on `agent` only: not on `knowledge` (runbooks come through `search_runbooks`) and never on `faults`, which lives on the lab's server where `agent_app` has no role. `CONNECT` on `agent` is revoked from `PUBLIC`.
+The agent MUST reach the lab only through mcp-tools: it has no datasource, HTTP client or credentials for the lab services, Loki, Prometheus, the lab's postgres or the fault-injector. `agent_app` MUST be `NOSUPERUSER NOCREATEDB NOCREATEROLE`, MUST exist only on `knowledge-db`, and MUST have `CONNECT` on `agent` only: not on `knowledge` (runbooks come through `search_runbooks`) and never on `faults`, which lives on the lab's server where `agent_app` has no role. `CONNECT` on `agent` is revoked from `PUBLIC`, and neither `knowledge_indexer` nor `kintsugi_agent` has it. The database is owned by the bootstrap superuser: `agent_app` has `USAGE, CREATE` on its schema `public` only, so it cannot grant `CONNECT` to another role, change the database's settings or create another schema.
 
 #### Scenario: No access to the truth
 - WHEN the agent's roles are listed on both PostgreSQL servers
@@ -316,6 +338,10 @@ The agent MUST reach the lab only through mcp-tools: it has no datasource, HTTP 
 
 #### Scenario: No direct knowledge access
 - WHEN `agent_app` tries to connect to `knowledge`
+- THEN the connection is refused for lack of `CONNECT` permission
+
+#### Scenario: The knowledge roles cannot reach the agent's state
+- WHEN `kintsugi_agent` or `knowledge_indexer` tries to connect to `agent`
 - THEN the connection is refused for lack of `CONNECT` permission
 
 #### Scenario: Not a superuser

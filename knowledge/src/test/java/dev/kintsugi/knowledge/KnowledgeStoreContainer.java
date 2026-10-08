@@ -47,7 +47,9 @@ final class KnowledgeStoreContainer {
 				.withCopyFileToContainer(MountableFile.forHostPath(initScript, 0755),
 						"/docker-entrypoint-initdb.d/01-knowledge.sh")
 				.withEnv("KNOWLEDGE_INDEXER_DB_PASSWORD", INDEXER_PASSWORD)
-				.withEnv("KINTSUGI_AGENT_DB_PASSWORD", "kintsugi-agent-test");
+				.withEnv("KINTSUGI_AGENT_DB_PASSWORD", "kintsugi-agent-test")
+				// The init script also creates the agent database and its role, agent_app (ADR-010).
+				.withEnv("AGENT_DB_PASSWORD", "agent-app-test");
 			container.start(); // stopped by Testcontainers' reaper when the JVM exits
 		}
 		return container;

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Database, extension, roles and schema of the knowledge store, the pgvector container that holds the agent's runbook
 # index (ADR-002, openspec/specs/knowledge-base/spec.md). It is a server of its own, separate from the lab's postgres.
+# It also hosts the agent's state, the agent database (ADR-010, openspec/specs/agent/spec.md).
 #
 # Runs once, on the first start with an empty data volume, as the bootstrap superuser (POSTGRES_USER). Only this script
 # uses that superuser. A superuser ignores REVOKE CONNECT, so every other role is NOSUPERUSER:
@@ -8,6 +9,11 @@
 # - kintsugi_agent is mcp-tools' read-only role: CONNECT on knowledge and SELECT on runbook_chunks and index_metadata,
 #   nothing else (not even indexed_files, the indexer's own bookkeeping). Same name as on the lab's server, but a
 #   different server with its own password.
+# - agent_app is the agent's role on its own database, agent, and on nothing else: no CONNECT on knowledge (runbooks
+#   come through mcp-tools' search_runbooks), and neither knowledge role may connect to agent. The agent's Flyway
+#   creates its tables as agent_app, so this script grants it CREATE on agent's schema public only; the database itself
+#   stays the superuser's, so agent_app cannot grant CONNECT to another role, change the database's settings or create
+#   another schema, as an owner could.
 # The extension and the schema are created here, not by the indexer or Spring AI: "vector" is not a trusted extension,
 # so only a superuser may create it, and keeping all DDL here keeps both application roles unprivileged.
 # The passwords come from the environment of the container. Changing them later needs the volume removed: this script
@@ -24,12 +30,14 @@ set -euo pipefail
 
 : "${KNOWLEDGE_INDEXER_DB_PASSWORD:?KNOWLEDGE_INDEXER_DB_PASSWORD must be set}"
 : "${KINTSUGI_AGENT_DB_PASSWORD:?KINTSUGI_AGENT_DB_PASSWORD must be set}"
+: "${AGENT_DB_PASSWORD:?AGENT_DB_PASSWORD must be set}"
 
 # psql reads the passwords from the environment itself (\getenv), so they never appear on a command line, and the
 # :'name' form quotes them as SQL literals, so no value is ever spliced into the SQL text.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<'SQL'
 \getenv indexer_password KNOWLEDGE_INDEXER_DB_PASSWORD
 \getenv agent_password KINTSUGI_AGENT_DB_PASSWORD
+\getenv agent_app_password AGENT_DB_PASSWORD
 CREATE ROLE knowledge_indexer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
   PASSWORD :'indexer_password';
 CREATE ROLE kintsugi_agent LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
@@ -41,11 +49,27 @@ ALTER ROLE kintsugi_agent SET default_transaction_read_only = on;
 ALTER ROLE kintsugi_agent SET statement_timeout = '3s';
 ALTER ROLE kintsugi_agent SET transaction_timeout = '5s';
 ALTER ROLE kintsugi_agent SET idle_in_transaction_session_timeout = '5s';
+CREATE ROLE agent_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  PASSWORD :'agent_app_password';
 
 -- The database stays owned by the superuser, so neither role can change its settings or grants.
 CREATE DATABASE knowledge;
 REVOKE CONNECT, TEMPORARY ON DATABASE knowledge FROM PUBLIC;
 GRANT CONNECT ON DATABASE knowledge TO knowledge_indexer, kintsugi_agent;
+
+-- The agent's state: incidents and their steps. Also owned by the superuser, for the same reason; only agent_app may
+-- connect.
+CREATE DATABASE agent;
+REVOKE CONNECT, TEMPORARY ON DATABASE agent FROM PUBLIC;
+GRANT CONNECT ON DATABASE agent TO agent_app;
+SQL
+
+# The agent's schema is not created here: its own Flyway migrations (agent/src/main/resources/db/migration) create it,
+# as agent_app, which then owns the tables. PUBLIC has no CREATE on schema public (PostgreSQL 15 and later), so this
+# grant is what lets agent_app create them, in this database only. It runs before the knowledge schema below, so the
+# knowledge grant to kintsugi_agent stays the last statement, the mark ../healthcheck.sh looks for.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname agent <<'SQL'
+GRANT USAGE, CREATE ON SCHEMA public TO agent_app;
 SQL
 
 # The schema, in database knowledge. Tables are created by the superuser, then handed to knowledge_indexer, so the

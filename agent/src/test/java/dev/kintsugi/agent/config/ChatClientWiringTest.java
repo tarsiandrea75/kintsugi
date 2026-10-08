@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import dev.kintsugi.agent.AgentDatabase;
+
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
@@ -22,6 +24,8 @@ import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -40,6 +44,11 @@ class ChatClientWiringTest {
 
 	@Autowired
 	ApplicationContext context;
+
+	@DynamicPropertySource
+	static void database(DynamicPropertyRegistry registry) {
+		AgentDatabase.register(registry);
+	}
 
 	static Clock clock() {
 		return Clock.fixed(Instant.parse("2026-10-05T12:00:00Z"), ZoneOffset.UTC);

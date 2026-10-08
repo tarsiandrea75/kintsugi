@@ -1,0 +1,102 @@
+package dev.kintsugi.agent.incident;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import dev.kintsugi.agent.incident.IncidentViews.Incident;
+import dev.kintsugi.agent.incident.IncidentViews.Step;
+
+/** Reads and writes {@code incidents} and {@code incident_steps} in the {@code agent} database, as {@code agent_app}. */
+@Repository
+@ConditionalOnWebApplication
+class IncidentRepository {
+
+	private final JdbcClient jdbc;
+
+	private final JsonMapper json;
+
+	IncidentRepository(JdbcClient jdbc, JsonMapper json) {
+		this.jdbc = jdbc;
+		this.json = json;
+	}
+
+	/**
+	 * Inserts a {@code RUNNING} incident. While another is running, the one-{@code RUNNING} partial unique index fails
+	 * the insert with {@link org.springframework.dao.DuplicateKeyException}: the check and the insert are one atomic
+	 * statement.
+	 */
+	void insertRunning(UUID id, IncidentSignal signal, Instant startedAt) {
+		jdbc.sql("INSERT INTO incidents (id, signal, status, started_at) VALUES (?, CAST(? AS jsonb), 'RUNNING', ?)")
+			.params(id, json.writeValueAsString(signal), Timestamp.from(startedAt))
+			.update();
+	}
+
+	/** The running incident, if any; there is at most one. */
+	Optional<UUID> findRunningId() {
+		return jdbc.sql("SELECT id FROM incidents WHERE status = 'RUNNING'").query(UUID.class).optional();
+	}
+
+	/** The incident and its steps in step order. */
+	Optional<Incident> find(UUID id) {
+		return jdbc.sql("""
+				SELECT id, signal->>'symptom' AS symptom, (signal->>'sinceMinutes')::int AS since_minutes, status,
+				       failure_reason, started_at, ended_at, report::text AS report
+				FROM incidents WHERE id = ?""")
+			.param(id)
+			.query(this::incident)
+			.optional()
+			.map(incident -> incident.withSteps(steps(id)));
+	}
+
+	/** Fails every {@code RUNNING} incident with {@code reason}; returns how many there were. */
+	int failRunning(String reason, Instant endedAt) {
+		return jdbc.sql("UPDATE incidents SET status = 'FAILED', failure_reason = ?, ended_at = ? WHERE status = 'RUNNING'")
+			.params(reason, Timestamp.from(endedAt))
+			.update();
+	}
+
+	private List<Step> steps(UUID id) {
+		return jdbc.sql("""
+				SELECT step_no, kind, phase, model, tokens, tool_name, tool_args::text AS tool_args, tool_outcome,
+				       summary, tool_output, model_output, latency_ms, created_at
+				FROM incident_steps WHERE incident_id = ? ORDER BY step_no""")
+			.param(id)
+			.query(this::step)
+			.list();
+	}
+
+	private Incident incident(ResultSet rs, int rowNum) throws SQLException {
+		return new Incident(rs.getObject("id", UUID.class), rs.getString("symptom"),
+				rs.getObject("since_minutes", Integer.class), rs.getString("status"), rs.getString("failure_reason"),
+				instant(rs, "started_at"), instant(rs, "ended_at"), tree(rs.getString("report")), List.of());
+	}
+
+	private Step step(ResultSet rs, int rowNum) throws SQLException {
+		return new Step(rs.getInt("step_no"), rs.getString("kind"), rs.getString("phase"), rs.getString("model"),
+				rs.getObject("tokens", Integer.class), rs.getString("tool_name"), tree(rs.getString("tool_args")),
+				rs.getString("tool_outcome"), rs.getString("summary"), rs.getString("tool_output"),
+				rs.getString("model_output"), rs.getObject("latency_ms", Integer.class), instant(rs, "created_at"));
+	}
+
+	private JsonNode tree(String text) {
+		return text == null ? null : json.readTree(text);
+	}
+
+	private static Instant instant(ResultSet rs, String column) throws SQLException {
+		OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+		return value == null ? null : value.toInstant();
+	}
+
+}

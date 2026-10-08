@@ -1,6 +1,16 @@
 spring:
   application:
     name: agent
+  # The agent's state store: database agent on the knowledge-db instance, as agent_app (ADR-010). Flyway creates the
+  # schema as the same role at startup, so the agent starts only when the store is reachable; it does not need Ollama.
+  # AGENT_DB_PASSWORD has no default: a missing one stops the start with the variable's name.
+  datasource:
+    url: jdbc:postgresql://${AGENT_DB_HOST:knowledge-db}:${AGENT_DB_PORT:5432}/agent
+    username: agent_app
+    password: ${AGENT_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 4
+      connection-timeout: 2000
   ai:
     ollama:
       chat:
@@ -15,3 +25,6 @@ spring:
       # CPU inference with an 8B model can take minutes; this is a cap, not an expectation.
       read-timeout: 5m
       connect-timeout: 2s
+
+server:
+  port: 8086

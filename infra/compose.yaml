@@ -21,9 +21,9 @@
 # - POSTGRES_BOOTSTRAP_PASSWORD, LAB_APP_DB_PASSWORD, FAULTS_DB_PASSWORD, KINTSUGI_AGENT_DB_PASSWORD: database
 #   passwords. They are applied only when the postgres volume is empty, so changing them needs a "down -v".
 # - GRAFANA_ADMIN_PASSWORD: Grafana's admin password.
-# - KNOWLEDGE_BOOTSTRAP_PASSWORD, KNOWLEDGE_INDEXER_DB_PASSWORD, KNOWLEDGE_AGENT_DB_PASSWORD: the knowledge store's
-#   passwords (its superuser, the indexer's owner role, and kintsugi_agent on that server). Applied only when the
-#   knowledge-data volume is empty, like the lab's.
+# - KNOWLEDGE_BOOTSTRAP_PASSWORD, KNOWLEDGE_INDEXER_DB_PASSWORD, KNOWLEDGE_AGENT_DB_PASSWORD, AGENT_DB_PASSWORD: the
+#   knowledge store's passwords (its superuser, the indexer's owner role, kintsugi_agent on that server, and the
+#   agent's agent_app role). Applied only when the knowledge-data volume is empty, like the lab's.
 # - OLLAMA_PROXY_BIND_IP: the address ollama-proxy listens on, the default bridge's gateway (docker0), which is what
 #   "host-gateway" resolves to. Change it only if the Docker daemon uses another bridge address.
 name: kintsugi-lab
@@ -239,6 +239,7 @@ services:
       POSTGRES_PASSWORD: ${KNOWLEDGE_BOOTSTRAP_PASSWORD:-postgres}
       KNOWLEDGE_INDEXER_DB_PASSWORD: ${KNOWLEDGE_INDEXER_DB_PASSWORD:-knowledge_indexer}
       KINTSUGI_AGENT_DB_PASSWORD: ${KNOWLEDGE_AGENT_DB_PASSWORD:-knowledge_agent}
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:-agent_app}
     volumes:
       - ./knowledge-db/init:/docker-entrypoint-initdb.d:ro
       - ./knowledge-db/healthcheck.sh:/usr/local/bin/knowledge-healthcheck.sh:ro

@@ -1,0 +1,7 @@
+# The demo asks one question and exits (DemoRunner): no web server and no state store, so it runs with Ollama alone.
+# Without a DataSource, Flyway and JdbcClient back off, and the incident beans (@ConditionalOnWebApplication) are absent.
+spring:
+  main:
+    web-application-type: none
+  autoconfigure:
+    exclude: org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration

@@ -68,7 +68,9 @@ class KnowledgeStoreRoleTest {
 					"/docker-entrypoint-initdb.d/01-knowledge.sh")
 			.withCopyFileToContainer(MountableFile.forHostPath(healthCheck, 0755), "/usr/local/bin/healthcheck.sh")
 			.withEnv("KNOWLEDGE_INDEXER_DB_PASSWORD", INDEXER_PASSWORD)
-			.withEnv("KINTSUGI_AGENT_DB_PASSWORD", AGENT_PASSWORD);
+			.withEnv("KINTSUGI_AGENT_DB_PASSWORD", AGENT_PASSWORD)
+			// The init script also creates the agent database and its role, agent_app (ADR-010).
+			.withEnv("AGENT_DB_PASSWORD", "agent-app-test");
 		container.start();
 		// One known chunk and the metadata row, so the agent's reads assert real values, not only that a row exists.
 		try (Connection connection = asIndexer(); Statement sql = connection.createStatement()) {

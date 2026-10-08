@@ -97,7 +97,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 ## Tasks
 
 - [x] **T1 — ADR-010 (agent loop design) and the living spec `openspec/specs/agent/spec.md`:** endpoint, loop, budgets, state, report schema and evidence check. Branch: tracker. Route: delegated writer.
-- [ ] **T2 — The state store:** the `agent` database and `agent_app` role on `knowledge-db`, the schema through Flyway in `agent/`, and the incident API skeleton (`POST` and `GET`). Testcontainers. Branch `-01-state`. Route: delegated writer.
+- [x] **T2 — The state store:** the `agent` database and `agent_app` role on `knowledge-db`, the schema through Flyway in `agent/`, and the incident API skeleton (`POST` and `GET`). Testcontainers. Branch `-01-state`. Route: delegated writer.
 - [ ] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
 - [ ] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
 - [ ] **T5 — Compose wiring and `verify-agent.sh` (F1–F3) run for real with `granite4.1:8b`;** record the results and docs. Branch `-04-check`. Route: delegated writer.
@@ -134,6 +134,22 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - the 409 rule enforced atomically, for example by a partial unique index on `RUNNING`;
     - deterministic tie-breaks in the summaries.
 
+- 2026-10-08: T2 done by a delegated writer on `feat/agent-loop-01-state`.
+  - **Part A** (spec only): refused calls and budgets pinned down; the 409 rule enforced by a partial unique index; summary tie-breaks.
+  - **Part B:**
+    - the `agent` database and the `agent_app` role on `knowledge-db`. The database stays owned by the bootstrap superuser; `agent_app` gets only USAGE and CREATE on `public`, so it cannot grant CONNECT or change settings, and a test proves it;
+    - a Flyway V1 with `incidents` and `incident_steps`, and CHECK constraints that tie `ended_at`, `failure_reason` and `report` to the status;
+    - `POST` and `GET /incidents` on port 8086, with hand-written validation;
+    - a no-op `IncidentRunner`, and the restart rule run before the web server accepts requests;
+    - the demo profile runs without a web server or database.
+  - **Parent:** added `AGENT_DB_PASSWORD` to the `knowledge-db` environment in compose. Without it the init stops on a fresh volume, and compose was outside the writer's surface.
+  - Results:
+    - `agent`: 105 tests (XML), exit 0, three runs by the writer and one by the parent;
+    - mcp-tools store tests: 74, and `knowledge`: 31, exit 0 (writer).
+  - RED observed: a compile failure, then config failures, then GREEN. A concurrency test runs 10 rounds of two parallel POSTs; exactly one wins each round.
+  - Choices to review: port 8086; the stricter CHECK constraints; the restart reason keeps the spec's wording.
+  - **The human must add** `AGENT_DB_PASSWORD=agent_app` to `infra/.env.example`. An existing store volume needs `down -v` and a re-index.
+
 ## Next step
 
-Review the T1 range. Then branch `feat/agent-loop-01-state` and start T2.
+Review the T2 range. Then branch `feat/agent-loop-02-tools` and start T3.
