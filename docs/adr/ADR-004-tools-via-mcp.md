@@ -115,7 +115,23 @@ The contract of each tool is in the [living spec](../../openspec/specs/mcp-tools
   - `transaction_timeout=5s`;
   - `idle_in_transaction_session_timeout=5s`.
 - Never `CONNECT` on `faults`, and never given the `faults` credentials.
-- mcp-tools also opens its connections read-only, so a bug in mcp-tools cannot write either.
+- mcp-tools also opens its connections read-only, so a bug in mcp-tools cannot write either: one Hikari pool per database (at most 2 connections, 2 s connection timeout), each connection marked read-only, and pgjdbc's `readOnlyMode=always` so even auto-commit statements run read-only. The database names are fixed in code, so no setting can point a pool at `faults`.
+
+**How the `SELECT` grants reach tables that do not exist yet.** The init script runs on an empty volume, before any service starts; each service's Flyway creates its tables later, as `lab_app`. Three options were weighed:
+
+| Option | Covers later tables | Only the six tables | Verdict |
+|--------|---------------------|---------------------|---------|
+| `ALTER DEFAULT PRIVILEGES FOR ROLE lab_app IN SCHEMA public GRANT SELECT ON TABLES TO kintsugi_agent` | yes | **no**: it also opens `order_items` (customer items), `flyway_schema_history` and every table a later migration adds | rejected: wider than the spec |
+| Explicit per-table `GRANT` run after Flyway (a one-shot compose job, or a migration in each service) | only if it runs after every migration, on every fresh volume | yes | rejected: an ordering dependency in compose, or mcp-tools' needs written into the lab services |
+| **Event trigger** on `ddl_command_end` for `CREATE TABLE` in each lab database | yes | yes: it grants only when the new table in `public` has one of the six names | **chosen** |
+
+The trigger function is created by the superuser in a schema of its own, closed to `PUBLIC`, so schema `public` stays empty for Flyway and no lab role can change it. It runs as the role that issued the `CREATE TABLE`, `lab_app`, which owns the table and so may grant on it. Tests run the real init script and the real migrations in a PostgreSQL 18.6 container and prove the role can read the six tables and nothing else.
+
+Residual risk:
+- A table renamed into one of the six names (`ALTER TABLE ... RENAME`) is not granted, and a table dropped and created again is granted again. Both fail closed or stay within the six names.
+- The six names are written in the script. A new evidence table needs a script change and a fresh volume, like any other role change (`down -v`).
+- The role settings (`default_transaction_read_only`, the timeouts) are session defaults. mcp-tools never changes them, but a client holding the `kintsugi_agent` credentials could `SET` them off. It still cannot write (no grant) or reach `faults` (no `CONNECT`); it could run longer queries. The credentials stay inside mcp-tools.
+- Like any role, `kintsugi_agent` can connect to the `postgres` maintenance database through the default `PUBLIC` grant. It holds no lab data.
 
 ### Untrusted content
 

@@ -91,7 +91,7 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
 - [x] **T1 — ADR-004 and living spec.** Route: delegated writer.
 - [x] **T2 — Skeleton.** Initializr skeleton if an MCP server dependency id exists; otherwise the same skeleton plus the starter. Route: delegated writer.
 - [x] **T3 — Log, metric and restart tools,** with fake Loki and Prometheus HTTP servers, tests first. Route: delegated writer.
-- [ ] **T4 — Event and summary tools and the `kintsugi_agent` role,** using Testcontainers, tests first. Route: delegated writer.
+- [x] **T4 — Event and summary tools and the `kintsugi_agent` role,** using Testcontainers, tests first. Route: delegated writer.
 - [ ] **T5 — Compose wiring, `verify-mcp.sh` run for real, docs.** Route: delegated writer.
 
 ## Progress
@@ -114,7 +114,41 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
     - (3) The level filter depends on Spring's console log format.
     - (4) Non-integer arguments are rejected by Spring AI before our validation, so they get no call log.
     - (5) Restarts less than one step apart merge into one.
+- 2026-10-08: T3 committed as two commits that each pass alone: `b091dc4` (transport hardening) and `65db4a9` (tools). Both were reviewed per range and approved.
+  - `review-6fc99cfbbc40fa7e` (`b091dc4`):
+    - WARNING: the STATELESS guard is a case-sensitive exact match, while relaxed binding and `@ConditionalOnProperty` ignore case.
+    - Suggestions: the missing-protocol test checks only `hasFailed()`; the version assertion is hardcoded.
+  - `review-b9f0814d82950441` (`65db4a9`):
+    - WARNING: `ToolCallRunner` drops whole items to enforce 8 KB, so a first series larger than the cap returns OK with `returned=0`.
+    - Suggestions: the unexpected-failure path and the unreachable-backend reason are untested.
+  - All of these fold into T4 part A.
+- 2026-10-08: T4 started on `feat/mcp-tools-02-evidence-tools` (PR 2 of the chain), delegated to one writer:
+  - part A: the review fixes and the compact metric encoding;
+  - part B: the event and summary tools and the `kintsugi_agent` role.
+
+- 2026-10-08: T4 done by the delegated writer and verified by the parent.
+  - Part A (the review fixes) is committed on its own and passes alone: 66 tests, mvn exit 0.
+    - The guard accepts any letter case.
+    - Metric series have at most 60 points, each `[unixSeconds, value]`. The step is `max(5 s, ceil(window/59))`.
+    - A first series larger than the 8 KB cap is cut from its oldest points and marked, instead of being dropped.
+    - The version is checked against the pom.
+    - New tests cover the unreachable backend and malformed backend data.
+  - Part B: `get_order_trace`, `recent_events`, `status_summary` and the `kintsugi_agent` role. Writer runs: 2 × 119 tests, exit 0; parent re-run: 119 tests, exit 0.
+    - RED was observed for the role tests (against the HEAD init script) and for the tool tests (they did not compile before the code existed).
+    - The guard test was written after the code, so it was never seen failing.
+  - **Grant strategy, decided autonomously (to review):**
+    - An event trigger grants SELECT only when Flyway creates one of the six evidence tables.
+    - Default privileges would also have exposed `order_items`, `flyway_schema_history` and any future table.
+    - The residual risks are recorded in ADR-004:
+      - the role's read-only and timeout settings are only session defaults, but the missing grants still prevent writes;
+      - the role can CONNECT to the empty `postgres` database through the default PUBLIC grant;
+      - a seventh evidence table needs a script change and a volume reset.
+  - **Other autonomous decisions (to review):**
+    - `get_order_trace` returns one list in time order: the order row first, then the oldest 50 events per table, each tagged with its source.
+    - `status_summary` rejects `sinceMinutes` for `stock`, which has no timestamps.
+    - Part B is a size exception of about 1,400 lines, as T3 was. The role and the tools share the Testcontainers fixture and the spec section, so splitting them would only duplicate setup.
+  - Open for T5: compose must pass `KINTSUGI_AGENT_DB_PASSWORD` and the `kintsugi.mcp.postgres.*` settings.
 
 ## Next step
 
-T4 (event and summary tools, `kintsugi_agent` role) plus the compact metric encoding, via a delegated writer.
+Review the part A and part B ranges, then T5 (compose wiring and `verify-mcp.sh` run for real).
