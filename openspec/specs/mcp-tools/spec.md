@@ -18,32 +18,53 @@ These apply to every tool.
 | Output size | at most 8 KB of text per result; longer output is cut and ends with the marker `[truncated]` |
 | Untrusted text | log lines and event `detail` are returned inside a field named `untrustedText` |
 | Timestamps | ISO-8601 UTC |
+| Result | one JSON text: `outcome`, `reason` (errors only), `returned`, `truncated`, `items`; `isError` is true unless `outcome` is `OK` |
+| Backends | `kintsugi.mcp.loki.base-url` (default `http://loki:3100`) and `kintsugi.mcp.prometheus.base-url` (default `http://prometheus:9090`), each with `connect-timeout` (2 s) and `read-timeout` (5 s) |
 
 ## Tools
 
 | Tool | Parameters (`?` = optional) | Source | Output |
 |------|-----------------------------|--------|--------|
-| `search_logs` | `service`, `contains?`, `level?`, `sinceMinutes`, `limit?` | Loki `query_range`, direction backward | lines, newest first: `timestamp`, `service`, `level`, `untrustedText`; plus `returned` and `truncated` |
+| `search_logs` | `service`, `contains?`, `level?`, `sinceMinutes`, `limit?` | Loki `query_range`, direction backward | lines, newest first: `timestamp`, `service`, `level`, `untrustedText` (a line longer than 1000 characters is cut and ends with `[truncated]`); plus `returned` and `truncated` |
 | `count_logs` | `service`, `contains?`, `level?`, `sinceMinutes` | Loki `count_over_time` over the window | `service`, `count` |
-| `query_metric` | `metric`, `service?`, `sinceMinutes` | Prometheus `query_range` | at most 10 series, each with its labels and at most 200 `[timestamp, value]` points |
+| `query_metric` | `metric`, `service?`, `sinceMinutes` | Prometheus `query_range`, step `max(5 s, ceil(window / 199))` | at most 10 series, each with its `labels` and at most 200 `[timestamp, value]` `points` (value as Prometheus writes it, such as `"0.5"` or `"NaN"`) |
 | `get_order_trace` | `orderId` | the order row, plus `order_events`, `payment_events` and `reservation_events` for that order | the order (`id`, `status`, `createdAt`, `updatedAt`) and per table at most 50 events: `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` |
 | `recent_events` | `source`, `type?`, `outcome?`, `minDurationMs?`, `sinceMinutes`, `limit?` | `order_events`, `payment_events` or `reservation_events` | events, newest first, with the same fields as above plus `orderId` |
 | `status_summary` | `table`, `sinceMinutes?` | `orders`, `payments` or `stock` | aggregates only: counts per status (`orders`, `payments`) or per SKU available quantity (`stock`) |
-| `service_restarts` | `sinceMinutes` | Prometheus `process_start_time_seconds` per allowed service | per service, the start times seen in the window, oldest first |
+| `service_restarts` | `sinceMinutes` | Prometheus `max by (service) (process_start_time_seconds{service=~"<allowed services>"})`, same step as `query_metric` | per service: `startTimes` seen in the window, oldest first, and `restartsInWindow`, the start times inside the window (each a restart or deploy). Two restarts within one step show as one |
 
 Parameter domains:
 
 | Parameter | Domain |
 |-----------|--------|
 | `service` | the allowed services |
-| `level` | `ERROR`, `WARN`, `INFO`, `DEBUG` |
-| `contains` | plain text, 1 to 200 characters, matched literally (escaped, never interpreted as a pattern or query) |
-| `metric` | allow-list: request rate, error rate, latency p95, `lab_orders`, `lab_payments`, `gateway_authorize_inflight`, `hikaricp_connections_*`, client request outcomes |
+| `level` | `ERROR`, `WARN`, `INFO`, `DEBUG`, any case; matched on the level column of Spring Boot's console line (`|~ `^\S+\s+<LEVEL>\s``), since Loki has no level label for the lab streams |
+| `contains` | plain text, 1 to 200 characters, no control characters, matched literally: a `|=` filter in a double-quoted LogQL string with `\` and `"` escaped |
+| `metric` | the names in the metric allow-list below |
 | `orderId` | UUID |
 | `source` | `order`, `payment`, `reservation` |
 | `type`, `outcome` | the values the source table's `CHECK` constraints allow |
 | `minDurationMs` | integer, 0 to 600000 |
 | `table` | `orders`, `payments`, `stock` |
+
+### Metric allow-list
+
+Each name maps to one PromQL template. Names come from the "Lab — Faults" dashboard and the runbooks' key signals. `<sel>` is `service="<service>"`, or `service=~"order-service|payment-service|inventory-service|gateway-mock"` when `service` is omitted. `<w>` is the larger of 60 s and the step.
+
+| `metric` | PromQL |
+|----------|--------|
+| `request_rate` | `sum by (service, uri) (rate(http_server_requests_seconds_count{<sel>}[<w>]))` |
+| `error_rate` | `sum by (service, uri, status) (rate(http_server_requests_seconds_count{<sel>,status=~"5.."}[<w>]))` |
+| `latency_avg` | `sum by (service, uri) (rate(http_server_requests_seconds_sum{<sel>}[<w>])) / sum by (service, uri) (rate(http_server_requests_seconds_count{<sel>}[<w>]))` |
+| `latency_max` | `max by (service, uri) (http_server_requests_seconds_max{<sel>})` |
+| `lab_orders` | `sum by (service, status) (lab_orders{<sel>})` |
+| `lab_payments` | `sum by (service, status) (lab_payments{<sel>})` |
+| `gateway_authorize_inflight` | `sum by (service) (gateway_authorize_inflight{<sel>})` |
+| `hikaricp_connections_active`, `_idle`, `_pending`, `_max` | `sum by (service) (hikaricp_connections_<kind>{<sel>})` |
+| `hikaricp_connections_timeout_rate` | `sum by (service) (rate(hikaricp_connections_timeout_total{<sel>}[<w>]))` |
+| `client_request_outcomes` | `sum by (service, client_name, outcome, exception) (rate(http_client_requests_seconds_count{<sel>}[<w>]))` |
+
+There is no latency p95: the lab services publish no `http_server_requests_seconds_bucket` histogram, so `latency_avg` and `latency_max` stand in for it.
 
 ## Requirements
 
@@ -106,6 +127,15 @@ Every tool MUST cap its rows, points, series and output size as the shared rules
 - THEN the step is chosen so that each series has at most 200 points
 - AND at most 10 series are returned
 
+### Requirement: Backend failures are reported, not thrown
+
+A failing backend MUST end the call with a tool error, not a protocol error.
+
+#### Scenario: Backend failure
+- GIVEN Loki or Prometheus answers an HTTP error, an unreadable body or nothing within the read timeout
+- WHEN a tool queries it
+- THEN the result has `outcome` `UPSTREAM_ERROR`, `isError: true` and a short `reason` such as `Loki answered HTTP 500` or `Prometheus did not answer in time`
+
 ### Requirement: The fault-injector and mcp-tools are out of reach
 
 `search_logs` and `count_logs` MUST only select streams of the allowed services. `fault-injector` and `mcp-tools` are not in the enum, so their logs, including mcp-tools' own tool-call records, can never be returned. Tools MUST NOT read the `faults` database.
@@ -164,5 +194,14 @@ mcp-tools MUST connect to PostgreSQL only as `kintsugi_agent`, and MUST open its
 `POST /mcp` MUST reject any request that carries an `Origin` header with 403, and MUST accept requests without one.
 
 #### Scenario: Browser request
-- WHEN `initialize` is posted with `Origin: http://evil.example`
+- WHEN `initialize` is posted with `Origin: http://evil.example`, `Origin: http://localhost:18085` or `Origin: null`
 - THEN the response status is 403
+
+#### Scenario: Protocol switch
+- GIVEN `spring.ai.mcp.server.protocol` is not `STATELESS`
+- WHEN mcp-tools starts
+- THEN the startup fails, because only the stateless transport carries the Origin validator
+
+#### Scenario: GET on the endpoint
+- WHEN a client sends `GET /mcp`
+- THEN the response status is 405

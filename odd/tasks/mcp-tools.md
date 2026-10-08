@@ -83,13 +83,14 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
 ## Delivery
 
 - `auto-chain` with `feature-branch-chain`. Forecast: about 1,800 lines.
+- Slices: tracker `feat/mcp-tools` (doc, ADR-004, spec, skeleton); PR 1 `-01-observability-tools`: transport hardening, then T3. T3 is a size exception (about 1,700 lines, of which 750 are tests): the clients reference the query templates (`LogQueries`, `MetricCatalog`) and one `ObservabilityTools` bean holds the four tools, so no cohesive split under budget exists.
 - RDD: on; consent is a standing grant.
 
 ## Tasks
 
 - [x] **T1 — ADR-004 and living spec.** Route: delegated writer.
 - [x] **T2 — Skeleton.** Initializr skeleton if an MCP server dependency id exists; otherwise the same skeleton plus the starter. Route: delegated writer.
-- [ ] **T3 — Log, metric and restart tools,** with fake Loki and Prometheus HTTP servers, tests first. Route: delegated writer.
+- [x] **T3 — Log, metric and restart tools,** with fake Loki and Prometheus HTTP servers, tests first. Route: delegated writer.
 - [ ] **T4 — Event and summary tools and the `kintsugi_agent` role,** using Testcontainers, tests first. Route: delegated writer.
 - [ ] **T5 — Compose wiring, `verify-mcp.sh` run for real, docs.** Route: delegated writer.
 
@@ -101,7 +102,19 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
   - Skeleton from Initializr (`spring-ai-mcp-server` gives the webmvc starter and `spring-ai-bom` 2.0.1; SDK 2.0.0).
   - **Origin validation is OFF by default in Spring AI 2.0.1** (no-op validator). It is now enabled by our own `webMvcStatelessServerTransport` bean using the SDK's `DefaultServerTransportSecurityValidator`: any request carrying an `Origin` header gets 403. A Host allow-list is deferred to T5.
   - Smoke test: `initialize` reports protocol 2025-11-25; `tools/list` returns empty; an evil Origin gets 403. mvn exit 0, 4 tests (parent re-run).
+- 2026-10-08: skeleton review (`review-484521c2dd4feca4`) approved. The spec's negated MUSTs became MUST NOT (`d36b24b`). The transport fixes are in T3 part A: an explicit empty origin list; the bean exists only for the STATELESS protocol, and a guard stops startup otherwise; 403 for localhost and `null` origins; `GET /mcp` returns 405; the server version is filtered from the build.
+- 2026-10-08: T3 done by a delegated writer. The first run stopped on the session limit before any edit and was restarted.
+  - Tools: `search_logs`, `count_logs`, `query_metric` (13 allow-listed templates) and `service_restarts` (`process_start_time_seconds`, which the test confirms is exported).
+  - `ToolCallRunner` enforces the 8 KB cap and logs one INFO line per call.
+  - LogQL escaping is tested.
+  - 60 tests, two runs (parent re-run, mvn exit 0).
+  - **Open:**
+    - (1) There is no p95: the lab publishes no latency histogram, so `latency_avg` and `latency_max` are used instead.
+    - (2) 8 KB holds only about one 200-point series. To fix in T4: a compact point encoding and fewer points.
+    - (3) The level filter depends on Spring's console log format.
+    - (4) Non-integer arguments are rejected by Spring AI before our validation, so they get no call log.
+    - (5) Restarts less than one step apart merge into one.
 
 ## Next step
 
-T3 (log, metric and restart tools) via a delegated writer.
+T4 (event and summary tools, `kintsugi_agent` role) plus the compact metric encoding, via a delegated writer.
