@@ -60,7 +60,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - The symptom never names the cause or the fault.
   - `POST /incidents {symptom, sinceMinutes}` answers 202 with an id.
   - `GET /incidents/{id}` returns the status, steps and report.
-- **Loop:** driven by our own code, not by Spring AI's internal tool loop (`internalToolExecutionEnabled(false)` with `ToolCallingManager`). Every step is counted, bounded and persisted. There are four phases, each exposing only a few tools:
+- **Loop:** driven by our own code, not by Spring AI's tool loop: `ChatModel` is called directly and each MCP `ToolCallback` is invoked by our code, one call at a time (corrected in T1; see ADR-010). Every step is counted, bounded and persisted. There are four phases, each exposing only a few tools:
   1. TRIAGE: `status_summary`, `query_metric`, `service_restarts`;
   2. INVESTIGATE: `search_logs`, `count_logs`, `recent_events`, `get_order_trace`;
   3. KNOWLEDGE: `search_runbooks`;
@@ -126,6 +126,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - on restart, an incident left `RUNNING` becomes `FAILED`.
   - **Accepted by the parent:** an exhausted tool budget leads to CONCLUDE rather than ending the run. This keeps the run scorable and records the budget explicitly.
   - Leakage grep: clean.
+
+- 2026-10-08: T1 range reviewed (medium risk, reliability lens), approved and acknowledged (`review-9b4856cc2faa5b3f`).
+  - The stale loop mechanism in this document is fixed here.
+  - These spec points fold into T2 part A:
+    - which budget a refused call consumes;
+    - the 409 rule enforced atomically, for example by a partial unique index on `RUNNING`;
+    - deterministic tie-breaks in the summaries.
 
 ## Next step
 
