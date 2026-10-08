@@ -179,6 +179,10 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - the connection is named `kintsugi`, and T5 sets `KINTSUGI_MCP_URL=http://mcp-tools:8085`.
   - Size: Part B is about 1,900 lines plus 312 of fixtures. It is cohesive: eight summarizers with their tests.
 
+- 2026-10-08: T3 range reviewed (medium risk, reliability lens), approved and acknowledged (`review-e658b633b537867f`). Folded into T4 part A:
+  - WARNING: a non-object argument gives a plain-text `INVALID_PARAMETER` output, which the summarizer cannot parse;
+  - suggestion: if `incidents.fail` throws inside the runner-failure catch, the `RUNNING` row stays.
+
 ## Next step
 
 Review the T3 range. Then branch `feat/agent-loop-03-loop` and start T4.
