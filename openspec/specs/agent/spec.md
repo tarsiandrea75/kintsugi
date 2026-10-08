@@ -29,6 +29,8 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 An invalid body MUST answer 400 naming the field and its allowed range, and MUST NOT create an incident.
 
+One incident runs at a time, and the database enforces it atomically: a partial unique index on the constant `((true)) WHERE status = 'RUNNING'` (see "State tables") admits at most one `RUNNING` row, the pattern the fault-injector uses for its one blocking injection. The endpoint MUST NOT check first and insert after; it inserts, and a unique violation on that index MUST answer 409. So two concurrent requests can never both start an incident.
+
 #### Scenario: Valid incident
 - GIVEN no incident is running
 - WHEN `POST /incidents` is called with `{"symptom": "Checkout orders stay pending for a long time", "sinceMinutes": 15}`
@@ -47,8 +49,14 @@ An invalid body MUST answer 400 naming the field and its allowed range, and MUST
 #### Scenario: Another incident is running (chosen)
 - GIVEN an incident with status `RUNNING`
 - WHEN `POST /incidents` is called with a valid body
-- THEN the response status is 409 with the id of the running incident
+- THEN the insert fails on the one-`RUNNING` unique index, and the response status is 409 with the id of the running incident
 - AND no incident is created
+
+#### Scenario: Two requests at once
+- GIVEN no incident is running
+- WHEN two valid `POST /incidents` requests are sent in parallel
+- THEN exactly one answers 202 and the other 409
+- AND exactly one `incidents` row has status `RUNNING`
 
 ### Requirement: Read an incident
 
@@ -97,7 +105,13 @@ The loop MUST run the phases in this order, offering the model only the tools of
 | `KNOWLEDGE` | `search_runbooks` | at most 2 |
 | `CONCLUDE` | none | 0 |
 
-A phase MUST end when the model answers without a tool call or the phase's cap is reached. Code MUST check each tool call the model requests, in order, before running it. A call to a tool not offered in the current phase, including an unknown name, MUST NOT run, MUST be recorded as a step with `tool_outcome` `REFUSED_PHASE`, and counts against the budgets.
+A phase MUST end when the model answers without a tool call or the phase's cap is reached. Code MUST check each tool call the model requests, in order, before running it:
+
+1. If the phase's allowance or the incident's 8-call tool budget has no unit left, the call MUST NOT run, MUST be recorded with `tool_outcome` `REFUSED_BUDGET`, and consumes nothing, since nothing is left. The phase then ends, and every later call of the same answer is refused the same way.
+2. Otherwise the call consumes one unit of the incident's tool budget and one unit of the phase's allowance, whether it then runs or is refused.
+3. A call to a tool not offered in the current phase, including an unknown name, MUST NOT run and MUST be recorded with `tool_outcome` `REFUSED_PHASE`. It has already consumed its units, so a model that keeps asking for the wrong tool cannot loop.
+
+A tool call never consumes the model-call budget: the model answer that requested it is the one model call.
 
 #### Scenario: Only the phase's tools are offered
 - WHEN the loop calls the model in `TRIAGE`
@@ -109,6 +123,7 @@ A phase MUST end when the model answers without a tool call or the phase's cap i
 - THEN no call reaches mcp-tools
 - AND a step is recorded with `tool_name` `search_logs` and `tool_outcome` `REFUSED_PHASE`
 - AND the model's next prompt says the call was refused because the tool is not available in this phase
+- AND 1 call is left in `TRIAGE` and 7 in the incident
 
 #### Scenario: Phase ends without a tool call
 - GIVEN the loop is in `INVESTIGATE` after one tool call
@@ -118,9 +133,9 @@ A phase MUST end when the model answers without a tool call or the phase's cap i
 #### Scenario: Several calls in one answer
 - GIVEN the loop is in `TRIAGE` with 2 calls left
 - WHEN the model requests three tool calls in one answer
-- THEN the first two are checked and run in order
-- AND the third is not run and is recorded with `tool_outcome` `REFUSED_BUDGET`
-- AND the loop moves to `INVESTIGATE`
+- THEN the first two are checked and run in order, each consuming one unit of the phase's allowance and of the incident's budget
+- AND the third is not run, is recorded with `tool_outcome` `REFUSED_BUDGET` and consumes nothing
+- AND the loop moves to `INVESTIGATE` with 6 calls left in the incident
 
 ### Requirement: The plan
 
@@ -151,10 +166,10 @@ No other field is allowed. An invalid plan MUST get one retry with the validatio
 | One model call | 90 s | the run ends `TIMED_OUT`, reason naming the call |
 | One incident | 10 minutes from `started_at`, tool calls included | the run ends `TIMED_OUT` |
 
-Refused tool calls count against the tool budget. Every budget end MUST be recorded as a step or a `failure_reason` and logged, never silent. Each tool-step prompt MUST state the tool calls left in the phase and in the incident.
+Which units a tool call consumes is fixed in "Phases and their tools": a call refused `REFUSED_PHASE` consumes one unit of the tool budget and of its phase's allowance, like a call that runs; a call refused `REFUSED_BUDGET` consumes nothing; no tool call consumes the model-call budget. Every budget end MUST be recorded as a step or a `failure_reason` and logged, never silent. Each tool-step prompt MUST state the tool calls left in the phase and in the incident.
 
 #### Scenario: Tool budget used up
-- GIVEN 8 tool calls were recorded
+- GIVEN tool calls have consumed all 8 units of the tool budget
 - WHEN the loop would continue an evidence phase
 - THEN it moves to `CONCLUDE` and logs that the tool budget is used up
 - AND the run can still end `COMPLETED`
@@ -199,6 +214,11 @@ The model MUST never receive a raw tool output. For each recorded call, code MUS
 | `get_order_trace` | the order's `status`, `createdAt`, `updatedAt`; at most 10 events (`source`, `type`, `outcome`, `durationMs`, `untrustedText` at most 150 characters) |
 | `search_runbooks` | at most 3 chunks: `service`, `section`, `score` and the first 300 characters of `untrustedText` |
 
+Every "top N" or "at most N" selection above MUST be deterministic, with no tie left to the order of a hash map or of the output:
+
+- a ranking by frequency (the `search_logs` messages) sorts by count descending, then by the time of the item's first occurrence ascending, then lexicographically by the item's text;
+- a ranking by another value (the 10 lowest `available`, the 3 newest events, the runbook chunks by `score`, the 5 metric series) sorts by that value in its stated direction, then by the time of the item's first occurrence ascending (its position in the output when it has no time), then lexicographically by the item's text (for a series, its labels serialized with the keys sorted). The metric series are ranked by their max value, descending.
+
 Each model call MUST be built from the incident state (symptom, window, phase, budgets left, latest plan, summaries so far, refusals), not from an accumulated chat history.
 
 #### Scenario: Deterministic and capped
@@ -215,6 +235,11 @@ Each model call MUST be built from the incident state (symptom, window, phase, b
 - GIVEN `search_logs` returns 20 lines whose message is the same connection error
 - WHEN the summary is built
 - THEN the message appears once, with count 20
+
+#### Scenario: Tied counts
+- GIVEN `search_logs` returns 6 distinct messages, each 3 times, the earliest first seen at 10:00:01 and the others later
+- WHEN the summary is built
+- THEN the message first seen at 10:00:01 comes first, the 5 listed are the 5 seen earliest, and a tie on both count and first time is ordered by the message text
 
 ### Requirement: The report
 
@@ -271,6 +296,8 @@ Flyway in `agent/` MUST create, in the `agent` database:
 |-------|---------|
 | `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
 | `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident), `kind text` (`PLAN`, `TOOL_CALL`, `REPORT`, `BUDGET`) **(chosen)**, `phase text`, `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`), `summary text` **(chosen)**, `model_output text` (the raw plan or report answer) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
+
+A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident").
 
 A step is written when it ends, before the next one starts, so a crash loses at most the step in progress.
 
