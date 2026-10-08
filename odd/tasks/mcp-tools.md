@@ -149,6 +149,17 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
     - Part B is a size exception of about 1,400 lines, as T3 was. The role and the tools share the Testcontainers fixture and the spec section, so splitting them would only duplicate setup.
   - Open for T5: compose must pass `KINTSUGI_AGENT_DB_PASSWORD` and the `kintsugi.mcp.postgres.*` settings.
 
+- 2026-10-08: T4 committed as `6c8ce48` (part A) and `81de94a` (part B). Both were reviewed as one committed range, `65db4a9..81de94a` (high risk, 4 lenses), and approved and acknowledged (`review-da7445b9d4245163`).
+  - WARNING (R4): `LabDatabases` reports every `CannotGetJdbcConnectionException` as "unreachable", including an exhausted pool and an authentication failure.
+  - WARNING (R2): the `recent_events` parameter descriptions repeat the type and outcome lists that `EventSource` already holds.
+  - WARNING (R2): `TraceEvent.of(null, ...)` uses a null source as a hidden mode switch.
+  - Suggestions:
+    - the agent password has a silent default, while the other passwords use `:?`;
+    - the `SummaryTable` error message hardcodes its list;
+    - the generic `query failed` branch is untested;
+    - the three datasources may couple the actuator health to PostgreSQL.
+  - All of these fold into T5 part A.
+
 ## Next step
 
-Review the part A and part B ranges, then T5 (compose wiring and `verify-mcp.sh` run for real).
+T5: part A fixes the T4 review findings; part B is the compose wiring and `verify-mcp.sh`, run for real.
