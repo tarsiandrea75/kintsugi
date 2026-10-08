@@ -78,7 +78,7 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
 ## Tasks
 
 - [x] **T1 — ADR-002, living spec `openspec/specs/knowledge-base/spec.md`,** the mcp-tools spec entry for `search_runbooks`, and a stale-version fix in ADR-006 (local Ollama is 0.31.1). Route: delegated writer.
-- [ ] **T2 — The knowledge store:** the pgvector container's init script (database, extension, roles, schema), tested with Testcontainers on the same image. Route: delegated writer.
+- [x] **T2 — The knowledge store:** the pgvector container's init script (database, extension, roles, schema), tested with Testcontainers on the same image. Route: delegated writer.
 - [ ] **T3 — The indexer (`knowledge/`):** allow-list, leakage check, splitting with metadata, model metadata and content hashes, tested with a fake embedding model. Route: delegated writer.
 - [ ] **T4 — `search_runbooks` in mcp-tools,** with the model-mismatch guard, tested with Testcontainers and a fake embedding model. Route: delegated writer.
 - [ ] **T5 — Compose wiring, Ollama reachability (needs the human), `verify-rag.sh` run for real, docs.** Route: delegated writer.
@@ -104,6 +104,23 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
     - Ollama embeddings come from `spring-ai-starter-model-ollama` with `spring.ai.model.embedding=ollama`.
   - Open for T4: the spec's mismatch guard compares only the model name and dimensions. mcp-tools could also compare the digest by reading Ollama's `/api/tags`; decide in T4 and update the spec.
 
+- 2026-10-08: T1 range reviewed (medium risk, reliability lens), approved and acknowledged (`review-978a093001fe6c18`). It raised 4 spec warnings, fixed in the next commit:
+  - the leakage pattern matched "default": it is now `\b(F[1-8]\b|fault|inject)`, case-insensitive;
+  - the mismatch guard ignored the digest: it now compares model name, digest (from Ollama `/api/tags`, cached at most 60 s), dimensions and both prefixes;
+  - a re-index failing mid-run could mix models: a run now commits atomically;
+  - an oversized nearest chunk would return OK with zero items: it is now cut with `[truncated]`, and chunks are at most 800 tokens.
+- 2026-10-08: T2 done by a delegated writer.
+  - `infra/knowledge-db/init/01-knowledge.sh` creates:
+    - the `knowledge` database, with CONNECT revoked from PUBLIC;
+    - the `vector` extension, created as superuser;
+    - `knowledge_indexer`, the owner;
+    - `kintsugi_agent`, SELECT only, with read-only and timeout defaults;
+    - `runbook_chunks` with `vector(768)` and the HNSW cosine index;
+    - a single-row `index_metadata`.
+  - `KnowledgeStoreRoleTest`, run on the pinned pgvector image: 18 tests, RED observed (the script did not exist), then GREEN.
+  - mcp-tools has 158 tests, mvn exit 0, run by the parent.
+  - Compose wiring of the store is in T5.
+
 ## Next step
 
-T2 (the knowledge store), via a delegated writer.
+Review the T2 range, then T3 (the indexer), via a delegated writer.

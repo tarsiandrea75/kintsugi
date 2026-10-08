@@ -11,8 +11,12 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | Store image | `pgvector/pgvector:0.8.7-pg18-trixie`, pinned by digest; a container separate from the lab's `postgres` |
 | Database | `knowledge`, with `CONNECT` revoked from `PUBLIC` |
 | Extension | `vector`, created by the init script as the bootstrap superuser (it is not a trusted extension) |
-| Roles | `knowledge_indexer` (owns and writes the tables), `kintsugi_agent` (reads only) |
-| Index | HNSW, cosine distance (`vector_cosine_ops`), on `embedding vector(<dimensions>)` |
+| Init script | `infra/knowledge-db/init/01-knowledge.sh`, run once on an empty volume as the bootstrap superuser; tested by `mcp-tools`' `KnowledgeStoreRoleTest` on the pinned image |
+| Roles | `knowledge_indexer` (owns and writes the tables; password from `KNOWLEDGE_INDEXER_DB_PASSWORD`), `kintsugi_agent` (reads only; password from `KINTSUGI_AGENT_DB_PASSWORD`, set separately from the lab server's). Both are required: the init script stops without them |
+| Agent session defaults | `default_transaction_read_only=on`, `statement_timeout=3s`, `transaction_timeout=5s`, `idle_in_transaction_session_timeout=5s`, as on the lab's server |
+| Chunk table | `runbook_chunks`: `id uuid` (primary key), `content text`, `metadata json` (holding `service`, `section`, `source`, `content_hash`), `embedding vector(768)`; all `NOT NULL` |
+| Index metadata table | `index_metadata`, exactly one row (`id` 1): `model_name`, `model_digest`, `dimensions`, `document_prefix`, `query_prefix`, `indexed_at` |
+| Index | `runbook_chunks_embedding_hnsw`: HNSW, cosine distance (`vector_cosine_ops`), on `embedding`. The column's 768 is fixed in the schema: a model with other dimensions needs a migration and a full re-index |
 | Schema owner | the init script; Spring AI never creates it (`spring.ai.vectorstore.pgvector.initialize-schema=false`) |
 | Embedding model | configurable: name (default `nomic-embed-text`), dimensions (default 768), document prefix (default `search_document: `), query prefix (default `search_query: `) |
 | Model digest | read from Ollama, never configured: `GET /api/tags`, the entry whose `name` equals the configured model; a configured name without a tag means `:latest` (`nomic-embed-text` is matched as `nomic-embed-text:latest`) |
@@ -59,8 +63,17 @@ Neither `knowledge_indexer` nor `kintsugi_agent` MUST be a superuser, and neithe
 
 #### Scenario: Agent reads the chunks
 - GIVEN the index holds chunks
-- WHEN `kintsugi_agent` selects from the chunk table and the index metadata table
+- WHEN `kintsugi_agent` selects from `runbook_chunks` and `index_metadata`
 - THEN both queries succeed
+- AND a query ordered by cosine distance (`<=>`) can use `runbook_chunks_embedding_hnsw`
+
+#### Scenario: Agent session defaults
+- WHEN `kintsugi_agent` connects to `knowledge`
+- THEN the session starts read-only, with `statement_timeout` 3s, `transaction_timeout` 5s and `idle_in_transaction_session_timeout` 5s
+
+#### Scenario: Wrong dimension
+- WHEN `knowledge_indexer` inserts a chunk whose embedding does not have 768 dimensions
+- THEN the insert fails
 
 #### Scenario: Extension already present
 - GIVEN a fresh volume after the init script ran

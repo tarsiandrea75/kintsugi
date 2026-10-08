@@ -51,7 +51,8 @@ Constraints:
 - One database, `knowledge`, with `REVOKE CONNECT ... FROM PUBLIC`.
 - `knowledge_indexer` owns the tables and writes them. Only the indexer holds its credentials.
 - `kintsugi_agent` has `CONNECT` on `knowledge` and `SELECT` on its tables, nothing else. It is the same role name mcp-tools already uses, but on a different server with its own password; it has no reach into the lab's databases from here, and no role in this container can reach `faults`, which lives on the other server.
-- Both roles are `NOSUPERUSER NOCREATEDB NOCREATEROLE`.
+- Both roles are `NOSUPERUSER NOCREATEDB NOCREATEROLE`. Their passwords come from `KNOWLEDGE_INDEXER_DB_PASSWORD` and `KINTSUGI_AGENT_DB_PASSWORD`, both required by the init script. `kintsugi_agent` gets the same session defaults as on the lab's server (read-only, 3 s statement, 5 s transaction and idle-in-transaction timeouts).
+- The init script is `infra/knowledge-db/init/01-knowledge.sh`; `mcp-tools`' `KnowledgeStoreRoleTest` runs it on the pinned image.
 
 ### The extension is created at init
 
@@ -61,9 +62,9 @@ Constraints:
 ### Schema and index
 
 - The schema is created by the init script, not by Spring AI: `spring.ai.vectorstore.pgvector.initialize-schema=false`. Why: schema creation needs `CREATE` on the database and, with Spring AI's default DDL, `CREATE EXTENSION`, which only the superuser may run. Keeping DDL in the init script keeps both application roles unprivileged.
-- The chunk table follows the layout Spring AI's `PgVectorStore` reads (`id`, `content`, `metadata` as JSON, `embedding vector(768)`).
-- **HNSW index with cosine distance** (`vector_cosine_ops`). HNSW needs no training step, unlike IVFFlat, so it works on an almost empty table and on a re-index. Cosine is the distance Nomic's embeddings are meant for.
-- An index metadata table records the model name, its digest, the dimensions and both prefixes the index was built with.
+- The chunk table, `runbook_chunks`, follows the layout Spring AI's `PgVectorStore` reads (`id`, `content`, `metadata` as JSON, `embedding vector(768)`); the indexer and mcp-tools name it in configuration. The 768 is fixed in the schema, not a variable: a model with other dimensions means a migration.
+- **HNSW index with cosine distance** (`runbook_chunks_embedding_hnsw`, `vector_cosine_ops`). HNSW needs no training step, unlike IVFFlat, so it works on an almost empty table and on a re-index. Cosine is the distance Nomic's embeddings are meant for.
+- An index metadata table, `index_metadata`, holds exactly one row and records the model name, its digest, the dimensions and both prefixes the index was built with.
 
 ### Embedding model and the coupling to the data
 
