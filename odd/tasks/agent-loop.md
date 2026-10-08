@@ -1,0 +1,114 @@
+# Feature: agent-loop
+
+Locator: `odd/tasks/agent-loop.md` · Engram mirror: `odd/agent-loop/tasks` · Tracker branch: `feat/agent-loop` (from `feat/runbook-rag` at `aecc90c`)
+
+## Objective
+
+Build the first diagnosing agent. These are the last two M2 items (`docs/vision.md:155-156`):
+- the loop perception → plan → action → observation, with `IncidentState`;
+- a JSON report with cited evidence.
+
+They feed the M2 check: "F1–F3 correctly diagnosed with a local model" (`docs/vision.md:157`).
+
+## Problem and why
+
+mcp-tools gives the evidence, and `search_runbooks` gives the knowledge, but nothing reasons over them yet. The agent must:
+- turn a neutral symptom into a diagnosis a script can score against the truth in `faults`;
+- cite evidence that a script can check really exists;
+- run within tight budgets on a small local model;
+- record every step, so each run can be replayed and measured.
+
+Core rule: the LLM proposes, deterministic code verifies, policy authorizes.
+
+## Scope
+
+- In:
+  - the perception REST endpoint;
+  - the agent's state tables;
+  - the MCP client;
+  - code-built summaries of tool outputs;
+  - the phased loop with a schema-validated plan;
+  - the schema-validated report with evidence checks;
+  - a minimal `ModelRouter` (one Ollama route);
+  - compose wiring;
+  - a check script running F1–F3 against the local model.
+- Out:
+  - Alertmanager and continuous traffic (M3);
+  - policy and approvals (M3; every tool is read-only, so policy is a no-op);
+  - long-term memory and Java rules (M3);
+  - the Python eval harness and the A–D benchmark (M4; the check script is M2's scorer).
+
+## Design
+
+The human decided the taxonomy, the context strategy and the trigger on 2026-10-08. The rest was proposed by Claude after read-only research and is to be reviewed.
+
+- **Report taxonomy (human):**
+  - `rootCauseService`: `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN`;
+  - `rootCauseCategory`: `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN`.
+
+  These are the truth's own column vocabularies (`root_cause_service`, `root_cause_category`). They are generic SRE terms, so they reveal no fault id. Scoring is a mechanical equality on both fields.
+- **Report shape:** `incidentId`, `rootCauseService`, `rootCauseCategory`, `summary` (at most 500 characters), `confidence` (0–1), `evidence[]` and `stepsUsed`.
+  - Each evidence item is `{toolCallId, tool, quote, why}`.
+  - Code checks every `quote` against the recorded output of that `toolCallId`. A citation that does not exist is rejected.
+  - Two invalid reports end the run with status `INVALID_REPORT`.
+- **Context strategy (human): summaries built in code.**
+  - The full tool output is stored in the step table, for citations and evals.
+  - The model receives a deterministic summary: counts, the first distinct lines, compressed series, and the top runbook hits. Tools are called with small limits.
+  - This is the vision's tactic, "logs summarized by code" (`docs/vision.md:117`).
+  - `num-ctx` stays 8192.
+- **Trigger (human): the check script.** The script injects a fault through the fault-injector, places orders the way `verify-f1.sh` does, waits, then calls `POST /incidents` with a neutral symptom.
+  - The symptom never names the cause or the fault.
+  - `POST /incidents {symptom, sinceMinutes}` answers 202 with an id.
+  - `GET /incidents/{id}` returns the status, steps and report.
+- **Loop:** driven by our own code, not by Spring AI's internal tool loop (`internalToolExecutionEnabled(false)` with `ToolCallingManager`). Every step is counted, bounded and persisted. There are four phases, each exposing only a few tools:
+  1. TRIAGE: `status_summary`, `query_metric`, `service_restarts`;
+  2. INVESTIGATE: `search_logs`, `count_logs`, `recent_events`, `get_order_trace`;
+  3. KNOWLEDGE: `search_runbooks`;
+  4. CONCLUDE: no tools; one structured-output call produces the report.
+
+  At the start of each phase the model writes a small schema-validated plan, `{hypotheses[], nextTools[]}`.
+- **Budgets:**
+  - at most 8 tool calls per incident;
+  - 90 s per model call;
+  - 10 minutes per incident;
+  - each budget ends the run with an explicit status, never silently.
+- **State:** an `agent` database with an owner role `agent_app`, not a superuser and with no CONNECT on `faults`. It holds:
+  - `incidents`: id, signal, status, report, started_at, ended_at;
+  - `incident_steps`: incident_id, step_no, phase, model, tokens, tool_name, tool_args, tool_output, tool_outcome, latency_ms, created_at.
+
+  The database lives on the `knowledge-db` instance, matching the vision's "state, memory and KB in one DB" (`docs/vision.md:89`). The lab's postgres, which faults can break, stays out of the agent's path. **To review.**
+- **Model:** `granite4.1:8b`, the ADR-003 default, behind a `ModelRouter` interface with one Ollama route. The API baseline route is deferred: ADR-003 lists it for M2, so this is **to review** with the human.
+- **MCP client:** `spring-ai-starter-mcp-client`, Streamable HTTP to `mcp-tools:8085` (on the Host allow-list), SYNC.
+- **Prompt injection:** the system prompt states that `untrustedText` is data. Plans and reports are schema-validated enums. Every tool is read-only, so the worst case in M2 is a wrong diagnosis.
+
+## Acceptance criteria
+
+- `POST /incidents` runs the loop within its budgets and stores every step, with the full tool output.
+- The report validates against its schema, and every evidence quote exists in its cited tool output.
+- `verify-agent.sh` injects F1, F2 and F3 in turn, generates traffic, triggers the agent and restores each fault. It records each report and scores it against the truth (service and category). It passes when all three match. Every run is logged, pass or fail.
+- The agent's roles cannot reach `faults`. The agent calls the lab only through mcp-tools.
+- `./mvnw test` passes in `agent`, and the existing verify scripts still pass.
+
+## Delivery
+
+- `feature-branch-chain` (standing preference). Tracker `feat/agent-loop`; children `feat/agent-loop-NN-<slice>`, each starting from the previous tip. The forecast is about 2,500 lines, so it is sliced by task.
+- RDD: on; consent is a standing grant.
+
+## Tasks
+
+- [ ] **T1 — ADR-010 (agent loop design) and the living spec `openspec/specs/agent/spec.md`:** endpoint, loop, budgets, state, report schema and evidence check. Branch: tracker. Route: delegated writer.
+- [ ] **T2 — The state store:** the `agent` database and `agent_app` role on `knowledge-db`, the schema through Flyway in `agent/`, and the incident API skeleton (`POST` and `GET`). Testcontainers. Branch `-01-state`. Route: delegated writer.
+- [ ] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
+- [ ] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
+- [ ] **T5 — Compose wiring and `verify-agent.sh` (F1–F3) run for real with `granite4.1:8b`;** record the results and docs. Branch `-04-check`. Route: delegated writer.
+
+## Progress
+
+- 2026-10-08: read-only research done.
+  - Facts: the truth enum `RootCauseCategory`; there is no Alertmanager and no traffic generator; the Spring AI MCP client exposes `SyncMcpToolCallbackProvider`; `num-ctx` 8192 is too small for raw tool outputs; ADR-003's smoke test does not rank the models.
+  - The human chose: the truth enum plus `UNKNOWN`, code-built summaries, and the check script as the trigger.
+  - Tracker branch created.
+
+## Next step
+
+T1, via a delegated writer.
