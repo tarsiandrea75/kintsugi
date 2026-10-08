@@ -203,7 +203,7 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
   - psql errors now show while postgres starts;
   - the probe has no wall-clock bound;
   - its failure branches were never exercised.
-- 2026-10-08: session closed. STATE and journal `2026-10-08-01` are written. The bundle `kintsugi-2026-10-08-full.bundle` (sha256 `8961b531…a18de774`, 53 refs) is verified.
+- 2026-10-08: session closed. STATE and journal `2026-10-08-01` are written. The bundle `kintsugi-2026-10-08-full.bundle` is verified; its checksum is in the `.sha256` file beside it.
 
 ## Next step
 
