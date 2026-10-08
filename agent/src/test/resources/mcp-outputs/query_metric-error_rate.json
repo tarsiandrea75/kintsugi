@@ -1,0 +1,1 @@
+{"outcome":"OK","returned":3,"truncated":false,"items":[{"labels":{"service":"inventory-service","status":"500","uri":"/reservations"},"points":[[1791475980,"0"]]},{"labels":{"service":"inventory-service","status":"503","uri":"/actuator/health"},"points":[[1791475980,"0"]]},{"labels":{"service":"order-service","status":"503","uri":"/orders"},"points":[[1791475980,"0"]]}]}

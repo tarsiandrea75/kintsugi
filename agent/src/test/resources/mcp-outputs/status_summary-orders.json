@@ -1,0 +1,1 @@
+{"outcome":"OK","returned":4,"truncated":false,"items":[{"status":"PAID","count":12},{"status":"PAYMENT_FAILED","count":3},{"status":"PAYMENT_PENDING","count":7},{"status":"REJECTED_INVENTORY_UNAVAILABLE","count":6}]}

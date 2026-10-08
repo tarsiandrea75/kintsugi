@@ -36,6 +36,11 @@
 			<artifactId>spring-ai-starter-model-ollama</artifactId>
 		</dependency>
 		<dependency>
+			<!-- The lab's tools over MCP Streamable HTTP, SYNC (agent spec, "Tool calls run small and recorded"). -->
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-mcp-client</artifactId>
+		</dependency>
+		<dependency>
 			<!-- The incident API: POST and GET /incidents (agent spec, "Open an incident"). -->
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>

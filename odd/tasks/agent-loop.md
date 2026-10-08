@@ -98,7 +98,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 - [x] **T1 — ADR-010 (agent loop design) and the living spec `openspec/specs/agent/spec.md`:** endpoint, loop, budgets, state, report schema and evidence check. Branch: tracker. Route: delegated writer.
 - [x] **T2 — The state store:** the `agent` database and `agent_app` role on `knowledge-db`, the schema through Flyway in `agent/`, and the incident API skeleton (`POST` and `GET`). Testcontainers. Branch `-01-state`. Route: delegated writer.
-- [ ] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
+- [x] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
 - [ ] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
 - [ ] **T5 — Compose wiring and `verify-agent.sh` (F1–F3) run for real with `granite4.1:8b`;** record the results and docs. Branch `-04-check`. Route: delegated writer.
 
@@ -158,6 +158,27 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
   For T5: publish the incident API only on `127.0.0.1`, because it has no authentication and `?full=true` returns full tool outputs.
 
+- 2026-10-08: T3 done by a delegated writer on `feat/agent-loop-02-tools`.
+  - **Part A** (the T2 review fixes) passes alone: 110 tests, exit 0, run by the parent.
+    - A runner failure marks the incident `FAILED` and answers 500.
+    - A 409 retries the insert once; a 409 with no id is documented.
+    - The repository uses the status enum.
+    - The concurrency barrier has a timeout.
+  - **Part B:**
+    - the MCP client starts lazily (`spring.ai.mcp.client.initialized=false`), so the agent starts while mcp-tools is down. With the default it fails, reproduced;
+    - calls go through `McpSyncClient.callTool`, because the Spring AI `ToolCallback` throws on error results and would lose `INVALID_PARAMETER` and `UPSTREAM_ERROR` evidence;
+    - the limit caps are applied by rewriting the arguments;
+    - one deterministic summarizer per tool. Copied text is written as escaped JSON string literals, so lab text cannot fake a header and quotes still match the raw output;
+    - 14 fixtures recorded read-only from the live mcp-tools.
+  - Results: `agent` has 172 tests (XML), exit 0, two runs by the writer and one by the parent.
+  - **Process deviation:** Part B's code was written before its tests. The only real RED was the eager-initialization experiment.
+  - **Leak found (fix in T5):** the verify scripts put `customerId "verify-fN"` into lab events, and the agent can read it through `recent_events` and `get_order_trace`. That names the fault. The fixtures were neutralised to `verify-run`; T5 must make every traffic generator use a neutral customer id.
+  - Spec changes:
+    - `service_restarts` shows the 6 newest start times plus a count of earlier ones;
+    - `get_order_trace` shows each event's time;
+    - the connection is named `kintsugi`, and T5 sets `KINTSUGI_MCP_URL=http://mcp-tools:8085`.
+  - Size: Part B is about 1,900 lines plus 312 of fixtures. It is cohesive: eight summarizers with their tests.
+
 ## Next step
 
-Review the T2 range. Then branch `feat/agent-loop-02-tools` and start T3.
+Review the T3 range. Then branch `feat/agent-loop-03-loop` and start T4.
