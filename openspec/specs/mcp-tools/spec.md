@@ -20,7 +20,7 @@ These apply to every tool.
 | Timestamps | ISO-8601 UTC |
 | Result | one JSON text: `outcome`, `reason` (errors only), `returned`, `truncated`, `items`; `isError` is true unless `outcome` is `OK` |
 | Backends | `kintsugi.mcp.loki.base-url` (default `http://loki:3100`) and `kintsugi.mcp.prometheus.base-url` (default `http://prometheus:9090`), each with `connect-timeout` (2 s) and `read-timeout` (5 s) |
-| Database | `kintsugi.mcp.postgres.host` (default `postgres`), `port` (5432), `username` (`kintsugi_agent`), `password`, `connection-timeout` (2 s), `maximum-pool-size` (2). One read-only pool per database; the database names `orders`, `payments` and `inventory` are fixed in code, not configurable |
+| Database | `kintsugi.mcp.postgres.host` (default `postgres`), `port` (5432), `username` (`kintsugi_agent`), `password` (required, from the `KINTSUGI_AGENT_DB_PASSWORD` environment variable; no default), `connection-timeout` (2 s), `maximum-pool-size` (2). One read-only pool per database; the database names `orders`, `payments` and `inventory` are fixed in code, not configurable |
 
 ## Tools
 
@@ -145,9 +145,27 @@ A failing backend MUST end the call with a tool error, not a protocol error.
 - THEN the result has `outcome` `UPSTREAM_ERROR`, `isError: true` and a short `reason` such as `Loki answered HTTP 500` or `Prometheus did not answer in time`
 
 #### Scenario: Database failure
-- GIVEN a lab database is unreachable, or a statement runs past the role's 3 s `statement_timeout`
+- GIVEN a lab database fails in one of the ways below
 - WHEN a tool queries it
-- THEN the result has `outcome` `UPSTREAM_ERROR` and a `reason` such as `PostgreSQL payments is unreachable` or `PostgreSQL orders did not answer in time`
+- THEN the result has `outcome` `UPSTREAM_ERROR` and the `reason` names the database and the failure, never the SQL:
+
+| Failure | `reason` |
+|---------|----------|
+| refused connection, unknown host or missing database | `PostgreSQL payments is unreachable` |
+| wrong password or role (SQLState `28P01` or `28000`) | `PostgreSQL payments authentication failed` |
+| every pooled connection in use past the connection timeout | `PostgreSQL payments connection pool busy` |
+| a statement past the role's 3 s `statement_timeout` | `PostgreSQL orders did not answer in time` |
+| any other SQL error | `PostgreSQL orders query failed` |
+
+#### Scenario: Health while PostgreSQL is down
+- GIVEN the lab databases are unreachable
+- WHEN `/actuator/health` is read
+- THEN it answers 200 `UP`: there is no database health indicator, because the outage is evidence the tools report, not a fault of mcp-tools
+
+#### Scenario: Missing password
+- GIVEN `KINTSUGI_AGENT_DB_PASSWORD` is unset or empty
+- WHEN mcp-tools starts
+- THEN the startup fails
 
 ### Requirement: The fault-injector and mcp-tools are out of reach
 

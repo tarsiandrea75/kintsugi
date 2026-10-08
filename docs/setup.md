@@ -148,6 +148,7 @@ Every variable except `DOCKER_GID` has a lab default; nothing here is a secret. 
 | `POSTGRES_BOOTSTRAP_PASSWORD` | `postgres` | the bootstrap superuser `postgres`, used only by the init script |
 | `LAB_APP_DB_PASSWORD` | `lab_app` | the role `lab_app`, which the four services connect as |
 | `FAULTS_DB_PASSWORD` | `faults` | the role `faults`, which the fault injector connects as |
+| `KINTSUGI_AGENT_DB_PASSWORD` | `kintsugi_agent` | the read-only role `kintsugi_agent`, which mcp-tools connects as; mcp-tools does not start without it |
 | `GRAFANA_ADMIN_PASSWORD` | `kintsugi-lab` | Grafana's `admin` login |
 
 `KINTSUGI_REPO_DIR` defaults to the current directory, which is right only from the repository root. From anywhere else, export it as above; the verify scripts set it themselves. With a wrong value the injector does not start, because it cannot read the compose file.
@@ -159,13 +160,14 @@ One PostgreSQL instance holds four databases (ADR-007, ADR-009):
 - `postgres` is the bootstrap superuser. Only `infra/postgres/init/01-roles-and-databases.sh` uses it.
 - `lab_app` is a non-superuser that owns `orders`, `payments` and `inventory`. The four services connect as `lab_app`.
 - `faults` is a non-superuser that owns the `faults` database, where the injector records the true cause of each fault. `CONNECT` on `faults` is revoked from `PUBLIC`, so `lab_app` cannot connect to it. A superuser would ignore that revoke, which is why no service or agent role is one.
+- `kintsugi_agent` is the read-only role of mcp-tools (ADR-004): `SELECT` on the six evidence tables of `orders`, `payments` and `inventory`, nothing else, and no `CONNECT` on `faults`.
 
 ```bash
 docker compose -f infra/compose.yaml exec -T postgres psql -U lab_app -d orders -c "select count(*) from orders"
 docker compose -f infra/compose.yaml exec -T postgres psql -U faults -d faults -c "select fault_id, status from injections"
 ```
 
-The init script runs only on an empty data volume. **Upgrading a lab created before the fault injector:** its volume has the old `lab` superuser and no `lab_app` or `faults`, so run `docker compose -f infra/compose.yaml down -v` once before the first start. The same applies after changing any database password.
+The init script runs only on an empty data volume. **Upgrading a lab created before the fault injector:** its volume has the old `lab` superuser and no `lab_app` or `faults`, so run `docker compose -f infra/compose.yaml down -v` once before the first start. The same applies to a lab created before mcp-tools, whose volume has no `kintsugi_agent`, and after changing any database password.
 
 ### Fault injector API
 

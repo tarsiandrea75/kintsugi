@@ -14,8 +14,7 @@ set -euo pipefail
 
 : "${LAB_APP_DB_PASSWORD:?LAB_APP_DB_PASSWORD must be set}"
 : "${FAULTS_DB_PASSWORD:?FAULTS_DB_PASSWORD must be set}"
-# Lab default until compose passes it; the role can only read evidence the agent is meant to read.
-KINTSUGI_AGENT_DB_PASSWORD="${KINTSUGI_AGENT_DB_PASSWORD:-kintsugi_agent}"
+: "${KINTSUGI_AGENT_DB_PASSWORD:?KINTSUGI_AGENT_DB_PASSWORD must be set}"
 
 # psql variables (:'name') quote the passwords as SQL literals, so no value is ever spliced into the SQL text.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \

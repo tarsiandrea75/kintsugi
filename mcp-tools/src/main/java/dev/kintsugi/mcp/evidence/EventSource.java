@@ -12,18 +12,12 @@ import dev.kintsugi.mcp.tool.InvalidParameterException;
  */
 public enum EventSource {
 
-	ORDER("order", Database.ORDERS, "order_events",
-			List.of("ORDER_RECEIVED", "INVENTORY_RESERVED", "INVENTORY_REJECTED", "INVENTORY_UNAVAILABLE",
-					"PAYMENT_AUTHORIZED", "PAYMENT_DECLINED", "PAYMENT_FAILED", "PAYMENT_UNAVAILABLE"),
-			// The order status after the event.
-			List.of("CREATED", "PAYMENT_PENDING", "PAID", "PAYMENT_FAILED", "REJECTED_OUT_OF_STOCK",
-					"REJECTED_INVENTORY_UNAVAILABLE")),
+	ORDER("order", Database.ORDERS, "order_events", Values.ORDER_TYPES, Values.ORDER_OUTCOMES),
 
-	PAYMENT("payment", Database.PAYMENTS, "payment_events", List.of("PAYMENT_ATTEMPT"),
-			List.of("AUTHORIZED", "DECLINED", "FAILED", "GATEWAY_UNAVAILABLE", "ERROR", "COMMIT_UNKNOWN")),
+	PAYMENT("payment", Database.PAYMENTS, "payment_events", Values.PAYMENT_TYPES, Values.PAYMENT_OUTCOMES),
 
-	RESERVATION("reservation", Database.INVENTORY, "reservation_events", List.of("RESERVATION_ATTEMPT"),
-			List.of("RESERVED", "INSUFFICIENT_STOCK"));
+	RESERVATION("reservation", Database.INVENTORY, "reservation_events", Values.RESERVATION_TYPES,
+			Values.RESERVATION_OUTCOMES);
 
 	private final String id;
 
@@ -35,12 +29,12 @@ public enum EventSource {
 
 	private final List<String> outcomes;
 
-	EventSource(String id, Database database, String table, List<String> types, List<String> outcomes) {
+	EventSource(String id, Database database, String table, String types, String outcomes) {
 		this.id = id;
 		this.database = database;
 		this.table = table;
-		this.types = types;
-		this.outcomes = outcomes;
+		this.types = List.of(types.split(Values.SEPARATOR));
+		this.outcomes = List.of(outcomes.split(Values.SEPARATOR));
 	}
 
 	public String id() {
@@ -82,6 +76,35 @@ public enum EventSource {
 					"must be one of " + this.outcomes + " for source " + this.id);
 		}
 		return value;
+	}
+
+	/**
+	 * The allowed values of each source, as compile-time constants joined by {@link #SEPARATOR}. They are the single
+	 * source of both the validation above and the {@code recent_events} parameter descriptions, which are annotation
+	 * values and so must be constants: the two cannot drift apart.
+	 */
+	static final class Values {
+
+		static final String SEPARATOR = ", ";
+
+		static final String ORDER_TYPES = "ORDER_RECEIVED, INVENTORY_RESERVED, INVENTORY_REJECTED, INVENTORY_UNAVAILABLE,"
+				+ " PAYMENT_AUTHORIZED, PAYMENT_DECLINED, PAYMENT_FAILED, PAYMENT_UNAVAILABLE";
+
+		/** The order status after the event. */
+		static final String ORDER_OUTCOMES = "CREATED, PAYMENT_PENDING, PAID, PAYMENT_FAILED, REJECTED_OUT_OF_STOCK,"
+				+ " REJECTED_INVENTORY_UNAVAILABLE";
+
+		static final String PAYMENT_TYPES = "PAYMENT_ATTEMPT";
+
+		static final String PAYMENT_OUTCOMES = "AUTHORIZED, DECLINED, FAILED, GATEWAY_UNAVAILABLE, ERROR, COMMIT_UNKNOWN";
+
+		static final String RESERVATION_TYPES = "RESERVATION_ATTEMPT";
+
+		static final String RESERVATION_OUTCOMES = "RESERVED, INSUFFICIENT_STOCK";
+
+		private Values() {
+		}
+
 	}
 
 }

@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,6 +51,16 @@ public class EvidenceTools {
 
 	private static final String SINCE = "Look back this many minutes, 1 to 360.";
 
+	/** Built from {@link EventSource.Values}, the same constants the validation reads. */
+	static final String TYPE_DESCRIPTION = "Optional event type. order: " + EventSource.Values.ORDER_TYPES
+			+ "; payment: " + EventSource.Values.PAYMENT_TYPES + "; reservation: " + EventSource.Values.RESERVATION_TYPES
+			+ ".";
+
+	/** Built from {@link EventSource.Values}, the same constants the validation reads. */
+	static final String OUTCOME_DESCRIPTION = "Optional outcome. order: the order status after the event ("
+			+ EventSource.Values.ORDER_OUTCOMES + "); payment: " + EventSource.Values.PAYMENT_OUTCOMES
+			+ "; reservation: " + EventSource.Values.RESERVATION_OUTCOMES + ".";
+
 	private static final String EVENT_COLUMNS = "order_id, occurred_at, type, outcome, duration_ms, detail";
 
 	private final LabDatabases databases;
@@ -81,7 +92,7 @@ public class EvidenceTools {
 				List<TraceEvent> rows = this.databases.query(source.database(),
 						"SELECT " + EVENT_COLUMNS + " FROM " + source.table()
 								+ " WHERE order_id = :orderId ORDER BY occurred_at, id LIMIT " + (MAX_TRACE_EVENTS + 1),
-						bind, (rs, n) -> TraceEvent.of(source, rs));
+						bind, (rs, n) -> TraceEvent.inTrace(source, rs));
 				if (rows.size() > MAX_TRACE_EVENTS) {
 					rows = rows.subList(0, MAX_TRACE_EVENTS);
 					truncated = true;
@@ -101,14 +112,8 @@ public class EvidenceTools {
 			+ " exact type, exact outcome, and a minimum duration in milliseconds." + UNTRUSTED)
 	public CallToolResult recentEvents(
 			@McpToolParam(description = "One of order, payment, reservation.") String source,
-			@McpToolParam(description = "Optional event type. order: ORDER_RECEIVED, INVENTORY_RESERVED,"
-					+ " INVENTORY_REJECTED, INVENTORY_UNAVAILABLE, PAYMENT_AUTHORIZED, PAYMENT_DECLINED, PAYMENT_FAILED,"
-					+ " PAYMENT_UNAVAILABLE; payment: PAYMENT_ATTEMPT; reservation: RESERVATION_ATTEMPT.",
-					required = false) String type,
-			@McpToolParam(description = "Optional outcome. order: the order status after the event (CREATED,"
-					+ " PAYMENT_PENDING, PAID, PAYMENT_FAILED, REJECTED_OUT_OF_STOCK, REJECTED_INVENTORY_UNAVAILABLE);"
-					+ " payment: AUTHORIZED, DECLINED, FAILED, GATEWAY_UNAVAILABLE, ERROR, COMMIT_UNKNOWN; reservation:"
-					+ " RESERVED, INSUFFICIENT_STOCK.", required = false) String outcome,
+			@McpToolParam(description = TYPE_DESCRIPTION, required = false) String type,
+			@McpToolParam(description = OUTCOME_DESCRIPTION, required = false) String outcome,
 			@McpToolParam(description = "Optional minimum duration in milliseconds, 0 to 600000.",
 					required = false) Integer minDurationMs,
 			@McpToolParam(description = SINCE) Integer sinceMinutes,
@@ -141,7 +146,7 @@ public class EvidenceTools {
 					sql.append(" ORDER BY occurred_at DESC, id LIMIT :limit");
 					bind.put("limit", max);
 					List<TraceEvent> events = this.databases.query(src.database(), sql.toString(), bind,
-							(rs, n) -> TraceEvent.of(null, rs).withOrderId(rs.getObject("order_id", UUID.class)));
+							(rs, n) -> TraceEvent.recent(rs));
 					return ToolResult.of(events, events.stream().anyMatch(TraceEvent::cut));
 				});
 	}
@@ -241,7 +246,8 @@ public class EvidenceTools {
 					return table;
 				}
 			}
-			throw new InvalidParameterException("table", "must be one of [orders, payments, stock]");
+			throw new InvalidParameterException("table",
+					"must be one of " + Arrays.stream(values()).map(SummaryTable::id).toList());
 		}
 
 	}
@@ -258,20 +264,30 @@ public class EvidenceTools {
 	record TraceEvent(String kind, String source, String orderId, String occurredAt, String type, String outcome,
 			Long durationMs, String untrustedText, @JsonIgnore boolean cut) {
 
-		static TraceEvent of(EventSource source, ResultSet rs) throws SQLException {
+		/**
+		 * An event of an order trace: tagged with its kind and source, since it sits in one list with the order row
+		 * and the other tables' events. The order id is the trace's own, so it is left out.
+		 */
+		static TraceEvent inTrace(EventSource source, ResultSet rs) throws SQLException {
+			return read("event", source.id(), null, rs);
+		}
+
+		/**
+		 * An event of {@code recent_events}: every item has the requested source, so neither kind nor source is
+		 * repeated, but each one names its order.
+		 */
+		static TraceEvent recent(ResultSet rs) throws SQLException {
+			return read(null, null, rs.getObject("order_id", UUID.class).toString(), rs);
+		}
+
+		private static TraceEvent read(String kind, String source, String orderId, ResultSet rs) throws SQLException {
 			String detail = rs.getString("detail");
 			boolean cut = detail != null && detail.length() > MAX_DETAIL_LENGTH;
 			if (cut) {
 				detail = detail.substring(0, MAX_DETAIL_LENGTH) + ToolCallRunner.TRUNCATED_MARKER;
 			}
-			return new TraceEvent(source == null ? null : "event", source == null ? null : source.id(), null,
-					instant(rs, "occurred_at"), rs.getString("type"), rs.getString("outcome"),
-					rs.getObject("duration_ms", Long.class), detail, cut);
-		}
-
-		TraceEvent withOrderId(UUID orderId) {
-			return new TraceEvent(this.kind, this.source, orderId.toString(), this.occurredAt, this.type, this.outcome,
-					this.durationMs, this.untrustedText, this.cut);
+			return new TraceEvent(kind, source, orderId, instant(rs, "occurred_at"), rs.getString("type"),
+					rs.getString("outcome"), rs.getObject("duration_ms", Long.class), detail, cut);
 		}
 
 	}

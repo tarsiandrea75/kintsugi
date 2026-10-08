@@ -15,8 +15,8 @@
 #   Defaults to $PWD, which is right when compose runs from the repository root.
 # - DOCKER_GID: group id of /var/run/docker.sock on the host, added to fault-injector. Required, with no default: a
 #   wrong gid would start an injector that cannot reach Docker, so compose refuses to run without it.
-# - POSTGRES_BOOTSTRAP_PASSWORD, LAB_APP_DB_PASSWORD, FAULTS_DB_PASSWORD: database passwords. They are applied only
-#   when the postgres volume is empty, so changing them needs a "down -v".
+# - POSTGRES_BOOTSTRAP_PASSWORD, LAB_APP_DB_PASSWORD, FAULTS_DB_PASSWORD, KINTSUGI_AGENT_DB_PASSWORD: database
+#   passwords. They are applied only when the postgres volume is empty, so changing them needs a "down -v".
 # - GRAFANA_ADMIN_PASSWORD: Grafana's admin password.
 name: kintsugi-lab
 
@@ -31,6 +31,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_BOOTSTRAP_PASSWORD:-postgres}
       LAB_APP_DB_PASSWORD: ${LAB_APP_DB_PASSWORD:-lab_app}
       FAULTS_DB_PASSWORD: ${FAULTS_DB_PASSWORD:-faults}
+      KINTSUGI_AGENT_DB_PASSWORD: ${KINTSUGI_AGENT_DB_PASSWORD:-kintsugi_agent}
     volumes:
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
       # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker.

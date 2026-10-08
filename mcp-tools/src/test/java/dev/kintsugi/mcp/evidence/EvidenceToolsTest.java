@@ -21,11 +21,13 @@ import java.util.stream.Stream;
 
 import javax.sql.DataSource;
 
+import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import dev.kintsugi.mcp.LabDatabase;
 import dev.kintsugi.mcp.config.DatabaseProperties;
 import dev.kintsugi.mcp.config.EvidenceConfiguration;
 import dev.kintsugi.mcp.tool.ToolCallRunner;
+import dev.kintsugi.mcp.tool.UpstreamException;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import org.junit.jupiter.api.AfterAll;
@@ -42,6 +44,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The event and summary tools against the lab database built by the real init script and migrations, connected as
@@ -338,6 +341,101 @@ class EvidenceToolsTest {
 		}
 	}
 
+	@Test
+	void anExhaustedPoolIsReportedAsBusy() throws SQLException {
+		Map<Database, HikariDataSource> single = pools(LabDatabase.port(), LabDatabase.AGENT_PASSWORD, 1);
+		try (Connection held = single.get(Database.PAYMENTS).getConnection()) {
+			EvidenceTools tools = new EvidenceTools(new LabDatabases(Map.copyOf(single)), new ToolCallRunner(),
+					Clock.systemUTC());
+
+			JsonNode body = body(tools.recentEvents("payment", null, null, null, 15, null));
+
+			assertThat(held.isValid(1)).isTrue();
+			assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
+			assertThat(body.path("reason").asString()).isEqualTo("PostgreSQL payments connection pool busy");
+		}
+		finally {
+			single.values().forEach(HikariDataSource::close);
+		}
+	}
+
+	@Test
+	void aWrongPasswordIsReportedAsAnAuthenticationFailure() {
+		Map<Database, HikariDataSource> wrong = pools(LabDatabase.port(), "not-the-password", 2);
+		try {
+			EvidenceTools tools = new EvidenceTools(new LabDatabases(Map.copyOf(wrong)), new ToolCallRunner(),
+					Clock.systemUTC());
+
+			JsonNode body = body(tools.statusSummary("orders", null));
+
+			assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
+			assertThat(body.path("reason").asString()).isEqualTo("PostgreSQL orders authentication failed");
+		}
+		finally {
+			wrong.values().forEach(HikariDataSource::close);
+		}
+	}
+
+	@Test
+	void aMissingDatabaseIsReportedAsUnreachable() {
+		HikariConfig config = new HikariConfig();
+		config.setJdbcUrl(LabDatabase.jdbcUrl("no_such_database"));
+		config.setUsername("kintsugi_agent");
+		config.setPassword(LabDatabase.AGENT_PASSWORD);
+		config.setConnectionTimeout(1000);
+		config.setInitializationFailTimeout(-1);
+		Map<Database, DataSource> missing = new EnumMap<>(Database.class);
+		missing.putAll(POOLS);
+		try (HikariDataSource noSuchDatabase = new HikariDataSource(config)) {
+			missing.put(Database.INVENTORY, noSuchDatabase);
+			EvidenceTools tools = new EvidenceTools(new LabDatabases(missing), new ToolCallRunner(),
+					Clock.systemUTC());
+
+			JsonNode body = body(tools.statusSummary("stock", null));
+
+			assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
+			assertThat(body.path("reason").asString()).isEqualTo("PostgreSQL inventory is unreachable");
+		}
+	}
+
+	@Test
+	void anyOtherDatabaseErrorIsReportedAsAFailedQuery() {
+		LabDatabases databases = new LabDatabases(Map.copyOf(POOLS));
+
+		// The tools' SQL is fixed, so this error cannot come from a tool call; it stands for any SQL error other than
+		// a timeout, here undefined_table (42P01). The reason names the database only, never the SQL or the error.
+		assertThatThrownBy(() -> databases.query(Database.ORDERS, "SELECT 1 FROM no_such_table", Map.of(),
+				(rs, n) -> rs.getInt(1)))
+			.isInstanceOf(UpstreamException.class)
+			.hasMessage("PostgreSQL orders query failed");
+	}
+
+	// tool descriptions
+
+	/** The descriptions and the validation read the same constants; this pins that each source's part is there. */
+	@ParameterizedTest
+	@MethodSource("eventDomains")
+	void theTypeAndOutcomeDescriptionsListTheValuesTheValidationAccepts(EventSource source, String types,
+			String outcomes) {
+		assertThat(EvidenceTools.TYPE_DESCRIPTION).contains(source.id() + ": " + types);
+		assertThat(EvidenceTools.OUTCOME_DESCRIPTION).contains(source.id() + ": ").contains(outcomes);
+		for (String type : types.split(", ")) {
+			assertThat(source.type(type)).isEqualTo(type);
+		}
+		for (String outcome : outcomes.split(", ")) {
+			assertThat(source.outcome(outcome)).isEqualTo(outcome);
+		}
+	}
+
+	static Stream<Arguments> eventDomains() {
+		return Stream.of(
+				Arguments.of(EventSource.ORDER, EventSource.Values.ORDER_TYPES, EventSource.Values.ORDER_OUTCOMES),
+				Arguments.of(EventSource.PAYMENT, EventSource.Values.PAYMENT_TYPES,
+						EventSource.Values.PAYMENT_OUTCOMES),
+				Arguments.of(EventSource.RESERVATION, EventSource.Values.RESERVATION_TYPES,
+						EventSource.Values.RESERVATION_OUTCOMES));
+	}
+
 	// the pools
 
 	@Test
@@ -356,8 +454,12 @@ class EvidenceToolsTest {
 	// helpers
 
 	private static Map<Database, HikariDataSource> pools(int port) {
-		DatabaseProperties properties = new DatabaseProperties(LabDatabase.host(), port, "kintsugi_agent",
-				LabDatabase.AGENT_PASSWORD, Duration.ofSeconds(1), 2);
+		return pools(port, LabDatabase.AGENT_PASSWORD, 2);
+	}
+
+	private static Map<Database, HikariDataSource> pools(int port, String password, int maximumPoolSize) {
+		DatabaseProperties properties = new DatabaseProperties(LabDatabase.host(), port, "kintsugi_agent", password,
+				Duration.ofSeconds(1), maximumPoolSize);
 		Map<Database, HikariDataSource> pools = new EnumMap<>(Database.class);
 		for (Database database : Database.values()) {
 			pools.put(database, EvidenceConfiguration.dataSource(properties, database));
