@@ -99,7 +99,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - [x] **T1 — ADR-010 (agent loop design) and the living spec `openspec/specs/agent/spec.md`:** endpoint, loop, budgets, state, report schema and evidence check. Branch: tracker. Route: delegated writer.
 - [x] **T2 — The state store:** the `agent` database and `agent_app` role on `knowledge-db`, the schema through Flyway in `agent/`, and the incident API skeleton (`POST` and `GET`). Testcontainers. Branch `-01-state`. Route: delegated writer.
 - [x] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
-- [ ] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
+- [x] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
 - [ ] **T5 — Compose wiring and `verify-agent.sh` (F1–F3) run for real with `granite4.1:8b`;** record the results and docs. Branch `-04-check`. Route: delegated writer.
 
 ## Progress
@@ -183,6 +183,25 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - WARNING: a non-object argument gives a plain-text `INVALID_PARAMETER` output, which the summarizer cannot parse;
   - suggestion: if `incidents.fail` throws inside the runner-failure catch, the `RUNNING` row stays.
 
+- 2026-10-08: T4 done by a delegated writer on `feat/agent-loop-03-loop`.
+  - **Part A** (the T3 review fixes) passes alone: 174 tests, exit 0, run by the parent.
+    - Non-object arguments get mcp-tools' `INVALID_PARAMETER` envelope.
+    - A failure inside the fail-in-catch is logged, and the restart sweep is the backstop.
+  - **Part B** adds the `loop/` package:
+    - `AgentLoop` on a single-thread executor with a queue of 2;
+    - `ModelRouter` with one Ollama route, `granite4.1:8b`;
+    - plan and report schemas through `outputSchema`, checked in code with one retry;
+    - per-call tool gating;
+    - a new step kind `ACT` (migration V2), so every model call has a row;
+    - each model call has a deadline of `min(90 s, time left)`.
+  - Results: `agent` has 209 tests (XML), exit 0: two runs by the writer, one by the parent. The leakage regex is clean on the prompts and schemas.
+  - **RED was only a compile failure.** No behavioural RED was observed against working code. The tests were written first.
+  - **Live smoke** (real `granite4.1:8b` and mcp-tools; the store on Testcontainers, since the live `knowledge-db` has no `agent` database yet):
+    - **run 1, cold:** the first plan took more than 90 s, so `TIMED_OUT`;
+    - **run 2, warm:** the plans were valid and two `query_metric` calls returned OK, but model calls took 42–84 s each, and an `ACT` call passed 90 s, so `TIMED_OUT`.
+    - **The wiring works; the budgets do not fit this laptop's CPU.** That needs the human's decision before T5.
+  - **Size exception:** Part B is about 2,470 lines (1,310 main, 1,015 tests). The writer proposed a split (B1: router, schemas, checks, prompts; B2: loop, repository and wiring). The parent committed it whole, as one cohesive behaviour; the review covers the range.
+
 ## Next step
 
-Review the T3 range. Then branch `feat/agent-loop-03-loop` and start T4.
+Review the T4 range. Then the human decides the budgets against the measured CPU latency, before T5.

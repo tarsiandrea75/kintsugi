@@ -18,16 +18,19 @@ import tools.jackson.databind.json.JsonMapper;
 import dev.kintsugi.agent.incident.IncidentViews.Incident;
 import dev.kintsugi.agent.incident.IncidentViews.Step;
 
-/** Reads and writes {@code incidents} and {@code incident_steps} in the {@code agent} database, as {@code agent_app}. */
+/**
+ * Reads and writes {@code incidents} and {@code incident_steps} in the {@code agent} database, as {@code agent_app}.
+ * The API opens and reads incidents; the loop writes their steps and ends them.
+ */
 @Repository
 @ConditionalOnWebApplication
-class IncidentRepository {
+public class IncidentRepository {
 
 	private final JdbcClient jdbc;
 
 	private final JsonMapper json;
 
-	IncidentRepository(JdbcClient jdbc, JsonMapper json) {
+	public IncidentRepository(JdbcClient jdbc, JsonMapper json) {
 		this.jdbc = jdbc;
 		this.json = json;
 	}
@@ -72,9 +75,51 @@ class IncidentRepository {
 
 	/** Fails the incident {@code id} with {@code reason} if it is still {@code RUNNING}; returns whether it was. */
 	boolean fail(UUID id, String reason, Instant endedAt) {
+		return end(id, IncidentStatus.FAILED, reason, endedAt);
+	}
+
+	/**
+	 * Ends the incident {@code id} with {@code status}, neither {@code RUNNING} nor {@code COMPLETED}, and its
+	 * {@code reason}, if it is still {@code RUNNING}; returns whether it was.
+	 */
+	public boolean end(UUID id, IncidentStatus status, String reason, Instant endedAt) {
+		if (status == IncidentStatus.RUNNING || status == IncidentStatus.COMPLETED) {
+			throw new IllegalArgumentException("not an end with a reason: " + status);
+		}
 		return jdbc.sql("UPDATE incidents SET status = ?, failure_reason = ?, ended_at = ? WHERE id = ? AND status = ?")
-			.params(IncidentStatus.FAILED.name(), reason, Timestamp.from(endedAt), id, IncidentStatus.RUNNING.name())
+			.params(status.name(), reason, Timestamp.from(endedAt), id, IncidentStatus.RUNNING.name())
 			.update() == 1;
+	}
+
+	/** Completes the incident {@code id} with its validated report, if it is still {@code RUNNING}. */
+	public boolean complete(UUID id, String report, Instant endedAt) {
+		return jdbc.sql("UPDATE incidents SET status = ?, report = CAST(? AS jsonb), ended_at = ? "
+				+ "WHERE id = ? AND status = ?")
+			.params(IncidentStatus.COMPLETED.name(), report, Timestamp.from(endedAt), id, IncidentStatus.RUNNING.name())
+			.update() == 1;
+	}
+
+	/** The signal and start time of the incident {@code id}, if it is {@code RUNNING}: what the loop starts from. */
+	public Optional<OpenIncident> findRunning(UUID id) {
+		return jdbc.sql("""
+				SELECT signal->>'symptom' AS symptom, (signal->>'sinceMinutes')::int AS since_minutes, started_at
+				FROM incidents WHERE id = ? AND status = ?""")
+			.params(id, IncidentStatus.RUNNING.name())
+			.query((rs, rowNum) -> new OpenIncident(id, rs.getString("symptom"), rs.getInt("since_minutes"),
+					instant(rs, "started_at")))
+			.optional();
+	}
+
+	/** Writes one step of the incident {@code id}; a step is written when it ends, before the next one starts. */
+	public void insertStep(UUID id, StepRow step) {
+		jdbc.sql("""
+				INSERT INTO incident_steps (incident_id, step_no, kind, phase, model, tokens, tool_name, tool_args,
+				                            tool_output, tool_outcome, summary, model_output, latency_ms, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?)""")
+			.params(id, step.stepNo(), step.kind(), step.phase(), step.model(), step.tokens(), step.toolName(),
+					step.toolArgs(), step.toolOutput(), step.toolOutcome(), step.summary(), step.modelOutput(),
+					step.latencyMs(), Timestamp.from(step.createdAt()))
+			.update();
 	}
 
 	private List<Step> steps(UUID id) {

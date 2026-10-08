@@ -30,7 +30,7 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -47,7 +47,8 @@ class IncidentApiTest {
 	@LocalServerPort
 	int port;
 
-	@MockitoSpyBean
+	/** A mock, so an opened incident stays RUNNING: these tests are about the API, not the loop. */
+	@MockitoBean
 	IncidentRunner runner;
 
 	@DynamicPropertySource

@@ -1,0 +1,38 @@
+package dev.kintsugi.agent.loop;
+
+import java.time.Duration;
+import java.util.List;
+
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+
+/**
+ * One route of {@link ModelRouter}: a chat model and the options every call on it carries.
+ *
+ * @param model the model's name, sent with every call and recorded on every step
+ * @param chatModel the chat model, called directly: in Spring AI 2.0.1 it never executes the tools it is offered
+ * @param temperature the sampling temperature
+ * @param numCtx the context window, in tokens
+ * @param callTimeout how long one call may take before the run ends {@code TIMED_OUT}
+ */
+public record ModelRoute(String model, ChatModel chatModel, double temperature, int numCtx, Duration callTimeout) {
+
+	/**
+	 * The options of one call: the route's settings, the tool definitions offered (none for a plan or a report) and,
+	 * for a plan or a report, the JSON schema the answer is constrained by. In M2 every route is Ollama's.
+	 */
+	public ChatOptions options(List<ToolCallback> tools, String outputSchema) {
+		OllamaChatOptions.Builder options = OllamaChatOptions.builder()
+			.model(this.model)
+			.temperature(this.temperature)
+			.numCtx(this.numCtx)
+			.toolCallbacks(tools);
+		if (outputSchema != null) {
+			options.outputSchema(outputSchema);
+		}
+		return options.build();
+	}
+
+}
