@@ -71,7 +71,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - at most 8 tool calls per incident;
   - 90 s per model call;
   - 10 minutes per incident;
-  - each budget ends the run with an explicit status, never silently.
+  - each budget ends the run with an explicit status, never silently. Exception (amended in T1): using up the 8 tool calls moves the run to CONCLUDE, so it still produces a report that can be scored. The exhausted budget is recorded on the steps.
 - **State:** an `agent` database with an owner role `agent_app`, not a superuser and with no CONNECT on `faults`. It holds:
   - `incidents`: id, signal, status, report, started_at, ended_at;
   - `incident_steps`: incident_id, step_no, phase, model, tokens, tool_name, tool_args, tool_output, tool_outcome, latency_ms, created_at.
@@ -96,7 +96,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 ## Tasks
 
-- [ ] **T1 — ADR-010 (agent loop design) and the living spec `openspec/specs/agent/spec.md`:** endpoint, loop, budgets, state, report schema and evidence check. Branch: tracker. Route: delegated writer.
+- [x] **T1 — ADR-010 (agent loop design) and the living spec `openspec/specs/agent/spec.md`:** endpoint, loop, budgets, state, report schema and evidence check. Branch: tracker. Route: delegated writer.
 - [ ] **T2 — The state store:** the `agent` database and `agent_app` role on `knowledge-db`, the schema through Flyway in `agent/`, and the incident API skeleton (`POST` and `GET`). Testcontainers. Branch `-01-state`. Route: delegated writer.
 - [ ] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
 - [ ] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
@@ -109,6 +109,24 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - The human chose: the truth enum plus `UNKNOWN`, code-built summaries, and the check script as the trigger.
   - Tracker branch created.
 
+- 2026-10-08: T1 done by a delegated writer (docs only).
+  - Created ADR-010 (140 lines) and `openspec/specs/agent/spec.md` (325 lines).
+  - **Corrections from the Spring AI 2.0.1 docs:**
+    - `internalToolExecutionEnabled` no longer exists. Calling `ChatModel` directly never runs tools; the automatic loop lives in `ChatClient`'s `ToolCallingAdvisor`.
+    - `ToolCallingManager.executeToolCalls` runs every call of a response at once, so the loop invokes each MCP `ToolCallback` itself, to check each call before it runs.
+    - Structured output uses `OllamaChatOptions.outputSchema`. `validateSchema()` is not used, because its hidden retries escape our budgets.
+    - ADR-005 was never written, so ADR-010 cites the vision instead.
+  - **Values chosen by the writer, marked "(chosen)" in the spec, to review:**
+    - tool calls per phase: 2 in TRIAGE, 4 in INVESTIGATE, 2 in KNOWLEDGE;
+    - at most 16 model calls per incident;
+    - a plan holds 1–3 hypotheses and 0–4 next tools;
+    - a report holds 1–5 evidence items; each quote is 8–300 characters and matches the raw output or a decoded JSON string in it;
+    - code caps `limit` at 20, and at 3 for `search_runbooks`;
+    - one incident runs at a time, and a second `POST` gets 409;
+    - on restart, an incident left `RUNNING` becomes `FAILED`.
+  - **Accepted by the parent:** an exhausted tool budget leads to CONCLUDE rather than ending the run. This keeps the run scorable and records the budget explicitly.
+  - Leakage grep: clean.
+
 ## Next step
 
-T1, via a delegated writer.
+Review the T1 range. Then branch `feat/agent-loop-01-state` and start T2.
