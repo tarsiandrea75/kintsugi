@@ -52,7 +52,9 @@ Constraints:
 - `knowledge_indexer` owns the tables and writes them. Only the indexer holds its credentials.
 - `kintsugi_agent` has `CONNECT` on `knowledge` and `SELECT` on its tables, nothing else. It is the same role name mcp-tools already uses, but on a different server with its own password; it has no reach into the lab's databases from here, and no role in this container can reach `faults`, which lives on the other server.
 - Both roles are `NOSUPERUSER NOCREATEDB NOCREATEROLE`. Their passwords come from `KNOWLEDGE_INDEXER_DB_PASSWORD` and `KINTSUGI_AGENT_DB_PASSWORD`, both required by the init script. `kintsugi_agent` gets the same session defaults as on the lab's server (read-only, 3 s statement, 5 s transaction and idle-in-transaction timeouts).
-- The init script is `infra/knowledge-db/init/01-knowledge.sh`; `mcp-tools`' `KnowledgeStoreRoleTest` runs it on the pinned image.
+- The init script is `infra/knowledge-db/init/01-knowledge.sh`; `mcp-tools`' `KnowledgeStoreRoleTest` runs it on the pinned image. psql reads both passwords from the environment with `\getenv`, so they never appear on a command line.
+- **A failed init needs the volume removed.** The postgres entrypoint runs initdb before the init scripts, so a script that stops halfway leaves an initialized volume, and every later start skips the scripts and serves a store without its roles or schema. The init cannot be made atomic. The recovery is the same as for the lab's postgres: fix the cause, then `docker compose down -v` for the store. The script checks its required variables before any SQL, so the commonest cause, a missing password, leaves nothing half-made.
+- **T5 note, health check.** `infra/knowledge-db/healthcheck.sh` is the store's compose health check: it passes only when `kintsugi_agent` can read `index_metadata`, the init script's last grant, so an incomplete init never reports healthy (`pg_isready` alone would). It connects over TCP on loopback, which the entrypoint's temporary init server does not listen on. T5 wires it in `compose.yaml`.
 
 ### The extension is created at init
 

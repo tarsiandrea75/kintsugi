@@ -11,14 +11,24 @@
 # so only a superuser may create it, and keeping all DDL here keeps both application roles unprivileged.
 # The passwords come from the environment of the container. Changing them later needs the volume removed: this script
 # never runs again on a used volume.
+#
+# A failed init is not atomic and needs the volume removed. The postgres entrypoint runs initdb before this script, so
+# when the script stops halfway the volume is already initialized: on the next start the entrypoint skips every init
+# script and serves a store without its roles or schema. The fix is the same as for the lab's postgres: fix the cause,
+# then `docker compose down -v` for the store's volume and start again. Two things keep this rare and visible:
+# - the required variables are checked below, before any SQL runs, so a missing password leaves no half-made store;
+# - the grant to kintsugi_agent on index_metadata is the last statement, and ../healthcheck.sh reports healthy only
+#   once it exists, so a store whose init stopped halfway never reports healthy.
 set -euo pipefail
 
 : "${KNOWLEDGE_INDEXER_DB_PASSWORD:?KNOWLEDGE_INDEXER_DB_PASSWORD must be set}"
 : "${KINTSUGI_AGENT_DB_PASSWORD:?KINTSUGI_AGENT_DB_PASSWORD must be set}"
 
-# psql variables (:'name') quote the passwords as SQL literals, so no value is ever spliced into the SQL text.
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
-  -v indexer_password="$KNOWLEDGE_INDEXER_DB_PASSWORD" -v agent_password="$KINTSUGI_AGENT_DB_PASSWORD" <<'SQL'
+# psql reads the passwords from the environment itself (\getenv), so they never appear on a command line, and the
+# :'name' form quotes them as SQL literals, so no value is ever spliced into the SQL text.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<'SQL'
+\getenv indexer_password KNOWLEDGE_INDEXER_DB_PASSWORD
+\getenv agent_password KINTSUGI_AGENT_DB_PASSWORD
 CREATE ROLE knowledge_indexer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
   PASSWORD :'indexer_password';
 CREATE ROLE kintsugi_agent LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
@@ -73,5 +83,7 @@ ALTER TABLE runbook_chunks OWNER TO knowledge_indexer;
 ALTER TABLE index_metadata OWNER TO knowledge_indexer;
 
 GRANT USAGE ON SCHEMA public TO knowledge_indexer, kintsugi_agent;
-GRANT SELECT ON runbook_chunks, index_metadata TO kintsugi_agent;
+GRANT SELECT ON runbook_chunks TO kintsugi_agent;
+-- Last on purpose: ../healthcheck.sh looks for this grant, so it is the mark of a complete init.
+GRANT SELECT ON index_metadata TO kintsugi_agent;
 SQL

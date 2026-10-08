@@ -11,7 +11,8 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | Store image | `pgvector/pgvector:0.8.7-pg18-trixie`, pinned by digest; a container separate from the lab's `postgres` |
 | Database | `knowledge`, with `CONNECT` revoked from `PUBLIC` |
 | Extension | `vector`, created by the init script as the bootstrap superuser (it is not a trusted extension) |
-| Init script | `infra/knowledge-db/init/01-knowledge.sh`, run once on an empty volume as the bootstrap superuser; tested by `mcp-tools`' `KnowledgeStoreRoleTest` on the pinned image |
+| Init script | `infra/knowledge-db/init/01-knowledge.sh`, run once on an empty volume as the bootstrap superuser; tested by `mcp-tools`' `KnowledgeStoreRoleTest` on the pinned image. It is not atomic: initdb runs before it, so a failed init leaves an initialized but incomplete volume that later starts skip; the recovery is `docker compose down -v` for the store, as for the lab's postgres |
+| Health check | `infra/knowledge-db/healthcheck.sh`: healthy only when `kintsugi_agent` can read `index_metadata`, the init script's last grant, so an incomplete init never reports healthy |
 | Roles | `knowledge_indexer` (owns and writes the tables; password from `KNOWLEDGE_INDEXER_DB_PASSWORD`), `kintsugi_agent` (reads only; password from `KINTSUGI_AGENT_DB_PASSWORD`, set separately from the lab server's). Both are required: the init script stops without them |
 | Agent session defaults | `default_transaction_read_only=on`, `statement_timeout=3s`, `transaction_timeout=5s`, `idle_in_transaction_session_timeout=5s`, as on the lab's server |
 | Chunk table | `runbook_chunks`: `id uuid` (primary key), `content text`, `metadata json` (holding `service`, `section`, `source`, `content_hash`), `embedding vector(768)`; all `NOT NULL` |
@@ -75,6 +76,11 @@ Neither `knowledge_indexer` nor `kintsugi_agent` MUST be a superuser, and neithe
 - WHEN `knowledge_indexer` inserts a chunk whose embedding does not have 768 dimensions
 - THEN the insert fails
 
+#### Scenario: Incomplete init is not healthy
+- GIVEN a store whose init script stopped before its last grant
+- WHEN the health check runs
+- THEN it fails, while it passes on a store whose init completed
+
 #### Scenario: Extension already present
 - GIVEN a fresh volume after the init script ran
 - WHEN `SELECT extversion FROM pg_extension WHERE extname = 'vector'` runs in `knowledge`
@@ -129,7 +135,7 @@ Before embedding anything, the indexer MUST scan every allowed file for the leak
 
 ### Requirement: Chunks carry their metadata
 
-The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. No chunk MUST hold more than 800 tokens of text, so a single chunk stays well under mcp-tools' 8 KB output cap in the common case. Every chunk MUST carry:
+The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. A chunk MUST NOT hold more than 800 tokens of text, so a single chunk stays well under mcp-tools' 8 KB output cap in the common case. Every chunk MUST carry:
 
 | Field | Value |
 |-------|-------|

@@ -23,6 +23,7 @@ import org.testcontainers.utility.MountableFile;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * The knowledge store as compose builds it: the pinned pgvector image runs the real
@@ -34,6 +35,11 @@ class KnowledgeStoreRoleTest {
 	private static final String PERMISSION_DENIED = "42501";
 
 	private static final String READ_ONLY_TRANSACTION = "25006";
+
+	private static final String CHECK_VIOLATION = "23514";
+
+	private static final String SEEDED_METADATA = "{\"service\":\"order-service\",\"section\":\"Key signals\","
+			+ "\"source\":\"docs/runbooks/order-service.md\",\"content_hash\":\"abc\"}";
 
 	private static final String INDEXER_PASSWORD = "knowledge-indexer-test";
 
@@ -51,17 +57,26 @@ class KnowledgeStoreRoleTest {
 	private static PostgreSQLContainer container;
 
 	@BeforeAll
-	static void start() {
+	static void start() throws SQLException {
 		Path initScript = REPO.resolve("infra/knowledge-db/init/01-knowledge.sh");
-		if (!Files.isRegularFile(initScript)) {
-			throw new IllegalStateException("Init script not found at " + initScript);
+		Path healthCheck = REPO.resolve("infra/knowledge-db/healthcheck.sh");
+		if (!Files.isRegularFile(initScript) || !Files.isRegularFile(healthCheck)) {
+			throw new IllegalStateException("Init script or health check not found under " + initScript.getParent());
 		}
 		container = new PostgreSQLContainer(IMAGE)
 			.withCopyFileToContainer(MountableFile.forHostPath(initScript, 0755),
 					"/docker-entrypoint-initdb.d/01-knowledge.sh")
+			.withCopyFileToContainer(MountableFile.forHostPath(healthCheck, 0755), "/usr/local/bin/healthcheck.sh")
 			.withEnv("KNOWLEDGE_INDEXER_DB_PASSWORD", INDEXER_PASSWORD)
 			.withEnv("KINTSUGI_AGENT_DB_PASSWORD", AGENT_PASSWORD);
 		container.start();
+		// One known chunk and the metadata row, so the agent's reads assert real values, not only that a row exists.
+		try (Connection connection = asIndexer(); Statement sql = connection.createStatement()) {
+			sql.execute("INSERT INTO runbook_chunks (content, metadata, embedding) VALUES ('Key signals', '"
+					+ SEEDED_METADATA + "', '" + vector(1) + "')");
+			sql.execute("INSERT INTO index_metadata (model_name, model_digest, dimensions, document_prefix, query_prefix)"
+					+ " VALUES ('nomic-embed-text', 'd1', 768, 'search_document: ', 'search_query: ')");
+		}
 	}
 
 	@AfterAll
@@ -94,15 +109,15 @@ class KnowledgeStoreRoleTest {
 
 	@Test
 	void theIndexerWritesChunksAndMetadata() throws SQLException {
+		// Rolled back, so the seeded values the agent tests read stay as they are.
 		try (Connection connection = asIndexer(); Statement sql = connection.createStatement()) {
-			sql.execute("INSERT INTO runbook_chunks (content, metadata, embedding) VALUES ('Key signals',"
-					+ " '{\"service\":\"order-service\",\"section\":\"Key signals\","
-					+ "\"source\":\"docs/runbooks/order-service.md\",\"content_hash\":\"abc\"}', '" + vector(1) + "')");
-			sql.execute("INSERT INTO index_metadata (model_name, model_digest, dimensions, document_prefix, query_prefix)"
-					+ " VALUES ('nomic-embed-text', 'd1', 768, 'search_document: ', 'search_query: ')"
-					+ " ON CONFLICT (id) DO NOTHING");
+			connection.setAutoCommit(false);
+			sql.execute("INSERT INTO runbook_chunks (content, metadata, embedding) VALUES ('Safe actions',"
+					+ " '{\"section\":\"Safe actions\"}', '" + vector(2) + "')");
 			assertThat(sql.executeUpdate("UPDATE index_metadata SET model_digest = 'd2', indexed_at = now()"))
 				.isEqualTo(1);
+			assertThat(sql.executeUpdate("DELETE FROM runbook_chunks WHERE content = 'Safe actions'")).isEqualTo(1);
+			connection.rollback();
 		}
 	}
 
@@ -111,7 +126,30 @@ class KnowledgeStoreRoleTest {
 		try (Connection connection = asIndexer(); Statement sql = connection.createStatement()) {
 			assertThatExceptionOfType(SQLException.class)
 				.isThrownBy(() -> sql.execute("INSERT INTO index_metadata (id, model_name, model_digest, dimensions,"
-						+ " document_prefix, query_prefix) VALUES (2, 'm', 'd', 768, '', '')"));
+						+ " document_prefix, query_prefix) VALUES (2, 'm', 'd', 768, '', '')"))
+				.satisfies(ex -> assertThat(ex.getSQLState()).isEqualTo(CHECK_VIOLATION));
+		}
+	}
+
+	@Test
+	void theHealthCheckPassesOnACompleteInit() throws Exception {
+		assertThat(container.execInContainer("/usr/local/bin/healthcheck.sh").getExitCode()).isZero();
+	}
+
+	@Test
+	void theHealthCheckFailsWhenTheInitStoppedBeforeItsLastGrant() throws Exception {
+		try (Connection admin = DriverManager.getConnection(url("knowledge"), container.getUsername(),
+				container.getPassword()); Statement sql = admin.createStatement()) {
+			sql.execute("REVOKE SELECT ON index_metadata FROM kintsugi_agent");
+		}
+		try {
+			assertThat(container.execInContainer("/usr/local/bin/healthcheck.sh").getExitCode()).isNotZero();
+		}
+		finally {
+			try (Connection admin = DriverManager.getConnection(url("knowledge"), container.getUsername(),
+					container.getPassword()); Statement sql = admin.createStatement()) {
+				sql.execute("GRANT SELECT ON index_metadata TO kintsugi_agent");
+			}
 		}
 	}
 
@@ -134,12 +172,23 @@ class KnowledgeStoreRoleTest {
 			}
 		}
 		try (Connection connection = asAgent(); Statement sql = connection.createStatement()) {
-			try (ResultSet rows = sql.executeQuery("SELECT count(*) FROM index_metadata")) {
+			try (ResultSet rows = sql.executeQuery("SELECT model_name, model_digest, dimensions, document_prefix,"
+					+ " query_prefix FROM index_metadata")) {
 				assertThat(rows.next()).isTrue();
+				assertThat(rows.getString(1)).isEqualTo("nomic-embed-text");
+				assertThat(rows.getString(2)).isEqualTo("d1");
+				assertThat(rows.getInt(3)).isEqualTo(768);
+				assertThat(rows.getString(4)).isEqualTo("search_document: ");
+				assertThat(rows.getString(5)).isEqualTo("search_query: ");
+				assertThat(rows.next()).isFalse();
 			}
-			try (ResultSet rows = sql.executeQuery("SELECT content, 1 - (embedding <=> '" + vector(3)
-					+ "') AS score FROM runbook_chunks ORDER BY embedding <=> '" + vector(3) + "' LIMIT 5")) {
+			// The seeded chunk's own vector is its nearest neighbour, at cosine distance 0.
+			try (ResultSet rows = sql.executeQuery("SELECT content, metadata::text, 1 - (embedding <=> '" + vector(1)
+					+ "') AS score FROM runbook_chunks ORDER BY embedding <=> '" + vector(1) + "' LIMIT 5")) {
 				assertThat(rows.next()).isTrue();
+				assertThat(rows.getString(1)).isEqualTo("Key signals");
+				assertThat(rows.getString(2)).isEqualTo(SEEDED_METADATA);
+				assertThat(rows.getDouble(3)).isCloseTo(1.0, within(1e-6));
 			}
 			sql.execute("SET enable_seqscan = off");
 			StringJoiner plan = new StringJoiner("\n");
