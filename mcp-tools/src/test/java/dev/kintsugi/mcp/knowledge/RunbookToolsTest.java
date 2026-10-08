@@ -423,6 +423,17 @@ class RunbookToolsTest {
 			.doesNotContain("\n");
 	}
 
+	/**
+	 * Line and paragraph separators would break the label onto another line, and format characters (the bidi controls,
+	 * zero-width characters) could reorder or hide its text, like control characters.
+	 */
+	@ParameterizedTest
+	@ValueSource(strings = { " ", " ", "‮", "⁦", "​", "﻿", "\u0085", "\r\n" })
+	void aSectionHasNoSeparatorOrFormatCharacter(String character) {
+		assertThat(RunbookTools.section("Slow" + character + "reservations")).isEqualTo("Slow"
+				+ " ".repeat(character.length()) + "reservations");
+	}
+
 	@Test
 	void everyCallIsRecordedOnOneLine(CapturedOutput output) {
 		KnowledgeDatabase.chunk("order-service", "A", "a", axis(0));

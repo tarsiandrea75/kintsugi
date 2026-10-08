@@ -96,7 +96,10 @@ class HealthWithoutDatabaseTest {
 
 	}
 
-	/** The lab database is up here too; the knowledge store's host is unresolvable and its password empty. */
+	/**
+	 * The lab database is up here too; the knowledge store's password is empty, and its host is set to a name that
+	 * never resolves ({@code .invalid}, RFC 6761), so nothing could connect even if the empty password were tried.
+	 */
 	@Nested
 	@Import(TestcontainersConfiguration.class)
 	@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -107,6 +110,7 @@ class HealthWithoutDatabaseTest {
 
 		@DynamicPropertySource
 		static void unsetPassword(DynamicPropertyRegistry registry) {
+			registry.add("kintsugi.mcp.knowledge.host", () -> "knowledge-db.invalid");
 			registry.add("kintsugi.mcp.knowledge.password", () -> "");
 		}
 

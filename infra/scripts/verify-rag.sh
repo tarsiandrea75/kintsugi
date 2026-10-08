@@ -12,13 +12,14 @@ on the running lab, with the local Ollama reached through ollama-proxy.
   infra/scripts/verify-rag.sh          # start or reuse the lab, run the checks, leave the lab running
   infra/scripts/verify-rag.sh --down   # same, then tear the lab down (containers and volumes)
 
-It waits for the one-shot knowledge-indexer to exit 0, then checks with psql inside knowledge-db that index_metadata
-records nomic-embed-text, its digest and 768 dimensions, and that every service runbook has chunks. Through MCP on
+It waits for the one-shot knowledge-indexer to exit 0 itself, then checks with psql inside
+knowledge-db that index_metadata records nomic-embed-text, 768 dimensions and the digest the local Ollama serves now
+(GET /api/tags), and that every service runbook has chunks. Through MCP on
 http://127.0.0.1:18085/mcp it asks search_runbooks symptom-worded questions and expects the right runbook in the top 3,
 and never the README's "Authoring rule" section. It checks that kintsugi_agent cannot write the knowledge store, that
 the store has no faults database, and that kintsugi_agent cannot connect to faults on the lab's postgres. It runs the
-indexer a second time and expects every runbook skipped, then starts a one-off mcp-tools configured with another model
-and expects search_runbooks to refuse it.
+indexer a second time and expects it to embed nothing and to skip every docs/runbooks/*.md file, then starts a
+one-off mcp-tools configured with another model and expects search_runbooks to refuse it.
 No fault is injected. Exits 0 when every check passes, non-zero otherwise.
 Needs docker (with compose), curl and the local Ollama on 127.0.0.1:11434 with nomic-embed-text.
 EOF
@@ -29,7 +30,7 @@ MCP=http://127.0.0.1:18085/mcp
 MCP_MAX_SECONDS=15
 INDEXER_WAIT_SECONDS=300
 MODEL=nomic-embed-text
-DIGEST=0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f
+OLLAMA=http://127.0.0.1:11434
 # The one-off mcp-tools configured with another model; removed on every exit.
 MISMATCH_CONTAINER=kintsugi-lab-verify-rag-mismatch
 
@@ -74,8 +75,20 @@ psql_knowledge() { compose exec -T knowledge-db psql -U kintsugi_agent -d knowle
 
 indexer_state() { docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$1" 2>/dev/null || echo "missing"; }
 
-# 1. Start or reuse the lab; compose runs the indexer before mcp-tools.
+# 1. Start or reuse the lab. start_lab accepts a failed indexer run, so the script waits for a successful one itself.
 start_lab
+
+# The digest the local Ollama serves now for $MODEL: the index must have been built with that very model, not with a
+# digest written down once. A name without a tag is ":latest", as in Ollama.
+tags=$(curl -fsS --max-time "$CURL_MAX_SECONDS" "$OLLAMA/api/tags" 2>/dev/null || true)
+entry="\"name\":\"$MODEL:latest\"[^{}]*\"digest\":\"[0-9a-f]{64}\""
+DIGEST=$(grep -oE "$entry" <<<"$tags" | grep -oE '[0-9a-f]{64}' | head -n1 || true)
+if [[ -n "$DIGEST" ]]; then
+  pass "Ollama serves $MODEL:latest with digest ${DIGEST:0:12}…"
+else
+  fail "Ollama on $OLLAMA does not list $MODEL:latest with a digest (GET /api/tags)"
+  exit 1
+fi
 
 indexer=$(compose ps -a -q knowledge-indexer 2>/dev/null || true)
 indexer_done() { [[ "$(indexer_state "$indexer")" == "exited "* ]]; }
@@ -179,15 +192,19 @@ else
   fail "lab postgres: kintsugi_agent could not connect to faults, but not for lack of permission: $denied"
 fi
 
-# 5. A second run skips every unchanged runbook and embeds nothing.
+# 5. A second run skips every unchanged runbook and embeds nothing: every docs/runbooks/*.md file is named as skipped.
 second_rc=0
 second=$(compose run --rm --no-deps knowledge-indexer 2>&1) || second_rc=$?
 report=$(grep -o 'Index unchanged, every runbook skipped.*' <<<"$second" | tail -n1 || true)
-if (( second_rc == 0 )) && [[ "$report" == *"embedded=[]"* && "$report" == *"removed=[]"* \
-  && "$report" == *"docs/runbooks/README.md"* && "$report" == *"docs/runbooks/payment-service.md"* ]]; then
-  pass "a second indexer run exits 0 and skips every runbook ($report)"
+unskipped=""
+for runbook in "$REPO_DIR"/docs/runbooks/*.md; do
+  [[ "$report" == *"docs/runbooks/${runbook##*/}"* ]] || unskipped+=" ${runbook##*/}"
+done
+if (( second_rc == 0 )) && [[ "$report" == *"embedded=[]"* && "$report" == *"removed=[]"* && -z "$unskipped" ]]; then
+  pass "a second indexer run exits 0, embeds nothing and skips every docs/runbooks/*.md file ($report)"
 else
-  fail "a second indexer run: expected exit 0 with embedded=[] and every runbook skipped, got $second_rc '$report'"
+  fail "a second indexer run: expected exit 0, embedded=[] and every runbook skipped; got $second_rc," \
+    "not skipped:${unskipped:- none} '$report'"
 fi
 
 # 6. A one-off mcp-tools configured with another model refuses to search the index.

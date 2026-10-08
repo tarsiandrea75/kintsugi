@@ -210,10 +210,13 @@ services:
         condition: service_started
       knowledge-db:
         condition: service_healthy
-      # Search waits for the indexer's run, so it does not start on an index being built. "required: false": when the
-      # run fails (Ollama down, a runbook failing the leakage gate), compose warns and starts mcp-tools anyway, so the
-      # seven evidence tools never depend on Ollama; search_runbooks then refuses with UPSTREAM_ERROR ("the runbook
-      # index has not been built", or a model mismatch), never with results from a missing or foreign index.
+      # Waits for the indexer's run, optionally. "required: false": when the run fails (Ollama down, ollama-proxy
+      # unable to bind, a runbook failing the leakage gate), compose warns and starts mcp-tools anyway, so the seven
+      # evidence tools never depend on Ollama; search_runbooks then refuses with UPSTREAM_ERROR ("the runbook index has
+      # not been built", or a model mismatch). The wait is kept although that refusal would cover an index still being
+      # built: without a service waiting on it, "up --wait" fails on the indexer's own exit 0 ("container ... exited
+      # (0)", Compose 5.1.3), before the other services are healthy. The cost is mcp-tools starting after the run:
+      # seconds when nothing changed, about 50 s on an empty store.
       knowledge-indexer:
         condition: service_completed_successfully
         required: false
@@ -252,9 +255,13 @@ services:
   # default bridge's gateway address alone and forwards to that loopback, so containers reach Ollama as
   # host.docker.internal:11434 (extra_hosts: host-gateway) while it stays off every other interface. Chosen by the
   # human on 2026-10-08 over OLLAMA_HOST=0.0.0.0 and a containerised Ollama (ADR-002).
+  # Only knowledge-indexer depends on it, and optionally. When the bind fails (another listener on that address and
+  # port), socat exits: the restart policy retries it, so it recovers once the address is free, and start_lab reports
+  # it, while every other service comes up as usual.
   ollama-proxy:
     image: alpine/socat:1.8.1.3@sha256:82ad20f6f6e29b91ff33b6662d24063522b1378f08fd8569cd3ab412cac13f50
     network_mode: host
+    restart: unless-stopped
     command: ["TCP-LISTEN:11434,bind=${OLLAMA_PROXY_BIND_IP:-172.17.0.1},fork,reuseaddr", "TCP:127.0.0.1:11434"]
     healthcheck:
       # The listener only, with busybox's nc: whether Ollama answers is search_runbooks' and the indexer's to report.
@@ -281,8 +288,11 @@ services:
     depends_on:
       knowledge-db:
         condition: service_healthy
+      # "required: false": when the proxy is not healthy (a failed bind), compose warns and runs the indexer anyway; it
+      # cannot reach Ollama and exits 1, leaving the previous index intact, which start_lab accepts and reports.
       ollama-proxy:
         condition: service_healthy
+        required: false
 
   prometheus:
     image: prom/prometheus:v3.15.0

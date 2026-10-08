@@ -117,15 +117,16 @@ public class RunbookTools {
 	}
 
 	/**
-	 * The heading as a one-line label: control characters become spaces, and past {@link #MAX_SECTION_LENGTH}
-	 * characters it is cut and ends with {@code [truncated]}.
+	 * The heading as a one-line label: control characters, the Unicode line and paragraph separators (U+2028, U+2029)
+	 * and format characters (category Cf, which holds the bidi controls and zero-width characters) become spaces, and
+	 * past {@link #MAX_SECTION_LENGTH} characters it is cut and ends with {@code [truncated]}.
 	 */
 	static String section(String heading) {
 		if (heading == null) {
 			return null;
 		}
 		StringBuilder label = new StringBuilder(heading.length());
-		heading.codePoints().forEach(c -> label.appendCodePoint(Character.isISOControl(c) ? ' ' : c));
+		heading.codePoints().forEach(c -> label.appendCodePoint(breaksTheLabel(c) ? ' ' : c));
 		String text = label.toString().strip();
 		if (text.length() <= MAX_SECTION_LENGTH) {
 			return text;
@@ -133,6 +134,13 @@ public class RunbookTools {
 		int end = Character.isHighSurrogate(text.charAt(MAX_SECTION_LENGTH - 1)) ? MAX_SECTION_LENGTH - 1
 				: MAX_SECTION_LENGTH;
 		return text.substring(0, end) + ToolCallRunner.TRUNCATED_MARKER;
+	}
+
+	/** True for a code point that could break the label onto another line or reorder or hide its text. */
+	private static boolean breaksTheLabel(int codePoint) {
+		int type = Character.getType(codePoint);
+		return Character.isISOControl(codePoint) || type == Character.LINE_SEPARATOR
+				|| type == Character.PARAGRAPH_SEPARATOR || type == Character.FORMAT;
 	}
 
 	static int limit(Integer value) {

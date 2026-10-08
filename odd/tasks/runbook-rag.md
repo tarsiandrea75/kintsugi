@@ -197,6 +197,18 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
     - `KNOWLEDGE_AGENT_DB_PASSWORD=knowledge_agent`
     - `OLLAMA_PROXY_BIND_IP=172.17.0.1`
 
+- 2026-10-08: T5 range reviewed (high risk, 4 lenses), approved and acknowledged (`review-9b423c3e231637f5`).
+  - The proxy-exposure warning is the risk the human accepted with the socat choice; it is recorded in ADR-002.
+  - The other findings were fixed by a delegated writer in the next commit:
+    - a failed proxy bind no longer blocks the lab. The proxy has `restart: unless-stopped` and only the indexer depends on it. Proven live: with `172.17.0.1:11434` taken, the lab came up, `start_lab` printed WARN lines and `verify-mcp.sh` passed;
+    - `start_lab` accepts a failed `up --wait` only when the indexer exited non-zero or the proxy is down, and every other service is running or healthy. It prints compose's errors;
+    - `verify-rag.sh` reads the expected digest live from Ollama;
+    - `section()` also blanks U+2028, U+2029 and format characters;
+    - the connect timeout has its own reason;
+    - the second-run check names every runbook.
+  - mcp-tools keeps waiting for the indexer: with Compose 5.1.3, `up --wait` fails on a one-shot service no one waits on. This is recorded in ADR-002.
+  - Results: mcp-tools 212 tests (XML), exit 0, run by the parent. `verify-rag.sh` exit 0, run by the parent. `verify-mcp.sh` and `verify-f1.sh` exit 0 (writer).
+
 ## Next step
 
 Review the T5 range. Then the human reviews the decisions marked "to review", and M2 continues with the agent loop.

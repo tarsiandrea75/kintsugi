@@ -6,6 +6,7 @@ import java.net.http.HttpTimeoutException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -67,21 +68,37 @@ public class OllamaDigests {
 	}
 
 	/**
-	 * A short reason for any failed Ollama call: never the URL or the answer's body. A read past the timeout
-	 * ({@code spring.http.clients.read-timeout}) is told apart from a refused or unknown host, like the other backends'
-	 * "did not answer in time".
+	 * A short reason for any failed Ollama call: never the URL or the answer's body. Three transport cases are told
+	 * apart, like the other backends':
+	 * <ul>
+	 * <li>a read past the timeout ({@code spring.http.clients.read-timeout}): "did not answer in time";</li>
+	 * <li>a connect past the timeout ({@code spring.http.clients.connect-timeout}): the JDK client throws
+	 * {@link HttpConnectTimeoutException}, and a socket-based client a {@link SocketTimeoutException} whose message
+	 * names the connect ("Connect timed out"): "did not accept a connection in time";</li>
+	 * <li>a refused connection or an unknown host: "unreachable".</li>
+	 * </ul>
 	 */
 	static UpstreamException failure(RuntimeException ex) {
 		boolean transport = false;
 		for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
-			// A connect timeout is a host that cannot be reached, not a slow answer.
-			if ((cause instanceof HttpTimeoutException && !(cause instanceof HttpConnectTimeoutException))
-					|| cause instanceof SocketTimeoutException) {
+			if (isConnectTimeout(cause)) {
+				return new UpstreamException("Ollama did not accept a connection in time", ex);
+			}
+			if (cause instanceof HttpTimeoutException || cause instanceof SocketTimeoutException) {
 				return new UpstreamException("Ollama did not answer in time", ex);
 			}
 			transport |= cause instanceof ResourceAccessException;
 		}
 		return new UpstreamException(transport ? "Ollama is unreachable" : "Ollama answered an error", ex);
+	}
+
+	private static boolean isConnectTimeout(Throwable cause) {
+		if (cause instanceof HttpConnectTimeoutException) {
+			return true;
+		}
+		String message = cause.getMessage();
+		return cause instanceof SocketTimeoutException && message != null
+				&& message.toLowerCase(Locale.ROOT).contains("connect");
 	}
 
 }

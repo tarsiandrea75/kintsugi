@@ -352,37 +352,78 @@ check_truth() {
 # True when $1 is a UUID, so it is safe to put in SQL between quotes.
 is_uuid() { [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
 
-# True when every service but the one-shot knowledge-indexer is running and none is unhealthy or still starting: the
-# state "up --wait" leaves when only the indexer failed, for example because Ollama is down.
-lab_up_without_indexer() {
-  local expected running
-  expected=$(compose config --services 2>/dev/null | grep -vx knowledge-indexer | sort) || return 1
-  running=$(compose ps --status running --format '{{.Service}}' 2>/dev/null | sort) || return 1
-  [[ -n "$expected" && "$expected" == "$running" ]] || return 1
-  ! compose ps --format '{{.Service}} {{.Health}}' 2>/dev/null | grep -qE ' (unhealthy|starting)$'
+# Prints one line per container of the lab, exited ones included: "<service> <state> <health or -> <exit code>".
+lab_states() {
+  compose ps -a --format '{{.Service}} {{.State}} {{if .Health}}{{.Health}}{{else}}-{{end}} {{.ExitCode}}' 2>/dev/null
+}
+
+# The only failure of "up --wait" start_lab accepts: the runbook knowledge base's Ollama path, which no evidence tool
+# needs. True, with the reasons printed one per line, when every service but knowledge-indexer and ollama-proxy is
+# running and, if it has a healthcheck, healthy, and when knowledge-indexer exited non-zero or ollama-proxy is not
+# running and healthy (a failed bind: compose then runs the indexer anyway, and it fails without Ollama). Any other
+# state, a service missing, stopped, restarting, starting or unhealthy, is false.
+knowledge_only_failure() {
+  local states service state health code expected reasons=() indexer_failed=false proxy_down=false
+  states=$(lab_states) || return 1
+  expected=$(compose config --services 2>/dev/null | grep -vxE 'knowledge-indexer|ollama-proxy') || return 1
+  [[ -n "$expected" ]] || return 1
+  for service in $expected; do
+    read -r _ state health _ <<<"$(grep -E "^$service " <<<"$states" | head -n1)"
+    [[ "$state" == running && ( "$health" == - || "$health" == healthy ) ]] || return 1
+  done
+  read -r _ state health code <<<"$(grep -E '^ollama-proxy ' <<<"$states" | head -n1)"
+  if [[ "$state" != running || "$health" != healthy ]]; then
+    proxy_down=true
+    reasons+=("ollama-proxy is ${state:-missing} (health ${health:--}): its bind on\
+ ${OLLAMA_PROXY_BIND_IP:-172.17.0.1}:11434 may have failed because another process listens there; it restarts on its own until the address is free.\
+ Logs: docker compose -f infra/compose.yaml logs ollama-proxy")
+  fi
+  read -r _ state health code <<<"$(grep -E '^knowledge-indexer ' <<<"$states" | head -n1)"
+  if [[ "$state" == exited && "$code" != 0 ]]; then
+    indexer_failed=true
+    reasons+=("knowledge-indexer exited $code (is Ollama up and reachable through ollama-proxy?); the previous index,\
+ if any, is intact. Logs: docker compose -f infra/compose.yaml logs knowledge-indexer")
+  fi
+  [[ "$indexer_failed" == true || "$proxy_down" == true ]] || return 1
+  printf '%s\n' "${reasons[@]}"
+}
+
+# After a failed "up --wait", which stops waiting at its first error, waits up to 300 s for every service but
+# knowledge-indexer and ollama-proxy to be running and healthy, without building, recreating or starting either of
+# those two. "$@" is the env options that unset the fault variables; compose's errors are appended to file $UP_ERRORS.
+wait_without_knowledge() {
+  local services
+  services=$(compose config --services 2>/dev/null | grep -vxE 'knowledge-indexer|ollama-proxy') || return 1
+  # shellcheck disable=SC2086 # one word per service name
+  env "$@" docker compose --progress quiet -f "$COMPOSE_FILE" up -d --no-build --no-deps --wait --wait-timeout 300 \
+    $services >/dev/null 2>>"$UP_ERRORS"
 }
 
 # Starts or reuses the lab, waits for Loki, restores any injection an earlier run left blocking, and resets the gateway.
-# Exits on failure.
+# Exits on failure. A failure of the knowledge base's Ollama path alone (knowledge_only_failure) is reported as WARN
+# lines, with compose's own errors, and the lab is used: the evidence tools do not need Ollama.
 start_lab() {
   info "starting or reusing the lab (docker compose up -d --build --wait)"
-  local up_errors unset_faults=() variable
+  local unset_faults=() variable reasons line
   for variable in "${FAULT_VARIABLES[@]}"; do unset_faults+=(-u "$variable"); done
-  up_errors=$(mktemp)
+  UP_ERRORS=$(mktemp)
   # Without the fault variables, "up" also puts a service left faulted by an earlier run back on its defaults.
-  if env "${unset_faults[@]}" docker compose -f "$COMPOSE_FILE" up -d --build --wait >/dev/null 2>"$up_errors"; then
-    rm -f "$up_errors"
+  # "--progress quiet": compose's stderr then holds only its warnings and errors, which a failure path prints.
+  if env "${unset_faults[@]}" docker compose --progress quiet -f "$COMPOSE_FILE" up -d --build --wait \
+    >/dev/null 2>"$UP_ERRORS"; then
+    rm -f "$UP_ERRORS"
     pass "every container is up and healthy"
-  elif lab_up_without_indexer; then
-    # The one-shot indexer needs Ollama; mcp-tools depends on it only optionally (compose.yaml), so the lab still runs.
-    rm -f "$up_errors"
-    echo "WARN  knowledge-indexer did not exit 0 (is Ollama up?); search_runbooks refuses until it runs." \
-      "Every other container is up and healthy. Logs: docker compose -f infra/compose.yaml logs knowledge-indexer" >&2
-    pass "every container but knowledge-indexer is up and healthy"
+  elif wait_without_knowledge "${unset_faults[@]}" && reasons=$(knowledge_only_failure); then
+    while IFS= read -r line; do echo "WARN  compose: $line" >&2; done <"$UP_ERRORS"
+    rm -f "$UP_ERRORS"
+    while IFS= read -r line; do echo "WARN  $line" >&2; done <<<"$reasons"
+    echo "WARN  search_runbooks refuses until the indexer runs with Ollama reachable;" \
+      "the evidence tools are unaffected." >&2
+    pass "every container but knowledge-indexer and ollama-proxy is up and healthy"
   else
-    cat "$up_errors" >&2
-    rm -f "$up_errors"
-    compose ps >&2 || true
+    cat "$UP_ERRORS" >&2
+    rm -f "$UP_ERRORS"
+    compose ps -a >&2 || true
     fail "docker compose up --wait did not get every container healthy"
     exit 1
   fi
