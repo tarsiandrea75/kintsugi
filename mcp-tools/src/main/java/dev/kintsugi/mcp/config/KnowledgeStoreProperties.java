@@ -17,7 +17,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param host the knowledge store's host
  * @param port its port
- * @param username always {@code kintsugi_agent}, the store's read-only role
+ * @param username the role search connects as: the store's read-only role, {@code kintsugi_agent} in
+ *        {@code application.properties} and in the init script
  * @param password that role's password on the knowledge store, set separately from the lab server's
  * @param connectionTimeout how long a search waits for a connection, from the pool or a new one
  * @param maximumPoolSize connections to the store
