@@ -4,33 +4,54 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-07 (session 05)
+2026-10-08 (session 01, autonomous work while the human was away)
 
 ## Milestone
 
-**M1 — The lab: complete.** Every M1 item is done, and the check "every fault F1–F4 is visible in Grafana" passes through four verify scripts. Next milestone: M2 — First agent.
+**M2 — First agent: in progress.** M1 is complete. The first M2 item, the MCP tools server, is done.
 
 ## Last action
 
-`fault-injector` is done ([feature document](../odd/tasks/fault-injector.md), [ADR-009](adr/ADR-009-fault-injector-docker-control.md), [spec](../openspec/specs/fault-injector/spec.md)).
-- **What it is:** `lab/fault-injector` on `127.0.0.1:18084`. F1 and F2 go through the gateway-mock admin API; F3 and F4 are real compose redeploys through the Docker socket.
-- **Truth:** the true cause is stored in the `faults` database, owned by a non-superuser `faults` role. No API ever returns it.
-- **Database roles:** the services moved to a non-superuser `lab_app` role. `postgres` is the bootstrap superuser, used only by the init scripts.
-- **Invisible to the agent:** Alloy drops the injector's logs and Prometheus does not scrape it.
-- **Checks:** `verify-f1.sh` … `verify-f4.sh` inject through the injector. They assert the truth row, that `lab_app` is not a superuser and cannot connect to `faults`, and that the injector is absent from Loki and Prometheus. All pass.
-- **Tests:** fault-injector 89, order-service 175, payment-service 86, inventory-service 70, gateway-mock 76, agent 37.
-- **Status:** every range is reviewed and approved. Nothing is pushed (local only).
-- **Running the lab by hand now needs** `export DOCKER_GID=$(stat -c %g /var/run/docker.sock)` and `export KINTSUGI_REPO_DIR=$(git rev-parse --show-toplevel)` before any `docker compose` command. An old lab volume needs `down -v` once (new roles).
+`mcp-tools` is done ([feature document](../odd/tasks/mcp-tools.md), [ADR-004](adr/ADR-004-tools-via-mcp.md), [spec](../openspec/specs/mcp-tools/spec.md)).
+- **What it is:** an MCP server on Spring AI 2.0.1 with MCP SDK 2.0.0 and protocol 2025-11-25. It uses STATELESS Streamable HTTP on `/mcp`, published only on `127.0.0.1:18085`.
+  - Origin validation is on: any request with an `Origin` header gets 403.
+  - Host allow-list: `mcp-tools:8085`, `localhost:18085`, `127.0.0.1:18085`; any other Host gets 421.
+- **7 read-only tools:**
+  - `search_logs`, `count_logs`, `query_metric` and `service_restarts` read Loki and Prometheus;
+  - `get_order_trace`, `recent_events` and `status_summary` read the event tables.
+  - Every query is a fixed template. Parameters are validated enums with caps, output is capped at 8 KB, log and event text is returned as `untrustedText`, and each call writes one INFO line.
+- **`kintsugi_agent` role:**
+  - not a superuser; CONNECT on `orders`, `payments` and `inventory` only, never `faults`;
+  - SELECT on the six evidence tables only, granted by an event trigger as Flyway creates them;
+  - read-only and timeout settings, plus read-only connections from mcp-tools.
+- **Checks:**
+  - `verify-mcp.sh` calls the tools through MCP under F1 and checks the role isolation;
+  - mcp-tools has 140 tests;
+  - `verify-mcp.sh` and `verify-f1.sh` … `verify-f4.sh` all pass.
+- **Status:** every range is reviewed and approved. Nothing is pushed.
+- **Running the lab by hand** needs one `down -v` on an old volume, because the role is new.
 
 ## Next action
 
-1. Waiting for the human (approved 2026-10-08, needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, so the host's Compose matches the injector's. After that, verify the version and record "host Compose = v5.6.0" in ADR-009 and setup. Background: The injector ships v5.6.0 and the host has v5.1.3; the two write different image-digest labels, so the host's next `up` recreates the services the injector touched once. That is noise in the future deploy history.
-2. Waiting for the human: add the new variables to the protected `infra/.env.example` (`KINTSUGI_REPO_DIR`, `DOCKER_GID`, `POSTGRES_BOOTSTRAP_PASSWORD`, `LAB_APP_DB_PASSWORD`, `FAULTS_DB_PASSWORD`).
-3. M2, in this order:
-   - the MCP server with read-only tools: Loki logs, Prometheus metrics, `queryDb` on the event tables through a non-superuser read-only role with no access to `faults`, and deploy history;
+1. Waiting for the human: review the decisions taken autonomously in `odd/tasks/mcp-tools.md` (marked "to review"), mainly:
+   - the design and its STATELESS transport (ADR-004);
+   - the event-trigger grant;
+   - `latency_avg`/`latency_max` instead of p95;
+   - the `get_order_trace` shape;
+   - the size exceptions of T3 and T4;
+   - the disabled database health check.
+2. Waiting for the human (approved, needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
+3. Waiting for the human: add these lines to the protected `infra/.env.example`:
+   - `KINTSUGI_REPO_DIR=`
+   - `DOCKER_GID=`
+   - `POSTGRES_BOOTSTRAP_PASSWORD=postgres`
+   - `LAB_APP_DB_PASSWORD=lab_app`
+   - `FAULTS_DB_PASSWORD=faults`
+   - `KINTSUGI_AGENT_DB_PASSWORD=kintsugi_agent`
+4. M2 continues:
    - RAG on `docs/runbooks/` with pgvector (ADR-002);
-   - the agent loop with `IncidentState` and a JSON report with cited evidence;
-   - the Python eval harness, which reads the truth with the `faults` role, for the M2 check (F1–F3 correctly diagnosed).
+   - the agent loop with `IncidentState` and a JSON report with cited evidence, calling mcp-tools as an MCP client;
+   - the Python eval harness for the M2 check (F1–F3 correctly diagnosed).
 
 ## Local branch chains (not pushed)
 
@@ -45,6 +66,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 - `feat/service-runbooks`
 - `feat/event-recording` → `-01-inventory` → `-02-payment` → `-03-order` → `-04-gateway-check`
 - `feat/fault-injector` → `-01-core` → `-02-api` → `-03-lab-control` → `-04-wiring`
+- `feat/mcp-tools` → `-01-observability-tools` → `-02-evidence-tools` → `-03-wiring`
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -63,6 +85,16 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+mcp-tools (details in the feature document):
+- "connection pool busy" is also reported when connection attempts are still running at the 2 s timeout (WARNING).
+- The level filter depends on the console log format.
+- Non-integer arguments are rejected by Spring AI before validation, so they get no call log.
+- Restarts less than one step apart merge.
+- The `verify-mcp.sh` probe has no wall-clock bound and its failure branches were not exercised.
+- Small doc and test suggestions from the T5 reviews.
+- No lab service has a restart policy or a memory limit.
+
 
 Lab services:
 - `POST /orders` and `POST /payments` are not idempotent, so a retry after a timeout can create duplicates. This is a candidate fault.
