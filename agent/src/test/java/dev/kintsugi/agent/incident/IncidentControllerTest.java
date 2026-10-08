@@ -93,4 +93,19 @@ class IncidentControllerTest {
 		verify(incidents).fail(eq(id), eq(IncidentController.RUNNER_FAILED), eq(Instant.parse("2026-10-08T12:00:00Z")));
 	}
 
+	@Test
+	void aStoreFailureWhileFailingTheIncidentStillAnswers500() {
+		doNothing().when(incidents).insertRunning(any(), any(), any());
+		doThrow(new IllegalStateException("no executor")).when(runner).start(any());
+		when(incidents.fail(any(), any(), any())).thenThrow(new IllegalStateException("store down"));
+
+		ResponseEntity<?> response = controller.open(VALID);
+
+		// The row may stay RUNNING; the restart sweep (RestartRecovery) is the backstop that frees the slot.
+		assertThat(response.getStatusCode().value()).isEqualTo(500);
+		Error error = (Error) response.getBody();
+		assertThat(error.error()).isEqualTo(IncidentController.RUNNER_FAILED);
+		assertThat(error.id()).isNotNull();
+	}
+
 }

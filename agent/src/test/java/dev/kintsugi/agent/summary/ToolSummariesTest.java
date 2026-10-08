@@ -375,6 +375,15 @@ class ToolSummariesTest {
 	}
 
 	@Test
+	void aRejectionWhoseOutputIsNotJsonQuotesTheOutputAsItsReason() {
+		String summary = ToolSummaries.summarize(5, "count_logs", INVALID_PARAMETER, "plain \"text\"\nfrom somewhere");
+
+		assertThat(summary).isEqualTo("toolCallId=5 tool=count_logs outcome=INVALID_PARAMETER returned=0 truncated=false\n"
+				+ "the tool rejected the arguments; no query ran\n"
+				+ "reason=\"plain \\\"text\\\"\\nfrom somewhere\"");
+	}
+
+	@Test
 	void anUpstreamErrorGetsAShortSummaryWithItsReason() {
 		String output = "{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"PostgreSQL orders is unreachable\",\"returned\":0,"
 				+ "\"truncated\":false,\"items\":[]}";

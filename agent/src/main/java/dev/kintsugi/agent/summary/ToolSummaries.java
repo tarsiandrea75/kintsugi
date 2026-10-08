@@ -66,8 +66,9 @@ public final class ToolSummaries {
 		List<String> lines = new ArrayList<>();
 		if (outcome != ToolOutcome.OK) {
 			lines.add(failure(outcome));
-			String reason = outcome == ToolOutcome.CLIENT_ERROR ? rawOutput
-					: result == null ? null : result.path("reason").asString(null);
+			// A client error's output is its reason; so is any other failed output that is not a JSON result, which
+			// is then quoted whole (escaped and cut like every literal) rather than lost.
+			String reason = result == null ? rawOutput : result.path("reason").asString(null);
 			if (reason != null) {
 				lines.add("reason=" + SummaryText.quote(reason, 300));
 			}

@@ -35,7 +35,7 @@ One incident runs at a time, and the database enforces it atomically: a partial 
 
 The 409 names the running incident, read after the failed insert. That read is a second statement, so the running incident may end in between: then the slot is free, and the endpoint MUST try the insert once more. If that second insert also fails and no running incident can be read, the 409 has no `id`; the client may simply retry.
 
-If the `IncidentRunner` throws while starting the loop, the endpoint MUST end the incident `FAILED` with `failure_reason` `the loop could not be started`, log the error, and answer 500 with `{"error": "the loop could not be started", "id": <the incident's id>}`. So a runner failure never leaves a `RUNNING` row that would block every later request.
+If the `IncidentRunner` throws while starting the loop, the endpoint MUST end the incident `FAILED` with `failure_reason` `the loop could not be started`, log the error, and answer 500 with `{"error": "the loop could not be started", "id": <the incident's id>}`. So a runner failure never leaves a `RUNNING` row that would block every later request. If marking the incident `FAILED` itself fails (the store is down), the endpoint MUST log both errors and still answer the same 500; the row then stays `RUNNING` until the next agent start, whose restart sweep ("Agent restarted during a run") is the backstop.
 
 #### Scenario: Valid incident
 - GIVEN no incident is running
@@ -70,6 +70,11 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 - THEN the response status is 500 with `error` and the incident's `id`
 - AND that incident has status `FAILED`, `failure_reason` `the loop could not be started` and an `ended_at`
 - AND a later valid `POST /incidents` answers 202
+
+#### Scenario: The store fails while the runner failure is recorded
+- GIVEN an `IncidentRunner` that throws on start, and a store that fails the update to `FAILED`
+- WHEN `POST /incidents` is called with a valid body
+- THEN the response status is 500 with `error` and the incident's `id`, and both errors are logged
 
 #### Scenario: Two requests at once
 - GIVEN no incident is running
@@ -212,9 +217,14 @@ Which units a tool call consumes is fixed in "Phases and their tools": a call re
 
 ### Requirement: Tool calls run small and recorded
 
-Before running a call, code MUST cap `limit` at 20 for `search_logs` and `recent_events` and at 3 for `search_runbooks`, setting it when the model left it out **(chosen)**; the recorded `tool_args` are the arguments actually sent. A `limit` that is not an integer, or is below 1, is sent as written, so that mcp-tools rejects it with `INVALID_PARAMETER` and says why. Arguments that are not a JSON object are not sent: the step records `INVALID_PARAMETER`, the output `the arguments are not a JSON object`, and the arguments as one JSON string. Every call MUST be recorded as one step with the full output text returned by mcp-tools, whatever its outcome; the outcome is the result's own `outcome` field. A transport failure, the MCP request timeout, a protocol error or a result without a readable `outcome` MUST be recorded with `tool_outcome` `CLIENT_ERROR` and its reason as the output (`mcp-tools call failed: ...`), and the run MUST continue: an unavailable source is evidence.
+Before running a call, code MUST cap `limit` at 20 for `search_logs` and `recent_events` and at 3 for `search_runbooks`, setting it when the model left it out **(chosen)**; the recorded `tool_args` are the arguments actually sent. A `limit` that is not an integer, or is below 1, is sent as written, so that mcp-tools rejects it with `INVALID_PARAMETER` and says why. Arguments that are not a JSON object are not sent: the step records `INVALID_PARAMETER`, the arguments as one JSON string, and an output in mcp-tools' own rejection envelope, `{"outcome":"INVALID_PARAMETER","reason":"the arguments are not a JSON object","returned":0,"truncated":false,"items":[]}`, so its summary carries the reason like any other rejection. Every call MUST be recorded as one step with the full output text returned by mcp-tools, whatever its outcome; the outcome is the result's own `outcome` field. A transport failure, the MCP request timeout, a protocol error or a result without a readable `outcome` MUST be recorded with `tool_outcome` `CLIENT_ERROR` and its reason as the output (`mcp-tools call failed: ...`), and the run MUST continue: an unavailable source is evidence.
 
 The agent MUST start while mcp-tools is down: the MCP client connects on its first request, never during startup. The tool definitions of a phase are listed from mcp-tools on first use and cached once a listing succeeds; when mcp-tools cannot list them, or does not serve one of the phase's tools, the loop is told so by an exception (`LabToolsUnavailableException`), not by an empty list.
+
+#### Scenario: Arguments that are not an object
+- WHEN the model calls `count_logs` with the arguments `[1, 2]`
+- THEN nothing is sent, the step records `INVALID_PARAMETER` with the rejection envelope as its output
+- AND its summary carries `reason="the arguments are not a JSON object"`
 
 #### Scenario: Limit capped
 - WHEN the model calls `search_logs` with `limit` = 100
@@ -236,7 +246,7 @@ The agent MUST start while mcp-tools is down: the MCP client connects on its fir
 
 The model MUST never receive a raw tool output. For each recorded call, code MUST build a summary that is deterministic (the same output always gives the same summary), at most 1,500 characters, and starts with the header `toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n> truncated=<bool>` (`returned` is 0 and `truncated` false when the output is not a readable result, as for `CLIENT_ERROR`; `truncated` is also true when the output ends with mcp-tools' `[truncated]` marker). Text copied from the output MUST be copied verbatim (cut only at its end), so that a quote of the summary is a quote of the output. Text from `untrustedText` fields MUST stay labelled as `untrustedText` in the summary.
 
-Every string copied from the output is written as a JSON string literal after its field's label, as in `untrustedText="..."`, with Jackson's escaping, the same as mcp-tools' own result: a quote, backslash or newline inside it stays escaped, so text from the lab can never close the literal, start a line of its own, or pass for a header or an instruction. The text between the quotes is therefore also a substring of the raw output. A literal cut at its limit is followed by `(cut)`, outside the quotes. When the lines exceed 1,500 characters, whole lines are dropped from the end and the summary ends with `[summary cut at 1500 characters]`. An output that is not `OK` gets the header, one line saying what the outcome means (the arguments were rejected and no query ran; a data source failed, which is evidence too; or mcp-tools could not be reached), and its `reason`.
+Every string copied from the output is written as a JSON string literal after its field's label, as in `untrustedText="..."`, with Jackson's escaping, the same as mcp-tools' own result: a quote, backslash or newline inside it stays escaped, so text from the lab can never close the literal, start a line of its own, or pass for a header or an instruction. The text between the quotes is therefore also a substring of the raw output. A literal cut at its limit is followed by `(cut)`, outside the quotes. When the lines exceed 1,500 characters, whole lines are dropped from the end and the summary ends with `[summary cut at 1500 characters]`. An output that is not `OK` gets the header, one line saying what the outcome means (the arguments were rejected and no query ran; a data source failed, which is evidence too; or mcp-tools could not be reached), and its `reason`; when such an output is not a JSON result, the whole output is the `reason` literal, escaped and cut like any other.
 
 | Tool | Summary **(chosen)** |
 |------|----------------------|

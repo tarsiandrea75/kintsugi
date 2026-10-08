@@ -22,6 +22,8 @@ import org.springframework.ai.tool.ToolCallback;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import dev.kintsugi.agent.summary.ToolSummaries;
+
 /**
  * {@link McpLabTools} against a fake mcp-tools speaking Streamable HTTP (agent spec, "Tool calls run small and
  * recorded", "Phases and their tools").
@@ -203,6 +205,17 @@ class McpLabToolsTest {
 		assertThat(result.outcome()).isEqualTo(ToolOutcome.INVALID_PARAMETER);
 		assertThat(JSON.readTree(result.args()).asString()).isEqualTo("[1, 2]");
 		assertThat(this.server.calls()).isEmpty();
+		// The output has mcp-tools' own envelope, so the summarizer reads its reason like any other rejection.
+		JsonNode output = JSON.readTree(result.rawOutput());
+		assertThat(output.get("outcome").asString()).isEqualTo("INVALID_PARAMETER");
+		assertThat(output.get("reason").asString()).isEqualTo("the arguments are not a JSON object");
+		assertThat(output.get("returned").asInt()).isZero();
+		assertThat(output.get("truncated").asBoolean()).isFalse();
+		assertThat(output.get("items").isEmpty()).isTrue();
+		assertThat(ToolSummaries.summarize(4, "count_logs", result.outcome(), result.rawOutput()))
+			.isEqualTo("toolCallId=4 tool=count_logs outcome=INVALID_PARAMETER returned=0 truncated=false\n"
+					+ "the tool rejected the arguments; no query ran\n"
+					+ "reason=\"the arguments are not a JSON object\"");
 	}
 
 	@Test

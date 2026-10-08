@@ -34,6 +34,9 @@ public class McpLabTools implements LabTools {
 	/** The {@code limit} each tool may send at most (agent spec, "Tool calls run small and recorded"). */
 	static final Map<String, Integer> LIMIT_CAPS = Map.of("search_logs", 20, "recent_events", 20, "search_runbooks", 3);
 
+	/** The reason recorded when the model's arguments are not a JSON object. */
+	static final String NOT_AN_OBJECT = "the arguments are not a JSON object";
+
 	private static final String TRUNCATED_SUFFIX = "\n[truncated]";
 
 	private static final Logger log = LoggerFactory.getLogger(McpLabTools.class);
@@ -60,9 +63,10 @@ public class McpLabTools implements LabTools {
 		}
 		catch (JacksonException | IllegalArgumentException unreadable) {
 			// The model wrote arguments that are not a JSON object: nothing is sent, as mcp-tools would refuse them.
-			// They are recorded as one JSON string, so the step still shows what the model wrote.
+			// They are recorded as one JSON string, so the step still shows what the model wrote, and the output is
+			// mcp-tools' own rejection envelope, so the summarizer reads its reason like any other rejection.
 			return new ToolResult(tool, JSON.writeValueAsString(String.valueOf(jsonArgs)),
-					"the arguments are not a JSON object", ToolOutcome.INVALID_PARAMETER, 0);
+					rejection(NOT_AN_OBJECT), ToolOutcome.INVALID_PARAMETER, 0);
 		}
 		String sent = JSON.writeValueAsString(args);
 		long start = System.nanoTime();
@@ -123,6 +127,17 @@ public class McpLabTools implements LabTools {
 			throw new IllegalArgumentException("not a JSON object");
 		}
 		return object;
+	}
+
+	/** An {@code INVALID_PARAMETER} result in the envelope mcp-tools writes, with no items. */
+	private static String rejection(String reason) {
+		ObjectNode output = JSON.createObjectNode();
+		output.put("outcome", "INVALID_PARAMETER");
+		output.put("reason", reason);
+		output.put("returned", 0);
+		output.put("truncated", false);
+		output.putArray("items");
+		return JSON.writeValueAsString(output);
 	}
 
 	/**

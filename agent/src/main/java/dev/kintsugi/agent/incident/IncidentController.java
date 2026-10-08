@@ -89,7 +89,15 @@ public class IncidentController {
 		}
 		catch (RuntimeException failed) {
 			log.error("incident={} event=runner_failed reason=\"{}\"", id, RUNNER_FAILED, failed);
-			incidents.fail(id, RUNNER_FAILED, clock.instant());
+			try {
+				incidents.fail(id, RUNNER_FAILED, clock.instant());
+			}
+			catch (RuntimeException notFailed) {
+				// The row stays RUNNING and holds the one-incident slot until the agent restarts: RestartRecovery's
+				// sweep is the backstop. The client still learns that the loop did not start.
+				log.error("incident={} event=runner_failure_not_recorded reason=\"the incident could not be marked {}\"",
+						id, IncidentStatus.FAILED, notFailed);
+			}
 			return ResponseEntity.internalServerError().body(new Error(RUNNER_FAILED, null, id));
 		}
 		return ResponseEntity.accepted()
