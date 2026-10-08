@@ -26,7 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Import(TestcontainersConfiguration.class)
 // Spring Boot turns metrics export off in tests; Prometheus export is turned back on to read the exposition.
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-		properties = "management.prometheus.metrics.export.enabled=true")
+		properties = { "management.prometheus.metrics.export.enabled=true",
+				// The test server listens on a random port, so its Host header is localhost:<port>.
+				"kintsugi.mcp.allowed-hosts=localhost:*" })
 class McpToolsEndpointTest {
 
 	private static final FakeHttpBackend LOKI = FakeHttpBackend.start();

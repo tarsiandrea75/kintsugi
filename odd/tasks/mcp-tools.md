@@ -92,7 +92,7 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
 - [x] **T2 — Skeleton.** Initializr skeleton if an MCP server dependency id exists; otherwise the same skeleton plus the starter. Route: delegated writer.
 - [x] **T3 — Log, metric and restart tools,** with fake Loki and Prometheus HTTP servers, tests first. Route: delegated writer.
 - [x] **T4 — Event and summary tools and the `kintsugi_agent` role,** using Testcontainers, tests first. Route: delegated writer.
-- [ ] **T5 — Compose wiring, `verify-mcp.sh` run for real, docs.** Route: delegated writer.
+- [x] **T5 — Compose wiring, `verify-mcp.sh` run for real, docs.** Route: delegated writer.
 
 ## Progress
 
@@ -160,6 +160,29 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
     - the three datasources may couple the actuator health to PostgreSQL.
   - All of these fold into T5 part A.
 
+- 2026-10-08: T5 done by the delegated writer on `feat/mcp-tools-03-wiring` (PR 3 of the chain).
+  - Part A fixes every T4 review finding:
+    - connection failures are classified as "authentication failed" (SQLState 28P01/28000), "connection pool busy" (a Hikari timeout with no SQLState) or "unreachable";
+    - the event types and outcomes have one source, `EventSource.Values`, used by both the validation and the tool descriptions;
+    - `TraceEvent.inTrace` and `TraceEvent.recent` replace the null mode switch;
+    - `KINTSUGI_AGENT_DB_PASSWORD` is required by the init script (`:?`) and by the app (`@NotBlank`);
+    - `management.health.db.enabled=false`: a PostgreSQL outage is evidence the tools report as `UPSTREAM_ERROR`, not a reason to mark mcp-tools DOWN.
+  - Part A passes alone: 130 tests, exit 0, run by the parent.
+  - Part B:
+    - a Dockerfile and the `mcp-tools` compose service on `127.0.0.1:18085`;
+    - a Host allow-list (`mcp-tools:8085`, `localhost:18085`, `127.0.0.1:18085`): an unknown Host gets 421, and an empty list stops startup, because the SDK skips the check when the list is empty;
+    - `infra/scripts/verify-mcp.sh`.
+  - Results:
+    - 140 tests, exit 0, run by the parent.
+    - `verify-mcp.sh`: exit 0 on a fresh volume and exit 0 on a rerun (writer); exit 0 again in the parent's spot check.
+    - `verify-f1.sh` through `verify-f4.sh`: all exit 0 (writer).
+    - Leakage grep: clean.
+  - Alloy already ships the mcp-tools logs, which no tool can select. Prometheus does not scrape mcp-tools; it has no tool metrics yet.
+  - **The human must add** `KINTSUGI_AGENT_DB_PASSWORD=kintsugi_agent` to `infra/.env.example`.
+  - Open, to review:
+    - (1) No lab service has a restart policy or a memory limit. mcp-tools matches them; add both everywhere, or nowhere.
+    - (2) The `PAYMENT_PENDING` rise check compares the first and last points of a 10-minute window. In theory, an order caught mid-flight could hide the rise.
+
 ## Next step
 
-T5: part A fixes the T4 review findings; part B is the compose wiring and `verify-mcp.sh`, run for real.
+Review the T5 range. Then the human reviews the autonomous decisions, and the next M2 feature (the agent) starts.

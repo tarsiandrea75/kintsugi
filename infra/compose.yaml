@@ -1,12 +1,13 @@
-# Kintsugi M1 lab: PostgreSQL, the four services, the fault injector and the observability stack (ADR-007, ADR-008,
-# ADR-009).
+# Kintsugi lab: PostgreSQL, the four services, the fault injector, the observability stack and mcp-tools, the agent's
+# tools (ADR-007, ADR-008, ADR-009, ADR-004).
 #
 #   export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
 #   docker compose -f infra/compose.yaml up -d --build --wait
 #   docker compose -f infra/compose.yaml down -v
 #
 # Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082, inventory-service 18083,
-# fault-injector 18084, Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090. Every port is bound to 127.0.0.1.
+# fault-injector 18084, mcp-tools 18085 (MCP on /mcp), Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090.
+# Every port is bound to 127.0.0.1.
 # PostgreSQL, Loki and Alloy are not published on the host; containers reach each other by service name.
 #
 # Variables (lab defaults; see infra/.env.example). Put overrides in infra/.env rather than in the shell: the fault
@@ -164,6 +165,37 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8084/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
+  # The agent's tools over MCP (ADR-004): read-only tools on Loki, Prometheus and the lab databases, as the read-only
+  # role kintsugi_agent. Streamable HTTP in STATELESS mode on /mcp; the agent reaches it as mcp-tools:8085. It accepts
+  # no Origin header and only the Host values in KINTSUGI_MCP_ALLOWEDHOSTS. Alloy ships its logs (the tool-call
+  # records) like any lab service's, but no tool can select them; Prometheus does not scrape it.
+  mcp-tools:
+    build: ../mcp-tools
+    environment:
+      SPRING_AI_MCP_SERVER_PROTOCOL: STATELESS
+      KINTSUGI_MCP_LOKI_BASEURL: http://loki:3100
+      KINTSUGI_MCP_PROMETHEUS_BASEURL: http://prometheus:9090
+      KINTSUGI_MCP_POSTGRES_HOST: postgres
+      KINTSUGI_MCP_POSTGRES_PORT: "5432"
+      KINTSUGI_AGENT_DB_PASSWORD: ${KINTSUGI_AGENT_DB_PASSWORD:-kintsugi_agent}
+      KINTSUGI_MCP_ALLOWEDHOSTS: mcp-tools:8085,localhost:18085,127.0.0.1:18085
+    ports:
+      - "127.0.0.1:18085:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8085/actuator/health"]
       interval: 5s
       timeout: 3s
       retries: 5

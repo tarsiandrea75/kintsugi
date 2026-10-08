@@ -6,6 +6,8 @@ The lab observability stack makes injected faults visible. One Docker Compose co
 
 The stack also runs the fault injector (`fault-injector`, [its spec](../fault-injector/spec.md), [ADR-009](../../../docs/adr/ADR-009-fault-injector-docker-control.md)). The verify scripts inject and restore every fault through it. It is deliberately **excluded** from the agent's data sources: Prometheus does not scrape it and Alloy drops its logs, because both would reveal when and which fault was injected.
 
+The stack also runs `mcp-tools`, the agent's tools over MCP ([its spec](../mcp-tools/spec.md), [ADR-004](../../../docs/adr/ADR-004-tools-via-mcp.md)). Alloy ships its logs like a lab service's, so its tool-call records are in Loki for the human; no tool can select them, because `mcp-tools` is not in the tools' service enum. Prometheus does not scrape it.
+
 ## Requirements
 
 ### Requirement: Every service exposes Prometheus metrics
@@ -30,7 +32,7 @@ order-service, payment-service, gateway-mock and inventory-service MUST expose `
 - GIVEN the compose stack is up
 - WHEN Prometheus' targets are listed
 - THEN the four services are targets with health `up`, each with the label `service` set to its compose service name
-- AND `fault-injector` is not a target
+- AND `fault-injector` and `mcp-tools` are not targets
 
 ### Requirement: Orders-by-status gauge
 
@@ -57,7 +59,7 @@ payment-service MUST export the gauge `lab_payments` (Micrometer name `lab.payme
 
 ### Requirement: Logs reach Loki labelled by service
 
-Alloy MUST read the Docker logs of the four services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`, `inventory-service`). Alloy MUST drop the logs of the `fault-injector` container, so Loki never has a `service="fault-injector"` stream; the operator reads them with `docker logs`.
+Alloy MUST read the Docker logs of the four services and push them to Loki with the label `service` set to the compose service name (`order-service`, `payment-service`, `gateway-mock`, `inventory-service`). It also ships the logs of `mcp-tools` (label `service="mcp-tools"`) and of the observability containers, as it does for every container of the compose project. Alloy MUST drop the logs of the `fault-injector` container, so Loki never has a `service="fault-injector"` stream; the operator reads them with `docker logs`.
 
 #### Scenario: Query a service's logs
 - GIVEN the compose stack is up and order-service has logged a line
@@ -208,7 +210,7 @@ It MUST exit non-zero when any assertion fails, and MUST restore the injection w
 
 ### Requirement: Compose startup and host ports
 
-`docker compose -f infra/compose.yaml up -d` MUST start every container healthy, with healthchecks and `depends_on` conditions. One PostgreSQL 18.6 container MUST hold the `orders`, `payments` and `inventory` databases, owned by the non-superuser role `lab_app` that the four services connect as, and the `faults` database, owned by the non-superuser role `faults` with `CONNECT` revoked from `PUBLIC`. Only the init script uses the bootstrap superuser. Services MUST reach each other by compose service name. Only these host ports MUST be published, each bound to `127.0.0.1` so the lab is not reachable from the network:
+`docker compose -f infra/compose.yaml up -d` MUST start every container healthy, with healthchecks and `depends_on` conditions. One PostgreSQL 18.6 container MUST hold the `orders`, `payments` and `inventory` databases, owned by the non-superuser role `lab_app` that the four services connect as, and the `faults` database, owned by the non-superuser role `faults` with `CONNECT` revoked from `PUBLIC`. The read-only role `kintsugi_agent`, which mcp-tools connects as, may read only the six evidence tables (mcp-tools spec). Only the init script uses the bootstrap superuser. Services MUST reach each other by compose service name. Only these host ports MUST be published, each bound to `127.0.0.1` so the lab is not reachable from the network:
 
 | Container | Host port |
 |-----------|-----------|
@@ -217,6 +219,7 @@ It MUST exit non-zero when any assertion fails, and MUST restore the injection w
 | gateway-mock | 18082 |
 | inventory-service | 18083 |
 | fault-injector | 18084 |
+| mcp-tools | 18085 |
 | Grafana | 13000 |
 | Prometheus | 19090 |
 

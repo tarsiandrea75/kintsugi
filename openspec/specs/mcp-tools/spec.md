@@ -4,7 +4,7 @@
 
 `mcp-tools/` is the MCP server through which the agent reads the lab: logs, metrics, recorded events and deploy history. Every tool is read-only and built from a fixed template; the model never writes a query language. Design: [feature document](../../../odd/tasks/mcp-tools.md) and [ADR-004](../../../docs/adr/ADR-004-tools-via-mcp.md). Verified by `./mvnw test` from `mcp-tools/` and by `infra/scripts/verify-mcp.sh`.
 
-It speaks MCP protocol 2025-11-25 over Streamable HTTP in stateless mode on `POST /mcp`, port 8085, published on `127.0.0.1:18085`.
+It speaks MCP protocol 2025-11-25 over Streamable HTTP in stateless mode on `POST /mcp`, port 8085, published on `127.0.0.1:18085`. In compose it is the service `mcp-tools`: the agent reaches it as `mcp-tools:8085`, it waits for PostgreSQL and Prometheus to be healthy, and its healthcheck reads `/actuator/health`. Alloy ships its logs to Loki for the human; Prometheus does not scrape it.
 
 ## Shared rules
 
@@ -20,6 +20,7 @@ These apply to every tool.
 | Timestamps | ISO-8601 UTC |
 | Result | one JSON text: `outcome`, `reason` (errors only), `returned`, `truncated`, `items`; `isError` is true unless `outcome` is `OK` |
 | Backends | `kintsugi.mcp.loki.base-url` (default `http://loki:3100`) and `kintsugi.mcp.prometheus.base-url` (default `http://prometheus:9090`), each with `connect-timeout` (2 s) and `read-timeout` (5 s) |
+| Hosts | `kintsugi.mcp.allowed-hosts`, comma-separated, default `mcp-tools:8085,localhost:18085,127.0.0.1:18085`; an entry ending in `:*` accepts any port. An empty list stops the startup |
 | Database | `kintsugi.mcp.postgres.host` (default `postgres`), `port` (5432), `username` (`kintsugi_agent`), `password` (required, from the `KINTSUGI_AGENT_DB_PASSWORD` environment variable; no default), `connection-timeout` (2 s), `maximum-pool-size` (2). One read-only pool per database; the database names `orders`, `payments` and `inventory` are fixed in code, not configurable |
 
 ## Tools
@@ -231,9 +232,17 @@ The tables are created after the role, by each service's Flyway as `lab_app`, so
 - WHEN `kintsugi_agent` runs `SELECT pg_sleep(10)`
 - THEN the statement is canceled after about 3 s
 
-### Requirement: Browser origins are rejected
+### Requirement: Browser origins and unknown hosts are rejected
 
-`POST /mcp` MUST reject any request that carries an `Origin` header with 403, and MUST accept requests without one.
+`POST /mcp` MUST reject any request that carries an `Origin` header with 403, and MUST accept requests without one. It MUST reject a `Host` header outside `kintsugi.mcp.allowed-hosts` with 421.
+
+#### Scenario: Unknown host
+- WHEN `tools/list` is posted with `Host: evil.example:18085`, or any value outside the allow-list
+- THEN the response status is 421
+
+#### Scenario: Compose hosts
+- WHEN a request without `Origin` carries `Host: mcp-tools:8085`, `localhost:18085` or `127.0.0.1:18085`
+- THEN it is accepted
 
 #### Scenario: Browser request
 - WHEN `initialize` is posted with `Origin: http://evil.example`, `Origin: http://localhost:18085` or `Origin: null`

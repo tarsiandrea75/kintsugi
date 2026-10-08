@@ -50,15 +50,18 @@ Checked with `./mvnw dependency:tree` in `mcp-tools/`.
   - Why stateless: the tools are request/response lookups. They need no server-to-client notifications, sampling or progress, so a session would only add state to lose on a restart.
   - `GET /mcp` answers 405, as the stateless transport defines.
 - Tools are declared with `@McpTool` and `@McpToolParam`.
-- **Network:** port 8085 in the container, published only on `127.0.0.1:18085`. The agent reaches it by its compose service name.
+- **Network:** port 8085 in the container, published only on `127.0.0.1:18085`. The agent reaches it by its compose service name, `mcp-tools:8085`.
+- **Compose:** the service `mcp-tools` waits for PostgreSQL and Prometheus to be healthy; its healthcheck reads `/actuator/health`. That health has no database indicator (`management.health.db.enabled=false`): a PostgreSQL outage is evidence the event tools report as `UPSTREAM_ERROR` while the log and metric tools keep working, not a fault of mcp-tools. Alloy ships its logs (the tool-call records) to Loki for the human; no tool can select them, because `mcp-tools` is not in the service enum. Prometheus does not scrape it: it exports no tool metrics yet, and leaving it out keeps Prometheus to the lab itself.
+- **Credentials:** `KINTSUGI_AGENT_DB_PASSWORD` has a lab default in compose only. The init script and mcp-tools both require it and have no default of their own.
 
-### Origin validation
+### Origin and Host validation
 
 Verified in the 2.0.1 sources:
 
 - The MCP SDK 2.0.0 has a `ServerTransportSecurityValidator` hook and a `DefaultServerTransportSecurityValidator` that checks `Origin` and `Host` against allow-lists.
 - **Spring AI 2.0.1 does not enable it.** `McpServerStatelessWebMvcAutoConfiguration` builds `WebMvcStatelessServerTransport` without a validator, so the builder's default `ServerTransportSecurityValidator.NOOP` applies. No `spring.ai.mcp.server.*` property changes that.
-- **How mcp-tools enables it:** `McpTransportConfiguration` declares its own `WebMvcStatelessServerTransport` bean with `DefaultServerTransportSecurityValidator` and an **empty origin allow-list**, set explicitly rather than left to the builder's default.
+- **How mcp-tools enables it:** `McpTransportConfiguration` declares its own `WebMvcStatelessServerTransport` bean with `DefaultServerTransportSecurityValidator`, an **empty origin allow-list**, set explicitly rather than left to the builder's default, and a **Host allow-list** from `kintsugi.mcp.allowed-hosts` (default `mcp-tools:8085,localhost:18085,127.0.0.1:18085`).
+  - The SDK skips the Host check when its list is empty, so an empty or missing property stops the startup instead.
   - The auto-configured bean backs off because its `@ConditionalOnMissingBean` has no attributes, so it matches **by type** (the method's return type), not by name.
   - The validator exists only on the STATELESS transport. Our bean is conditional on `spring.ai.mcp.server.protocol=STATELESS`, and a guard bean fails the startup for any other protocol, so a protocol switch cannot silently drop validation. Both compare the value ignoring case, as Spring's relaxed enum binding does, so `stateless` works too.
 
@@ -68,8 +71,9 @@ With that configuration:
 |---------|--------|
 | No `Origin` header (the agent, `curl`) | accepted |
 | Any `Origin` header (a browser page) | 403 |
+| A `Host` outside the allow-list | 421 |
 
-That blocks DNS-rebinding from a page open in the developer's browser. The smoke test asserts the 403 for `http://evil.example`, `http://localhost:18085` and `null`, that the active transport bean is ours, and that `GET /mcp` answers 405. `Host` is not restricted yet (see Consequences).
+That blocks DNS-rebinding from a page open in the developer's browser. The smoke test asserts the 403 for `http://evil.example`, `http://localhost:18085` and `null`, that the active transport bean is ours, and that `GET /mcp` answers 405. Unit tests check the three compose hosts pass and other hosts get 421; `infra/scripts/verify-mcp.sh` checks the 403 and the 421 against the running container.
 
 ### No free query language
 
@@ -179,7 +183,7 @@ This follows the "everything is recorded" rule. Because `mcp-tools` is not in th
 ### Negative
 
 - **No authentication beyond network isolation.** Anyone who can reach port 8085 on the compose network, or `127.0.0.1:18085` on the host, can call the tools. Accepted for a lab bound to localhost. If the lab ever leaves the laptop, add authentication, for example MCP's OAuth authorization or a shared token.
-- **`Host` is not validated yet.** Origin validation stops browser-based DNS rebinding, which is the main local threat. A `Host` allow-list (`mcp-tools:8085`, `localhost:18085`, `127.0.0.1:18085`) would add a second layer, but it must match the compose wiring, so it waits for that task.
+- **The `Host` allow-list must follow the compose wiring.** A new port or service name for mcp-tools needs `kintsugi.mcp.allowed-hosts` changed too, or every call answers 421.
 - **Prompt-injection risk remains.** Log lines and event `detail` are attacker-controllable in principle, for example through a crafted order note. Labelling them as data lowers the risk but does not remove it. The tools are read-only, so the worst outcome is a wrong diagnosis, not a write; the policy layer (M3) guards writes.
 - **One more service** to build, run, monitor and keep in step with the stack versions.
 - **Spring AI customization point.** Origin validation depends on replacing an auto-configured bean by name. A Spring AI upgrade that renames the bean, or adds its own property, must be checked; the smoke test's 403 assertion catches a silent regression.

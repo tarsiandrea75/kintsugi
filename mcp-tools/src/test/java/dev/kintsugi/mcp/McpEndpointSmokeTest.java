@@ -25,7 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * call it.
  */
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// The test server listens on a random port, so its Host header is localhost:<port>.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+		properties = "kintsugi.mcp.allowed-hosts=localhost:*")
 class McpEndpointSmokeTest {
 
 	private static final String INITIALIZE = """

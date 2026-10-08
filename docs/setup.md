@@ -132,6 +132,7 @@ The compose project is called `kintsugi-lab`, so these commands never touch othe
 | gateway-mock | <http://localhost:18082> |
 | inventory-service | <http://localhost:18083> |
 | fault-injector | <http://localhost:18084> |
+| mcp-tools (MCP, `POST /mcp`) | <http://localhost:18085/mcp> |
 | Grafana | <http://localhost:13000> |
 | Prometheus | <http://localhost:19090> |
 
@@ -311,6 +312,24 @@ With the compose lab running, watch the "Lab — Faults" dashboard: under F4, "i
    ```
 
 Why F4 looks different from F3: the symptom is again an error on order, but the root cause is inside inventory-service's own resources. Its pool metrics (`hikaricp_connections_pending`, `hikaricp_connections_timeout_total`) show the exhaustion, while inventory's database and its other dependencies are healthy.
+
+### The agent's tools (mcp-tools)
+
+mcp-tools ([spec](../openspec/specs/mcp-tools/spec.md), [ADR-004](adr/ADR-004-tools-via-mcp.md)) serves the agent's read-only tools over MCP: Streamable HTTP, stateless, JSON-RPC on `POST /mcp`. Compose publishes it on `127.0.0.1:18085`; the agent reaches it as `mcp-tools:8085`. It connects to PostgreSQL as the read-only role `kintsugi_agent`. A request with an `Origin` header gets 403, and a `Host` other than `mcp-tools:8085`, `localhost:18085` or `127.0.0.1:18085` gets 421. Every tool call is one `INFO` line in its log: `docker compose -f infra/compose.yaml logs mcp-tools`.
+
+```bash
+curl -s localhost:18085/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+curl -s localhost:18085/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status_summary","arguments":{"table":"orders"}}}'
+```
+
+```bash
+infra/scripts/verify-mcp.sh          # start or reuse the lab, run the checks, leave it running
+infra/scripts/verify-mcp.sh --down   # the same, then `down -v`
+```
+
+The script recreates the lab with `down -v` when its volume has no `kintsugi_agent` role. It sends `initialize` and `tools/list` (exactly the seven tools), places a healthy order, injects F1 through the fault injector and places an order that ends `PAYMENT_PENDING`. Through `tools/call` it checks that `search_logs` finds order-service's `WARN` line for that order, that `query_metric` shows `lab_orders{status="PAYMENT_PENDING"}` rising, and that `get_order_trace` returns the order with its `PAYMENT_UNAVAILABLE` event. It checks that `search_logs` on `fault-injector` answers `INVALID_PARAMETER`, that an `Origin` header gets 403 and an unknown `Host` 421, and, with `psql` as `kintsugi_agent`, that the role cannot connect to `faults`, cannot insert into `orders`, and is not a superuser. Last, it checks that mcp-tools logged the calls, restores F1 and runs the same truth checks as the F1 script. Output, exit status and the restore on exit work as in the F1 check. It needs `docker`, `curl` and `awk`, and takes about 2 minutes on a fresh stack.
 
 ## Run the lab services without Docker Compose
 
