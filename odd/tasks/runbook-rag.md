@@ -79,7 +79,7 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
 
 - [x] **T1 — ADR-002, living spec `openspec/specs/knowledge-base/spec.md`,** the mcp-tools spec entry for `search_runbooks`, and a stale-version fix in ADR-006 (local Ollama is 0.31.1). Route: delegated writer.
 - [x] **T2 — The knowledge store:** the pgvector container's init script (database, extension, roles, schema), tested with Testcontainers on the same image. Route: delegated writer.
-- [ ] **T3 — The indexer (`knowledge/`):** allow-list, leakage check, splitting with metadata, model metadata and content hashes, tested with a fake embedding model. Route: delegated writer.
+- [x] **T3 — The indexer (`knowledge/`):** allow-list, leakage check, splitting with metadata, model metadata and content hashes, tested with a fake embedding model. Route: delegated writer.
 - [ ] **T4 — `search_runbooks` in mcp-tools,** with the model-mismatch guard, tested with Testcontainers and a fake embedding model. Route: delegated writer.
 - [ ] **T5 — Compose wiring, Ollama reachability (needs the human), `verify-rag.sh` run for real, docs.** Route: delegated writer.
 
@@ -121,6 +121,24 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
   - mcp-tools has 158 tests, mvn exit 0, run by the parent.
   - Compose wiring of the store is in T5.
 
+- 2026-10-08: T2 range reviewed (high risk, 4 lenses), approved and acknowledged (`review-ea539b09f103c230`). These warnings are fixed in T3 part A:
+  - a failed init leaves a half-initialized volume: documented as needing `down -v`, plus a health check that passes only after a complete init;
+  - "No chunk MUST" wording;
+  - vacuous assertions in `KnowledgeStoreRoleTest`.
+
+  The passwords are now read with psql `\getenv`, so they stay off the command line.
+- 2026-10-08: T3 done by a delegated writer.
+  - Part A passes alone: mcp-tools 160 tests, exit 0, run by the parent.
+  - Part B is the `knowledge/` module, a one-shot indexer. `knowledge` has 29 tests, exit 0: two runs by the writer, one by the parent.
+  - Decided by the writer, to review:
+    - **`JdbcTemplate`, not `PgVectorStore`:** the store would embed the text it stores, so the document prefix could not be sent without also being stored, and it writes as it embeds, which breaks the one-transaction run.
+    - **Sections are split with the CommonMark parser:** `MarkdownDocumentReader` mangles headings with inline code and flattens tables. `TokenTextSplitter` then caps each section at 800 tokens, counted with cl100k as an approximation of nomic's tokenizer.
+    - **An empty runbooks directory stops the run,** so a missing mount cannot empty the index. This guard was added beyond the spec, and the spec was updated.
+  - Real runbooks, chunks per file: README 2, order-service 13, payment-service 12, inventory-service 12, gateway-mock 12. None is over 800 tokens, and none comes from the authoring rule.
+  - Smoke run against the real Ollama: digest `0a109f42…` read from `/api/tags`, and 768 dimensions.
+  - **Size exception:** Part B is about 1,800 lines (620 main, 900 tests). It is a whole new module with one test per spec scenario, and splitting it would leave an indexer that cannot run.
+  - Decided for T4: search uses `JdbcTemplate` as well, for the query prefix and the digest guard. The mcp-tools spec's mention of `PgVectorStore` is corrected in T4.
+
 ## Next step
 
-Review the T2 range, then T3 (the indexer), via a delegated writer.
+Review the T3 range, then T4 (`search_runbooks`), via a delegated writer.

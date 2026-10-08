@@ -18,10 +18,10 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | Chunk table | `runbook_chunks`: `id uuid` (primary key), `content text`, `metadata json` (holding `service`, `section`, `source`, `content_hash`), `embedding vector(768)`; all `NOT NULL` |
 | Index metadata table | `index_metadata`, exactly one row (`id` 1): `model_name`, `model_digest`, `dimensions`, `document_prefix`, `query_prefix`, `indexed_at` |
 | Index | `runbook_chunks_embedding_hnsw`: HNSW, cosine distance (`vector_cosine_ops`), on `embedding`. The column's 768 is fixed in the schema: a model with other dimensions needs a migration and a full re-index |
-| Schema owner | the init script; Spring AI never creates it (`spring.ai.vectorstore.pgvector.initialize-schema=false`) |
+| Schema owner | the init script; Spring AI never creates it (the indexer writes with plain SQL; any `PgVectorStore` runs with `spring.ai.vectorstore.pgvector.initialize-schema=false`) |
 | Embedding model | configurable: name (default `nomic-embed-text`), dimensions (default 768), document prefix (default `search_document: `), query prefix (default `search_query: `) |
 | Model digest | read from Ollama, never configured: `GET /api/tags`, the entry whose `name` equals the configured model; a configured name without a tag means `:latest` (`nomic-embed-text` is matched as `nomic-embed-text:latest`) |
-| Chunk size | at most 800 tokens of text per chunk |
+| Chunk size | at most 800 tokens of text per chunk, counted with `TokenTextSplitter`'s tokenizer (cl100k_base) |
 | Indexed files | `docs/runbooks/*.md` only, read from a read-only mount of that directory |
 | Leakage pattern | `\b(F[1-8]\b\|fault\|inject)`, case-insensitive: the runbook authoring rule's check. A match is a fault id, or a word that starts with `fault` or `inject`; a word that only contains them, such as `default`, does not match |
 | Chunk metadata | `service`, `section`, `source`, `content_hash` |
@@ -100,6 +100,11 @@ The indexer MUST read only files matching `docs/runbooks/*.md`. It MUST NOT read
 - WHEN the indexer runs
 - THEN no chunk has either as its `source`
 
+#### Scenario: No runbooks
+- GIVEN the mounted directory holds no `*.md` file, for example because the mount is missing
+- WHEN the indexer runs
+- THEN it exits with a non-zero code and the index is unchanged, instead of removing every indexed file
+
 #### Scenario: Read-only source
 - WHEN the indexer runs
 - THEN it writes nothing under the mounted runbooks directory
@@ -135,12 +140,12 @@ Before embedding anything, the indexer MUST scan every allowed file for the leak
 
 ### Requirement: Chunks carry their metadata
 
-The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. A chunk MUST NOT hold more than 800 tokens of text, so a single chunk stays well under mcp-tools' 8 KB output cap in the common case. Every chunk MUST carry:
+The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. A chunk's text is the section's Markdown, starting with its heading line; a heading with no text under it, such as a runbook's title, yields no chunk. A chunk MUST NOT hold more than 800 tokens of text, so a single chunk stays well under mcp-tools' 8 KB output cap in the common case. Every chunk MUST carry:
 
 | Field | Value |
 |-------|-------|
 | `service` | the file name without `.md` when it is one of the allowed services (`order-service`, `payment-service`, `inventory-service`, `gateway-mock`); absent for `README.md` |
-| `section` | the text of the chunk's heading |
+| `section` | the text of the chunk's heading, without Markdown markup (``Slow `POST /reservations` `` gives `Slow POST /reservations`) |
 | `source` | the repository-relative path, such as `docs/runbooks/order-service.md` |
 | `content_hash` | the SHA-256 of the whole file's content when it was indexed |
 

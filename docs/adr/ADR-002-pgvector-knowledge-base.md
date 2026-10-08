@@ -33,8 +33,8 @@ Constraints:
 |-----------|---------|-------|
 | Store image | `pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0` | pgvector 0.8.7, the latest release, on PostgreSQL 18. The digest is the multi-platform index, read with `docker buildx imagetools inspect` without pulling. The trixie variant matches the Debian base of the lab's `postgres:18.6` |
 | Spring AI | 2.0.1 | as in [ADR-006](ADR-006-stack-versions.md) |
-| Vector store | `spring-ai-starter-vector-store-pgvector` | [PGvector docs](https://docs.spring.io/spring-ai/reference/api/vectordbs/pgvector.html) |
-| Markdown reader | `spring-ai-markdown-document-reader` | [ETL pipeline docs](https://docs.spring.io/spring-ai/reference/api/etl-pipeline.html) |
+| Vector store | `spring-ai-starter-vector-store-pgvector`; not used by the indexer, which writes with `JdbcTemplate` (see Indexer) | [PGvector docs](https://docs.spring.io/spring-ai/reference/api/vectordbs/pgvector.html) |
+| Markdown reader | `spring-ai-markdown-document-reader`; the indexer uses the CommonMark 0.22 parser it brings (see Indexer) | [ETL pipeline docs](https://docs.spring.io/spring-ai/reference/api/etl-pipeline.html) |
 | Splitter | `TokenTextSplitter` | same ETL docs |
 | Embeddings | `spring-ai-starter-model-ollama` with `spring.ai.model.embedding=ollama` | [Ollama embeddings docs](https://docs.spring.io/spring-ai/reference/api/embeddings/ollama-embeddings.html) |
 | Ollama | 0.31.1 (local) | see the correction note in ADR-006 |
@@ -84,8 +84,14 @@ Constraints:
 - The `knowledge/` module is a Spring Boot one-shot job. It runs as a compose service and exits.
 - **Allow-list:** it reads only `docs/runbooks/*.md`, from a read-only mount of that directory alone. `openspec/` and `odd/` are not mounted.
 - **Leakage gate:** before embedding anything, it scans every file with the runbook authoring rule's pattern (`\b(F[1-8]\b|fault|inject)`, case-insensitive: a fault id, or a word that starts with `fault` or `inject`, so "default" does not match). Any match outside the README's own "Authoring rule" section stops the run with a non-zero exit, and nothing is written.
-- It splits by heading with the Markdown reader, then with `TokenTextSplitter` for long sections, so no chunk holds more than 800 tokens. That keeps a single chunk well under the tool's 8 KB cap; if one still exceeds it, `search_runbooks` returns it cut with `[truncated]`, never an empty `OK`. Each chunk carries `service` (from the file name), `section` (its heading), `source` (the repository path) and `content_hash`.
+- It splits by heading, then with `TokenTextSplitter` for long sections, so no chunk holds more than 800 tokens. That keeps a single chunk well under the tool's 8 KB cap; if one still exceeds it, `search_runbooks` returns it cut with `[truncated]`, never an empty `OK`. Each chunk carries `service` (from the file name), `section` (its heading), `source` (the repository path) and `content_hash`.
 - It stores each file's content hash and skips files that have not changed.
+- **Implementation (T3).** The `knowledge/` module (Spring Boot 4.1.1, Spring AI 2.0.1) is verified by Testcontainers tests on the pinned image with the real init script and a fake Ollama, and by a manual smoke run against the local Ollama 0.31.1 (768 dimensions, digest `0a109f42…`). Choices made while building it:
+  - **Plain SQL through `JdbcTemplate`, not `PgVectorStore`.** `PgVectorStore.add` embeds each document's text itself, so the document prefix would either be stored with the text or not be sent at all, and it writes as it embeds, so a run could not compute every embedding first and then write once. Plain SQL on the init script's schema is a few statements and matches its columns by construction.
+  - **Sections come from the CommonMark parser, not from `MarkdownDocumentReader`'s documents.** On the runbooks the reader's visitor loses information: a heading such as ``Slow `POST /reservations` `` gets the title `Slow ` and its inline code moves into the body; paragraphs are joined with no separator; tables are flattened. The indexer parses with the same CommonMark parser (with source line positions) and keeps each section's raw Markdown, heading line included, so tables, code spans and the heading reach the embedding intact. `section` is the heading's text without Markdown markup.
+  - Tokens are counted with `TokenTextSplitter`'s own tokenizer (cl100k_base), not Nomic's; 800 of them stays far below Nomic's 2048-token context.
+  - One embedding call per file, holding all of its chunks.
+  - **A directory with no runbooks stops the run.** Otherwise a missing mount would count every indexed file as removed and empty the index; the image declares no `VOLUME` for the same reason.
 - **A run commits atomically.** All of a run's chunk changes and the metadata row are written in one transaction, after every embedding was computed. The index is a few hundred rows, so this is cheap, and a failure mid-run leaves the previous index fully intact, never a mix of two models.
 
 ### Retrieval
