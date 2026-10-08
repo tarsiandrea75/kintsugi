@@ -79,18 +79,27 @@ final class KnowledgeStoreContainer {
 	}
 
 	static void empty() {
-		admin().execute("TRUNCATE runbook_chunks, index_metadata");
+		admin().execute("TRUNCATE runbook_chunks, index_metadata, indexed_files");
 	}
 
-	/** Every chunk row, ordered, as text: equal snapshots mean an untouched index. */
+	/**
+	 * Every row of the three tables, ordered, as text: equal snapshots mean an untouched index. The metadata row
+	 * includes {@code indexed_at}, so any write of a run changes the snapshot.
+	 */
 	static List<String> snapshot() {
 		JdbcTemplate admin = admin();
-		List<String> rows = new java.util.ArrayList<>(admin.queryForList(
-				"SELECT id || '|' || content || '|' || metadata::text || '|' || embedding::text FROM runbook_chunks"
-						+ " ORDER BY id", String.class));
+		List<String> rows = new java.util.ArrayList<>(chunkRows());
+		rows.addAll(admin.queryForList("SELECT source || '|' || content_hash FROM indexed_files ORDER BY source",
+				String.class));
 		rows.addAll(admin.queryForList("SELECT model_name || '|' || model_digest || '|' || dimensions || '|'"
 				+ " || document_prefix || '|' || query_prefix || '|' || indexed_at FROM index_metadata", String.class));
 		return rows;
+	}
+
+	/** Every chunk row only, ordered by id, as text: id, content, metadata and embedding. */
+	static List<String> chunkRows() {
+		return admin().queryForList("SELECT id || '|' || content || '|' || metadata::text || '|' || embedding::text"
+				+ " FROM runbook_chunks ORDER BY id", String.class);
 	}
 
 	static List<Map<String, String>> chunkMetadata() {

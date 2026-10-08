@@ -14,8 +14,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The indexer's access to the knowledge store, as {@code knowledge_indexer}, through plain SQL on the schema that
- * {@code infra/knowledge-db/init/01-knowledge.sh} created: {@code runbook_chunks} and the single-row
- * {@code index_metadata}. Spring AI's {@code PgVectorStore} is not used: it embeds each document's stored text itself,
+ * {@code infra/knowledge-db/init/01-knowledge.sh} created: {@code runbook_chunks}, the single-row
+ * {@code index_metadata} and {@code indexed_files}. Spring AI's {@code PgVectorStore} is not used: it embeds each document's stored text itself,
  * so the document prefix could not be sent without being stored, and it cannot embed a whole run before writing it.
  */
 @Component
@@ -34,11 +34,20 @@ public class KnowledgeStore {
 	public record EmbeddedChunk(String content, Map<String, Object> metadata, float[] embedding) {
 	}
 
-	/** The dimension of the {@code embedding} column, fixed by the schema. */
+	/**
+	 * The dimension of the {@code embedding} column, fixed by the schema. A store without the column, or with a
+	 * column of no fixed dimension, was not built by the init script, so the run stops with that cause.
+	 */
 	public int columnDimensions() {
-		Integer dimensions = this.jdbc.queryForObject("SELECT atttypmod FROM pg_attribute"
-				+ " WHERE attrelid = 'runbook_chunks'::regclass AND attname = 'embedding'", Integer.class);
-		return dimensions == null ? -1 : dimensions;
+		List<Integer> dimensions = this.jdbc.queryForList("SELECT atttypmod FROM pg_attribute"
+				+ " WHERE attrelid = to_regclass('runbook_chunks') AND attname = 'embedding' AND NOT attisdropped",
+				Integer.class);
+		if (dimensions.isEmpty() || dimensions.getFirst() == null || dimensions.getFirst() < 1) {
+			throw new IndexingException("The knowledge store has no runbook_chunks.embedding column of a fixed"
+					+ " dimension: the schema is missing; the store must be created by"
+					+ " infra/knowledge-db/init/01-knowledge.sh");
+		}
+		return dimensions.getFirst();
 	}
 
 	public Optional<IndexModel> indexModel() {
@@ -50,30 +59,39 @@ public class KnowledgeStore {
 			.findFirst();
 	}
 
-	/** The content hash each indexed file had; a file with more than one hash maps to an empty one, so it re-embeds. */
+	/**
+	 * The content hash of each file the last run indexed, from {@code indexed_files}. It lists a file that yielded no
+	 * chunk too, so such a file is skipped like any other unchanged one.
+	 */
 	public Map<String, String> contentHashes() {
 		Map<String, String> hashes = new HashMap<>();
-		this.jdbc.query("SELECT DISTINCT metadata->>'source', metadata->>'content_hash' FROM runbook_chunks",
+		this.jdbc.query("SELECT source, content_hash FROM indexed_files",
 				row -> {
-					hashes.merge(row.getString(1), row.getString(2), (first, second) -> "");
+					hashes.put(row.getString(1), row.getString(2));
 				});
 		return hashes;
 	}
 
 	/**
-	 * Writes a run in one transaction: deletes every chunk ({@code everything}) or those of {@code replacedSources},
-	 * inserts {@code chunks}, and records {@code model}. Any failure rolls all of it back.
+	 * Writes a run in one transaction: deletes every chunk and file row ({@code everything}) or those of
+	 * {@code replacedSources}, inserts {@code chunks} and the content hash of each file in {@code indexedFiles}, and
+	 * records {@code model}. Any failure rolls all of it back.
 	 */
-	public void write(boolean everything, Set<String> replacedSources, List<EmbeddedChunk> chunks, IndexModel model) {
+	public void write(boolean everything, Set<String> replacedSources, List<EmbeddedChunk> chunks,
+			Map<String, String> indexedFiles, IndexModel model) {
 		this.transactions.executeWithoutResult(status -> {
 			if (everything) {
 				this.jdbc.update("DELETE FROM runbook_chunks");
+				this.jdbc.update("DELETE FROM indexed_files");
 			}
 			else {
 				for (String source : replacedSources) {
 					this.jdbc.update("DELETE FROM runbook_chunks WHERE metadata->>'source' = ?", source);
+					this.jdbc.update("DELETE FROM indexed_files WHERE source = ?", source);
 				}
 			}
+			indexedFiles.forEach((source, hash) -> this.jdbc
+				.update("INSERT INTO indexed_files (source, content_hash) VALUES (?, ?)", source, hash));
 			this.jdbc.batchUpdate("INSERT INTO runbook_chunks (content, metadata, embedding) VALUES (?, ?::json, ?::vector)",
 					chunks, 100, (statement, chunk) -> {
 						statement.setString(1, chunk.content());

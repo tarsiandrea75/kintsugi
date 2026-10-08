@@ -12,10 +12,11 @@ The knowledge base is what the agent searches to learn what a symptom means and 
 | Database | `knowledge`, with `CONNECT` revoked from `PUBLIC` |
 | Extension | `vector`, created by the init script as the bootstrap superuser (it is not a trusted extension) |
 | Init script | `infra/knowledge-db/init/01-knowledge.sh`, run once on an empty volume as the bootstrap superuser; tested by `mcp-tools`' `KnowledgeStoreRoleTest` on the pinned image. It is not atomic: initdb runs before it, so a failed init leaves an initialized but incomplete volume that later starts skip; the recovery is `docker compose down -v` for the store, as for the lab's postgres |
-| Health check | `infra/knowledge-db/healthcheck.sh`: healthy only when `kintsugi_agent` can read `index_metadata`, the init script's last grant, so an incomplete init never reports healthy |
+| Health check | `infra/knowledge-db/healthcheck.sh`: healthy only when `kintsugi_agent` can read `index_metadata`, the init script's last grant, so an incomplete init never reports healthy. It connects as `kintsugi_agent` over loopback (trusted by the image's `pg_hba.conf`), so it does not depend on `POSTGRES_USER` being set in the `docker exec` environment |
 | Roles | `knowledge_indexer` (owns and writes the tables; password from `KNOWLEDGE_INDEXER_DB_PASSWORD`), `kintsugi_agent` (reads only; password from `KINTSUGI_AGENT_DB_PASSWORD`, set separately from the lab server's). Both are required: the init script stops without them |
 | Agent session defaults | `default_transaction_read_only=on`, `statement_timeout=3s`, `transaction_timeout=5s`, `idle_in_transaction_session_timeout=5s`, as on the lab's server |
 | Chunk table | `runbook_chunks`: `id uuid` (primary key), `content text`, `metadata json` (holding `service`, `section`, `source`, `content_hash`), `embedding vector(768)`; all `NOT NULL` |
+| File table | `indexed_files`: `source text` (primary key), `content_hash text NOT NULL`; one row per file the last run indexed, including a file that yields no chunk. Owned and read by `knowledge_indexer` only: `kintsugi_agent` has no grant on it. Added after the first volumes were made: a store created before it needs `docker compose down -v` and a fresh init |
 | Index metadata table | `index_metadata`, exactly one row (`id` 1): `model_name`, `model_digest`, `dimensions`, `document_prefix`, `query_prefix`, `indexed_at` |
 | Index | `runbook_chunks_embedding_hnsw`: HNSW, cosine distance (`vector_cosine_ops`), on `embedding`. The column's 768 is fixed in the schema: a model with other dimensions needs a migration and a full re-index |
 | Schema owner | the init script; Spring AI never creates it (the indexer writes with plain SQL; any `PgVectorStore` runs with `spring.ai.vectorstore.pgvector.initialize-schema=false`) |
@@ -48,7 +49,7 @@ The knowledge store MUST run in its own container, separate from the lab's `post
 
 ### Requirement: Roles are unprivileged and the agent reads only
 
-Neither `knowledge_indexer` nor `kintsugi_agent` MUST be a superuser, and neither MUST be able to create databases or roles. `kintsugi_agent` MUST have `CONNECT` on `knowledge` and `SELECT` on its tables, and no other privilege. Only `knowledge_indexer` MUST be able to write the tables.
+Neither `knowledge_indexer` nor `kintsugi_agent` MUST be a superuser, and neither MUST be able to create databases or roles. `kintsugi_agent` MUST have `CONNECT` on `knowledge` and `SELECT` on `runbook_chunks` and `index_metadata`, and no other privilege (none on `indexed_files`). Only `knowledge_indexer` MUST be able to write the tables.
 
 #### Scenario: Not superusers
 - WHEN `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname IN ('knowledge_indexer', 'kintsugi_agent')` runs
@@ -80,6 +81,11 @@ Neither `knowledge_indexer` nor `kintsugi_agent` MUST be a superuser, and neithe
 - GIVEN a store whose init script stopped before its last grant
 - WHEN the health check runs
 - THEN it fails, while it passes on a store whose init completed
+
+#### Scenario: Health check without POSTGRES_USER
+- GIVEN a store whose init completed
+- WHEN the health check runs with `POSTGRES_USER` unset in its environment
+- THEN it passes
 
 #### Scenario: Extension already present
 - GIVEN a fresh volume after the init script ran
@@ -160,12 +166,17 @@ The indexer MUST split each file by Markdown heading, then split any section lon
 
 ### Requirement: Unchanged files are skipped
 
-The indexer MUST compare each file's content hash with the stored one. An unchanged file MUST NOT be embedded again. A changed file MUST have all its old chunks replaced. A file no longer present MUST have its chunks removed.
+The indexer MUST compare each file's content hash with the one recorded in `indexed_files` by the last run. An unchanged file MUST NOT be embedded again, including a file that yields no chunk. A changed file MUST have all its old chunks replaced. A file no longer present MUST have its chunks removed.
 
 #### Scenario: Second run with no changes
 - GIVEN the index was built from the current runbooks
 - WHEN the indexer runs again
 - THEN no embedding is requested and the chunk rows are unchanged
+
+#### Scenario: A file with no chunks
+- GIVEN `docs/runbooks/payment-service.md` holds only its title heading, so it yields no chunk, and the index was built from the current runbooks
+- WHEN the indexer runs again
+- THEN the file is reported as skipped, no embedding is requested and the index is unchanged
 
 #### Scenario: One file changed
 - GIVEN only `docs/runbooks/gateway-mock.md` changed since the last run
@@ -206,6 +217,11 @@ The index metadata table MUST hold the embedding model's name, its digest, the d
 - THEN every file is embedded again, even with unchanged content hashes
 - AND the metadata table holds the new model
 
+#### Scenario: Schema missing
+- GIVEN a store without the `runbook_chunks.embedding` column, for example one not created by the init script
+- WHEN the indexer runs
+- THEN it stops with a non-zero code before embedding, saying the schema is missing
+
 #### Scenario: Dimensions differ from the column
 - GIVEN the configured dimensions differ from the `vector` column's
 - WHEN the indexer runs
@@ -223,7 +239,7 @@ The indexer MUST send each chunk to the embedding model as the configured docume
 
 ### Requirement: A run commits atomically
 
-A run that re-embeds anything MUST commit as a whole: every chunk insert and delete of the run and the metadata row MUST be written in one database transaction, after all the run's embeddings were computed. The index is small (a few hundred chunks), so one transaction is cheap. A failure at any point, from Ollama or the store, MUST roll the whole run back: the previous index stays fully intact and never mixes chunks from two models or two digests. The indexer then exits with a non-zero code.
+A run that re-embeds anything MUST commit as a whole: every chunk insert and delete of the run, the `indexed_files` rows and the metadata row MUST be written in one database transaction, after all the run's embeddings were computed. The index is small (a few hundred chunks), so one transaction is cheap. A failure at any point, from Ollama or the store, MUST roll the whole run back: the previous index stays fully intact and never mixes chunks from two models or two digests. The indexer then exits with a non-zero code.
 
 #### Scenario: Ollama down
 - GIVEN Ollama is unreachable

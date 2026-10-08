@@ -15,8 +15,8 @@ import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
 
 /**
- * Splits a Markdown file into sections, one per heading, with the CommonMark parser that Spring AI's Markdown reader
- * uses. Each section keeps its raw Markdown lines (tables and inline code included), from its heading to the next
+ * Splits a Markdown file into sections, one per heading, with the CommonMark parser (a direct dependency, pinned in
+ * the pom; Spring AI's own Markdown reader loses headings with inline code and flattens tables). Each section keeps its raw Markdown lines (tables and inline code included), from its heading to the next
  * heading of any level. Only top-level headings count, so a {@code #} line inside a code block or a quote never
  * starts a section.
  */

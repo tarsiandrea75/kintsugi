@@ -4,9 +4,10 @@
 #
 # Runs once, on the first start with an empty data volume, as the bootstrap superuser (POSTGRES_USER). Only this script
 # uses that superuser. A superuser ignores REVOKE CONNECT, so every other role is NOSUPERUSER:
-# - knowledge_indexer owns the two tables and writes them; only the one-shot indexer (the knowledge/ module) uses it.
-# - kintsugi_agent is mcp-tools' read-only role: CONNECT on knowledge and SELECT on the two tables, nothing else. Same
-#   name as on the lab's server, but a different server with its own password.
+# - knowledge_indexer owns the three tables and writes them; only the one-shot indexer (the knowledge/ module) uses it.
+# - kintsugi_agent is mcp-tools' read-only role: CONNECT on knowledge and SELECT on runbook_chunks and index_metadata,
+#   nothing else (not even indexed_files, the indexer's own bookkeeping). Same name as on the lab's server, but a
+#   different server with its own password.
 # The extension and the schema are created here, not by the indexer or Spring AI: "vector" is not a trusted extension,
 # so only a superuser may create it, and keeping all DDL here keeps both application roles unprivileged.
 # The passwords come from the environment of the container. Changing them later needs the volume removed: this script
@@ -79,8 +80,17 @@ CREATE TABLE index_metadata (
   indexed_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- The content hash of every file the last run indexed, one row per file, including a file that yields no chunk (a
+-- runbook with only a title). Without it such a file would have no row to compare with and be re-read on every run.
+-- Written in the same transaction as the chunks. Only the indexer reads it: kintsugi_agent gets no grant on it.
+CREATE TABLE indexed_files (
+  source text PRIMARY KEY,
+  content_hash text NOT NULL
+);
+
 ALTER TABLE runbook_chunks OWNER TO knowledge_indexer;
 ALTER TABLE index_metadata OWNER TO knowledge_indexer;
+ALTER TABLE indexed_files OWNER TO knowledge_indexer;
 
 GRANT USAGE ON SCHEMA public TO knowledge_indexer, kintsugi_agent;
 GRANT SELECT ON runbook_chunks TO kintsugi_agent;

@@ -137,6 +137,13 @@ class KnowledgeStoreRoleTest {
 	}
 
 	@Test
+	void theHealthCheckPassesWithoutPostgresUserInItsEnvironment() throws Exception {
+		// A docker exec does not always carry POSTGRES_USER; under set -u the check must not depend on it.
+		assertThat(container.execInContainer("env", "-u", "POSTGRES_USER", "/usr/local/bin/healthcheck.sh")
+			.getExitCode()).isZero();
+	}
+
+	@Test
 	void theHealthCheckFailsWhenTheInitStoppedBeforeItsLastGrant() throws Exception {
 		try (Connection admin = DriverManager.getConnection(url("knowledge"), container.getUsername(),
 				container.getPassword()); Statement sql = admin.createStatement()) {
@@ -206,6 +213,7 @@ class KnowledgeStoreRoleTest {
 	@ValueSource(strings = { "INSERT INTO runbook_chunks (content, metadata, embedding) VALUES ('x', '{}', NULL)",
 			"UPDATE runbook_chunks SET content = 'x'", "DELETE FROM runbook_chunks", "TRUNCATE runbook_chunks",
 			"UPDATE index_metadata SET model_digest = 'x'", "DELETE FROM index_metadata",
+			"INSERT INTO indexed_files VALUES ('x', 'h')", "DELETE FROM indexed_files",
 			"CREATE TABLE notes (id int)", "DROP INDEX runbook_chunks_embedding_hnsw" })
 	void theAgentCannotWriteEvenAfterLeavingReadOnlyMode(String statement) throws SQLException {
 		try (Connection connection = asAgent(); Statement sql = connection.createStatement()) {
@@ -242,10 +250,24 @@ class KnowledgeStoreRoleTest {
 	void theIndexerOwnsTheTables() throws SQLException {
 		try (Connection connection = asAgent(); Statement sql = connection.createStatement();
 				ResultSet rows = sql.executeQuery("SELECT DISTINCT tableowner FROM pg_tables"
-						+ " WHERE tablename IN ('runbook_chunks', 'index_metadata')")) {
+						+ " WHERE tablename IN ('runbook_chunks', 'index_metadata', 'indexed_files')")) {
 			assertThat(rows.next()).isTrue();
 			assertThat(rows.getString(1)).isEqualTo("knowledge_indexer");
 			assertThat(rows.next()).isFalse();
+		}
+	}
+
+	@Test
+	void theIndexerKeepsTheFileHashesAndTheAgentCannotReadThem() throws SQLException {
+		try (Connection connection = asIndexer(); Statement sql = connection.createStatement()) {
+			connection.setAutoCommit(false);
+			sql.execute("INSERT INTO indexed_files (source, content_hash) VALUES ('docs/runbooks/x.md', 'h')");
+			assertThat(sql.executeUpdate("DELETE FROM indexed_files WHERE source = 'docs/runbooks/x.md'")).isEqualTo(1);
+			connection.rollback();
+		}
+		try (Connection connection = asAgent(); Statement sql = connection.createStatement()) {
+			assertThatExceptionOfType(SQLException.class).isThrownBy(() -> sql.executeQuery("SELECT * FROM indexed_files"))
+				.satisfies(ex -> assertThat(ex.getSQLState()).isEqualTo(PERMISSION_DENIED));
 		}
 	}
 

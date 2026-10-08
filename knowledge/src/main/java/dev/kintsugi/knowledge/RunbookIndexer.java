@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.slf4j.Logger;
@@ -21,9 +22,9 @@ import org.springframework.stereotype.Component;
  * <li>read the allow-listed runbooks and run the leakage gate on all of them;</li>
  * <li>check the configured dimensions against the {@code vector} column, and read the model's digest from Ollama;</li>
  * <li>pick the files to embed: all of them when the model, digest, dimensions or prefixes differ from the recorded
- * ones, otherwise only those whose content hash changed;</li>
+ * ones, otherwise only those whose content hash differs from the one recorded in {@code indexed_files};</li>
  * <li>embed them, one call per file, checking every embedding's length;</li>
- * <li>write every change and the metadata row in one transaction.</li>
+ * <li>write every change, the files' content hashes and the metadata row in one transaction.</li>
  * </ol>
  */
 @Component
@@ -84,7 +85,9 @@ public class RunbookIndexer {
 		}
 		Set<String> replaced = new TreeSet<>(removed);
 		changed.forEach(runbook -> replaced.add(runbook.source()));
-		this.store.write(everything, replaced, chunks, wanted);
+		Map<String, String> indexedFiles = new TreeMap<>();
+		changed.forEach(runbook -> indexedFiles.put(runbook.source(), runbook.contentHash()));
+		this.store.write(everything, replaced, chunks, indexedFiles, wanted);
 		IndexReport report = new IndexReport(changed.stream().map(Runbook::source).toList(), skipped,
 				List.copyOf(removed), everything, chunks.size());
 		log.info("Indexed with {} ({}): {}", wanted.name(), wanted.digest(), report);

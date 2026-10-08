@@ -255,10 +255,7 @@ class RunbookIndexerTest {
 	@Test
 	void aChangedFileIsTheOnlyOneEmbeddedAndItsOldChunksAreReplaced() throws IOException {
 		indexer(DEFAULT_MODEL).index();
-		List<String> untouched = KnowledgeStoreContainer.snapshot()
-			.stream()
-			.filter(row -> !row.contains("gateway-mock"))
-			.toList();
+		List<String> untouched = otherThanGateway(KnowledgeStoreContainer.chunkRows());
 		ollama.reset();
 		String changed = GATEWAY + "\n## Safe actions\n\nReset the gateway behavior.\n";
 		write("gateway-mock.md", changed);
@@ -274,7 +271,39 @@ class RunbookIndexerTest {
 			.toList();
 		assertThat(gateway).hasSize(2).allSatisfy(metadata -> assertThat(metadata).containsEntry("content_hash",
 				sha256(changed)));
-		assertThat(KnowledgeStoreContainer.snapshot()).containsAll(untouched.subList(0, untouched.size() - 1));
+		// The other files' chunk rows are exactly as before: same ids, text, metadata and embeddings.
+		assertThat(otherThanGateway(KnowledgeStoreContainer.chunkRows())).isEqualTo(untouched);
+	}
+
+	@Test
+	void aFileWithNoChunksIsSkippedWhenUnchanged() throws IOException {
+		write("payment-service.md", "# Runbook: payment-service\n");
+		IndexReport first = indexer(DEFAULT_MODEL).index();
+		assertThat(first.embedded()).contains("docs/runbooks/payment-service.md");
+		assertThat(KnowledgeStoreContainer.chunkMetadata()).extracting(metadata -> metadata.get("source"))
+			.doesNotContain("docs/runbooks/payment-service.md");
+		List<String> before = KnowledgeStoreContainer.snapshot();
+		ollama.reset();
+
+		IndexReport second = indexer(DEFAULT_MODEL).index();
+
+		assertThat(second.embedded()).isEmpty();
+		assertThat(second.skipped()).contains("docs/runbooks/payment-service.md").hasSize(5);
+		assertThat(ollama.embedCalls()).isEmpty();
+		assertThat(KnowledgeStoreContainer.snapshot()).isEqualTo(before);
+	}
+
+	@Test
+	void aStoreWithoutTheSchemaStopsTheRunNamingTheCause() {
+		KnowledgeStoreContainer.admin().execute("ALTER TABLE runbook_chunks RENAME TO runbook_chunks_moved");
+		try {
+			assertThatExceptionOfType(IndexingException.class).isThrownBy(() -> indexer(DEFAULT_MODEL).index())
+				.withMessageContaining("schema is missing");
+			assertThat(ollama.embedCalls()).isEmpty();
+		}
+		finally {
+			KnowledgeStoreContainer.admin().execute("ALTER TABLE runbook_chunks_moved RENAME TO runbook_chunks");
+		}
 	}
 
 	@Test
@@ -440,9 +469,14 @@ class RunbookIndexerTest {
 
 		assertThatExceptionOfType(RuntimeException.class)
 			.isThrownBy(() -> KnowledgeStoreContainer.indexerStore().write(true, Set.of(), chunks,
+					Map.of("docs/runbooks/x.md", "h"),
 					new IndexModel("other", "d9", 768, "search_document: ", "search_query: ")));
 
 		assertThat(KnowledgeStoreContainer.snapshot()).isEqualTo(before);
+	}
+
+	private static List<String> otherThanGateway(List<String> chunkRows) {
+		return chunkRows.stream().filter(row -> !row.contains("docs/runbooks/gateway-mock.md")).toList();
 	}
 
 	private RunbookIndexer indexer(KnowledgeProperties.Model model) {
