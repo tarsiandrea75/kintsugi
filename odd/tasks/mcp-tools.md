@@ -87,8 +87,8 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
 
 ## Tasks
 
-- [ ] **T1 — ADR-004 and living spec.** Route: delegated writer.
-- [ ] **T2 — Skeleton.** Initializr skeleton if an MCP server dependency id exists; otherwise the same skeleton plus the starter. Route: delegated writer.
+- [x] **T1 — ADR-004 and living spec.** Route: delegated writer.
+- [x] **T2 — Skeleton.** Initializr skeleton if an MCP server dependency id exists; otherwise the same skeleton plus the starter. Route: delegated writer.
 - [ ] **T3 — Log, metric and restart tools,** with fake Loki and Prometheus HTTP servers, tests first. Route: delegated writer.
 - [ ] **T4 — Event and summary tools and the `kintsugi_agent` role,** using Testcontainers, tests first. Route: delegated writer.
 - [ ] **T5 — Compose wiring, `verify-mcp.sh` run for real, docs.** Route: delegated writer.
@@ -96,7 +96,12 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
 ## Progress
 
 - 2026-10-08: research done (Spring AI 2.0.1 MCP, SDK 2.0.0, protocol 2025-11-25, Loki and Prometheus limits, read-only role practices); design decided autonomously; branch created.
+- 2026-10-08: T1 + T2 done by a delegated writer.
+  - ADR-004 and the spec; the spec fixes concrete values: an 8 KB output cap with a `[truncated]` marker, the `untrustedText` field, outcomes `OK`/`INVALID_PARAMETER`/`UPSTREAM_ERROR`, `contains` of 1–200 characters matched literally, and `minDurationMs` from 0 to 600000.
+  - Skeleton from Initializr (`spring-ai-mcp-server` gives the webmvc starter and `spring-ai-bom` 2.0.1; SDK 2.0.0).
+  - **Origin validation is OFF by default in Spring AI 2.0.1** (no-op validator). It is now enabled by our own `webMvcStatelessServerTransport` bean using the SDK's `DefaultServerTransportSecurityValidator`: any request carrying an `Origin` header gets 403. A Host allow-list is deferred to T5.
+  - Smoke test: `initialize` reports protocol 2025-11-25; `tools/list` returns empty; an evil Origin gets 403. mvn exit 0, 4 tests (parent re-run).
 
 ## Next step
 
-T1 + T2 via a delegated writer.
+T3 (log, metric and restart tools) via a delegated writer.
