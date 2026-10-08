@@ -201,13 +201,19 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
   - The proxy-exposure warning is the risk the human accepted with the socat choice; it is recorded in ADR-002.
   - The other findings were fixed by a delegated writer in the next commit:
     - a failed proxy bind no longer blocks the lab. The proxy has `restart: unless-stopped` and only the indexer depends on it. Proven live: with `172.17.0.1:11434` taken, the lab came up, `start_lab` printed WARN lines and `verify-mcp.sh` passed;
-    - `start_lab` accepts a failed `up --wait` only when the indexer exited non-zero or the proxy is down, and every other service is running or healthy. It prints compose's errors;
+    - `start_lab` accepts a failed `up --wait` only when the indexer exited non-zero or the proxy is down, and every other service is running, and healthy where it has a healthcheck. It prints compose's errors;
     - `verify-rag.sh` reads the expected digest live from Ollama;
     - `section()` also blanks U+2028, U+2029 and format characters;
     - the connect timeout has its own reason;
     - the second-run check names every runbook.
   - mcp-tools keeps waiting for the indexer: with Compose 5.1.3, `up --wait` fails on a one-shot service no one waits on. This is recorded in ADR-002.
   - Results: mcp-tools 212 tests (XML), exit 0, run by the parent. `verify-rag.sh` exit 0, run by the parent. `verify-mcp.sh` and `verify-f1.sh` exit 0 (writer).
+
+- 2026-10-08: the fix range `09c6d5f..80c167d` reviewed (high risk, 4 lenses), approved and acknowledged (`review-3d587daebdfa052c`). Follow-ups, not fixed (the one-correction-per-range rule):
+  - WARNING (R4): `knowledge_only_failure` may read an indexer exit state left by an earlier `up`, and so mask another failure;
+  - WARNING (R3): that bash classifier has no test;
+  - WARNING (R2): the separator test uses invisible raw Unicode literals instead of escapes;
+  - suggestions: the accepted-path PASS message always names both services; the global `UP_ERRORS` is hidden state.
 
 ## Next step
 
