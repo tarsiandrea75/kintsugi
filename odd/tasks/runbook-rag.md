@@ -77,7 +77,7 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
 
 ## Tasks
 
-- [ ] **T1 — ADR-002, living spec `openspec/specs/knowledge-base/spec.md`,** the mcp-tools spec entry for `search_runbooks`, and a stale-version fix in ADR-006 (local Ollama is 0.31.1). Route: delegated writer.
+- [x] **T1 — ADR-002, living spec `openspec/specs/knowledge-base/spec.md`,** the mcp-tools spec entry for `search_runbooks`, and a stale-version fix in ADR-006 (local Ollama is 0.31.1). Route: delegated writer.
 - [ ] **T2 — The knowledge store:** the pgvector container's init script (database, extension, roles, schema), tested with Testcontainers on the same image. Route: delegated writer.
 - [ ] **T3 — The indexer (`knowledge/`):** allow-list, leakage check, splitting with metadata, model metadata and content hashes, tested with a fake embedding model. Route: delegated writer.
 - [ ] **T4 — `search_runbooks` in mcp-tools,** with the model-mismatch guard, tested with Testcontainers and a fake embedding model. Route: delegated writer.
@@ -90,6 +90,20 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
   - The human chose `nomic-embed-text` after learning that the model is configurable but the data is not.
   - Branch created.
 
+- 2026-10-08: T1 done by a delegated writer (docs only).
+  - Created ADR-002 and `openspec/specs/knowledge-base/spec.md`.
+  - Added `search_runbooks` to the mcp-tools spec; there are now 8 tools.
+  - Added a dated Ollama 0.31.1 correction to ADR-006.
+  - pgvector image index digest: `sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0`.
+  - Leakage grep: clean.
+  - Decided by the writer, to review:
+    - `README.md` is indexed, without a `service`, except its "Authoring rule" section, which is exempt from the leakage gate and never indexed;
+    - `kintsugi_agent` is reused as the reader role on the knowledge store, with its own password.
+  - Corrections to the research:
+    - `nomic-embed-text` has a 2048-token model context;
+    - Ollama embeddings come from `spring-ai-starter-model-ollama` with `spring.ai.model.embedding=ollama`.
+  - Open for T4: the spec's mismatch guard compares only the model name and dimensions. mcp-tools could also compare the digest by reading Ollama's `/api/tags`; decide in T4 and update the spec.
+
 ## Next step
 
-T1, via a delegated writer.
+T2 (the knowledge store), via a delegated writer.

@@ -1,0 +1,186 @@
+# Knowledge Base Specification
+
+## Purpose
+
+The knowledge base is what the agent searches to learn what a symptom means and where to look: the service runbooks in `docs/runbooks/`, split into sections and embedded for semantic search. It has two parts: a pgvector store holding the `knowledge` database, and a one-shot indexer, the `knowledge/` module, that fills it. mcp-tools reads it through `search_runbooks` ([mcp-tools spec](../mcp-tools/spec.md)). Design: [feature document](../../../odd/tasks/runbook-rag.md) and [ADR-002](../../../docs/adr/ADR-002-pgvector-knowledge-base.md).
+
+## Shared rules
+
+| Rule | Value |
+|------|-------|
+| Store image | `pgvector/pgvector:0.8.7-pg18-trixie`, pinned by digest; a container separate from the lab's `postgres` |
+| Database | `knowledge`, with `CONNECT` revoked from `PUBLIC` |
+| Extension | `vector`, created by the init script as the bootstrap superuser (it is not a trusted extension) |
+| Roles | `knowledge_indexer` (owns and writes the tables), `kintsugi_agent` (reads only) |
+| Index | HNSW, cosine distance (`vector_cosine_ops`), on `embedding vector(<dimensions>)` |
+| Schema owner | the init script; Spring AI never creates it (`spring.ai.vectorstore.pgvector.initialize-schema=false`) |
+| Embedding model | configurable: name (default `nomic-embed-text`), dimensions (default 768), document prefix (default `search_document: `), query prefix (default `search_query: `) |
+| Indexed files | `docs/runbooks/*.md` only, read from a read-only mount of that directory |
+| Leakage pattern | `\bF[1-8]\b|fault|inject`, case-insensitive: the runbook authoring rule's check |
+| Chunk metadata | `service`, `section`, `source`, `content_hash` |
+
+## Requirements
+
+### Requirement: The store is isolated from the lab and the truth
+
+The knowledge store MUST run in its own container, separate from the lab's `postgres`, so that a fault on the lab's database does not affect it. It MUST hold no lab data and no copy of the `faults` database, and none of its roles MUST hold credentials for the lab's server.
+
+#### Scenario: Lab database down
+- GIVEN the lab's `postgres` container is stopped
+- WHEN `kintsugi_agent` connects to the `knowledge` database
+- THEN the connection succeeds and the chunks can be read
+
+#### Scenario: No faults database
+- WHEN the databases of the knowledge store are listed
+- THEN `faults` is not among them
+
+#### Scenario: Closed to PUBLIC
+- GIVEN a role with no explicit `CONNECT` grant on `knowledge`
+- WHEN it tries to connect to `knowledge`
+- THEN the connection is refused for lack of `CONNECT` permission
+
+### Requirement: Roles are unprivileged and the agent reads only
+
+Neither `knowledge_indexer` nor `kintsugi_agent` MUST be a superuser, and neither MUST be able to create databases or roles. `kintsugi_agent` MUST have `CONNECT` on `knowledge` and `SELECT` on its tables, and no other privilege. Only `knowledge_indexer` MUST be able to write the tables.
+
+#### Scenario: Not superusers
+- WHEN `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname IN ('knowledge_indexer', 'kintsugi_agent')` runs
+- THEN both rows have all three columns false
+
+#### Scenario: Agent cannot write
+- WHEN `kintsugi_agent` runs `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on any table of `knowledge`
+- THEN the statement fails for lack of permission
+
+#### Scenario: Agent cannot change the schema
+- WHEN `kintsugi_agent` runs `CREATE TABLE` or `DROP INDEX` in `knowledge`
+- THEN the statement fails for lack of permission
+
+#### Scenario: Agent reads the chunks
+- GIVEN the index holds chunks
+- WHEN `kintsugi_agent` selects from the chunk table and the index metadata table
+- THEN both queries succeed
+
+#### Scenario: Extension already present
+- GIVEN a fresh volume after the init script ran
+- WHEN `SELECT extversion FROM pg_extension WHERE extname = 'vector'` runs in `knowledge`
+- THEN the result is `0.8.7`, and neither application role had to create it
+
+### Requirement: Only the runbooks are indexed
+
+The indexer MUST read only files matching `docs/runbooks/*.md`. It MUST NOT read or index any other path, including `openspec/`, `odd/` and subdirectories of `docs/runbooks/`. It MUST see only a read-only mount of `docs/runbooks/`.
+
+#### Scenario: Allowed files
+- GIVEN `docs/runbooks/` holds `README.md` and the four service runbooks
+- WHEN the indexer runs
+- THEN the `source` of every stored chunk is one of those five paths
+
+#### Scenario: Other files ignored
+- GIVEN the mounted directory also holds `notes.txt` and `drafts/extra.md`
+- WHEN the indexer runs
+- THEN no chunk has either as its `source`
+
+#### Scenario: Read-only source
+- WHEN the indexer runs
+- THEN it writes nothing under the mounted runbooks directory
+
+### Requirement: The leakage gate stops the run
+
+Before embedding anything, the indexer MUST scan every allowed file for the leakage pattern. The README's own "Authoring rule" section, which states the rule, is exempt from the scan and MUST NOT be indexed. Any other match MUST stop the run with a non-zero exit code, name the file and line, and leave the index unchanged.
+
+#### Scenario: Clean runbooks
+- GIVEN no allowed file matches the pattern outside the README's "Authoring rule" section
+- WHEN the indexer runs
+- THEN it indexes the files and exits with code 0
+
+#### Scenario: A runbook names a fault
+- GIVEN `docs/runbooks/order-service.md` contains the line "This is fault F3"
+- WHEN the indexer runs
+- THEN it exits with a non-zero code, naming `docs/runbooks/order-service.md` and the line number
+- AND no embedding is requested and no row is written or deleted
+
+#### Scenario: Case and word forms
+- GIVEN a runbook contains "Injected latency" or "FAULT"
+- WHEN the indexer runs
+- THEN the gate stops the run
+
+#### Scenario: Authoring rule is not indexed
+- WHEN the indexer completes
+- THEN no chunk has `section` "Authoring rule"
+
+### Requirement: Chunks carry their metadata
+
+The indexer MUST split each file by Markdown heading, then split any section longer than the splitter's token limit. Every chunk MUST carry:
+
+| Field | Value |
+|-------|-------|
+| `service` | the file name without `.md` when it is one of the allowed services (`order-service`, `payment-service`, `inventory-service`, `gateway-mock`); absent for `README.md` |
+| `section` | the text of the chunk's heading |
+| `source` | the repository-relative path, such as `docs/runbooks/order-service.md` |
+| `content_hash` | the SHA-256 of the whole file's content when it was indexed |
+
+#### Scenario: A service runbook section
+- WHEN `docs/runbooks/inventory-service.md` is indexed
+- THEN each of its chunks has `service` `inventory-service`, `source` `docs/runbooks/inventory-service.md`, the heading of its section as `section`, and the file's `content_hash`
+
+#### Scenario: Long section
+- GIVEN a section longer than the splitter's token limit
+- WHEN it is indexed
+- THEN it becomes several chunks, each with the same `service`, `section` and `source`
+
+### Requirement: Unchanged files are skipped
+
+The indexer MUST compare each file's content hash with the stored one. An unchanged file MUST NOT be embedded again. A changed file MUST have all its old chunks replaced. A file no longer present MUST have its chunks removed.
+
+#### Scenario: Second run with no changes
+- GIVEN the index was built from the current runbooks
+- WHEN the indexer runs again
+- THEN no embedding is requested and the chunk rows are unchanged
+
+#### Scenario: One file changed
+- GIVEN only `docs/runbooks/gateway-mock.md` changed since the last run
+- WHEN the indexer runs
+- THEN only that file is embedded, its old chunks are gone and its new chunks carry the new `content_hash`
+
+#### Scenario: File removed
+- GIVEN a runbook present at the last run is deleted
+- WHEN the indexer runs
+- THEN no chunk has that `source`
+
+### Requirement: The index records its model
+
+The index metadata table MUST hold the embedding model's name, its digest and the dimensions the chunks were embedded with. The indexer MUST write them on every run that changes the chunks. A run whose configured model, digest or dimensions differ from the recorded ones MUST re-embed every file, not only the changed ones.
+
+#### Scenario: Metadata after a run
+- WHEN the indexer completes with the default configuration
+- THEN the metadata table holds `nomic-embed-text`, digest `0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f` and dimensions 768
+
+#### Scenario: Model changed
+- GIVEN the index was built with `nomic-embed-text`
+- WHEN the indexer runs with another model configured
+- THEN every file is embedded again, even with unchanged content hashes
+- AND the metadata table holds the new model
+
+#### Scenario: Dimensions differ from the column
+- GIVEN the configured dimensions differ from the `vector` column's
+- WHEN the indexer runs
+- THEN it stops with a non-zero code before embedding, stating both numbers
+
+### Requirement: Documents are embedded with the document prefix
+
+The indexer MUST send each chunk to the embedding model as the configured document prefix followed by the chunk text (`search_document: <text>` by default). The stored `content` MUST be the chunk text without the prefix.
+
+#### Scenario: Prefix sent, not stored
+- GIVEN a fake embedding model that records its inputs
+- WHEN a chunk with text "Key signals" is indexed
+- THEN the model receives `search_document: Key signals`
+- AND the stored `content` is `Key signals`
+
+### Requirement: An Ollama failure leaves the index consistent
+
+When the embedding model cannot be reached or fails, the indexer MUST exit with a non-zero code and MUST NOT leave a file half-indexed: a file's old chunks and metadata are replaced only after all its new embeddings were computed.
+
+#### Scenario: Ollama down
+- GIVEN Ollama is unreachable
+- WHEN the indexer runs on a changed runbook
+- THEN it exits with a non-zero code naming the embedding model
+- AND the old chunks of that runbook are still in the index

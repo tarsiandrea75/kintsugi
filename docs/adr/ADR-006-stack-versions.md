@@ -23,6 +23,8 @@ Versions:
 - **JUnit 6.0.3**, managed by Spring Boot.
 - **Ollama >= 0.4.6** (local install: 0.34.4).
 
+> **Correction, 2026-10-08:** the local install is Ollama **0.31.1** (`ollama --version`), not 0.34.4 as written above. The minimum of 0.4.6 is unchanged. Found while writing [ADR-002](ADR-002-pgvector-knowledge-base.md).
+
 Runtime defaults in `agent/src/main/resources/application.yaml`:
 
 - `spring.ai.retry.max-attempts: 0`. The default is 10 retries with exponential backoff up to 180 s. A refused connection on localhost means the server is down, so retrying only delays the error.
