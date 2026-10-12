@@ -202,6 +202,19 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - **The wiring works; the budgets do not fit this laptop's CPU.** That needs the human's decision before T5.
   - **Size exception:** Part B is about 2,470 lines (1,310 main, 1,015 tests). The writer proposed a split (B1: router, schemas, checks, prompts; B2: loop, repository and wiring). The parent committed it whole, as one cohesive behaviour; the review covers the range.
 
+- 2026-10-08: T4 range reviewed (medium risk, reliability lens), approved and acknowledged (`review-d81f547c033875bb`). Folded into T5 part A:
+  - WARNING: the global 90 s read timeout also hits the demo profile's cold first call;
+  - an `Error` in `run()` skips `finish()` and leaves the incident `RUNNING`;
+  - the full-queue rejection is untested;
+  - a null tool name can throw in `contains`.
+- 2026-10-12: **the human decided the budgets** against the measured CPU latency (42–84 s per call):
+  - fewer calls: the plan merges into the first `ACT` call of each phase, so there are no separate `PLAN` calls and about 8–10 calls per run;
+  - 180 s per model call;
+  - 30 minutes per incident;
+  - a model warm-up before each run.
+
+  The spec and ADR-010 change in T5 part A.
+
 ## Next step
 
-Review the T4 range. Then the human decides the budgets against the measured CPU latency, before T5.
+T5 on `feat/agent-loop-04-check`: part A covers the budget change and the T4 review fixes; part B covers compose wiring, neutral traffic ids, and `verify-agent.sh` run for real.
