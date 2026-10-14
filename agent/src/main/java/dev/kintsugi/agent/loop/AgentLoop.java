@@ -235,18 +235,23 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		AssistantMessage lastAnswer = null;
 		List<ToolResponse> lastResponses = List.of();
 		while (phaseLeft > 0 && run.toolsLeft > 0) {
-			List<Message> messages = new ArrayList<>();
-			messages.add(run.system);
-			messages.add(new UserMessage(Prompts.act(run.state(phase, phaseLeft, lastResponses.size()), lastAnswer == null)));
+			boolean withPlan = lastAnswer == null;
+			// What changes least comes first, so that Ollama reuses the prompt it has already read: the system
+			// message, the evidence before the previous answer, which only grows, then the previous answer's calls
+			// and what they gave, as the model expects tool results, and last the instruction with the budgets left.
+			List<Message> messages = run.opening(lastResponses.size());
 			if (lastAnswer != null) {
-				// The previous answer's calls and what they gave, as the model expects tool results.
 				messages.add(lastAnswer);
 				messages.add(ToolResponseMessage.builder().responses(lastResponses).build());
 			}
-			Answer answer = call(run, ModelTask.ACT, phase, messages, tools, null);
+			messages.add(new UserMessage(Prompts.act(run.state(phase, phaseLeft), withPlan)));
+			Answer answer = call(run, ModelTask.ACT, phase, withPlan, messages, tools, null);
 			List<ToolCall> calls = answer.message().getToolCalls();
 			String note = calls.isEmpty() ? "no tool call; the phase ends" : calls.size() + " tool call(s)";
-			if (lastAnswer == null) {
+			if (answer.cut()) {
+				note += "; answer cut at " + answer.cap() + " tokens";
+			}
+			if (withPlan) {
 				note += "; " + plan(run, phase, answer.text());
 			}
 			write(run, new StepRow(run.steps + 1, "ACT", phase.name(), answer.model(), answer.tokens(), null, null,
@@ -330,11 +335,18 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	private String conclude(Run run) {
 		List<String> errors = List.of();
 		for (int attempt = 1; attempt <= 2; attempt++) {
-			Prompts.State state = run.state(Phase.CONCLUDE, 0, 0);
-			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE,
-					List.of(run.system, new UserMessage(Prompts.report(state, errors))), List.of(), Schemas.REPORT);
+			List<Message> messages = run.opening(0);
+			messages.add(new UserMessage(Prompts.report(run.state(Phase.CONCLUDE, 0), errors)));
+			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(), Schemas.REPORT);
 			JsonNode report = Answers.json(answer.text());
 			errors = ReportCheck.errors(report, run.toolSteps);
+			if (!errors.isEmpty() && answer.cut()) {
+				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one.
+				errors = new ArrayList<>(errors);
+				errors.addFirst("the answer was cut at " + answer.cap()
+						+ " tokens before it ended; write a shorter report, with a shorter summary and fewer or shorter "
+						+ "evidence items");
+			}
 			write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), answer.model(), answer.tokens(),
 					null, null, null, null, verdict(errors), answer.text(), answer.latencyMs(), now()));
 			if (errors.isEmpty()) {
@@ -354,11 +366,13 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * One model call, within the model-call budget and the time budgets. A call never waits past its own time budget
-	 * or the incident's, whichever ends first.
+	 * One model call, within the model-call budget and the time budgets, its answer capped by the route's
+	 * {@code num_predict} for the task (the larger cap when the answer carries a plan). A call never waits past its own
+	 * time budget or the incident's, whichever ends first; one it stops waiting for is interrupted, which closes its
+	 * HTTP connection, so that Ollama stops working on it.
 	 */
-	private Answer call(Run run, ModelTask task, Phase phase, List<Message> messages, List<ToolCallback> tools,
-			String outputSchema) {
+	private Answer call(Run run, ModelTask task, Phase phase, boolean withPlan, List<Message> messages,
+			List<ToolCallback> tools, String outputSchema) {
 		checkTime(run);
 		if (run.modelCalls >= this.settings.maxModelCalls()) {
 			throw new RunEnd(IncidentStatus.BUDGET_EXCEEDED,
@@ -366,7 +380,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 		run.modelCalls++;
 		ModelRoute route = this.router.route(task);
-		Prompt prompt = new Prompt(messages, route.options(tools, outputSchema));
+		int cap = route.numPredict().of(task, withPlan);
+		Prompt prompt = new Prompt(messages, route.options(cap, tools, outputSchema));
 		Duration incidentLeft = this.settings.incidentTimeout().minus(elapsed(run));
 		boolean incidentBound = incidentLeft.compareTo(route.callTimeout()) < 0;
 		Duration limit = incidentBound ? incidentLeft : route.callTimeout();
@@ -397,9 +412,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 		AssistantMessage message = response.getResult().getOutput();
 		Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
+		// Ollama's done_reason "length": the answer reached its cap and was cut.
+		boolean cut = response.getResult().getMetadata() != null
+				&& "length".equalsIgnoreCase(response.getResult().getMetadata().getFinishReason());
 		return new Answer(message, message.getText() == null ? "" : message.getText(),
 				usage == null ? null : usage.getTotalTokens(), route.model(),
-				(int) ((System.nanoTime() - start) / 1_000_000));
+				(int) ((System.nanoTime() - start) / 1_000_000), cut, cap);
 	}
 
 	/** Ends the run {@code TIMED_OUT} once the incident has used up its time budget. */
@@ -560,15 +578,31 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			this.system = new SystemMessage(Prompts.system(incident.symptom(), incident.sinceMinutes()));
 		}
 
-		/** The state for a prompt; the newest {@code inToolResponse} summaries travel in the tool-response message. */
-		Prompts.State state(Phase phase, int phaseLeft, int inToolResponse) {
-			return new Prompts.State(phase, phaseLeft, this.toolsLeft, this.plan,
-					List.copyOf(this.evidence.subList(0, this.evidence.size() - inToolResponse)));
+		/** The parts of the state the instruction shows. */
+		Prompts.State state(Phase phase, int phaseLeft) {
+			return new Prompts.State(phase, phaseLeft, this.toolsLeft, this.plan);
+		}
+
+		/**
+		 * The prompt's opening, which only grows from call to call: the system message, then the evidence message
+		 * when there is any. The newest {@code inToolResponse} summaries are left out: they travel in the
+		 * tool-response message after the previous answer.
+		 */
+		List<Message> opening(int inToolResponse) {
+			List<Message> messages = new ArrayList<>();
+			messages.add(this.system);
+			String evidence = Prompts.evidence(this.evidence.subList(0, this.evidence.size() - inToolResponse));
+			if (evidence != null) {
+				messages.add(new UserMessage(evidence));
+			}
+			return messages;
 		}
 
 	}
 
-	private record Answer(AssistantMessage message, String text, Integer tokens, String model, int latencyMs) {
+	/** A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. */
+	private record Answer(AssistantMessage message, String text, Integer tokens, String model, int latencyMs,
+			boolean cut, int cap) {
 	}
 
 	/** Ends the run with a status other than {@code COMPLETED}, and its reason. */

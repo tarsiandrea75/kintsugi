@@ -9,7 +9,7 @@ public class OllamaModelRouter implements ModelRouter {
 
 	public OllamaModelRouter(ChatModel chatModel, ModelRouteProperties properties) {
 		this.route = new ModelRoute(properties.name(), chatModel, properties.temperature(), properties.numCtx(),
-				properties.callTimeout());
+				properties.callTimeout(), properties.numPredict());
 	}
 
 	@Override

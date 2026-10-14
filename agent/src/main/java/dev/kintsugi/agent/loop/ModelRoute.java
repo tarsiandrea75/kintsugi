@@ -16,18 +16,22 @@ import org.springframework.ai.tool.ToolCallback;
  * @param temperature the sampling temperature
  * @param numCtx the context window, in tokens
  * @param callTimeout how long one call may take before the run ends {@code TIMED_OUT}
+ * @param numPredict the most tokens an answer may hold, per kind of call
  */
-public record ModelRoute(String model, ChatModel chatModel, double temperature, int numCtx, Duration callTimeout) {
+public record ModelRoute(String model, ChatModel chatModel, double temperature, int numCtx, Duration callTimeout,
+		NumPredict numPredict) {
 
 	/**
-	 * The options of one call: the route's settings, the tool definitions offered (none for the report) and, for the
-	 * report, the JSON schema the answer is constrained by. In M2 every route is Ollama's.
+	 * The options of one call: the route's settings, the answer's cap ({@code num_predict}), the tool definitions
+	 * offered (none for the report) and, for the report, the JSON schema the answer is constrained by. In M2 every
+	 * route is Ollama's.
 	 */
-	public ChatOptions options(List<ToolCallback> tools, String outputSchema) {
+	public ChatOptions options(int answerCap, List<ToolCallback> tools, String outputSchema) {
 		OllamaChatOptions.Builder options = OllamaChatOptions.builder()
 			.model(this.model)
 			.temperature(this.temperature)
 			.numCtx(this.numCtx)
+			.numPredict(answerCap)
 			.toolCallbacks(tools);
 		if (outputSchema != null) {
 			options.outputSchema(outputSchema);

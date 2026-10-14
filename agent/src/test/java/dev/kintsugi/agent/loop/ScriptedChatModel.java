@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.AssistantMessage.ToolCall;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -76,6 +77,18 @@ final class ScriptedChatModel implements ChatModel {
 			sleep(delay);
 			return response(AssistantMessage.builder().content("").toolCalls(List.of(calls)).build());
 		});
+		return this;
+	}
+
+	/**
+	 * Answers {@code text} and these tool calls, cut at the answer's cap: Ollama's {@code done_reason} is
+	 * {@code length}, as when the model runs on until {@code num_predict} stops it.
+	 */
+	ScriptedChatModel cut(String text, ToolCall... calls) {
+		AssistantMessage message = AssistantMessage.builder().content(text).toolCalls(List.of(calls)).build();
+		this.script.add(prompt -> new ChatResponse(
+				List.of(new Generation(message, ChatGenerationMetadata.builder().finishReason("length").build())),
+				ChatResponseMetadata.builder().usage(new DefaultUsage(10, 5)).build()));
 		return this;
 	}
 

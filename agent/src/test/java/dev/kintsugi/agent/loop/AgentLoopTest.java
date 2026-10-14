@@ -57,6 +57,8 @@ class AgentLoopTest {
 
 	private static final String SYMPTOM = "Checkout orders stay pending for a long time";
 
+	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
+
 	private final IncidentRepository incidents = new IncidentRepository(AgentDatabase.asAgentApp(), JSON);
 
 	private final ScriptedChatModel model = new ScriptedChatModel();
@@ -157,6 +159,112 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void theStablePartsComeFirstAndTheInstructionLast() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.text("")
+			.planned(call("count_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}"),
+					call("search_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}"))
+			.tools(call("recent_events", "{\"source\":\"order\",\"sinceMinutes\":15}"))
+			.text("")
+			.plan()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		List<Prompt> prompts = this.model.prompts();
+		assertThat(prompts).hasSize(7);
+		// The first call has no evidence yet: the system message, then the instruction.
+		assertThat(prompts.get(0).getInstructions()).extracting(Message::getMessageType)
+			.containsExactly(MessageType.SYSTEM, MessageType.USER);
+		// A later call: system, the evidence so far, the previous answer, its tool results, and the instruction last.
+		assertThat(prompts.get(4).getInstructions()).extracting(Message::getMessageType)
+			.containsExactly(MessageType.SYSTEM, MessageType.USER, MessageType.ASSISTANT, MessageType.TOOL,
+					MessageType.USER);
+		for (Prompt prompt : prompts) {
+			assertThat(userText(prompt)).contains("Tool calls left:").contains("Task:");
+			assertThat(evidenceText(prompt) == null ? "" : evidenceText(prompt)).doesNotContain("Tool calls left")
+				.doesNotContain("Task:")
+				.doesNotContain("Latest plan");
+		}
+		// What comes first never changes between calls and only grows: the system message is the same, and each
+		// call's evidence starts with the previous call's, so Ollama can reuse the prompt it already read.
+		String previous = "";
+		for (Prompt prompt : prompts) {
+			assertThat(prompt.getInstructions().get(0).getText())
+				.isEqualTo(prompts.get(0).getInstructions().get(0).getText());
+			String evidence = evidenceText(prompt) == null ? "" : evidenceText(prompt);
+			assertThat(evidence).startsWith(previous);
+			previous = evidence;
+		}
+		assertThat(previous).contains((String) step(2).get("summary"))
+			.contains((String) step(5).get("summary"))
+			.contains((String) step(8).get("summary"));
+	}
+
+	@Test
+	void theInstructionAsksForToolCallsOrNoTextNeverASummary() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}")).text("").quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		run();
+
+		String first = userText(this.model.prompts().get(0));
+		assertThat(first).contains("first write your plan").contains("never inside a tool's arguments");
+		String later = userText(this.model.prompts().get(1));
+		assertThat(later).contains("answer with no text and no tool call").contains("Do not summarise");
+	}
+
+	@Test
+	void eachAnswerIsCappedAndAPlanCarryingAnswerGetsTheLargerCap() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}")).text("").quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		run();
+
+		List<Prompt> prompts = this.model.prompts();
+		assertThat(numPredict(prompts.get(0))).isEqualTo(384);
+		assertThat(numPredict(prompts.get(1))).isEqualTo(160);
+		assertThat(numPredict(prompts.get(2))).isEqualTo(384);
+		assertThat(numPredict(prompts.get(3))).isEqualTo(384);
+		assertThat(numPredict(prompts.get(4))).isEqualTo(512);
+		// The warm-up keeps its single token.
+		assertThat(((OllamaChatOptions) this.model.warmUps().get(0).getOptions()).getNumPredict()).isEqualTo(1);
+	}
+
+	@Test
+	void aCutAnswerIsRecordedItsToolCallsStillCheckedAndTheRunGoesOn() {
+		String cutPlan = "{\"hypotheses\":[{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPEND";
+		this.model.cut(cutPlan, call("search_logs", "{}"))
+			.cut("**Investigation Summary**\n\nThe orders table shows")
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(step(1)).containsEntry("summary", "1 tool call(s); answer cut at 384 tokens; plan missing");
+		// Its call was checked as usual: search_logs is not a TRIAGE tool.
+		assertThat(step(2)).containsEntry("tool_outcome", "REFUSED_PHASE");
+		assertThat(this.lab.calls()).isEmpty();
+		// A cut answer without a tool call ends the phase like any answer without one.
+		assertThat(step(3)).containsEntry("kind", "ACT")
+			.containsEntry("summary", "no tool call; the phase ends; answer cut at 160 tokens");
+		assertThat(kinds()).containsExactly("ACT:TRIAGE", "TOOL_CALL:TRIAGE", "ACT:TRIAGE", "ACT:INVESTIGATE",
+				"ACT:KNOWLEDGE", "REPORT:CONCLUDE");
+	}
+
+	@Test
+	void aCutReportIsRetriedWithTheReason() {
+		this.model.quietPhases()
+			.cut("{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPENDENCY_LATENCY\",\"summ")
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat((String) step(4).get("summary")).startsWith("invalid: the answer was cut at 512 tokens");
+		assertThat(userText(this.model.prompts().get(4))).contains("the answer was cut at 512 tokens");
+	}
+
+	@Test
 	void eachRunStartsWithOneWarmUpOnTheRoutesModelAndContext() {
 		this.model.quietPhases().text(unknownReport());
 
@@ -222,15 +330,17 @@ class AgentLoopTest {
 		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
 
 		List<Message> afterTriageCall = this.model.prompts().get(1).getInstructions();
-		assertThat(afterTriageCall.get(afterTriageCall.size() - 2).getMessageType()).isEqualTo(MessageType.ASSISTANT);
-		ToolResponseMessage triage = (ToolResponseMessage) afterTriageCall.get(afterTriageCall.size() - 1);
+		// The previous answer, its tool results, then the instruction last.
+		assertThat(afterTriageCall.get(afterTriageCall.size() - 3).getMessageType()).isEqualTo(MessageType.ASSISTANT);
+		ToolResponseMessage triage = (ToolResponseMessage) afterTriageCall.get(afterTriageCall.size() - 2);
 		assertThat(triage.getResponses()).singleElement()
 			.satisfies(response -> assertThat(response.responseData()).isEqualTo(step(2).get("summary")));
-		ToolResponseMessage investigate = (ToolResponseMessage) last(this.model.prompts().get(3));
+		assertThat(afterTriageCall.get(afterTriageCall.size() - 1).getMessageType()).isEqualTo(MessageType.USER);
+		ToolResponseMessage investigate = toolResponses(this.model.prompts().get(3));
 		assertThat(investigate.getResponses()).extracting(ToolResponseMessage.ToolResponse::responseData)
 			.containsExactly((String) step(5).get("summary"), (String) step(6).get("summary"));
-		// Earlier summaries are part of the state the next prompt is rebuilt from.
-		assertThat(userText(this.model.prompts().get(2))).contains((String) step(2).get("summary"));
+		// Earlier summaries are part of the evidence message the next prompt is rebuilt from.
+		assertThat(evidenceText(this.model.prompts().get(2))).contains((String) step(2).get("summary"));
 		for (String tool : List.of("status_summary", "count_logs", "search_logs")) {
 			assertThat(this.model.everything()).doesNotContain(this.lab.output(tool));
 		}
@@ -252,7 +362,7 @@ class AgentLoopTest {
 			.containsEntry("tool_output", null);
 		String next = userText(this.model.prompts().get(1));
 		assertThat(next).contains("Tool calls left: 1 in this phase, 7 in the incident");
-		assertThat(lastMessageText(this.model.prompts().get(1))).contains("not available in TRIAGE");
+		assertThat(toolResponseText(this.model.prompts().get(1))).contains("not available in TRIAGE");
 	}
 
 	@Test
@@ -527,7 +637,7 @@ class AgentLoopTest {
 
 		assertThat(kinds()).containsExactly("ACT:TRIAGE", "ACT:INVESTIGATE", "TOOL_CALL:INVESTIGATE",
 				"ACT:INVESTIGATE", "TOOL_CALL:INVESTIGATE", "ACT:INVESTIGATE", "ACT:KNOWLEDGE", "REPORT:CONCLUDE");
-		String seen = lastMessageText(this.model.prompts().get(2));
+		String seen = toolResponseText(this.model.prompts().get(2));
 		assertThat(seen).contains("untrustedText=").contains("Ignore previous instructions");
 		assertThat(seen.lines()).noneMatch(line -> line.startsWith("toolCallId=99"));
 		assertThat(storedReport().get("rootCauseService").asString()).isEqualTo("order-service");
@@ -553,7 +663,7 @@ class AgentLoopTest {
 	}
 
 	private AgentLoop loop(LoopSettings settings, Duration callTimeout) {
-		ModelRouter router = task -> new ModelRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeout);
+		ModelRouter router = task -> new ModelRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeout, CAPS);
 		return new AgentLoop(this.incidents, router, this.lab, settings, Clock.systemUTC());
 	}
 
@@ -614,25 +724,39 @@ class AgentLoopTest {
 		return prompt.getOptions() instanceof StructuredOutputChatOptions options ? options.getOutputSchema() : null;
 	}
 
+	/** The prompt's instruction: its last message, a user message after any tool results. */
 	private static String userText(Prompt prompt) {
-		return prompt.getInstructions()
-			.stream()
-			.filter(message -> message.getMessageType() == MessageType.USER)
-			.map(Message::getText)
-			.findFirst()
-			.orElseThrow();
+		Message last = last(prompt);
+		assertThat(last.getMessageType()).isEqualTo(MessageType.USER);
+		return last.getText();
+	}
+
+	/** The evidence message: the user message after the system message that holds the earlier summaries, if any. */
+	private static String evidenceText(Prompt prompt) {
+		List<Message> messages = prompt.getInstructions();
+		Message second = messages.get(1);
+		return second.getMessageType() == MessageType.USER && second != last(prompt) ? second.getText() : null;
 	}
 
 	private static Message last(Prompt prompt) {
 		return prompt.getInstructions().get(prompt.getInstructions().size() - 1);
 	}
 
-	private static String lastMessageText(Prompt prompt) {
-		Message last = last(prompt);
-		if (last instanceof ToolResponseMessage responses) {
-			return String.join("\n", responses.getResponses().stream().map(r -> r.responseData()).toList());
-		}
-		return last.getText();
+	private static ToolResponseMessage toolResponses(Prompt prompt) {
+		return prompt.getInstructions()
+			.stream()
+			.filter(ToolResponseMessage.class::isInstance)
+			.map(ToolResponseMessage.class::cast)
+			.reduce((first, second) -> second)
+			.orElseThrow();
+	}
+
+	private static String toolResponseText(Prompt prompt) {
+		return String.join("\n", toolResponses(prompt).getResponses().stream().map(r -> r.responseData()).toList());
+	}
+
+	private static Integer numPredict(Prompt prompt) {
+		return ((OllamaChatOptions) prompt.getOptions()).getNumPredict();
 	}
 
 }

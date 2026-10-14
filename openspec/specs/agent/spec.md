@@ -10,8 +10,8 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 | Rule | Value |
 |------|-------|
-| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` 180 s), every call carrying these options. The loop stops waiting for a call at its timeout itself |
-| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longer of `call-timeout` and `warm-up-timeout` (300 s), so the HTTP client never cuts a request before the loop's own deadline does. The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
+| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` 180 s, `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its timeout itself, and aborts it ("An abandoned call is aborted") |
+| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longer of `call-timeout` and `warm-up-timeout` (300 s), so the HTTP client never cuts a request before the loop's own deadline does. The same customizer buffers the request body, so every request to Ollama carries a `Content-Length` ("An abandoned call is aborted"). The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
 | Tool execution | the loop calls `ChatModel` directly (in Spring AI 2.0.1 it never executes tools) and runs each checked tool call itself through the `LabTools` port: the model is offered the MCP `ToolCallback`s' definitions, wrapped so that they cannot be executed, and each call goes to the `McpSyncClient` directly, because the MCP `ToolCallback` throws on a tool error (`isError`) and re-serializes the content, which would lose the `INVALID_PARAMETER` or `UPSTREAM_ERROR` output |
 | MCP client | `spring-ai-starter-mcp-client`, `SYNC`, one Streamable HTTP connection `kintsugi` (`spring.ai.mcp.client.streamable-http.connections.kintsugi`) to `${KINTSUGI_MCP_URL:http://127.0.0.1:18085}`, endpoint `/mcp`, request timeout 20 s (the default). `spring.ai.mcp.client.initialized=false`: the starter would otherwise send `initialize` while the context starts and fail the start when mcp-tools is down; uninitialized, the client initializes on its first request and tries again on the next one after a failure. Tool names keep no prefix |
 | Structured output | the report call carries its JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned. The plan travels in the text of a call that offers tools, which Ollama cannot also constrain by a schema, so code alone checks it ("The plan") |
@@ -176,8 +176,8 @@ The definitions of a phase's tools are listed at the start of the phase, before 
 #### Scenario: The model sees a tool result
 - GIVEN the model requested `status_summary` in `TRIAGE` and the call ran
 - WHEN the loop calls the model again in that phase
-- THEN the prompt ends with the model's previous answer and a tool-response message holding that call's summary
-- AND the summaries of earlier answers are in the state the prompt is rebuilt from
+- THEN the prompt holds the model's previous answer and a tool-response message with that call's summary, followed by the instruction message
+- AND the summaries of earlier answers are in the evidence message the prompt is rebuilt from
 
 #### Scenario: Phase ends without a tool call
 - GIVEN the loop is in `INVESTIGATE` after one tool call
@@ -202,7 +202,7 @@ The first model call of `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE` MUST ask for the
 
 No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A valid plan becomes the latest plan, shown in the phase's later prompts and the next phases'.
 
-A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked for again; the answer's tool calls are checked and run as usual. Why: the plan steers the model and is recorded for the evals, but it authorizes nothing, since code checks every tool call against the phase and the budgets whatever the plan says; a retry would cost a model call, the cost this design removes; and a small model that answers with tool calls may leave the text empty, which must not cost a diagnosis. The `PLAN` step kind stays allowed by the table's `CHECK` but is no longer written.
+A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked for again; the answer's tool calls are checked and run as usual. A plan cut by the answer's cap ("Answer caps") is no exception: it is recorded `plan missing` or `plan invalid`, like any other. Why: the plan steers the model and is recorded for the evals, but it authorizes nothing, since code checks every tool call against the phase and the budgets whatever the plan says; a retry would cost a model call, the cost this design removes; and a small model that answers with tool calls may leave the text empty, which must not cost a diagnosis. The `PLAN` step kind stays allowed by the table's `CHECK` but is no longer written.
 
 #### Scenario: Plan and tool calls in one answer
 - GIVEN the loop starts `TRIAGE`
@@ -245,6 +245,50 @@ Which units a tool call consumes is fixed in "Phases and their tools": a call re
 - GIVEN the run has lasted 30 minutes since its warm-up ended
 - WHEN the loop is about to start another model or tool call
 - THEN the run ends `TIMED_OUT` instead
+
+### Requirement: Answer caps
+
+Every model call MUST carry Ollama's `num_predict`, the most tokens its answer may hold, from `kintsugi.agent.model.num-predict` **(chosen, T5c)**:
+
+| Call | Cap | Why |
+|------|-----|-----|
+| a phase's first `ACT` answer (`first-act`) | 384 | it carries the plan and its tool calls. The first full run (2026-10-14) measured plans of 681 to 695 characters, about 170 to 200 tokens, with one tool call; 384 leaves about twice that. At the measured 2.9 tokens/s it takes at most about 130 s, inside the 180 s call |
+| a later `ACT` answer (`act`) | 160 | it only requests tool calls, or ends the phase with no text. The same run measured 30 to 66 tokens for one or two calls; 160 holds four, the most a phase allows, in about 55 s. The answer that passed 180 s was a 650 to 800-token Markdown summary of the tool results |
+| a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, about all one call can hold anyway. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
+| the warm-up | 1 | "The warm-up" |
+
+Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:
+
+- a cut `ACT` answer is recorded with `answer cut at <cap> tokens` in its step's `summary` (after the tool-call count, before the plan's verdict), and its tool calls, if any, are checked and run as usual; with no tool call it ends the phase, like any answer without one;
+- a cut `REPORT` answer that fails the schema or the evidence check gets, first in its list of errors, `the answer was cut at <cap> tokens before it ended; write a shorter report, ...`; the retry rules of "Evidence is checked" apply unchanged. A cut answer that still passes both checks is accepted.
+
+#### Scenario: Caps by call
+- WHEN a run makes a phase's first `ACT` call, a later `ACT` call and a report call
+- THEN they carry `num_predict` 384, 160 and 512, and the warm-up 1
+
+#### Scenario: A cut answer that summarises
+- GIVEN a later `ACT` answer in `TRIAGE` cut at its cap, with Markdown text and no tool call
+- WHEN the loop records it
+- THEN the `ACT` step's summary is `no tool call; the phase ends; answer cut at 160 tokens`, and the run moves to `INVESTIGATE`
+
+#### Scenario: A cut plan
+- GIVEN a phase's first answer cut in the middle of its plan, with one tool call
+- WHEN the loop records it
+- THEN the step's summary is `1 tool call(s); answer cut at 384 tokens; plan missing`, and the call is checked as usual
+
+#### Scenario: A cut report
+- GIVEN a report answer cut at its cap, so not valid JSON
+- WHEN it is checked
+- THEN its `REPORT` step says `invalid: the answer was cut at 512 tokens ...`, and the retry's prompt carries that error
+
+### Requirement: An abandoned call is aborted
+
+When the loop stops waiting for a model call at its deadline, the call MUST stop in Ollama too: Ollama serves one request at a time, so an abandoned call that runs on delays every later call, the next incident's warm-up included (the first full run: an abandoned call ran 3 min past its 180 s, and the next warm-up waited 2 min 14 s). The loop interrupts the thread of the call, which closes its HTTP connection. Ollama's server (Go `net/http`) notices a client going away only once it has read the request body to its end; its JSON decoder stops at the end of the object, so with a chunked body whose last chunk arrives in a later packet, which is how the default client sent it, it never does, and the call ran to its end (measured on the lab, 2026-10-14: a chunked request whose client closed at 6 s ran 16.7 s to `200`; the same request with a `Content-Length` ended `500` at 6 s). So every request of the loop to Ollama MUST carry a `Content-Length`: the loop's `RestClientCustomizer` buffers the body (`BufferingClientHttpRequestFactory`), a few kilobytes of JSON.
+
+#### Scenario: The connection of an abandoned call is closed
+- GIVEN the agent as the web profile wires it, and an Ollama endpoint that answers the warm-up and never answers the next request
+- WHEN a model call passes its deadline
+- THEN the run ends `TIMED_OUT` within seconds, the hanging request carried a `Content-Length` and no chunked body, and its connection is closed long before the HTTP read timeout
 
 ### Requirement: The warm-up
 
@@ -317,7 +361,7 @@ Every "top N" or "at most N" selection above MUST be deterministic, with no tie 
 - a ranking by frequency (the `search_logs` messages) sorts by count descending, then by the time of the item's first occurrence ascending, then lexicographically by the item's text;
 - a ranking by another value (the 10 lowest `available`, the 3 newest events, the runbook chunks by `score`, the 5 metric series) sorts by that value in its stated direction, then by the time of the item's first occurrence ascending (its position in the output when it has no time), then lexicographically by the item's text (for a series, its labels serialized with the keys sorted). The metric series are ranked by their max value, descending, ignoring `NaN` points (a series with only `NaN` points comes last); a series' first occurrence is its first point's time.
 
-Each model call MUST be built from the incident state (symptom, window, phase, budgets left, latest plan, summaries so far, refusals), not from an accumulated chat history.
+Each model call MUST be built from the incident state (symptom, window, phase, budgets left, latest plan, summaries so far, refusals), not from an accumulated chat history, in the order of "What one call sees".
 
 #### Scenario: Deterministic and capped
 - GIVEN a recorded `search_logs` output of 8 KB
@@ -338,6 +382,26 @@ Each model call MUST be built from the incident state (symptom, window, phase, b
 - GIVEN `search_logs` returns 6 distinct messages, each 3 times, the earliest first seen at 10:00:01 and the others later
 - WHEN the summary is built
 - THEN the message first seen at 10:00:01 comes first, the 5 listed are the 5 seen earliest, and a tie on both count and first time is ordered by the message text
+
+### Requirement: What one call sees
+
+The messages of every model call MUST come in this order, what changes least first **(T5c)**:
+
+1. the system message (role, symptom, window, rules, the two enums), the same for the whole incident;
+2. the evidence message, a user message `Evidence so far, oldest first:` followed by the summaries of the tool steps before the previous answer, refusals included, in step order; absent while there are none;
+3. within a phase after its first call, the previous answer with its tool calls, then one tool-response message with their summaries;
+4. last, the instruction, a user message: the phase, its tools, the tool calls left in the phase and the incident, the latest plan, and the task.
+
+Why: a call's evidence always starts with the previous call's, so the prompt's beginning stays the same from call to call within a phase, and Ollama reuses what it already read instead of reading it again at about 13 tokens/s; before T5c the rebuilt state came first and changed every call, so only the system message and the tool definitions (1,368 tokens) were reused. The instruction comes after the tool results, so the model's next step is to act on it, not to answer the results: before T5c it came before them, and the model wrote a long summary of the results instead of calling tools. The task of a later `ACT` call says to call the phase's tools or answer with no text and no tool call, and not to summarise or explain the results; the plan's task says that the plan goes in the text, never inside a tool's arguments (the first full run found it there).
+
+#### Scenario: The instruction comes last
+- GIVEN a call within a phase after the model's first answer
+- WHEN the loop builds it
+- THEN its messages are system, evidence, the previous answer, the tool results and the instruction, in that order, and only the instruction states the calls left and the task
+
+#### Scenario: The beginning of the prompt only grows
+- WHEN a run makes several model calls
+- THEN every call has the same system message, and each call's evidence message starts with the previous call's
 
 ### Requirement: The report
 

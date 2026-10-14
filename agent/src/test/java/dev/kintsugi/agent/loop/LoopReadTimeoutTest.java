@@ -74,7 +74,7 @@ class LoopReadTimeoutTest {
 	}
 
 	private static ModelRouteProperties route(Duration callTimeout) {
-		return new ModelRouteProperties("granite4.1:8b", 0, 8192, callTimeout);
+		return new ModelRouteProperties("granite4.1:8b", 0, 8192, callTimeout, new NumPredict(384, 160, 512));
 	}
 
 	private static LoopSettings loop(Duration warmUpTimeout) {

@@ -7,8 +7,10 @@ import tools.jackson.databind.json.JsonMapper;
 import dev.kintsugi.agent.lab.Phase;
 
 /**
- * The texts the model reads (agent spec, "Untrusted text is data", "Summaries built in code"). Each call is rebuilt
- * from the incident's state, never from an accumulated chat history. Nothing here names a cause the lab may be put
+ * The texts the model reads (agent spec, "Untrusted text is data", "Summaries built in code", "What one call sees").
+ * Each call is rebuilt from the incident's state, never from an accumulated chat history, in an order that keeps what
+ * changes last: the system message, the evidence of earlier calls (which only grows), the previous answer and its
+ * tool results, then the instruction with the budgets left and the task. Nothing here names a cause the lab may be put
  * through, or maps a symptom to a cause: the model has to find the cause in the evidence.
  */
 final class Prompts {
@@ -49,13 +51,16 @@ final class Prompts {
 	private static final String PLAN_AND_ACT_TASK = """
 			Task: first write your plan for this phase in your answer's text, as one JSON object with two fields. \
 			hypotheses: 1 to 3 items, each {rootCauseService, rootCauseCategory, why}, with why at most 200 \
-			characters. nextTools: 0 to 4 names of this phase's tools that you intend to call. Then call the tools \
-			of this phase that best test your hypotheses; you may request several calls in one answer. Answer \
-			without a tool call when this phase has nothing more to give.""";
+			characters. nextTools: 0 to 4 names of this phase's tools that you intend to call. The plan goes in the \
+			text, never inside a tool's arguments. Then call the tools of this phase that best test your \
+			hypotheses; you may request several calls in one answer. Write nothing else: code reads only the plan \
+			and the tool calls.""";
 
 	private static final String ACT_TASK = """
-			Task: call the tools of this phase that best test your hypotheses; you may request several calls in \
-			one answer. Answer without a tool call when this phase has nothing more to give.""";
+			Task: if this phase's tools can still test your hypotheses, call them now; you may request several \
+			calls in one answer. Otherwise answer with no text and no tool call, and the run moves on. Do not \
+			summarise or explain the results above: code reads only your tool calls, and the report comes at the \
+			end of the run.""";
 
 	private static final String REPORT_TASK = """
 			Task: write the final report as a JSON object with these fields. rootCauseService and \
@@ -79,14 +84,26 @@ final class Prompts {
 	}
 
 	/**
-	 * The user message of a call within an evidence phase; the first call of a phase also asks for the phase's plan,
-	 * in the text of the same answer as its tool calls.
+	 * The evidence message: the summaries of the tool steps before the previous answer, refusals included, in step
+	 * order, or null when there are none. A call's evidence always starts with the previous call's, so the prompt's
+	 * beginning stays the same from call to call and Ollama reuses what it has already read.
+	 */
+	static String evidence(List<String> summaries) {
+		if (summaries.isEmpty()) {
+			return null;
+		}
+		return "Evidence so far, oldest first:\n\n" + String.join("\n\n", summaries);
+	}
+
+	/**
+	 * The instruction of a call within an evidence phase, the prompt's last message; the first call of a phase also
+	 * asks for the phase's plan, in the text of the same answer as its tool calls.
 	 */
 	static String act(State state, boolean withPlan) {
 		return state.text() + "\n\n" + (withPlan ? PLAN_AND_ACT_TASK : ACT_TASK);
 	}
 
-	/** The user message of a report call; {@code errors} are those of the rejected previous report, if any. */
+	/** The instruction of a report call; {@code errors} are those of the rejected previous report, if any. */
 	static String report(State state, List<String> errors) {
 		return state.text() + "\n\n" + REPORT_TASK + retry("report", errors);
 	}
@@ -100,14 +117,14 @@ final class Prompts {
 	}
 
 	/**
-	 * The incident's state as one prompt shows it.
+	 * The parts of the incident's state that change from call to call, as the instruction shows them; the evidence
+	 * travels in its own message ({@link #evidence}).
 	 * @param phase the current phase
 	 * @param phaseLeft the tool calls left in the phase
 	 * @param incidentLeft the tool calls left in the incident
 	 * @param plan the latest valid plan, as JSON, or null
-	 * @param evidence the summaries of the tool steps so far, refusals included, in step order
 	 */
-	record State(Phase phase, int phaseLeft, int incidentLeft, String plan, List<String> evidence) {
+	record State(Phase phase, int phaseLeft, int incidentLeft, String plan) {
 
 		String text() {
 			StringBuilder text = new StringBuilder();
@@ -118,14 +135,7 @@ final class Prompts {
 				.append('\n');
 			text.append("Tool calls left: ").append(this.phaseLeft).append(" in this phase, ").append(this.incidentLeft)
 				.append(" in the incident\n");
-			text.append("Latest plan: ").append(this.plan == null ? "none yet" : this.plan).append('\n');
-			text.append("Evidence so far:");
-			if (this.evidence.isEmpty()) {
-				text.append(" none yet");
-			}
-			for (String summary : this.evidence) {
-				text.append("\n\n").append(summary);
-			}
+			text.append("Latest plan: ").append(this.plan == null ? "none yet" : this.plan);
 			return text.toString();
 		}
 

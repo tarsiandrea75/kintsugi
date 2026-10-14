@@ -51,6 +51,13 @@ kintsugi:
       temperature: ${spring.ai.ollama.chat.temperature}
       num-ctx: ${spring.ai.ollama.chat.num-ctx}
       call-timeout: 180s
+      # The most tokens an answer may hold, Ollama's num_predict (agent spec, "Answer caps", where the values are
+      # justified). On the laptop's CPU an answer is written at about 3 tokens/s, so a cap also bounds the call's time:
+      # a phase's first ACT answer carries the plan and its tool calls, a later one only tool calls, the report is JSON.
+      num-predict:
+        first-act: 384
+        act: 160
+        report: 512
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
     # run makes at most 10 model calls (8 ACT answers and 2 reports), so 12 is a guard; the warm-up, which loads the
     # model before the run, counts against no budget and has its own bound.
