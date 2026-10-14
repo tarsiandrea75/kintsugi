@@ -27,3 +27,6 @@ Thumbs.db
 # Machine-local tooling
 .codegraph/
 .atl/
+
+# verify-agent.sh results (full incident JSON and run logs)
+infra/scripts/out/

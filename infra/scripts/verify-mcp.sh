@@ -134,10 +134,10 @@ else
 fi
 
 # 3. A healthy order, then F1 through the fault injector and an order left PAYMENT_PENDING.
-expect_paid_order verify-mcp healthy
+expect_paid_order healthy
 inject_fault F1
 
-read -r code pending_id status _ <<<"$(place_order verify-mcp)"
+read -r code pending_id status _ <<<"$(place_order)"
 if [[ "$code" == 201 && "$status" == PAYMENT_PENDING ]] && is_uuid "$pending_id"; then
   pass "order $pending_id under F1 is 201 PAYMENT_PENDING"
 else
@@ -202,7 +202,7 @@ fi
 # The read-only session default is turned off first, so only the missing grant can stop the insert.
 if denied=$(psql_agent orders "set default_transaction_read_only = off" \
   -c "insert into orders (id, customer_id, status, version, created_at, updated_at)
-      values (gen_random_uuid(), 'verify-mcp', 'CREATED', 0, now(), now())" 2>&1); then
+      values (gen_random_uuid(), 'checkout-probe', 'CREATED', 0, now(), now())" 2>&1); then
   fail "PostgreSQL: kintsugi_agent inserted into orders"
 elif grep -q 'permission denied for table orders' <<<"$denied"; then
   pass "PostgreSQL: kintsugi_agent cannot insert into orders (permission denied)"

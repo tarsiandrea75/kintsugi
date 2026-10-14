@@ -1,4 +1,5 @@
-# Shared helpers for the fault visibility checks (verify-f1.sh … verify-f4.sh). Source it; do not run it.
+# Shared helpers for the lab checks (verify-*.sh, reset-volume.sh). Source it; do not run it.
+# shellcheck shell=bash disable=SC2034 # its variables are read by the scripts that source it
 # The caller sets "set -euo pipefail", defines usage(), then calls parse_args "$@" and start_lab.
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -160,16 +161,21 @@ loki_has_warn() {
 # Prints the value of JSON string field $1 in $2, or nothing. Never fails: grep finds no match on an error body.
 json_field() { grep -o "\"$1\":\"[^\"]*\"" <<<"$2" | head -n1 | cut -d'"' -f4 || true; }
 
-# POST /orders as customer $1; always prints "<http code> <order id> <status> <seconds>", one line, even when curl
-# fails: a transport failure (refused, timed out) prints "000 none none <seconds>". The order id is the "id" of a 201
+# A customer id for one order: "checkout-" and 8 random hex digits. Every value these scripts write into the lab (orders,
+# events, logs) is neutral like this: the agent reads it through its tools, so it must never name a fault or a script.
+neutral_customer() { printf 'checkout-%04x%04x' "$RANDOM" "$RANDOM"; }
+
+# POST /orders as a new neutral customer (neutral_customer); always prints "<http code> <order id> <status> <seconds>",
+# one line, even when curl fails: a transport failure (refused, timed out) prints "000 none none <seconds>". The order id is the "id" of a 201
 # body, or the "orderId" of a 409 or 503 ProblemDetail body (the rejected order is stored too); a ProblemDetail has no
 # order status, so status is "none" then. Callers read it with
-#   read -r code id status seconds <<<"$(place_order customer)"
+#   read -r code id status seconds <<<"$(place_order)"
 # and report a FAIL themselves, so a broken request never aborts the script before the exit trap restores the lab.
 place_order() {
   local out rc=0 code seconds body id status
   out=$(curl -sS --max-time "$ORDER_MAX_SECONDS" -w '\n%{http_code} %{time_total}' -X POST "$ORDERS/orders" \
-    -H 'Content-Type: application/json' -d "{\"customerId\":\"$1\",\"items\":[{\"sku\":\"SKU-1\",\"quantity\":1}]}") || rc=$?
+    -H 'Content-Type: application/json' \
+    -d "{\"customerId\":\"$(neutral_customer)\",\"items\":[{\"sku\":\"SKU-1\",\"quantity\":1}]}") || rc=$?
   read -r code seconds <<<"${out##*$'\n'}" || true
   body=${out%$'\n'*}
   (( rc == 0 )) || code=000
@@ -289,6 +295,14 @@ check_truth_row() {
   else
     fail "truth: expected exactly '$1|$2|RESTORED|t' for injection $injection_id, got '${rows:-no row}'"
   fi
+}
+
+# Prints the root cause of injection $1 as "<service>|<category>", read as the faults role from the truth table; prints
+# nothing when the injection has no row (or the database cannot be read). It is what an agent report is scored against.
+truth_cause() {
+  is_uuid "$1" || return 0
+  psql_faults "select root_cause_service || '|' || root_cause_category from injections where id = '$1'" \
+    2>/dev/null || true
 }
 
 # The truth is isolated from the services' role: lab_app and faults are not superusers (a superuser ignores
@@ -446,14 +460,96 @@ start_lab() {
   reset_gateway
 }
 
-# Places an order as customer $1 and requires 201 PAID; exits otherwise.
+# --- The diagnosing agent's incident API (openspec/specs/agent) ---
+
+AGENT=http://127.0.0.1:18086
+# Seconds between two reads of a running incident: a run lasts minutes, one model call alone 40 to 180 s on a CPU.
+INCIDENT_POLL_SECONDS=15
+# Bounded wall clock for one incident: the agent's 30 min incident budget, plus its 300 s warm-up (which runs before
+# that budget starts), plus a margin for the last call to be stored. Past it, the agent itself has ended the run.
+INCIDENT_WAIT_SECONDS=$((30 * 60 + 300 + 120))
+
+# Calls the agent: $1 method, $2 path, $3 optional JSON body. Prints "<http code> <body>" on one line, "000 " on a
+# transport failure; never fails, like injector_call.
+agent_call() {
+  local out rc=0
+  out=$(curl -sS --max-time "$CURL_MAX_SECONDS" -w '\n%{http_code}' -X "$1" "$AGENT$2" \
+    -H 'Content-Type: application/json' ${3:+-d "$3"} 2>/dev/null) || rc=$?
+  (( rc == 0 )) || { echo "000 "; return 0; }
+  echo "${out##*$'\n'} ${out%$'\n'*}" | tr -d '\n'
+  echo
+}
+
+# Prints the status of incident $1 (RUNNING, COMPLETED, ...), or "unreadable" when GET does not answer 200.
+incident_status() {
+  local code body status
+  read -r code body <<<"$(agent_call GET "/incidents/$1")" || true
+  status=$(json_field status "$body")
+  [[ "$code" == 200 && -n "$status" ]] && echo "$status" || echo unreadable
+}
+
+# Waits until incident $1 is no longer RUNNING, for at most $2 seconds (INCIDENT_WAIT_SECONDS by default). Prints one
+# progress line every 5 minutes. True when the incident ended; its final status is then in incident_final_status.
+incident_final_status=""
+wait_incident() {
+  local id=$1 seconds=${2:-$INCIDENT_WAIT_SECONDS} deadline next_note=$((SECONDS + 300)) waited=$SECONDS status
+  deadline=$((SECONDS + seconds))
+  while true; do
+    status=$(incident_status "$id")
+    if [[ "$status" != RUNNING && "$status" != unreadable ]]; then
+      incident_final_status=$status
+      return 0
+    fi
+    (( SECONDS >= deadline )) && { incident_final_status=$status; return 1; }
+    if (( SECONDS >= next_note )); then
+      info "incident $id is $status after $((SECONDS - waited))s"
+      next_note=$((SECONDS + 300))
+    fi
+    sleep "$INCIDENT_POLL_SECONDS"
+  done
+}
+
+# POST /incidents with symptom $1 (no double quotes or backslashes) and window $2 minutes. Prints the new incident's
+# id; prints nothing and fails on any other answer, after printing it on stderr. One incident runs at a time: on a 409
+# naming a running incident (an earlier, interrupted run), it waits for that one to end (wait_incident) and tries once
+# more.
+open_incident() {
+  local body code answer id attempt
+  body="{\"symptom\":\"$1\",\"sinceMinutes\":$2}"
+  for attempt in 1 2; do
+    read -r code answer <<<"$(agent_call POST /incidents "$body")" || true
+    id=$(json_field id "$answer")
+    if [[ "$code" == 202 ]] && is_uuid "$id"; then
+      echo "$id"
+      return 0
+    fi
+    if [[ "$code" == 409 && "$attempt" == 1 ]] && is_uuid "$id"; then
+      echo "....  incident $id from an earlier run is still RUNNING; waiting for it to end" >&2
+      wait_incident "$id" >&2 || { echo "POST /incidents: incident $id still RUNNING" >&2; return 1; }
+      continue
+    fi
+    echo "POST /incidents: expected 202 with an id, got $code ${answer:-no body}" >&2
+    return 1
+  done
+}
+
+# Restarts the agent and waits for it to be healthy. The API has no cancel: the restart sweep ends an incident left
+# RUNNING as FAILED ("agent restarted during the run"), so the next POST /incidents is accepted at once. By hand:
+#   bash -c 'source infra/scripts/lib.sh && restart_agent'
+restart_agent() {
+  compose restart agent >/dev/null 2>&1 || return 1
+  env -u ORDER_PAYMENT_BASEURL -u INVENTORY_POOL_SIZE -u INVENTORY_RESERVATION_DELAY \
+    docker compose --progress quiet -f "$COMPOSE_FILE" up -d --no-deps --no-build --wait agent >/dev/null 2>&1
+}
+
+# Places an order and requires 201 PAID; exits otherwise. $1 names the order in the messages ("healthy", ...).
 expect_paid_order() {
   local code id status
-  read -r code id status _ <<<"$(place_order "$1")"
+  read -r code id status _ <<<"$(place_order)"
   if [[ "$code" == 201 && "$status" == PAID ]]; then
-    pass "$2 order $id is PAID"
+    pass "$1 order $id is PAID"
   else
-    fail "$2 order: expected 201 PAID, got $code $status"
+    fail "$1 order: expected 201 PAID, got $code $status"
     exit 1
   fi
 }

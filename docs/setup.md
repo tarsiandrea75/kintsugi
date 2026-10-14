@@ -112,7 +112,7 @@ Each change is logged as one `INFO` line with `key=value` pairs (`Gateway behavi
 
 ## Lab with Docker Compose
 
-One command starts the whole lab: PostgreSQL, the four services, the fault injector, Prometheus, Loki, Alloy, Grafana, mcp-tools and the runbook knowledge base (the `knowledge-db` store, the one-shot `knowledge-indexer` and `ollama-proxy`) (ADR-008, ADR-009, ADR-004, ADR-002, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
+One command starts the whole lab: PostgreSQL, the four services, the fault injector, Prometheus, Loki, Alloy, Grafana, mcp-tools, the runbook knowledge base (the `knowledge-db` store, the one-shot `knowledge-indexer` and `ollama-proxy`) and the diagnosing agent (ADR-008, ADR-009, ADR-004, ADR-002, ADR-010, [living spec](../openspec/specs/lab-observability/spec.md)). Run it from the repository root.
 
 ```bash
 export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
@@ -133,6 +133,7 @@ The compose project is called `kintsugi-lab`, so these commands never touch othe
 | inventory-service | <http://localhost:18083> |
 | fault-injector | <http://localhost:18084> |
 | mcp-tools (MCP, `POST /mcp`) | <http://localhost:18085/mcp> |
+| agent (incident API) | <http://localhost:18086/incidents> |
 | Grafana | <http://localhost:13000> |
 | Prometheus | <http://localhost:19090> |
 
@@ -154,6 +155,7 @@ Every variable except `DOCKER_GID` has a lab default; nothing here is a secret. 
 | `KNOWLEDGE_BOOTSTRAP_PASSWORD` | `postgres` | the knowledge store's bootstrap superuser, used only by its init script |
 | `KNOWLEDGE_INDEXER_DB_PASSWORD` | `knowledge_indexer` | the role `knowledge_indexer`, which owns the knowledge tables; only the indexer connects as it |
 | `KNOWLEDGE_AGENT_DB_PASSWORD` | `knowledge_agent` | `kintsugi_agent` on the knowledge store (a separate server, so a separate password); without it mcp-tools still starts and only `search_runbooks` fails |
+| `AGENT_DB_PASSWORD` | `agent_app` | the role `agent_app`, which owns the agent's state in the `agent` database on `knowledge-db`; the agent does not start without it (outside compose, `application.yaml` has no default) |
 | `OLLAMA_PROXY_BIND_IP` | `172.17.0.1` | the address `ollama-proxy` listens on: the default bridge's gateway (`docker0`), which is what `host-gateway` resolves to |
 
 `KINTSUGI_REPO_DIR` defaults to the current directory, which is right only from the repository root. From anywhere else, export it as above; the verify scripts set it themselves. With a wrong value the injector does not start, because it cannot read the compose file.
@@ -172,7 +174,7 @@ docker compose -f infra/compose.yaml exec -T postgres psql -U lab_app -d orders 
 docker compose -f infra/compose.yaml exec -T postgres psql -U faults -d faults -c "select fault_id, status from injections"
 ```
 
-The knowledge store is a second server, `knowledge-db` (ADR-002): `knowledge_indexer` owns the `knowledge` database's tables, and `kintsugi_agent` there has `CONNECT` and `SELECT` only; it holds no `faults` database. Its init script runs only on an empty `knowledge-data` volume too.
+The knowledge store is a second server, `knowledge-db` (ADR-002): `knowledge_indexer` owns the `knowledge` database's tables, and `kintsugi_agent` there has `CONNECT` and `SELECT` only; it holds no `faults` database. It also holds the `agent` database, the diagnosing agent's state (ADR-010): `agent_app` is not a superuser, has only `USAGE` and `CREATE` on its `public` schema, and Flyway creates the tables as that role when the agent starts. Its init script runs only on an empty `knowledge-data` volume too.
 
 The init script runs only on an empty data volume. **Upgrading a lab created before the fault injector:** its volume has the old `lab` superuser and no `lab_app` or `faults`, so run `docker compose -f infra/compose.yaml down -v` once before the first start. The same applies to a lab created before mcp-tools, whose volume has no `kintsugi_agent`, and after changing any database password.
 
@@ -356,6 +358,39 @@ infra/scripts/verify-rag.sh --down   # the same, then `down -v`
 ```
 
 The script waits for `knowledge-indexer` to exit 0, then checks with `psql` that `index_metadata` records `nomic-embed-text`, 768 dimensions and the digest the local Ollama serves now (read from `GET /api/tags`) and that every service runbook has chunks. Through MCP it asks four symptom-worded questions and expects the right runbook in the top 3 and no hit from the README's "Authoring rule", and checks the `service` filter. It checks that `kintsugi_agent` cannot insert into the knowledge store, that the store has no `faults` database, and that `kintsugi_agent` cannot connect to `faults` on the lab's postgres. It runs the indexer again and expects it to embed nothing and to name every `docs/runbooks/*.md` file as skipped, then starts a one-off mcp-tools configured with `mxbai-embed-large` and expects `search_runbooks` to refuse the index. No fault is injected. It needs `docker`, `curl` and Ollama, and takes about a minute on a running lab.
+
+### The diagnosing agent
+
+The agent (`agent/`, [spec](../openspec/specs/agent/spec.md), [ADR-010](adr/ADR-010-agent-loop.md)) receives a neutral symptom, investigates the lab only through mcp-tools, and writes a JSON report naming the root-cause service and category, with evidence that code checks against the recorded tool outputs. Compose publishes its incident API on `127.0.0.1:18086` only: it has no authentication, and `?full=true` returns full tool outputs. It keeps its state in the `agent` database on `knowledge-db` and reaches `granite4.1:8b` through `ollama-proxy` (`ollama pull granite4.1:8b`). One incident runs at a time; a second `POST` gets 409. Read its step log with `docker compose -f infra/compose.yaml logs agent`.
+
+```bash
+curl -s -X POST localhost:18086/incidents -H 'Content-Type: application/json' \
+  -d '{"symptom":"Customers report that checkout orders are not completing as expected","sinceMinutes":10}'
+curl -s localhost:18086/incidents/<id>              # status, steps (summaries) and, once COMPLETED, the report
+curl -s 'localhost:18086/incidents/<id>?full=true'  # the same with every full tool output and model answer
+```
+
+A `knowledge-data` volume created before the `agent` database has no `agent` database or `agent_app` role, so the agent cannot connect and exits at startup: reset that volume once ([Reset a volume](#reset-a-volume)).
+
+The API has no cancel. To end an incident left `RUNNING` (for example by an interrupted script), restart the agent: its restart sweep marks the incident `FAILED`, `agent restarted during the run`.
+
+```bash
+bash -c 'source infra/scripts/lib.sh && restart_agent'
+```
+
+### Check that the agent diagnoses F1, F2 and F3
+
+The M2 check ([vision](vision.md), [feature document](../odd/tasks/agent-loop.md)): the agent must find the root-cause service and category of F1, F2 and F3 with the local model.
+
+```bash
+infra/scripts/verify-agent.sh                 # F1, F2 and F3 in turn, leave the lab running
+infra/scripts/verify-agent.sh --only F2       # one fault, or a list: --only F1,F3
+infra/scripts/verify-agent.sh --down          # the same, then `down -v`
+```
+
+It checks that Ollama serves `granite4.1:8b` and that `ollama-proxy` is healthy, then starts or reuses the lab as the other scripts do. For each fault it places 3 healthy orders, injects the fault through the fault injector, places 6 more orders and waits 30 s for the metrics and logs to land. It then opens an incident with the same neutral symptom and a 10-minute window for every fault, polls it every 15 s for at most 37 minutes (the 30-minute incident budget, the 5-minute warm-up and a margin), restores the fault and reads the injection's truth row as the `faults` role. A fault matches when the incident is `COMPLETED` and its report's `rootCauseService` and `rootCauseCategory` equal the truth's `root_cause_service` and `root_cause_category`; the script passes only when every selected fault matches. Every customer id it writes into the lab is a neutral `checkout-xxxxxxxx`, and the symptom names no cause: the agent reads both through its tools.
+
+Every run, pass or fail, is logged under `infra/scripts/out/verify-agent-<UTC time>/` (ignored by git): `run.log` (the whole output), and per fault `<fault>-incident.json` (the incident with every step, full tool outputs and model answers) and `<fault>-score.txt`; `summary.tsv` has one line per fault. When the run stops early (Ctrl-C, or a failed step), the fault being diagnosed gets a `not scored` line and fails the run, and an incident it left `RUNNING` is ended by restarting the agent (`restart_agent`); a `RUNNING` incident from elsewhere is waited for before the next `POST`. The restore on exit works as in the F1 check. It needs `docker`, `curl` and Ollama with `granite4.1:8b`, and takes up to about 35 minutes per fault on a laptop CPU, so up to about 2 hours for all three.
 
 ### Reset a volume
 

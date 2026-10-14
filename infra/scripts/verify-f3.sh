@@ -35,7 +35,7 @@ trap on_exit EXIT
 start_lab
 
 # 2. A healthy order is paid.
-expect_paid_order verify-f3 healthy
+expect_paid_order healthy
 
 # 3. Inject F3 through the fault injector: a redeploy of order-service with a wrong payment URL.
 # Wait one scrape interval first, so the healthy order's gateway call is scraped before the window that step 5 checks
@@ -62,7 +62,7 @@ else
 fi
 
 # 4. The order is created, stays pending, and the answer is fast because the connection is refused at once.
-read -r code pending_id status seconds <<<"$(place_order verify-f3)"
+read -r code pending_id status seconds <<<"$(place_order)"
 if [[ "$code" == 201 && "$status" == PAYMENT_PENDING ]]; then
   pass "order $pending_id under F3 is 201 PAYMENT_PENDING"
 else
@@ -102,7 +102,7 @@ fi
 # 7. Recovery: the injector recreates order-service on its default URL, which pays orders again. The trap restores
 # again on every exit.
 expect_restored
-expect_paid_order verify-f3 "after the restore, the"
+expect_paid_order "after the restore, the"
 
 # 8. The truth row and its isolation.
 check_truth F3 order-service

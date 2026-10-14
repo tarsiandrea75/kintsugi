@@ -26,7 +26,7 @@ trap on_exit EXIT
 start_lab
 
 # 2. A healthy order is paid.
-expect_paid_order verify-f1 healthy
+expect_paid_order healthy
 
 baseline=""
 read_baseline() { baseline=$(prom_stable_int 'lab_orders{status="PAYMENT_PENDING"}'); }
@@ -40,7 +40,7 @@ fi
 # 3. Inject F1 through the fault injector: the gateway answers after 10 s, past order-service's 3 s read timeout.
 inject_fault F1
 
-read -r code pending_id status _ <<<"$(place_order verify-f1)"
+read -r code pending_id status _ <<<"$(place_order)"
 if [[ "$code" == 201 && "$status" == PAYMENT_PENDING ]]; then
   pass "order $pending_id under F1 is 201 PAYMENT_PENDING"
 else

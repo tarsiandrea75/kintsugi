@@ -41,7 +41,7 @@ trap on_exit EXIT
 # 1. Start or reuse the lab ("up", run without the fault variables, puts inventory-service back on its defaults); a
 # healthy order is paid.
 start_lab
-expect_paid_order verify-f4 healthy
+expect_paid_order healthy
 
 # 2. Inject F4 through the fault injector: a redeploy of inventory-service with a tiny pool and a slow reservation query.
 injected_at=$SECONDS
@@ -71,7 +71,7 @@ fi
 # 4. Concurrent orders: each runs in a background subshell and writes its place_order line to its own file.
 results=$(mktemp -d)
 for ((i = 1; i <= F4_ORDERS; i++)); do
-  place_order verify-f4 >"$results/$i" &
+  place_order >"$results/$i" &
 done
 wait
 
@@ -192,7 +192,7 @@ fi
 expect_restored
 
 # 10. A new order is paid again.
-expect_paid_order verify-f4 "after the restore, the"
+expect_paid_order "after the restore, the"
 
 # 11. The truth row and its isolation.
 check_truth F4 inventory-service

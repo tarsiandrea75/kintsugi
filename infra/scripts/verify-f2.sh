@@ -30,7 +30,7 @@ trap on_exit EXIT
 start_lab
 
 # 2. A healthy order is paid.
-expect_paid_order verify-f2 healthy
+expect_paid_order healthy
 
 payments_baseline=""
 orders_baseline=""
@@ -49,7 +49,7 @@ inject_fault F2
 
 failed_id=none
 for ((i = 1; i <= F2_ORDERS; i++)); do
-  read -r code id status _ <<<"$(place_order verify-f2)"
+  read -r code id status _ <<<"$(place_order)"
   if [[ "$code" == 201 && "$status" == PAYMENT_FAILED ]]; then
     pass "order $id under F2 is 201 PAYMENT_FAILED"
     failed_id=$id
@@ -82,7 +82,7 @@ fi
 
 # 6. Recovery: after the restore through the injector, orders are paid again. The trap restores again on every exit.
 expect_restored
-expect_paid_order verify-f2 "after the restore, the"
+expect_paid_order "after the restore, the"
 
 # 7. The truth row and its isolation.
 check_truth F2 gateway-mock

@@ -1,13 +1,14 @@
 # Kintsugi lab: PostgreSQL, the four services, the fault injector, the observability stack, mcp-tools, the agent's
-# tools, and the runbook knowledge base: the pgvector store, its one-shot indexer and the Ollama proxy (ADR-007, ADR-008,
-# ADR-009, ADR-004, ADR-002).
+# tools, the runbook knowledge base: the pgvector store, its one-shot indexer and the Ollama proxy, and the diagnosing
+# agent (ADR-007, ADR-008, ADR-009, ADR-004, ADR-002, ADR-010).
 #
 #   export KINTSUGI_REPO_DIR="$(git rev-parse --show-toplevel)" DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
 #   docker compose -f infra/compose.yaml up -d --build --wait
 #   docker compose -f infra/compose.yaml down -v
 #
 # Host ports (ADR-008): order-service 18080, payment-service 18081, gateway-mock 18082, inventory-service 18083,
-# fault-injector 18084, mcp-tools 18085 (MCP on /mcp), Grafana 13000 (dashboard "Lab — Faults"), Prometheus 19090.
+# fault-injector 18084, mcp-tools 18085 (MCP on /mcp), agent 18086 (incident API), Grafana 13000 (dashboard
+# "Lab — Faults"), Prometheus 19090.
 # Every port is bound to 127.0.0.1.
 # PostgreSQL, the knowledge store, Loki and Alloy are not published on the host; containers reach each other by service
 # name. Ollama stays on the host's loopback; ollama-proxy exposes it on the Docker bridge gateway only (ADR-002).
@@ -252,13 +253,44 @@ services:
       retries: 30
       start_period: 30s
 
+  # The diagnosing agent (ADR-010): POST /incidents runs the phased loop on the local model, GET /incidents/{id} reads
+  # it. It reaches the lab only through mcp-tools, keeps its state in the agent database on knowledge-db as agent_app,
+  # and reaches Ollama through ollama-proxy like the indexer. Published on 127.0.0.1 only: the API has no
+  # authentication, and ?full=true returns full tool outputs. Alloy ships its logs like any container's; search_logs'
+  # service enum cannot select them, and Prometheus does not scrape it.
+  agent:
+    build: ../agent
+    environment:
+      KINTSUGI_MCP_URL: http://mcp-tools:8085
+      AGENT_DB_HOST: knowledge-db
+      AGENT_DB_PORT: "5432"
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:-agent_app}
+      SPRING_AI_OLLAMA_BASEURL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:18086:8086"
+    depends_on:
+      mcp-tools:
+        condition: service_healthy
+      knowledge-db:
+        condition: service_healthy
+    healthcheck:
+      # No actuator: an unknown incident answers 404 once the web server and the state store are up.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8086/incidents/00000000-0000-0000-0000-000000000000 | grep -qx 404"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
+
   # Ollama listens only on the host's loopback (127.0.0.1:11434). This proxy, on the host's network, listens on the
   # default bridge's gateway address alone and forwards to that loopback, so containers reach Ollama as
   # host.docker.internal:11434 (extra_hosts: host-gateway) while it stays off every other interface. Chosen by the
   # human on 2026-10-08 over OLLAMA_HOST=0.0.0.0 and a containerised Ollama (ADR-002).
-  # Only knowledge-indexer depends on it, and optionally. When the bind fails (another listener on that address and
-  # port), socat exits: the restart policy retries it, so it recovers once the address is free, and start_lab reports
-  # it, while every other service comes up as usual.
+  # Only knowledge-indexer depends on it, and optionally; mcp-tools (search_runbooks) and the agent use it at call
+  # time. When the bind fails (another listener on that address and port), socat exits: the restart policy retries it,
+  # so it recovers once the address is free, and start_lab reports it, while every other service comes up as usual.
   ollama-proxy:
     image: alpine/socat:1.8.1.3@sha256:82ad20f6f6e29b91ff33b6662d24063522b1378f08fd8569cd3ab412cac13f50
     network_mode: host
