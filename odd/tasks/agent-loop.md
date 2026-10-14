@@ -247,6 +247,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Each run ended at the same point: the 4th model call, the second `ACT` in `INVESTIGATE` (after two `recent_events` results), passed 180 s. Earlier calls took 27–117 s. Each incident lasted 6–7.5 min of its 30.
   - The model put its plan inside the tool arguments (F1 step 2: `query_metric` got `{"plan": …}`, `CLIENT_ERROR`), and the plan was recorded missing.
   - **Script bug:** `verify-agent.sh:147` reads `rootCauseService`/`rootCauseCategory` with `json_field` from the whole incident body, so it picked up a hypothesis from that plan in the tool arguments and printed `reported 'payment-service|DEPENDENCY_REJECTING'` for all three, although `report` is null. The verdicts (MISS) are right; the logged "reported" values are false. Fix in part C: read only `.report`.
+- 2026-10-14: diagnosis of the 4th-call timeout (read-only worker; evidence from `journalctl -u ollama` timings and one replayed request):
+  - **Cause:** after two tool results, granite writes a 650–800-token Markdown summary ("**Investigation Summary** …") instead of tool calls or an empty answer. `ModelRoute.options()` sets no `num_predict`, and this CPU generates about 2.9 tokens/s, so the answer alone takes 228–287 s. Earlier `ACT` answers were 30–66 tokens. Replaying F2's 4th request with `num_predict` 512 stopped at the cap with prose and no tool calls. Likely trigger: the instruction sits in the user message before the assistant and tool messages, so the model "answers" the results.
+  - **Aggravating:** the prompt cache is reused only for the first 1368 tokens (system prompt and tool definitions), because the rebuilt user state comes first and changes every call; the rest is re-read at about 13 tokens/s (70–92 s on the 4th call).
+  - **Knock-on:** Ollama finishes an abandoned call after the agent's 180 s timeout (one request at a time), so the next incident's warm-up waited behind it (F2 2m14s, F3 58 s).
+  - **Ruled out:** context overflow (at most 3354 of 8192 tokens, `truncated = 0`), model eviction (no loads or embedding calls in the window), large tool outputs (only summaries are sent).
+  - Fix options: cap `num_predict` on `ACT` calls; put the instruction after the tool results and keep the changing parts at the end so the prefix stays cached; abort the HTTP request on timeout.
 
 ## Next step
 
