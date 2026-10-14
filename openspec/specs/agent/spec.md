@@ -10,8 +10,8 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 | Rule | Value |
 |------|-------|
-| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` 180 s, `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its timeout itself, and aborts it ("An abandoned call is aborted") |
-| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longer of `call-timeout` and `warm-up-timeout` (300 s), so the HTTP client never cuts a request before the loop's own deadline does. The same customizer buffers the request body, so every request to Ollama carries a `Content-Length` ("An abandoned call is aborted"). The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
+| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task: `act` 240 s and `report` 300 s, see "Budgets"; `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its task's deadline itself, and aborts it ("An abandoned call is aborted") |
+| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longest of `call-timeout.act`, `call-timeout.report` and `warm-up-timeout` (300 s with the defaults), so the HTTP client never cuts a request before the loop's own deadline does. The same customizer buffers the request body, so every request to Ollama carries a `Content-Length` ("An abandoned call is aborted"). The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
 | Tool execution | the loop calls `ChatModel` directly (in Spring AI 2.0.1 it never executes tools) and runs each checked tool call itself through the `LabTools` port: the model is offered the MCP `ToolCallback`s' definitions, wrapped so that they cannot be executed, and each call goes to the `McpSyncClient` directly, because the MCP `ToolCallback` throws on a tool error (`isError`) and re-serializes the content, which would lose the `INVALID_PARAMETER` or `UPSTREAM_ERROR` output |
 | MCP client | `spring-ai-starter-mcp-client`, `SYNC`, one Streamable HTTP connection `kintsugi` (`spring.ai.mcp.client.streamable-http.connections.kintsugi`) to `${KINTSUGI_MCP_URL:http://127.0.0.1:18085}`, endpoint `/mcp`, request timeout 20 s (the default). `spring.ai.mcp.client.initialized=false`: the starter would otherwise send `initialize` while the context starts and fail the start when mcp-tools is down; uninitialized, the client initializes on its first request and tries again on the next one after a failure. Tool names keep no prefix |
 | Structured output | the report call carries its JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned. The plan travels in the text of a call that offers tools, which Ollama cannot also constrain by a schema, so code alone checks it ("The plan") |
@@ -225,7 +225,7 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 |--------|-------|---------------|
 | Tool calls | 8 per incident, the sum of the phase caps | further requests are refused (`REFUSED_BUDGET`) and the loop moves on to the next phase |
 | Model calls **(chosen)** | 12 per incident; the warm-up is not one | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 12 calls is used up`. A valid run makes at most 10 (each phase's answers are at most its allowance, 8 in all, plus 2 report attempts), so this is a guard against a loop bug |
-| One model call | 180 s, and never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call (`model call <task> in <phase> took longer than 180 s`), or the incident when its time ran out first |
+| One model call **(T5c4)** | per task, `kintsugi.agent.model.call-timeout`: 240 s for an `ACT` call (`act`), 300 s for a `REPORT` call (`report`); never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call and its task's deadline (`model call ACT in <phase> took longer than 240 s`, `model call REPORT in CONCLUDE took longer than 300 s`), or the incident when its time ran out first |
 | One incident | 30 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 30 min, ...` |
 
 Which units a tool call consumes is fixed in "Phases and their tools": a call refused `REFUSED_PHASE` consumes one unit of the tool budget and of its phase's allowance, like a call that runs; a call refused `REFUSED_BUDGET` consumes nothing; no tool call consumes the model-call budget. Every budget end MUST be recorded as a step or a `failure_reason` and logged, never silent. Each tool-step prompt MUST state the tool calls left in the phase and in the incident.
@@ -236,10 +236,27 @@ Which units a tool call consumes is fixed in "Phases and their tools": a call re
 - THEN it records a `BUDGET` step saying the tool budget is used up, logs it and moves to `CONCLUDE`
 - AND the run can still end `COMPLETED`
 
+Why per task (the human's decision of 2026-10-14): on the laptop's CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s. In the second full run plan-carrying `ACT` calls took 139 to 178 s, at the edge of a single 180 s deadline, and two runs timed out on the `REPORT` call: a 512-token report needs about 176 s of writing alone. 240 s gives the longest `ACT` call about a minute of room; 300 s holds the prompt read and a full 512-token report.
+
 #### Scenario: Slow model call
-- GIVEN a model that does not answer within 180 s
+- GIVEN a model whose `ACT` answer does not come within the `ACT` deadline (240 s)
 - WHEN the loop calls it
-- THEN the run ends `TIMED_OUT` and no later step is recorded
+- THEN the run ends `TIMED_OUT` with `model call ACT in <phase> took longer than 240 s` and no later step is recorded
+
+#### Scenario: A report slower than an ACT call but within its own deadline
+- GIVEN a model whose report takes longer than the `ACT` deadline but less than the `REPORT` deadline
+- WHEN the loop asks it for the report
+- THEN it waits for the answer and the run can end `COMPLETED`
+
+#### Scenario: Slow report
+- GIVEN a model whose report does not come within the `REPORT` deadline (300 s)
+- WHEN the loop asks it for the report
+- THEN the run ends `TIMED_OUT` with `model call REPORT in CONCLUDE took longer than 300 s`
+
+#### Scenario: Missing deadlines
+- GIVEN `kintsugi.agent.model.call-timeout` or `kintsugi.agent.model.num-predict` is not set, or a deadline is not positive
+- WHEN the agent starts in the web profile
+- THEN it fails to start with a message naming the property, instead of failing at the first call
 
 #### Scenario: Incident too long
 - GIVEN the run has lasted 30 minutes since its warm-up ended
@@ -252,9 +269,9 @@ Every model call MUST carry Ollama's `num_predict`, the most tokens its answer m
 
 | Call | Cap | Why |
 |------|-----|-----|
-| a phase's first `ACT` answer (`first-act`) | 384 | it carries the plan and its tool calls. The first full run (2026-10-14) measured plans of 681 to 695 characters, about 170 to 200 tokens, with one tool call; 384 leaves about twice that. At the measured 2.9 tokens/s it takes at most about 130 s, inside the 180 s call |
-| a later `ACT` answer (`act`) | 160 | it only requests tool calls, or ends the phase with no text. The same run measured 30 to 66 tokens for one or two calls; 160 holds four, the most a phase allows, in about 55 s. The answer that passed 180 s was a 650 to 800-token Markdown summary of the tool results |
-| a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, about all one call can hold anyway. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
+| a phase's first `ACT` answer (`first-act`) | 384 | it carries the plan and its tool calls. The first full run (2026-10-14) measured plans of 681 to 695 characters, about 170 to 200 tokens, with one tool call; 384 leaves about twice that. At the measured 2.9 tokens/s it takes at most about 130 s of writing, inside the 240 s `ACT` deadline |
+| a later `ACT` answer (`act`) | 160 | it only requests tool calls, or ends the phase with no text. The same run measured 30 to 66 tokens for one or two calls; 160 holds four, the most a phase allows, in about 55 s. The answer that passed the old 180 s deadline was a 650 to 800-token Markdown summary of the tool results |
+| a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) is about all the 300 s `REPORT` deadline can hold. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
 | the warm-up | 1 | "The warm-up" |
 
 Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:

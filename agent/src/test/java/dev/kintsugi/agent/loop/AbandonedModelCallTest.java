@@ -59,7 +59,8 @@ class AbandonedModelCallTest {
 	static void properties(DynamicPropertyRegistry registry) {
 		AgentDatabase.register(registry);
 		registry.add("spring.ai.ollama.base-url", OLLAMA::url);
-		registry.add("kintsugi.agent.model.call-timeout", () -> "500ms");
+		registry.add("kintsugi.agent.model.call-timeout.act", () -> "500ms");
+		registry.add("kintsugi.agent.model.call-timeout.report", () -> "500ms");
 		// The HTTP read timeout is the longer of the call's and the warm-up's: 30 s, far beyond the call's deadline,
 		// so only the loop can end the hanging request within the test.
 		registry.add("kintsugi.agent.loop.warm-up-timeout", () -> "30s");

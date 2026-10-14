@@ -47,11 +47,16 @@ class LoopReadTimeoutTest {
 	}
 
 	@Test
-	void theReadTimeoutIsTheLongerOfACallAndTheWarmUp() {
-		assertThat(LoopConfig.readTimeout(route(Duration.ofSeconds(180)), loop(Duration.ofSeconds(300))))
+	void theReadTimeoutIsTheLongestOfTheCallDeadlinesAndTheWarmUp() {
+		assertThat(LoopConfig.readTimeout(route(Duration.ofSeconds(240), Duration.ofSeconds(300)),
+				loop(Duration.ofSeconds(300))))
 			.isEqualTo(Duration.ofSeconds(300));
-		assertThat(LoopConfig.readTimeout(route(Duration.ofSeconds(400)), loop(Duration.ofSeconds(300))))
+		assertThat(LoopConfig.readTimeout(route(Duration.ofSeconds(240), Duration.ofSeconds(400)),
+				loop(Duration.ofSeconds(300))))
 			.isEqualTo(Duration.ofSeconds(400));
+		assertThat(LoopConfig.readTimeout(route(Duration.ofSeconds(500), Duration.ofSeconds(400)),
+				loop(Duration.ofSeconds(300))))
+			.isEqualTo(Duration.ofSeconds(500));
 	}
 
 	@Test
@@ -74,7 +79,12 @@ class LoopReadTimeoutTest {
 	}
 
 	private static ModelRouteProperties route(Duration callTimeout) {
-		return new ModelRouteProperties("granite4.1:8b", 0, 8192, callTimeout, new NumPredict(384, 160, 512));
+		return route(callTimeout, callTimeout);
+	}
+
+	private static ModelRouteProperties route(Duration act, Duration report) {
+		return new ModelRouteProperties("granite4.1:8b", 0, 8192, new CallTimeouts(act, report),
+				new NumPredict(384, 160, 512));
 	}
 
 	private static LoopSettings loop(Duration warmUpTimeout) {

@@ -106,6 +106,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - [ ] **T5c1 — model-call fixes (agent code, spec, ADR):** cap `num_predict` on `ACT` calls, with room for a phase's first answer, which carries the plan; put the instruction after the tool results and keep the parts that change at the end, so the model does not summarise and the cached prefix grows; abort the HTTP request when a call times out, so Ollama does not finish an abandoned call. Tests first. Route: delegated writer.
   - [ ] **T5c2 — `verify-agent.sh` fixes:** read the reported cause only from `.report`; restart the agent when a wait times out; a per-fault window that excludes the previous fault's traffic; a fresh window after a 409 wait; the lab starts even when the agent cannot. Route: delegated writer (same worker as T5c1, separate commit).
   - [ ] **T5c3 — full run** of `verify-agent.sh`, results recorded. Route: parent.
+  - [ ] **T5c4 — a call deadline per task (the human's decision of 2026-10-14):** 240 s for `ACT` calls, 300 s for the `REPORT` call (`kintsugi.agent.model.call-timeout.act`/`.report`), each still bounded by the incident's time left and named in the timeout reason; the loop's read timeout follows the longest deadline. Tests first; spec and ADR-010 "Amended in T5c4". Route: delegated writer.
 
 ## Progress
 
@@ -273,6 +274,11 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - F1 timed out on the first `INVESTIGATE` call (plan-carrying) after a 164 s `TRIAGE` call.
   - The abort works: Ollama logged the abandoned call as `500` at 3m0s.
   - Estimate, not measured: about 90 s to read the prompt plus up to 512 report tokens at about 2.9 tokens/s (about 176 s) cannot fit in 180 s, so the per-call budget does not fit this CPU for the report and barely fits for plan calls. This needs the human's decision.
+- 2026-10-14: T5c4 done by a delegated writer (uncommitted, one unit). Route: delegated writer (2+ non-trivial files: loop code, tests, spec, ADR).
+  - `CallTimeouts(act, report)` replaces the single `call-timeout`: `kintsugi.agent.model.call-timeout.act` 240 s and `.report` 300 s. A call waits at most `min(its task's deadline, incident time left)`; the reason names the task's deadline (`model call REPORT in CONCLUDE took longer than 300 s`). `LoopConfig.readTimeout` is the longest of both deadlines and the warm-up (300 s with the defaults).
+  - T5c review suggestions: the `ModelRouteProperties` javadoc no longer repeats the caps (it points at the spec); a missing `call-timeout` or `num-predict` now fails binding with a message naming the property, instead of a `NullPointerException` at the first call.
+  - RED observed (behavioural, with a stub `CallTimeouts` that used the `ACT` deadline for every task): a report past the `ACT` but within the `REPORT` deadline ended `TIMED_OUT` instead of `COMPLETED`; a slow report named `3 s` instead of its own `300 ms`; `of(REPORT)` and the read timeout returned the `ACT` deadline. Then GREEN: `agent` 236 tests, 0 failures.
+  - Durations in tests are scaled down (200 ms to 3 s) through the route's `CallTimeouts`.
 
 ## Next step
 

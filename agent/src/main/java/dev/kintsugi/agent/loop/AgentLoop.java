@@ -367,9 +367,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * One model call, within the model-call budget and the time budgets, its answer capped by the route's
-	 * {@code num_predict} for the task (the larger cap when the answer carries a plan). A call never waits past its own
-	 * time budget or the incident's, whichever ends first; one it stops waiting for is interrupted, which closes its
-	 * HTTP connection, so that Ollama stops working on it.
+	 * {@code num_predict} for the task (the larger cap when the answer carries a plan). A call never waits past its task's
+	 * deadline ({@link CallTimeouts}) or the incident's time left, whichever ends first; one it stops waiting for is
+	 * interrupted, which closes its HTTP connection, so that Ollama stops working on it.
 	 */
 	private Answer call(Run run, ModelTask task, Phase phase, boolean withPlan, List<Message> messages,
 			List<ToolCallback> tools, String outputSchema) {
@@ -382,9 +382,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		ModelRoute route = this.router.route(task);
 		int cap = route.numPredict().of(task, withPlan);
 		Prompt prompt = new Prompt(messages, route.options(cap, tools, outputSchema));
+		Duration deadline = route.callTimeouts().of(task);
 		Duration incidentLeft = this.settings.incidentTimeout().minus(elapsed(run));
-		boolean incidentBound = incidentLeft.compareTo(route.callTimeout()) < 0;
-		Duration limit = incidentBound ? incidentLeft : route.callTimeout();
+		boolean incidentBound = incidentLeft.compareTo(deadline) < 0;
+		Duration limit = incidentBound ? incidentLeft : deadline;
 		String what = "model call " + task + " in " + phase;
 		long start = System.nanoTime();
 		Future<ChatResponse> future = this.modelCalls.submit(() -> route.chatModel().call(prompt));
@@ -398,7 +399,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 		catch (ExecutionException failed) {
 			if (isTimeout(failed.getCause())) {
-				throw callTimedOut(what, route.callTimeout());
+				throw callTimedOut(what, deadline);
 			}
 			throw new RunEnd(IncidentStatus.FAILED, what + " failed: " + describe(failed.getCause()));
 		}

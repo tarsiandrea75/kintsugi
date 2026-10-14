@@ -36,21 +36,26 @@ spring:
   http:
     clients:
       # The demo's one question: CPU inference with an 8B model can take minutes; this is a cap, not an expectation.
-      # The loop does not use it: LoopConfig gives Ollama's client in the web profile its own read timeout, the longer
-      # of kintsugi.agent.model.call-timeout and kintsugi.agent.loop.warm-up-timeout (agent spec, "Shared rules").
+      # The loop does not use it: LoopConfig gives Ollama's client in the web profile its own read timeout, the longest
+      # of kintsugi.agent.model.call-timeout.act, .report and kintsugi.agent.loop.warm-up-timeout (agent spec,
+      # "Shared rules").
       read-timeout: 5m
       connect-timeout: 2s
 
 kintsugi:
   agent:
     # ModelRouter's one route in M2 (ADR-010, ADR-003): ACT and REPORT both go to the local Ollama model, with the
-    # same settings as spring.ai.ollama.chat. 180 s per call: the human's decision of 2026-10-12, after model calls
-    # measured 42 to 84 s on the laptop's CPU.
+    # same settings as spring.ai.ollama.chat.
     model:
       name: ${spring.ai.ollama.chat.model}
       temperature: ${spring.ai.ollama.chat.temperature}
       num-ctx: ${spring.ai.ollama.chat.num-ctx}
-      call-timeout: 180s
+      # The deadline of one call, per task (agent spec, "Budgets"; the human's decision of 2026-10-14): on the laptop's
+      # CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s, so plan-carrying
+      # ACT calls took 139 to 178 s and a 512-token report cannot fit in 180 s.
+      call-timeout:
+        act: 240s
+        report: 300s
       # The most tokens an answer may hold, Ollama's num_predict (agent spec, "Answer caps", where the values are
       # justified). On the laptop's CPU an answer is written at about 3 tokens/s, so a cap also bounds the call's time:
       # a phase's first ACT answer carries the plan and its tool calls, a later one only tool calls, the report is JSON.

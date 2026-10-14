@@ -1,6 +1,5 @@
 package dev.kintsugi.agent.loop;
 
-import java.time.Duration;
 import java.util.List;
 
 import org.springframework.ai.chat.model.ChatModel;
@@ -15,11 +14,11 @@ import org.springframework.ai.tool.ToolCallback;
  * @param chatModel the chat model, called directly: in Spring AI 2.0.1 it never executes the tools it is offered
  * @param temperature the sampling temperature
  * @param numCtx the context window, in tokens
- * @param callTimeout how long one call may take before the run ends {@code TIMED_OUT}
+ * @param callTimeouts how long one call may take before the run ends {@code TIMED_OUT}, per task
  * @param numPredict the most tokens an answer may hold, per kind of call
  */
-public record ModelRoute(String model, ChatModel chatModel, double temperature, int numCtx, Duration callTimeout,
-		NumPredict numPredict) {
+public record ModelRoute(String model, ChatModel chatModel, double temperature, int numCtx,
+		CallTimeouts callTimeouts, NumPredict numPredict) {
 
 	/**
 	 * The options of one call: the route's settings, the answer's cap ({@code num_predict}), the tool definitions

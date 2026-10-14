@@ -39,7 +39,8 @@ class LoopConfig {
 	/**
 	 * The loop's own HTTP read timeout, applied to the auto-configured {@code RestClient.Builder} that Ollama's client is
 	 * built from, in the web profile only; the {@code demo} profile keeps {@code spring.http.clients.read-timeout}. It
-	 * is the longer of the two waits the loop allows a request, one model call and the warm-up, so that neither is cut
+	 * is the longest wait the loop allows a request, the longer call deadline ({@code ACT} or {@code REPORT}) or the
+	 * warm-up, so that none is cut
 	 * by the HTTP client before the loop's own deadline ends it (agent spec, "Shared rules").
 	 *
 	 * <p>
@@ -58,8 +59,8 @@ class LoopConfig {
 	}
 
 	static Duration readTimeout(ModelRouteProperties route, LoopSettings settings) {
-		return route.callTimeout().compareTo(settings.warmUpTimeout()) >= 0 ? route.callTimeout()
-				: settings.warmUpTimeout();
+		Duration longestCall = route.callTimeout().longest();
+		return longestCall.compareTo(settings.warmUpTimeout()) >= 0 ? longestCall : settings.warmUpTimeout();
 	}
 
 }

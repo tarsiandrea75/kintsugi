@@ -513,6 +513,40 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void aReportPastTheActDeadlineButWithinItsOwnCompletes() {
+		this.loop = loop(settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				new CallTimeouts(Duration.ofMillis(200), Duration.ofSeconds(3)));
+		this.model.quietPhases().slow(Duration.ofMillis(600), unknownReport());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+	}
+
+	@Test
+	void anActCallPastTheActDeadlineTimesOutNamingItEvenWhenTheReportsIsLonger() {
+		this.loop = loop(settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				new CallTimeouts(Duration.ofMillis(240), Duration.ofSeconds(3)));
+		this.model.slow(Duration.ofSeconds(5), plan("order-service", "DEPENDENCY_LATENCY"));
+
+		long start = System.nanoTime();
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.TIMED_OUT);
+
+		assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(2));
+		assertThat(failureReason()).isEqualTo("model call ACT in TRIAGE took longer than 240 ms");
+		assertThat(kinds()).isEmpty();
+	}
+
+	@Test
+	void aReportPastItsOwnDeadlineTimesOutNamingIt() {
+		this.loop = loop(settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				new CallTimeouts(Duration.ofSeconds(3), Duration.ofMillis(300)));
+		this.model.quietPhases().slow(Duration.ofSeconds(5), unknownReport());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.TIMED_OUT);
+
+		assertThat(failureReason()).isEqualTo("model call REPORT in CONCLUDE took longer than 300 ms");
+	}
+
+	@Test
 	void anIncidentPastItsTimeBudgetEndsTimedOut() {
 		this.loop = loop(settings(12, Duration.ofMillis(400), Duration.ofSeconds(5)), Duration.ofSeconds(5));
 		Duration pause = Duration.ofMillis(150);
@@ -663,7 +697,11 @@ class AgentLoopTest {
 	}
 
 	private AgentLoop loop(LoopSettings settings, Duration callTimeout) {
-		ModelRouter router = task -> new ModelRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeout, CAPS);
+		return loop(settings, new CallTimeouts(callTimeout, callTimeout));
+	}
+
+	private AgentLoop loop(LoopSettings settings, CallTimeouts callTimeouts) {
+		ModelRouter router = task -> new ModelRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeouts, CAPS);
 		return new AgentLoop(this.incidents, router, this.lab, settings, Clock.systemUTC());
 	}
 
