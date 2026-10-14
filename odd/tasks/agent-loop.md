@@ -236,6 +236,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - New generic `lib.sh` helpers: `agent_call`, `incident_status`, `wait_incident`, `open_incident` (on a 409 it waits for the running incident and retries once), `restart_agent` (the API has no cancel; the restart sweep ends a `RUNNING` incident `FAILED`), `truth_cause`. Documented in `docs/setup.md` ("The diagnosing agent", "Check that the agent diagnoses F1, F2 and F3"), which also lists the agent's port, `AGENT_DB_PASSWORD` and the `agent` database.
   - Validated on the live lab: the fresh `knowledge-data` volume created the `agent` database and the non-superuser `agent_app`; Flyway applied V1 and V2; the agent is healthy and reaches Ollama through `ollama-proxy`; `POST /incidents` answered 202 with an id, `GET` showed `RUNNING`, a second `POST` 409 with that id; a restart ended it `FAILED`. Two interrupted `verify-agent.sh` runs (F2, F1) injected, placed neutral orders, opened the incident (warm-up 769 ms, first `ACT` call started), then restored the fault and recorded `not scored`. `verify-mcp.sh` and `verify-f1.sh` pass; new orders carry `checkout-` ids. `bash -n` and shellcheck 0.10.0 (Docker image) are clean on the changed scripts.
   - Observed, not fixed (agent code is out of this task's surface): on shutdown the loop logs `run_end_not_stored` (the store is closed before the interrupted run can record its end); the restart sweep then marks the incident `FAILED`, so nothing stays `RUNNING`.
+- 2026-10-14: T5 part B wiring committed (`1662569`) and reviewed with `reset-volume.sh` (`39fb342`): high risk, four lenses, approved and acknowledged (`review-754658aa32761c24`). WARNINGs to fix in T5 part C:
+  - a `wait_incident` timeout clears `current_fault` before `exit 1`, so the trap never runs `restart_agent` and the incident stays `RUNNING` (three lenses);
+  - the fixed 10-minute window can include the previous fault's orders and logs when an incident ends early, so scores depend on timing;
+  - after a 409 wait in `open_incident`, the retried POST keeps a window that may no longer cover the fault;
+  - the agent is now part of every `start_lab`; on a pre-agent `knowledge-data` volume it exits, and every verify script fails until `reset-volume.sh` runs.
+  Suggestions: a duration mismatch in the usage text, the hard-coded env list in `restart_agent`, an unreadable timeout message, an untracked window on `open_incident`, and EOF handling in `reset-volume.sh`'s prompt.
+- 2026-10-14: the first full `verify-agent.sh` run started on the committed script (before the part C fixes), so its F2 and F3 scores may suffer from the window issue.
 
 ## Next step
 
