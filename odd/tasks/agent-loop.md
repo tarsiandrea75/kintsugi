@@ -215,6 +215,20 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
   The spec and ADR-010 change in T5 part A.
 
+- 2026-10-14: T5 part A committed on `feat/agent-loop-04-check` (`206bf8e`). Route: delegated writer (earlier session), parent commit.
+  - The plan is read from the first `ACT` answer of each phase; a missing or invalid plan is recorded and the run goes on. `ModelTask` is `ACT` or `REPORT`.
+  - Budgets: 180 s per model call, 30 min per incident, at most 12 model calls; a warm-up on the `ACT` route (300 s limit, no step) runs before the time budget starts.
+  - T4 review fixes: the loop sets its own read timeout (web profile), the demo keeps 5 min; an `Error` in `run()` ends the incident `FAILED`; the full-queue rejection and a nameless tool call are tested.
+  - ADR-010 lines that still named a separate `PLAN` call were corrected before the commit.
+  - Checks: `agent` has 223 tests (surefire XML), 0 failures, exit 0 (run by an assessment worker). The leakage regex is clean on `Prompts.java` and `Schemas.java`.
+- 2026-10-14: T5 part A reviewed (medium risk, `slice_budget_reached`, reliability lens), approved and acknowledged (`review-73eb7c52d4d33d38`). Non-blocking suggestions:
+  - `Answers.embedded` returns null when the whole text parses as a non-object JSON value, without trying the fence or brace search;
+  - the warm-up's HTTP-level timeout branch ("took longer than") has no test.
+- 2026-10-14: T5 part B is started but uncommitted: the `agent` compose service (127.0.0.1:18086), `agent/Dockerfile`, neutral `checkout-xxxxxxxx` customer ids in `lib.sh` (all `verify-*.sh` follow the new signatures), and a `.gitignore` entry for `infra/scripts/out/`. Open points:
+  - `verify-agent.sh` does not exist yet;
+  - the live `knowledge-db` volume predates the `agent` database and role, which `01-knowledge.sh` creates only on a fresh volume;
+  - compose defaults `AGENT_DB_PASSWORD` to `agent_app`, while `application.yaml` has no default.
+
 ## Next step
 
-T5 on `feat/agent-loop-04-check`: part A covers the budget change and the T4 review fixes; part B covers compose wiring, neutral traffic ids, and `verify-agent.sh` run for real.
+T5 part B on `feat/agent-loop-04-check`: write `verify-agent.sh`, recreate or migrate the `knowledge-db` volume for the `agent` database, settle the `AGENT_DB_PASSWORD` default, then run F1–F3 for real with `granite4.1:8b` and record the results.
