@@ -314,7 +314,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		String summary = ToolSummaries.summarize(stepNo, result.tool(), result.outcome(), result.rawOutput());
 		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, result.tool(), result.args(),
 				result.rawOutput(), result.outcome().name(), summary, null, (int) result.durationMs(), now()));
-		run.toolSteps.put(stepNo, new ToolStep(stepNo, result.tool(), result.outcome().name(), result.rawOutput()));
+		run.toolSteps.put(stepNo, new ToolStep(stepNo, result.tool(), result.outcome().name(), result.rawOutput(),
+				summary));
 		run.evidence.add(summary);
 		return summary;
 	}
@@ -326,7 +327,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 				+ "\nthe call was refused and did not run: " + why;
 		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, call.name(), jsonArgs(call.arguments()),
 				null, outcome, summary, null, 0, now()));
-		run.toolSteps.put(stepNo, new ToolStep(stepNo, String.valueOf(call.name()), outcome, null));
+		run.toolSteps.put(stepNo, new ToolStep(stepNo, String.valueOf(call.name()), outcome, null, summary));
 		run.evidence.add(summary);
 		return summary;
 	}

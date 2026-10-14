@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -38,6 +40,9 @@ final class ReportCheck {
 	private static final String TRUNCATED_SUFFIX = "\n[truncated]";
 
 	private static final JsonMapper JSON = JsonMapper.shared();
+
+	/** One escape a summary or a JSON text may hold: a backslash and one of {@code n t " \}. */
+	private static final Pattern ESCAPE = Pattern.compile("\\\\([nt\"\\\\])");
 
 	private ReportCheck() {
 	}
@@ -123,15 +128,15 @@ final class ReportCheck {
 			errors.add(name + ".tool is " + Causes.shown(item.get("tool")).replace("\"", "") + ", but step " + stepNo
 					+ " is " + step.tool());
 		}
-		else if (!quoted(item.get("quote").asString(), step.output())) {
+		else if (!quoted(quote.asString(), step.output()) && !inText(normalized(quote.asString()), step.summary())) {
 			errors.add(name + ".quote is not in the output of step " + stepNo);
 		}
 	}
 
 	/**
-	 * Whether {@code quote} is in {@code output}, after whitespace normalization of both (trimmed, every run of
-	 * whitespace one space, case kept): in the raw text, or in one of the string values of its JSON, decoded, so that
-	 * escaped quotes and newlines compare as text.
+	 * Whether {@code quote} is in {@code output}, both {@link #normalized normalized}: in the raw text, or in one of the
+	 * string values of its JSON, decoded, so that escaped quotes and newlines compare as text. The evidence check also
+	 * tries the step's summary, the text the model saw (T5c6).
 	 */
 	static boolean quoted(String quote, String output) {
 		if (output == null) {
@@ -141,7 +146,7 @@ final class ReportCheck {
 		if (wanted.isEmpty()) {
 			return false;
 		}
-		if (normalized(output).contains(wanted)) {
+		if (inText(wanted, output)) {
 			return true;
 		}
 		String json = output.endsWith(TRUNCATED_SUFFIX)
@@ -174,8 +179,24 @@ final class ReportCheck {
 		return text.codePointCount(0, text.length());
 	}
 
+	private static boolean inText(String wanted, String text) {
+		return text != null && !wanted.isEmpty() && normalized(text).contains(wanted);
+	}
+
+	/**
+	 * The form a quote and the text it is looked up in are compared in (T5c6): the escapes {@code \n}, {@code \t},
+	 * {@code \"} and {@code \\} decoded, every run of whitespace, line breaks included, one space, trimmed; case kept.
+	 * A summary shows untrusted text as an escaped literal, and the model copies it with real line breaks.
+	 */
 	static String normalized(String text) {
-		return text.strip().replaceAll("\\s+", " ");
+		return ESCAPE.matcher(text)
+			.replaceAll(match -> Matcher.quoteReplacement(switch (match.group(1)) {
+				case "n" -> "\n";
+				case "t" -> "\t";
+				default -> match.group(1);
+			}))
+			.strip()
+			.replaceAll("\\s+", " ");
 	}
 
 }

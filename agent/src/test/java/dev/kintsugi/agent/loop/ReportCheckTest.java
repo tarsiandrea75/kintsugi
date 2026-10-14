@@ -20,10 +20,10 @@ import dev.kintsugi.agent.lab.Phase;
 class ReportCheckTest {
 
 	private static final Map<Integer, ToolStep> STEPS = Map.of( //
-			3, new ToolStep(3, "status_summary", "OK", fixture("status_summary-orders.json")), //
-			4, new ToolStep(4, "search_logs", "OK", fixture("search_logs-order.json")), //
-			5, new ToolStep(5, "recent_events", "OK", fixture("recent_events-order.json")), //
-			6, new ToolStep(6, "search_logs", "REFUSED_PHASE", null));
+			3, new ToolStep(3, "status_summary", "OK", fixture("status_summary-orders.json"), null), //
+			4, new ToolStep(4, "search_logs", "OK", fixture("search_logs-order.json"), null), //
+			5, new ToolStep(5, "recent_events", "OK", fixture("recent_events-order.json"), null), //
+			6, new ToolStep(6, "search_logs", "REFUSED_PHASE", null, null));
 
 	/** The first event detail of recent_events-order.json, decoded: a whole line, about 230 characters. */
 	private static final String WHOLE_DETAIL = "{\"exception\":\"java.net.http.HttpTimeoutException\","
@@ -44,6 +44,22 @@ class ReportCheckTest {
 				evidence(4, "search_logs", "  16:32:03.395Z \n INFO   1 --- [order-service]  ")))).isEmpty();
 		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY",
 				evidence(4, "search_logs", "16:32:03.395Z info 1 --- [order-service]")))).hasSize(1);
+	}
+
+	@Test
+	void normalizationDecodesEscapesThenCollapsesWhitespace() {
+		assertThat(ReportCheck.normalized("  a\\n\\nb\\t c \n\n d \\\"e\\\" f\\\\n  ")).isEqualTo("a b c d \"e\" f\\n");
+	}
+
+	@Test
+	void aQuoteOfTheSummaryIsCheckedLikeTheOutput() {
+		Map<Integer, ToolStep> steps = Map.of(3, new ToolStep(3, "status_summary", "OK",
+				fixture("status_summary-orders.json"), "toolCallId=3 tool=status_summary outcome=OK\nstatus=\"PAID\" count=3"));
+		assertThat(ReportCheck.errors(Answers.json(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", "status=\"PAID\" count=3"))), steps)).isEmpty();
+		assertThat(ReportCheck.errors(Answers.json(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", "status=\"PAID\" count=4"))), steps))
+			.containsExactly("evidence[0].quote is not in the output of step 3");
 	}
 
 	@Test
