@@ -361,6 +361,11 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - agent: an offered call whose argument is a placeholder (`<name>`) is refused `REFUSED_PLACEHOLDER`; a call with the same tool and arguments (parsed JSON, key order ignored) as one that ran is refused `REFUSED_DUPLICATE`, "already called as toolCallId N; read that result". Neither runs. The first 2 per incident consume nothing; later ones consume a unit, so a repeating model still ends its phase. With the cap a valid run makes at most 8 + 2 `ACT` answers and 2 reports, the 12-call model budget (`DefaultBudgetsTest`). Migration V3 widens the `tool_outcome` check. The system message says an order never paid stays `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, filter by those, `PAYMENT_FAILED` only when the status summary shows it, and copy a real `orderId`.
   - RED observed against stubs (9 failures): 3 `AgentLoopTest` (placeholder, duplicate, cap), 3 `ToolArgsTest`, 2 `PromptsTest`, 1 `DefaultBudgetsTest`. GREEN: `agent` 272 tests (surefire XML), 0 failures, 0 errors; the `AgentLoopTest` leak check still passes.
   - Open: the 45 min incident budget does not hold the new worst case (10 `ACT` + 2 `REPORT` at their deadlines), as it already did not for 8 + 2.
+- 2026-10-14: T5c9 committed as `be241fd` (mcp-tools) and `f9d2b25` (agent; Flyway `V3` widens the `tool_outcome` CHECK). Spot check: `ToolArgsTest` and `DefaultBudgetsTest` green. Assess from `e20dcc2`: medium, `slice_budget_reached`. Review (reliability lens) approved and acknowledged. Follow-ups:
+  - WARNING: a call that failed transiently (`UPSTREAM_ERROR`/`CLIENT_ERROR`) is also remembered, so retrying it is refused as a duplicate (`AgentLoop.java:338-342`);
+  - SUGGESTION: duplicates count across phases, although time-relative queries can return new data later;
+  - SUGGESTION: `<init>`-like search terms would count as placeholders;
+  - SUGGESTION: `DefaultBudgetsTest` only adds up constants; no loop-level worst-case test.
 
 ## Next step
 
