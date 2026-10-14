@@ -335,7 +335,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - RED observed (behavioural, 13 failures, with the old code and a stub `quotableLines` returning every line): `PromptsTest` 6, `AgentLoopTest` 2 (plan shown per phase), `ToolSummariesTest` 4 (900 cap, fitting, quotable lines), `ReportCheckTest` 1 (code-written text). The WARNING B loop test passed before and after: it guards T5c6's existing wiring. GREEN: `agent` 262 tests (surefire XML), 0 failures, 0 errors.
   - Replay (`LiveRunReportCheckTest`): unchanged, **20 of 26 quotes pass**, F1's retry valid; no quote of the run relied on text only the summary's code wrote.
   - Cost: about 110 tokens added to the system message (read once per incident, then reused), about 60 to each plan task, about 100 to the log tools' definitions. Authored lines: about 500 with the new `PromptsTest`, over the 400 heuristic because of tests and two specs.
+- 2026-10-14: T5c8 committed as `059141c` (mcp-tools) and `e20dcc2` (agent). Spot check: `PromptsTest` and `ReportCheckTest` green. Assess from `80dd02f`: medium, `slice_budget_reached`. Review (reliability lens) approved and acknowledged. Follow-ups:
+  - WARNING: a 900-character runbook chunk full of `\n`/`\"` can escape past the 1,500-character summary cap, so the line is dropped while the summary still says `shown=1` (`Summarizers.java:233-239`);
+  - SUGGESTION: computed figures stay quotable (`ToolSummaries.java:66-74`);
+  - SUGGESTION: no test covers how ties between runbook chunks are ordered;
+  - the recorded `tools-list.json` still has the old descriptions, and no test compares against it.
 
 ## Next step
 
-T5c8 (delegated writer), then the fifth full run (T5c3).
+The fifth full run (T5c3), started after T5c8.
