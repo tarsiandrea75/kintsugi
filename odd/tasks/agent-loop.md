@@ -101,6 +101,11 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - [x] **T3 — The MCP client and tool-output summarizers,** tested against recorded tool outputs. Branch `-02-tools`. Route: delegated writer.
 - [x] **T4 — The loop, planner and report:** phases, plan schema, budgets, report schema, evidence check and `ModelRouter`, tested with a scripted fake chat model. Branch `-03-loop`. Route: delegated writer.
 - [ ] **T5 — Compose wiring and `verify-agent.sh` (F1–F3) run for real with `granite4.1:8b`;** record the results and docs. Branch `-04-check`. Route: delegated writer.
+  - [x] **T5a** — budgets amended, warm-up, T4 review fixes (`206bf8e`, review `review-73eb7c52d4d33d38`).
+  - [x] **T5b** — compose wiring, neutral traffic ids, `verify-agent.sh` (`1662569`, review `review-754658aa32761c24`).
+  - [ ] **T5c1 — model-call fixes (agent code, spec, ADR):** cap `num_predict` on `ACT` calls, with room for a phase's first answer, which carries the plan; put the instruction after the tool results and keep the parts that change at the end, so the model does not summarise and the cached prefix grows; abort the HTTP request when a call times out, so Ollama does not finish an abandoned call. Tests first. Route: delegated writer.
+  - [ ] **T5c2 — `verify-agent.sh` fixes:** read the reported cause only from `.report`; restart the agent when a wait times out; a per-fault window that excludes the previous fault's traffic; a fresh window after a 409 wait; the lab starts even when the agent cannot. Route: delegated writer (same worker as T5c1, separate commit).
+  - [ ] **T5c3 — full run** of `verify-agent.sh`, results recorded. Route: parent.
 
 ## Progress
 
@@ -256,4 +261,4 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 ## Next step
 
-T5 part B on `feat/agent-loop-04-check`: run `infra/scripts/verify-agent.sh` (F1–F3, up to about 2 hours on the laptop CPU) with `granite4.1:8b`, record the results from `infra/scripts/out/`, then commit Part B.
+T5c1 and T5c2 on `feat/agent-loop-04-check` (one delegated writer, two commits), then the T5c3 full run.
