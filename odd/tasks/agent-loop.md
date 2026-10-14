@@ -109,7 +109,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - [x] **T5c4 — a call deadline per task (the human's decision of 2026-10-14):** 240 s for `ACT` calls, 300 s for the `REPORT` call (`kintsugi.agent.model.call-timeout.act`/`.report`), each still bounded by the incident's time left and named in the timeout reason; the loop's read timeout follows the longest deadline. Tests first; spec and ADR-010 "Amended in T5c4". Route: delegated writer.
   - [x] **T5c5 — short evidence quotes and longer call deadlines (the human's decision of 2026-10-14, after the third run):** the report prompt asks for a short verbatim fragment per evidence `quote` (at most 160 characters) and `ReportCheck` rejects a longer quote with a reason the retry can act on; the substring check stays. Call deadlines become 300 s for `ACT` and 420 s for `REPORT`; check that the incident's time budget and `verify-agent.sh`'s wait still fit them. Tests first; spec and ADR-010 "Amended in T5c5". Route: delegated writer (2+ non-trivial files).
   - [x] **T5c6 — evidence check against what the model saw (the human's decision of 2026-10-14, after the fourth run):** `ReportCheck` also accepts a quote found verbatim in the cited step's summary, the text shown to the model, which is derived from the tool output deterministically. It compares with whitespace and line breaks collapsed, and decodes escapes such as `\n` first. The substring rule stays. Tests first, from the fourth run's real quotes; update the spec (the acceptance wording "exists in its cited tool output") and ADR-010 "Amended in T5c6". Route: delegated writer.
-  - [ ] **T5c7 — why every report blames `payment-service`:** a read-only investigation of the fourth run (prompts, summaries, tools, runbooks), returning the cause and a fix proposal for the human. Route: read-only explorer.
+  - [x] **T5c7 — why every report blames `payment-service`:** a read-only investigation of the fourth run (prompts, summaries, tools, runbooks), returning the cause and a fix proposal for the human. Route: read-only explorer.
 
 ## Progress
 
@@ -305,7 +305,22 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Fixture: `agent/src/test/resources/live-runs/verify-agent-20261014T174310Z.json`, the fourth run's tool steps (output and summary) and report answers, unchanged. `LiveRunReportCheckTest` replays its six reports.
   - RED observed (behavioural, 5 failures): the summary-form quote `status="PAYMENT_FAILED" count=6` (F2 step 3), a runbook quote of the summary with its `\n\n` escapes written as one real line break (F2 step 11), a summary quote in a unit test, the escape decoding in `normalized`, and the replay. The rejection test (invented `Gatewa...(cut)`, `| **g`, `durationMs=10008 of 9 events`) passed before and after. Then GREEN: `agent` 250 tests (surefire XML), 0 failures, 0 errors.
   - Replay: the run has 26 quotes, not 30 (F1's retry holds one item); 16 are verbatim in their step's summary and none in the raw output. With the new check **20 of 26 pass** and **one report is valid: F1's retry (step 16)**. Still rejected, correctly, because they are not verbatim: F1#15 `durationMs=10008 of 9 events` (the summary has `min=... max=10008 of 9 events`); F2#15 and F2#16 `## 5. Key signals\n- \`lab_payments{status}\`...` (drops the `**Metrics** ...` line between); F3#15 `Gatewa...(cut)` (the summary has `Gatewa"(cut)`) and `| **g` (the runbook has `| gateway-mock`); F3#16 the same `| **g`. Every report would still name `payment-service|DEPENDENCY_REJECTING` (T5c7).
+- 2026-10-14: T5c6 committed as `80dd02f`. Spot check: `ReportCheckTest` and `LiveRunReportCheckTest` green. Assess from `c81d03f`: medium, `slice_budget_reached`. Review `review-02490cbeba753389` (one lens, reliability) approved and acknowledged, with follow-up WARNINGs:
+  - the summary fallback also matches text the code writes (the header, computed aggregates, the `(cut)` markers and the outcome sentences), so a quote of those passes;
+  - no `AgentLoop`-level test proves the loop stores the summary it showed the model on the `ToolStep`.
+- 2026-10-14: T5c7, why every report blames `payment-service` (read-only explorer). Verified from the fourth run and the code; ranked:
+  1. **Caller named instead of callee (prompt):** `Prompts.java:39-49` never says that for `DEPENDENCY_*` the root cause is the slow or refusing dependency. The F1/F3 summaries name gateway-mock and still report payment-service.
+  2. **Evidence-free TRIAGE plan, re-fed verbatim (prompt + loop):** step 0 hypothesizes payment-service, inventory-service and postgres before any tool call in all three runs. "Latest plan" (`Prompts.java:141`) repeats it, and the tool arguments follow it. gateway-mock and order-service are never targeted.
+  3. **Queries miss every decisive signal (tool text + prompt):**
+     - the lab logs failures at WARN/INFO, never ERROR, and every log query used `level=ERROR`, so they returned 0;
+     - `error_rate` counts 5xx only, so it is blind to F1–F3;
+     - F3 traced a pre-fault PAID order taken from `source=payment`;
+     - `service_restarts` is never called.
+  4. **The runbook summary cuts the exonerating text (summarizer):** `Summarizers.RUNBOOK_TEXT_CHARS=300` cuts before "FAILED means the gateway answered 429" and before the gateway rows of "Burst of PAYMENT_FAILED orders".
+  5. **KNOWLEDGE comes after INVESTIGATE and is filtered to payment-service (loop, large).**
+
+  Decisive signals: F1 gateway-mock INFO `latency_ms=10000` (not queried); F2 payment-service WARN `Gateway rejected … 429` (ERROR-only queries); F3 order event `PAYMENT_UNAVAILABLE` `ConnectException` to `:9999` (`recent_events source=order`, never queried). The existing tools can surface all three.
 
 ## Next step
 
-T5c6 (delegated writer) and T5c7 (read-only explorer) in parallel, then the human decides the fix for diagnosis quality before the next full run.
+The human chooses the diagnosis-quality fixes from T5c7 before the fifth full run.
