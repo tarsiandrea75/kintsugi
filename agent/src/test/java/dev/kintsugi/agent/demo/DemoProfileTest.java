@@ -12,6 +12,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.restclient.RestClientCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -49,6 +50,12 @@ class DemoProfileTest {
 		assertThat(context.getBeanNamesForType(IncidentController.class)).isEmpty();
 		assertThat(context.containsBean("demoRunner")).isTrue();
 		assertThat(output.getOut()).contains("It is noon in Buenos Aires.");
+	}
+
+	@Test
+	void theDemoKeepsItsFiveMinuteReadTimeoutAndHasNoLoopCustomizer() {
+		assertThat(context.getEnvironment().getProperty("spring.http.clients.read-timeout")).isEqualTo("5m");
+		assertThat(context.getBeanNamesForType(RestClientCustomizer.class)).doesNotContain("loopReadTimeout");
 	}
 
 }

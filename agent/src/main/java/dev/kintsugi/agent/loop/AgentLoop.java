@@ -58,20 +58,23 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  * starts.
  *
  * <p>
- * {@code TRIAGE}, {@code INVESTIGATE} and {@code KNOWLEDGE} each start with a schema-constrained plan, then let the
- * model call the phase's tools within the phase's allowance and the incident's tool budget; the model sees each result
- * only as its code-built summary, in a tool-response message. {@code CONCLUDE} asks for the report, which code checks
- * against the recorded outputs. Every budget ends the run with an explicit status, except the tool budget, which moves
- * the run to {@code CONCLUDE} so that it can still be scored.
+ * A run starts with one warm-up request, which loads the model and counts against no budget. {@code TRIAGE},
+ * {@code INVESTIGATE} and {@code KNOWLEDGE} then let the model call the phase's tools within the phase's allowance and
+ * the incident's tool budget; the first answer of each phase also writes the phase's plan in its text, which code
+ * checks and records but which never ends the run. The model sees each result only as its code-built summary, in a
+ * tool-response message. {@code CONCLUDE} asks for the report, which code checks against the recorded outputs. Every
+ * budget ends the run with an explicit status, except the tool budget, which moves the run to {@code CONCLUDE} so that
+ * it can still be scored.
  */
 public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/** Incidents waiting for the loop's one thread; the database already admits one {@code RUNNING} at a time. */
 	static final int RUN_QUEUE = 2;
 
-	static final String PLAN_INVALID = "plan invalid twice";
-
 	static final String REPORT_INVALID = "report invalid twice";
+
+	/** How reasons name the warm-up request. */
+	static final String WARM_UP = "the model warm-up";
 
 	private static final List<Phase> EVIDENCE_PHASES = List.of(Phase.TRIAGE, Phase.INVESTIGATE, Phase.KNOWLEDGE);
 
@@ -154,7 +157,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			status = end.status;
 			reason = end.reason;
 		}
-		catch (RuntimeException unexpected) {
+		catch (RuntimeException | Error unexpected) {
+			// An Error too (a missing class, a stack overflow): the run must still end, or its RUNNING row would block
+			// every later incident until the agent restarts. The loop's thread survives to serve the next run.
 			log.error("incident={} event=run_failed", incidentId, unexpected);
 			status = IncidentStatus.FAILED;
 			reason = "unexpected error: " + describe(unexpected);
@@ -164,9 +169,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	private String investigate(Run run) {
+		warmUp(run);
 		for (Phase phase : EVIDENCE_PHASES) {
 			List<ToolCallback> tools = tools(phase);
-			plan(run, phase);
 			act(run, phase, tools);
 			if (run.toolsLeft == 0) {
 				budgetStep(run, phase, "the incident's tool budget of " + LoopSettings.TOOL_BUDGET
@@ -186,30 +191,44 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 	}
 
-	/** The phase's plan: one call constrained by the plan schema, checked in code, with one retry. */
-	private void plan(Run run, Phase phase) {
-		List<String> errors = List.of();
-		for (int attempt = 1; attempt <= 2; attempt++) {
-			Prompts.State state = run.state(phase, LoopSettings.ALLOWANCES.get(phase), 0);
-			Answer answer = call(run, ModelTask.PLAN, phase,
-					List.of(run.system, new UserMessage(Prompts.plan(state, errors))), List.of(),
-					Schemas.plan(phase));
-			JsonNode plan = Answers.json(answer.text());
-			errors = PlanCheck.errors(plan, phase);
-			write(run, new StepRow(run.steps + 1, "PLAN", phase.name(), answer.model(), answer.tokens(), null, null,
-					null, null, verdict(errors), answer.text(), answer.latencyMs(), now()));
-			if (errors.isEmpty()) {
-				run.plan = JSON.writeValueAsString(plan);
-				return;
-			}
+	/**
+	 * Loads the model with one tiny request before the run, on the route of its first call and with the same options,
+	 * so that the first real call does not pay the load. It counts against no budget: the incident's time budget starts
+	 * when it ends. It is bounded by its own timeout, and a failure ends the run {@code FAILED} with the reason.
+	 */
+	private void warmUp(Run run) {
+		ModelRoute route = this.router.route(ModelTask.ACT);
+		Prompt prompt = new Prompt(List.of(new UserMessage(Prompts.WARM_UP)), route.warmUpOptions());
+		Duration limit = this.settings.warmUpTimeout();
+		long start = System.nanoTime();
+		Future<ChatResponse> future = this.modelCalls.submit(() -> route.chatModel().call(prompt));
+		try {
+			future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
 		}
-		throw new RunEnd(IncidentStatus.FAILED, PLAN_INVALID);
+		catch (TimeoutException slow) {
+			future.cancel(true);
+			throw new RunEnd(IncidentStatus.FAILED, WARM_UP + " took longer than " + shown(limit));
+		}
+		catch (ExecutionException failed) {
+			throw new RunEnd(IncidentStatus.FAILED, isTimeout(failed.getCause())
+					? WARM_UP + " took longer than " + shown(limit) : WARM_UP + " failed: " + describe(failed.getCause()));
+		}
+		catch (InterruptedException interrupted) {
+			future.cancel(true);
+			Thread.currentThread().interrupt();
+			throw new RunEnd(IncidentStatus.FAILED, "the run was interrupted during " + WARM_UP);
+		}
+		log.info("incident={} event=model_warmed_up model={} latencyMs={}", run.incident.id(), route.model(),
+				(System.nanoTime() - start) / 1_000_000);
+		run.budgetStart = now();
 	}
 
 	/**
 	 * The phase's tool calls. The model is offered the phase's tools only; each call it requests is checked in order
 	 * (budget, then phase) and runs only when both allow it. The phase ends when the model answers without a tool call
-	 * or nothing is left of the phase's allowance or of the incident's budget.
+	 * or nothing is left of the phase's allowance or of the incident's budget. The first answer also carries the
+	 * phase's plan in its text: it is checked and recorded on its {@code ACT} step, and only a valid plan becomes the
+	 * latest plan; a missing or invalid one never ends the run, and is not asked for again.
 	 */
 	private void act(Run run, Phase phase, List<ToolCallback> tools) {
 		int phaseLeft = LoopSettings.ALLOWANCES.get(phase);
@@ -218,7 +237,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		while (phaseLeft > 0 && run.toolsLeft > 0) {
 			List<Message> messages = new ArrayList<>();
 			messages.add(run.system);
-			messages.add(new UserMessage(Prompts.act(run.state(phase, phaseLeft, lastResponses.size()))));
+			messages.add(new UserMessage(Prompts.act(run.state(phase, phaseLeft, lastResponses.size()), lastAnswer == null)));
 			if (lastAnswer != null) {
 				// The previous answer's calls and what they gave, as the model expects tool results.
 				messages.add(lastAnswer);
@@ -226,9 +245,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			}
 			Answer answer = call(run, ModelTask.ACT, phase, messages, tools, null);
 			List<ToolCall> calls = answer.message().getToolCalls();
+			String note = calls.isEmpty() ? "no tool call; the phase ends" : calls.size() + " tool call(s)";
+			if (lastAnswer == null) {
+				note += "; " + plan(run, phase, answer.text());
+			}
 			write(run, new StepRow(run.steps + 1, "ACT", phase.name(), answer.model(), answer.tokens(), null, null,
-					null, null, calls.isEmpty() ? "no tool call; the phase ends" : calls.size() + " tool call(s)",
-					actOutput(answer), answer.latencyMs(), now()));
+					null, null, note, actOutput(answer), answer.latencyMs(), now()));
 			if (calls.isEmpty()) {
 				return;
 			}
@@ -245,7 +267,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 				else {
 					phaseLeft--;
 					run.toolsLeft--;
-					summary = phase.tools().contains(call.name()) ? runTool(run, phase, call, answer.model())
+					// A call without a name is refused like any tool the phase does not offer (List.contains(null) throws).
+					boolean offered = call.name() != null && phase.tools().contains(call.name());
+					summary = offered ? runTool(run, phase, call, answer.model())
 							: refuse(run, phase, call, answer.model(), "REFUSED_PHASE", label(call.name())
 									+ " is not available in " + phase + "; this phase offers "
 									+ String.join(", ", phase.tools()));
@@ -258,6 +282,23 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 				return;
 			}
 		}
+	}
+
+	/**
+	 * Reads and checks the plan in the text of a phase's first answer; a valid one becomes the run's latest plan.
+	 * @return the verdict for the {@code ACT} step: {@code plan valid}, {@code plan missing} or {@code plan invalid: ...}
+	 */
+	private static String plan(Run run, Phase phase, String text) {
+		JsonNode plan = Answers.embedded(text);
+		if (plan == null) {
+			return "plan missing";
+		}
+		List<String> errors = PlanCheck.errors(plan, phase);
+		if (!errors.isEmpty()) {
+			return "plan invalid: " + String.join("; ", errors);
+		}
+		run.plan = JSON.writeValueAsString(plan);
+		return "plan valid";
 	}
 
 	/** Runs one checked call through mcp-tools and records the full output with the summary the model will see. */
@@ -409,11 +450,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			log.error("incident={} event=run_end_not_stored status={}", run.incident.id(), status, notStored);
 		}
 		log.info("incident={} event=run_ended status={} reason=\"{}\" durationMs={}", run.incident.id(), status,
-				reason == null ? "-" : reason, elapsed(run).toMillis());
+				reason == null ? "-" : reason, Duration.between(run.incident.startedAt(), now()).toMillis());
 	}
 
+	/** The time the incident's budget has used: from the end of the warm-up, or from {@code started_at} before it. */
 	private Duration elapsed(Run run) {
-		return Duration.between(run.incident.startedAt(), this.clock.instant());
+		return Duration.between(run.budgetStart, this.clock.instant());
 	}
 
 	private Instant now() {
@@ -479,10 +521,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		return text.replaceAll("\\s+", " ").strip();
 	}
 
-	/** A budget as the reasons write it: {@code 10 min}, {@code 90 s} or {@code 200 ms}. */
+	/** A budget as the reasons write it: {@code 30 min}, {@code 180 s} or {@code 200 ms}. */
 	static String shown(Duration duration) {
 		long ms = duration.toMillis();
-		if (ms % 60_000 == 0) {
+		if (ms % 60_000 == 0 && ms >= 600_000) {
 			return ms / 60_000 + " min";
 		}
 		return ms % 1000 == 0 ? ms / 1000 + " s" : ms + " ms";
@@ -509,8 +551,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		String plan;
 
+		/** Where the incident's time budget starts: the end of the warm-up, so the model's load is not counted. */
+		Instant budgetStart;
+
 		Run(OpenIncident incident) {
 			this.incident = incident;
+			this.budgetStart = incident.startedAt();
 			this.system = new SystemMessage(Prompts.system(incident.symptom(), incident.sinceMinutes()));
 		}
 

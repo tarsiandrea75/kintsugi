@@ -74,11 +74,10 @@ class AgentLoopApiTest {
 
 	@Test
 	void anIncidentPostedToTheApiRunsToCompletion() throws Exception {
-		MODEL.plan()
-			.tools(call("status_summary", "{\"table\":\"orders\"}"))
+		MODEL.planned(call("status_summary", "{\"table\":\"orders\"}"))
 			.text("done")
 			.quietPhasesAfterTriage()
-			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", "PAYMENT_PENDING")));
+			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(2, "status_summary", "PAYMENT_PENDING")));
 		assertThat(this.runner).isInstanceOf(AgentLoop.class);
 
 		HttpResponse<String> opened = send(HttpRequest.newBuilder(uri("/incidents"))
@@ -94,16 +93,17 @@ class AgentLoopApiTest {
 		assertThat(incident.get("status").asString()).isEqualTo("COMPLETED");
 		assertThat(incident.has("failureReason")).isFalse();
 		assertThat(incident.get("report").get("incidentId").asString()).isEqualTo(id);
-		assertThat(incident.get("report").get("stepsUsed").asInt()).isEqualTo(9);
+		assertThat(incident.get("report").get("stepsUsed").asInt()).isEqualTo(6);
 		JsonNode steps = incident.get("steps");
-		assertThat(steps).hasSize(9);
-		assertThat(steps.get(2).get("kind").asString()).isEqualTo("TOOL_CALL");
-		assertThat(steps.get(2).get("summary").asString()).startsWith("toolCallId=3 tool=status_summary");
-		assertThat(steps.get(2).has("toolOutput")).isFalse();
+		assertThat(steps).hasSize(6);
+		assertThat(steps.get(1).get("kind").asString()).isEqualTo("TOOL_CALL");
+		assertThat(steps.get(1).get("summary").asString()).startsWith("toolCallId=2 tool=status_summary");
+		assertThat(steps.get(1).has("toolOutput")).isFalse();
 		assertThat(MODEL.left()).isZero();
+		assertThat(MODEL.warmUps()).hasSize(1);
 
 		JsonNode full = JSON.readTree(send(HttpRequest.newBuilder(uri("/incidents/" + id + "?full=true")).build()).body());
-		assertThat(full.get("steps").get(2).get("toolOutput").asString()).contains("PAYMENT_PENDING");
+		assertThat(full.get("steps").get(1).get("toolOutput").asString()).contains("PAYMENT_PENDING");
 	}
 
 	private JsonNode pollUntilEnded(String id, Duration within) throws Exception {

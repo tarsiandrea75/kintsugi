@@ -36,6 +36,8 @@ final class FakeLabTools implements LabTools {
 
 	private volatile RuntimeException unavailable;
 
+	private volatile Error broken;
+
 	FakeLabTools() {
 		DEFAULT_FIXTURES.forEach((tool, fixture) -> this.outputs.put(tool, fixture(fixture)));
 	}
@@ -53,8 +55,17 @@ final class FakeLabTools implements LabTools {
 		return this;
 	}
 
+	/** Makes {@link #call} throw {@code error}, as a broken class path or an exhausted JVM would. */
+	FakeLabTools breaks(Error error) {
+		this.broken = error;
+		return this;
+	}
+
 	@Override
 	public ToolResult call(String tool, String jsonArgs) {
+		if (this.broken != null) {
+			throw this.broken;
+		}
 		if (!Phase.isLabTool(tool)) {
 			throw new IllegalArgumentException("not an mcp-tools tool: " + tool);
 		}

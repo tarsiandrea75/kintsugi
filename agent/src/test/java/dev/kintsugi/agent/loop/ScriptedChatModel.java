@@ -22,7 +22,8 @@ import org.springframework.ai.chat.prompt.Prompt;
 /**
  * A chat model that answers from a script, in order, and keeps every prompt it received. Each answer reports 10
  * prompt and 5 completion tokens. Once the script is used up, a call fails, so a loop that calls the model more
- * than the test planned is caught.
+ * than the test planned is caught. The run's warm-up request is answered apart, by {@link #warmUp} ({@code OK} unless
+ * a test sets another), and kept apart: it is neither in the script nor in {@link #prompts()}.
  */
 final class ScriptedChatModel implements ChatModel {
 
@@ -30,8 +31,16 @@ final class ScriptedChatModel implements ChatModel {
 
 	private final List<Prompt> prompts = new CopyOnWriteArrayList<>();
 
+	private final List<Prompt> warmUps = new CopyOnWriteArrayList<>();
+
+	private volatile Function<Prompt, ChatResponse> warmUp = prompt -> response(new AssistantMessage("OK"));
+
 	@Override
 	public ChatResponse call(Prompt prompt) {
+		if (prompt.getInstructions().size() == 1 && Prompts.WARM_UP.equals(prompt.getInstructions().get(0).getText())) {
+			this.warmUps.add(prompt);
+			return this.warmUp.apply(prompt);
+		}
 		this.prompts.add(prompt);
 		Function<Prompt, ChatResponse> next = this.script.poll();
 		if (next == null) {
@@ -78,19 +87,51 @@ final class ScriptedChatModel implements ChatModel {
 		return this;
 	}
 
-	/** Answers a valid plan for {@code phase}, one hypothesis, calling no tool in particular. */
+	/** Answers with a valid plan in the text and these tool calls, as the first answer of a phase does. */
+	ScriptedChatModel planned(ToolCall... calls) {
+		String text = "My plan:\n" + plan("order-service", "DEPENDENCY_LATENCY") + "\nCalling the tools now.";
+		this.script.add(prompt -> response(AssistantMessage.builder().content(text).toolCalls(List.of(calls)).build()));
+		return this;
+	}
+
+	/** Answers a valid plan and no tool call: a phase that ends at its first answer. */
 	ScriptedChatModel plan() {
 		return text(plan("order-service", "DEPENDENCY_LATENCY"));
 	}
 
 	/** Answers the three evidence phases with a plan and no tool call each. */
 	ScriptedChatModel quietPhases() {
-		return plan().text("nothing to call").plan().text("nothing to call").plan().text("nothing to call");
+		return plan().plan().plan();
 	}
 
 	/** Answers INVESTIGATE and KNOWLEDGE with a plan and no tool call each. */
 	ScriptedChatModel quietPhasesAfterTriage() {
-		return plan().text("nothing to call").plan().text("nothing to call");
+		return plan().plan();
+	}
+
+	/** Answers the warm-up with {@code answer} instead of {@code OK}, for every run from now on. */
+	ScriptedChatModel warmUp(Function<Prompt, ChatResponse> answer) {
+		this.warmUp = answer;
+		return this;
+	}
+
+	/** Makes the warm-up wait {@code delay} before it answers {@code OK}. */
+	ScriptedChatModel slowWarmUp(Duration delay) {
+		return warmUp(prompt -> {
+			sleep(delay);
+			return response(new AssistantMessage("OK"));
+		});
+	}
+
+	/** Makes the warm-up throw {@code failure}. */
+	ScriptedChatModel warmUpFails(RuntimeException failure) {
+		return warmUp(prompt -> {
+			throw failure;
+		});
+	}
+
+	List<Prompt> warmUps() {
+		return this.warmUps;
 	}
 
 	List<Prompt> prompts() {

@@ -35,24 +35,29 @@ spring:
       max-attempts: 0
   http:
     clients:
-      # One model call may take 90 s (ADR-010); the loop stops waiting at kintsugi.agent.model.call-timeout itself,
-      # and this read timeout ends the HTTP request at the same budget, so a slow call never outlives its run.
-      read-timeout: 90s
+      # The demo's one question: CPU inference with an 8B model can take minutes; this is a cap, not an expectation.
+      # The loop does not use it: LoopConfig gives Ollama's client in the web profile its own read timeout, the longer
+      # of kintsugi.agent.model.call-timeout and kintsugi.agent.loop.warm-up-timeout (agent spec, "Shared rules").
+      read-timeout: 5m
       connect-timeout: 2s
 
 kintsugi:
   agent:
-    # ModelRouter's one route in M2 (ADR-010, ADR-003): PLAN, ACT and REPORT all go to the local Ollama model,
-    # with the same settings as spring.ai.ollama.chat.
+    # ModelRouter's one route in M2 (ADR-010, ADR-003): ACT and REPORT both go to the local Ollama model, with the
+    # same settings as spring.ai.ollama.chat. 180 s per call: the human's decision of 2026-10-12, after model calls
+    # measured 42 to 84 s on the laptop's CPU.
     model:
       name: ${spring.ai.ollama.chat.model}
       temperature: ${spring.ai.ollama.chat.temperature}
       num-ctx: ${spring.ai.ollama.chat.num-ctx}
-      call-timeout: 90s
-    # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code.
+      call-timeout: 180s
+    # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
+    # run makes at most 10 model calls (8 ACT answers and 2 reports), so 12 is a guard; the warm-up, which loads the
+    # model before the run, counts against no budget and has its own bound.
     loop:
-      max-model-calls: 16
-      incident-timeout: 10m
+      max-model-calls: 12
+      incident-timeout: 30m
+      warm-up-timeout: 300s
 
 server:
   port: 8086

@@ -6,12 +6,11 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import dev.kintsugi.agent.lab.Phase;
-
 /**
- * The JSON schemas of the plan and the report, sent with their calls through {@code OllamaChatOptions.outputSchema}
- * (agent spec, "The plan", "The report"). Ollama constrains the answer with them, when the model honours it; code
- * checks every answer against the same rules anyway ({@link PlanCheck}, {@link ReportCheck}).
+ * The JSON schema of the report, sent with its call through {@code OllamaChatOptions.outputSchema} (agent spec, "The
+ * report"). Ollama constrains the answer with it, when the model honours it; code checks every answer against the same
+ * rules anyway ({@link ReportCheck}). The plan has no schema sent: it travels in the text of a call that offers tools,
+ * and Ollama cannot constrain an answer by a schema and offer tools in the same call ({@link PlanCheck} checks it).
  */
 final class Schemas {
 
@@ -20,18 +19,6 @@ final class Schemas {
 	static final String REPORT = JSON.writeValueAsString(report());
 
 	private Schemas() {
-	}
-
-	/** The plan of {@code phase}: hypotheses with the report's enums, and next tools among the phase's own. */
-	static String plan(Phase phase) {
-		ObjectNode hypothesis = object(List.of("rootCauseService", "rootCauseCategory", "why"));
-		hypothesis.withObject("properties").set("rootCauseService", enumOf(Causes.SERVICES));
-		hypothesis.withObject("properties").set("rootCauseCategory", enumOf(Causes.CATEGORIES));
-		hypothesis.withObject("properties").set("why", string(0, 200));
-		ObjectNode plan = object(List.of("hypotheses", "nextTools"));
-		plan.withObject("properties").set("hypotheses", array(hypothesis, 1, 3));
-		plan.withObject("properties").set("nextTools", array(enumOf(phase.tools()), 0, 4));
-		return JSON.writeValueAsString(plan);
 	}
 
 	private static ObjectNode report() {

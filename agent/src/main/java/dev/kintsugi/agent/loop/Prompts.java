@@ -46,10 +46,12 @@ final class Prompts {
 			disk or threads.
 			- UNKNOWN: the evidence does not support one of the above.""";
 
-	private static final String PLAN_TASK = """
-			Task: write your plan for this phase as a JSON object with two fields. hypotheses: 1 to 3 items, each \
-			{rootCauseService, rootCauseCategory, why}, with why at most 200 characters. nextTools: 0 to 4 names \
-			of this phase's tools that you intend to call.""";
+	private static final String PLAN_AND_ACT_TASK = """
+			Task: first write your plan for this phase in your answer's text, as one JSON object with two fields. \
+			hypotheses: 1 to 3 items, each {rootCauseService, rootCauseCategory, why}, with why at most 200 \
+			characters. nextTools: 0 to 4 names of this phase's tools that you intend to call. Then call the tools \
+			of this phase that best test your hypotheses; you may request several calls in one answer. Answer \
+			without a tool call when this phase has nothing more to give.""";
 
 	private static final String ACT_TASK = """
 			Task: call the tools of this phase that best test your hypotheses; you may request several calls in \
@@ -62,6 +64,12 @@ final class Prompts {
 			when both causes are UNKNOWN; toolCallId and tool come from a summary's header, quote is 8 to 300 \
 			characters copied exactly from that tool call's result, and why is at most 200 characters.""";
 
+	/**
+	 * The warm-up's only message. It loads the model before the run; its answer is not read, and it holds nothing
+	 * about the incident.
+	 */
+	static final String WARM_UP = "Reply with the single word OK.";
+
 	private Prompts() {
 	}
 
@@ -70,14 +78,12 @@ final class Prompts {
 		return SYSTEM.formatted(JSON.writeValueAsString(symptom), sinceMinutes);
 	}
 
-	/** The user message of a plan call; {@code errors} are those of the rejected previous plan, if any. */
-	static String plan(State state, List<String> errors) {
-		return state.text() + "\n\n" + PLAN_TASK + retry("plan", errors);
-	}
-
-	/** The user message of a call within an evidence phase. */
-	static String act(State state) {
-		return state.text() + "\n\n" + ACT_TASK;
+	/**
+	 * The user message of a call within an evidence phase; the first call of a phase also asks for the phase's plan,
+	 * in the text of the same answer as its tool calls.
+	 */
+	static String act(State state, boolean withPlan) {
+		return state.text() + "\n\n" + (withPlan ? PLAN_AND_ACT_TASK : ACT_TASK);
 	}
 
 	/** The user message of a report call; {@code errors} are those of the rejected previous report, if any. */

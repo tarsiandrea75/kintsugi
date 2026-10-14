@@ -20,8 +20,8 @@ import org.springframework.ai.tool.ToolCallback;
 public record ModelRoute(String model, ChatModel chatModel, double temperature, int numCtx, Duration callTimeout) {
 
 	/**
-	 * The options of one call: the route's settings, the tool definitions offered (none for a plan or a report) and,
-	 * for a plan or a report, the JSON schema the answer is constrained by. In M2 every route is Ollama's.
+	 * The options of one call: the route's settings, the tool definitions offered (none for the report) and, for the
+	 * report, the JSON schema the answer is constrained by. In M2 every route is Ollama's.
 	 */
 	public ChatOptions options(List<ToolCallback> tools, String outputSchema) {
 		OllamaChatOptions.Builder options = OllamaChatOptions.builder()
@@ -33,6 +33,20 @@ public record ModelRoute(String model, ChatModel chatModel, double temperature, 
 			options.outputSchema(outputSchema);
 		}
 		return options.build();
+	}
+
+	/**
+	 * The options of the warm-up: the route's model, temperature and context window, so that Ollama loads the model
+	 * exactly as the run's calls will use it (a different {@code num_ctx} would load it again), and at most one token
+	 * of answer, since only the load matters.
+	 */
+	public ChatOptions warmUpOptions() {
+		return OllamaChatOptions.builder()
+			.model(this.model)
+			.temperature(this.temperature)
+			.numCtx(this.numCtx)
+			.numPredict(1)
+			.build();
 	}
 
 }

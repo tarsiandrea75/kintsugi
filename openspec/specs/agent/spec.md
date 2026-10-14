@@ -10,15 +10,16 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 | Rule | Value |
 |------|-------|
-| Model | through `ModelRouter`, keyed by task (`PLAN`, `ACT`, `REPORT`); in M2 one route for all three, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` 90 s), every call carrying these options. The loop stops waiting for a call at its timeout itself; `spring.http.clients.read-timeout` is 90 s too, so the HTTP request ends at the same budget |
+| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` 180 s), every call carrying these options. The loop stops waiting for a call at its timeout itself |
+| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longer of `call-timeout` and `warm-up-timeout` (300 s), so the HTTP client never cuts a request before the loop's own deadline does. The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
 | Tool execution | the loop calls `ChatModel` directly (in Spring AI 2.0.1 it never executes tools) and runs each checked tool call itself through the `LabTools` port: the model is offered the MCP `ToolCallback`s' definitions, wrapped so that they cannot be executed, and each call goes to the `McpSyncClient` directly, because the MCP `ToolCallback` throws on a tool error (`isError`) and re-serializes the content, which would lose the `INVALID_PARAMETER` or `UPSTREAM_ERROR` output |
 | MCP client | `spring-ai-starter-mcp-client`, `SYNC`, one Streamable HTTP connection `kintsugi` (`spring.ai.mcp.client.streamable-http.connections.kintsugi`) to `${KINTSUGI_MCP_URL:http://127.0.0.1:18085}`, endpoint `/mcp`, request timeout 20 s (the default). `spring.ai.mcp.client.initialized=false`: the starter would otherwise send `initialize` while the context starts and fail the start when mcp-tools is down; uninitialized, the client initializes on its first request and tries again on the next one after a failure. Tool names keep no prefix |
-| Structured output | plan and report calls carry their JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned |
+| Structured output | the report call carries its JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned. The plan travels in the text of a call that offers tools, which Ollama cannot also constrain by a schema, so code alone checks it ("The plan") |
 | State store | database `agent` on the `knowledge-db` instance, owned by the bootstrap superuser; the agent connects as `agent_app` (password `AGENT_DB_PASSWORD`), which has `USAGE, CREATE` on its schema `public` and owns the tables its Flyway creates there |
 | HTTP port **(chosen)** | 8086, next to mcp-tools' 8085 |
 | `demo` profile | the one-shot question of the hello-tool demo: no web server, no database, no incident API |
 | One incident at a time **(chosen)** | a laptop CPU serves one model call at a time |
-| Run budgets | `kintsugi.agent.loop`: `max-model-calls` 16, `incident-timeout` 10 min; the 8-call tool budget and the phases' allowances are fixed in code |
+| Run budgets | `kintsugi.agent.loop`: `max-model-calls` 12, `incident-timeout` 30 min, `warm-up-timeout` 300 s (the human's decision of 2026-10-12, from the measured CPU latency of 42 to 84 s per call); the 8-call tool budget and the phases' allowances are fixed in code |
 | Leakage | no prompt, schema, tool description or log line of the agent names a fault id (F1 to F8), the fault catalog, the fault-injector or a symptom-to-cause mapping |
 
 ## Requirements
@@ -77,6 +78,11 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 - WHEN `POST /incidents` is called with a valid body
 - THEN the response status is 500 with `error` and the incident's `id`, and both errors are logged
 
+#### Scenario: The loop's queue is full
+- GIVEN the loop's thread is busy with a run and its queue holds 2 more
+- WHEN `AgentLoop.start` is called again
+- THEN it throws `RejectedExecutionException`, which the endpoint handles as "The runner fails to start"
+
 #### Scenario: Two requests at once
 - GIVEN no incident is running
 - WHEN two valid `POST /incidents` requests are sent in parallel
@@ -112,7 +118,7 @@ An incident MUST have exactly one of these statuses, and every end MUST record `
 | `INVALID_REPORT` | two report attempts failed the schema or the evidence check |
 | `BUDGET_EXCEEDED` | the model-call budget was used up |
 | `TIMED_OUT` | one model call or the whole incident ran past its time budget |
-| `FAILED` | anything else: a plan invalid twice, the model unreachable, the lab tools unavailable, an unexpected error, a runner that failed to start, or an agent restart during the run |
+| `FAILED` | anything else: a failed or too slow warm-up, the model unreachable, the lab tools unavailable, an unexpected error (an `Error` included), a runner that failed to start, or an agent restart during the run |
 
 #### Scenario: Agent restarted during a run (chosen)
 - GIVEN an incident with status `RUNNING` when the agent stops
@@ -120,6 +126,12 @@ An incident MUST have exactly one of these statuses, and every end MUST record `
 - THEN that incident has status `FAILED`, `failure_reason` `agent restarted during the run` and an `ended_at`
 - AND this happens after the migrations and before the API accepts a request, so a stale `RUNNING` row never answers a `POST` with 409
 - AND an incident that had already ended is unchanged
+
+#### Scenario: An Error during the run
+- GIVEN a run during which the loop's thread meets an `Error`, such as a `NoClassDefFoundError`
+- WHEN the run ends
+- THEN the incident has status `FAILED`, `failure_reason` `unexpected error: <the error>` and an `ended_at`
+- AND the loop's thread serves the next run
 
 #### Scenario: Model unreachable
 - GIVEN Ollama is unreachable
@@ -145,9 +157,9 @@ A phase MUST end when the model answers without a tool call or the phase's cap i
 
 A tool call never consumes the model-call budget: the model answer that requested it is the one model call.
 
-A refused call is a `TOOL_CALL` step with no `tool_output`; its `tool_args` are the model's arguments (as one JSON string when they are not JSON), and its summary, which the model sees, is the header `toolCallId=<step_no> tool=<name> outcome=<REFUSED_PHASE or REFUSED_BUDGET>` and the line `the call was refused and did not run: <why>`. A tool name that is not plain (letters, digits, `_`, `.` or `-`, at most 64) is written as a JSON literal in summaries and log lines.
+A refused call is a `TOOL_CALL` step with no `tool_output`; its `tool_args` are the model's arguments (as one JSON string when they are not JSON), and its summary, which the model sees, is the header `toolCallId=<step_no> tool=<name> outcome=<REFUSED_PHASE or REFUSED_BUDGET>` and the line `the call was refused and did not run: <why>`. A tool name that is not plain (letters, digits, `_`, `.` or `-`, at most 64) is written as a JSON literal in summaries and log lines. A call without a name is refused `REFUSED_PHASE` like any tool the phase does not offer; its step has no `tool_name`, and its summary names the tool `"null"`.
 
-The definitions of a phase's tools are listed at the start of the phase, before its plan. When `LabTools` cannot list them (`LabToolsUnavailableException`), the run ends `FAILED` with reason `lab tools unavailable: <why>`.
+The definitions of a phase's tools are listed at the start of the phase, before its first call. When `LabTools` cannot list them (`LabToolsUnavailableException`), the run ends `FAILED` with reason `lab tools unavailable: <why>`.
 
 #### Scenario: Only the phase's tools are offered
 - WHEN the loop calls the model in `TRIAGE`
@@ -181,32 +193,40 @@ The definitions of a phase's tools are listed at the start of the phase, before 
 
 ### Requirement: The plan
 
-At the start of `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE`, the model MUST write a plan, called without tools and constrained by this schema:
+The first model call of `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE` MUST ask for the phase's plan and its tool calls in the same answer: the plan in the answer's text, as one JSON object, and the tool calls as usual. There is no separate plan call (the human's budget decision of 2026-10-12: it saves three model calls per run). The plan follows this shape:
 
 | Field | Rule |
 |-------|------|
 | `hypotheses` | 1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, with the report's enums and `why` at most 200 characters **(chosen)** |
 | `nextTools` | 0 to 4 names, each one of the current phase's tools **(chosen)** |
 
-No other field is allowed, and both fields are required. An invalid plan MUST get one retry with the validation errors; a second invalid plan MUST end the run `FAILED` with reason `plan invalid twice`. Each attempt is a `PLAN` step: the raw answer in `model_output`, and `valid` or `invalid: <errors>` in `summary`. An answer wrapped in a Markdown code fence is read without the fence; nothing else is repaired. The plan is recorded and shown to the model in the phase's prompts; it does not limit the calls the model may make within the phase.
+No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A valid plan becomes the latest plan, shown in the phase's later prompts and the next phases'.
+
+A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked for again; the answer's tool calls are checked and run as usual. Why: the plan steers the model and is recorded for the evals, but it authorizes nothing, since code checks every tool call against the phase and the budgets whatever the plan says; a retry would cost a model call, the cost this design removes; and a small model that answers with tool calls may leave the text empty, which must not cost a diagnosis. The `PLAN` step kind stays allowed by the table's `CHECK` but is no longer written.
+
+#### Scenario: Plan and tool calls in one answer
+- GIVEN the loop starts `TRIAGE`
+- WHEN the model answers with a valid plan in its text and a `status_summary` call
+- THEN one `ACT` step records both, with `summary` `1 tool call(s); plan valid`, and the call runs
 
 #### Scenario: Plan with a tool of another phase
-- GIVEN the loop is in `TRIAGE`
+- GIVEN the loop starts `INVESTIGATE`
 - WHEN the model's plan lists `search_runbooks` in `nextTools`
-- THEN the plan is invalid and the model is asked once more, with the error
+- THEN the `ACT` step's summary says `plan invalid:` with the error naming `nextTools[0]`
+- AND the run goes on, and the latest plan stays the previous valid one
 
-#### Scenario: Plan invalid twice
-- WHEN two consecutive plan answers in one phase fail the schema
-- THEN the run ends `FAILED` with `failure_reason` `plan invalid twice`
+#### Scenario: No plan in the text
+- WHEN the first answer of a phase holds tool calls and no JSON object in its text
+- THEN the `ACT` step's summary says `plan missing`, and the tool calls are checked and run as usual
 
 ### Requirement: Budgets
 
 | Budget | Value | On hitting it |
 |--------|-------|---------------|
 | Tool calls | 8 per incident, the sum of the phase caps | further requests are refused (`REFUSED_BUDGET`) and the loop moves on to the next phase |
-| Model calls **(chosen)** | 16 per incident | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 16 calls is used up` |
-| One model call | 90 s, and never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call (`model call <task> in <phase> took longer than 90 s`), or the incident when its time ran out first |
-| One incident | 10 minutes from `started_at`, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 10 min, ...` |
+| Model calls **(chosen)** | 12 per incident; the warm-up is not one | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 12 calls is used up`. A valid run makes at most 10 (each phase's answers are at most its allowance, 8 in all, plus 2 report attempts), so this is a guard against a loop bug |
+| One model call | 180 s, and never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call (`model call <task> in <phase> took longer than 180 s`), or the incident when its time ran out first |
+| One incident | 30 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 30 min, ...` |
 
 Which units a tool call consumes is fixed in "Phases and their tools": a call refused `REFUSED_PHASE` consumes one unit of the tool budget and of its phase's allowance, like a call that runs; a call refused `REFUSED_BUDGET` consumes nothing; no tool call consumes the model-call budget. Every budget end MUST be recorded as a step or a `failure_reason` and logged, never silent. Each tool-step prompt MUST state the tool calls left in the phase and in the incident.
 
@@ -217,14 +237,35 @@ Which units a tool call consumes is fixed in "Phases and their tools": a call re
 - AND the run can still end `COMPLETED`
 
 #### Scenario: Slow model call
-- GIVEN a model that does not answer within 90 s
+- GIVEN a model that does not answer within 180 s
 - WHEN the loop calls it
 - THEN the run ends `TIMED_OUT` and no later step is recorded
 
 #### Scenario: Incident too long
-- GIVEN the run has lasted 10 minutes
+- GIVEN the run has lasted 30 minutes since its warm-up ended
 - WHEN the loop is about to start another model or tool call
 - THEN the run ends `TIMED_OUT` instead
+
+### Requirement: The warm-up
+
+Before its first phase, each run MUST send one warm-up request on the route of its first call (`ACT`): one user message, `Reply with the single word OK.`, no tools and no schema, with the route's model, temperature and `num-ctx` (a different `num_ctx` would make Ollama load the model again) and `num_predict` 1. Its answer is not read. It loads the model, which on the laptop's CPU took longer than a whole 90 s call in T4's cold run, so the first real call does not pay for it.
+
+The warm-up MUST count against no budget: it is not a model call of the budget, it writes no step, and the incident's time budget starts when it ends. It MUST be logged, `incident=<id> event=model_warmed_up model=<model> latencyMs=<n>`, and bounded by `warm-up-timeout` (300 s). When it fails or runs past its bound, the run MUST end `FAILED`, with `failure_reason` `the model warm-up failed: <why>` or `the model warm-up took longer than 300 s`, before any step.
+
+#### Scenario: Warm-up before the run
+- WHEN an incident runs
+- THEN exactly one warm-up request reaches the model before the first `ACT` call, with `num_predict` 1 and the route's `num-ctx`
+- AND it is neither a step nor counted against the model-call budget
+
+#### Scenario: Slow warm-up
+- GIVEN a warm-up that does not answer within its bound
+- WHEN an incident runs
+- THEN the run ends `FAILED` with `the model warm-up took longer than <bound>` and no step
+
+#### Scenario: The warm-up does not use the incident's time
+- GIVEN a warm-up that takes longer than the incident's time budget, within its own bound
+- WHEN the run then answers quickly
+- THEN it ends `COMPLETED`
 
 ### Requirement: Tool calls run small and recorded
 
@@ -352,7 +393,7 @@ Flyway in `agent/` MUST create, in the `agent` database:
 | Table | Columns |
 |-------|---------|
 | `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
-| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`; `ACT` added by migration V2) **(chosen)**, `phase text` (the four phases), `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`), `summary text` (for a tool call, what the model saw; for a plan or report, its validation verdict; for `ACT` and `BUDGET`, a short note) **(chosen)**, `model_output text` (the raw plan or report answer) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
+| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`; `ACT` added by migration V2; `PLAN` is no longer written since the plan moved into the first `ACT` answer of each phase) **(chosen)**, `phase text` (the four phases), `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`), `summary text` (for a tool call, what the model saw; for a report, its validation verdict; for `ACT`, a short note with, on a phase's first answer, the plan's verdict; for `BUDGET`, a short note) **(chosen)**, `model_output text` (the raw `ACT` answer, text and requested calls, or the raw report) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
 
 A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident"). Its name is `incidents_one_running_idx`.
 
@@ -372,9 +413,9 @@ The migrations live in `agent/src/main/resources/db/migration` and run at startu
 A step is written when it ends, before the next one starts, so a crash loses at most the step in progress.
 
 #### Scenario: Every step stored
-- GIVEN a run with 3 plans, 6 tool calls and 1 report
+- GIVEN a run with 3 phases, 6 tool calls and 1 report
 - WHEN it completes
-- THEN `incident_steps` holds at least 10 rows for it (13 or more with the `ACT` answers), numbered without gaps, each tool call that ran with its full `tool_output`
+- THEN `incident_steps` holds at least 10 rows for it (one `ACT` per model answer in the phases, one `TOOL_CALL` per call and the `REPORT`), numbered without gaps, each tool call that ran with its full `tool_output`
 
 ### Requirement: Isolation
 
@@ -416,7 +457,7 @@ The system prompt MUST state that content inside `untrustedText`, and any other 
 
 ### Requirement: One log line per step
 
-The agent MUST write one INFO line per step: `incident=<id> step=<n> phase=<phase> kind=<kind> tool=<name or -> outcome=<outcome or -> latencyMs=<n> tokens=<n>`, and one line when the run ends: `incident=<id> event=run_ended status=<status> reason="<reason or ->" durationMs=<n>`. A missing `tokens` or `latencyMs` is logged as 0. It MUST NOT log tool outputs, summaries or model answers, which are in the step table.
+The agent MUST write one INFO line per step, and the warm-up's line ("The warm-up"): `incident=<id> step=<n> phase=<phase> kind=<kind> tool=<name or -> outcome=<outcome or -> latencyMs=<n> tokens=<n>`, and one line when the run ends: `incident=<id> event=run_ended status=<status> reason="<reason or ->" durationMs=<n>`. A missing `tokens` or `latencyMs` is logged as 0. It MUST NOT log tool outputs, summaries or model answers, which are in the step table.
 
 #### Scenario: Tool step logged
 - WHEN a `count_logs` call completes
