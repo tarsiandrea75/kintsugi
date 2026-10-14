@@ -243,6 +243,10 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - the agent is now part of every `start_lab`; on a pre-agent `knowledge-data` volume it exits, and every verify script fails until `reset-volume.sh` runs.
   Suggestions: a duration mismatch in the usage text, the hard-coded env list in `restart_agent`, an unreadable timeout message, an untracked window on `open_incident`, and EOF handling in `reset-volume.sh`'s prompt.
 - 2026-10-14: the first full `verify-agent.sh` run started on the committed script (before the part C fixes), so its F2 and F3 scores may suffer from the window issue.
+- 2026-10-14: first full `verify-agent.sh` run (`infra/scripts/out/verify-agent-20261014T133638Z/`, logs not in git): **F1, F2 and F3 all `TIMED_OUT`, no report, 0/3.**
+  - Each run ended at the same point: the 4th model call, the second `ACT` in `INVESTIGATE` (after two `recent_events` results), passed 180 s. Earlier calls took 27–117 s. Each incident lasted 6–7.5 min of its 30.
+  - The model put its plan inside the tool arguments (F1 step 2: `query_metric` got `{"plan": …}`, `CLIENT_ERROR`), and the plan was recorded missing.
+  - **Script bug:** `verify-agent.sh:147` reads `rootCauseService`/`rootCauseCategory` with `json_field` from the whole incident body, so it picked up a hypothesis from that plan in the tool arguments and printed `reported 'payment-service|DEPENDENCY_REJECTING'` for all three, although `report` is null. The verdicts (MISS) are right; the logged "reported" values are false. Fix in part C: read only `.report`.
 
 ## Next step
 
