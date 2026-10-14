@@ -61,10 +61,11 @@ public class ObservabilityTools {
 
 	/**
 	 * Where the lab's own lines are (T5c8): its services log failures at WARN and the gateway's decisions at INFO, so a
-	 * level=ERROR query finds none of them, as every log query of the fourth live run showed.
+	 * level=ERROR query finds none of them, as every log query of the fourth live run showed. The fifth run still
+	 * searched gateway-mock with level=WARN and found nothing, so gateway-mock is named plainly (T5c9).
 	 */
-	private static final String LEVELS = " The lab services log failures at WARN and gateway decisions at INFO: filter"
-			+ " on WARN or give no level, not ERROR.";
+	private static final String LEVELS = " The lab services log failures at WARN, not ERROR: filter on WARN or give no"
+			+ " level. gateway-mock logs its decisions at INFO, so search gateway-mock with no level filter.";
 
 	private final LokiClient loki;
 

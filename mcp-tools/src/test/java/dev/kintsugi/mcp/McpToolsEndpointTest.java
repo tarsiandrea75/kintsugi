@@ -93,7 +93,9 @@ class McpToolsEndpointTest {
 		for (String name : List.of("search_logs", "count_logs")) {
 			assertThat(tool(tools, name).path("description").asString()).as(name)
 				.contains("failures at WARN")
-				.contains("not ERROR");
+				.contains("not ERROR")
+				// The fifth run searched gateway-mock with level=WARN and found nothing: it logs at INFO (T5c9).
+				.contains("gateway-mock logs its decisions at INFO, so search gateway-mock with no level filter");
 		}
 		assertThat(tool(tools, "query_metric").path("description").asString())
 			.contains("error_rate (5xx server responses per second only");

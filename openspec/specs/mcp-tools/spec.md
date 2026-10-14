@@ -199,15 +199,16 @@ A runbook chunk's `section` is its heading, so it is runbook text and untrusted 
 
 The descriptions MUST point a caller at the signals the lab actually emits **(T5c8)**:
 
-- `search_logs` and `count_logs`: the lab services log failures at WARN and gateway decisions at INFO, so a caller filters on `WARN` or gives no level, not `ERROR`;
+- `search_logs` and `count_logs`: the lab services log failures at WARN, so a caller filters on `WARN` or gives no level, not `ERROR`; gateway-mock logs its decisions at INFO, so a caller searches gateway-mock with no level filter **(T5c9)**;
 - `query_metric`: `error_rate` counts 5xx server responses only;
 - `search_runbooks`: its `query` example is a neutral symptom, `orders stay pending after checkout`, that names no component.
 
-Why (T5c7): in the fourth full agent run every log query used `level=ERROR` and returned nothing, since no lab service logs at ERROR; `error_rate` read 0 while the gateway was slow or refusing; and the only example query named payments, the component the agent then blamed in every report. The descriptions describe the lab's logging and metrics, never a cause the lab may be put through.
+Why (T5c7): in the fourth full agent run every log query used `level=ERROR` and returned nothing, since no lab service logs at ERROR; `error_rate` read 0 while the gateway was slow or refusing; and the only example query named payments, the component the agent then blamed in every report. Why gateway-mock is named (T5c9): in the fifth run, after the T5c8 text, the agent still searched gateway-mock with `level=WARN` and got 0 lines, because its decisions (`latency_ms=`, `answered=429`) are INFO lines. The descriptions describe the lab's logging and metrics, never a cause the lab may be put through.
 
 #### Scenario: Levels and error rate described
 - WHEN a client lists the tools
 - THEN the descriptions of `search_logs` and `count_logs` say that failures are logged at WARN, not ERROR
+- AND they say that gateway-mock logs its decisions at INFO, so it is searched with no level filter
 - AND `query_metric`'s says that `error_rate` counts 5xx server responses only
 - AND `search_runbooks`' `query` description does not name payments
 
