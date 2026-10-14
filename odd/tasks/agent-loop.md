@@ -340,7 +340,16 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - SUGGESTION: computed figures stay quotable (`ToolSummaries.java:66-74`);
   - SUGGESTION: no test covers how ties between runbook chunks are ordered;
   - the recorded `tools-list.json` still has the old descriptions, and no test compares against it.
+- 2026-10-14: fifth full `verify-agent.sh` run after T5c8 (`infra/scripts/out/verify-agent-20261014T221806Z/`, 66 min): **1/3, the first match.** All three ended `COMPLETED` with a valid report, and no call hit a deadline. Incidents took 587–917 s.
+  - **F2 MATCH** `gateway-mock|DEPENDENCY_REJECTING`, citing `status="FAILED" count=6` and the six `FAILED` payment attempts.
+  - **F1 and F3 `UNKNOWN|UNKNOWN`:** honest reports that say the evidence is insufficient. Waste in the 8-call tool budget, seen in all three runs:
+    - the INVESTIGATE plan sends `get_order_trace` with the literal placeholder `"<SELECT_A_PENDING_ORDER_ID>"` (`INVALID_PARAMETER`, budget spent);
+    - the next `ACT` repeats an identical call (`recent_events source=payment …`, F1/F2 steps 5 and 9);
+    - `search_logs gateway-mock level=WARN` returns 0, because gateway-mock logs its decisions (`latency_ms=`, `answered=429`) at INFO;
+    - F3 filtered `recent_events source=order` by `outcome=PAYMENT_FAILED`, but its orders are `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, so it saw nothing;
+    - F3's `count_logs service=postgres` was invalid; F1's KNOWLEDGE plan named a tool not allowed in that phase.
+  - The budget runs out in INVESTIGATE before the decisive call (F1: the trace of a real order and gateway-mock logs were refused).
 
 ## Next step
 
-The fifth full run (T5c3), started after T5c8.
+The human decides the fixes for the budget waste seen in the fifth run; T5c3 stays open.
