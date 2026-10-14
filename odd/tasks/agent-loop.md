@@ -295,7 +295,10 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - WARNING (readability): ADR-010 still said a call is abandoned "at 180 s". Fixed in the next docs commit ("at its deadline").
   - WARNING (reliability), follow-up: the 45 min budget covers the longest measured run (6 `ACT` + 2 `REPORT` = 2,640 s at the deadlines) but not tool-call time (up to 20 s each) nor a valid worst case of 8 `ACT` + 2 `REPORT` (3,240 s). `DefaultBudgetsTest` checks only the measured run. Revisit after the fourth run's latencies.
   - Suggestions: the singular `call-timeout` name in `ModelRouteProperties:18`, a test-name typo at `AgentLoopTest:525`, a tight `ACT` deadline test, and the incident budget's worst valid run in `application.yaml`.
+- 2026-10-14: fourth full `verify-agent.sh` run after T5c5 (`infra/scripts/out/verify-agent-20261014T174310Z/`, 84 min): **0/3, all `INVALID_REPORT`**. Every incident ran the full loop (16 steps), and no call hit a deadline: `ACT` 77–233 s, `REPORT` 88–341 s. Every report closed its JSON, and no quote was over 160 characters.
+  - **Cause (deterministic, in our check):** the model writes its quotes from the tool **summaries** it is shown (`status="PAYMENT_FAILED" count=6`), but `ReportCheck` looks them up only in the raw `toolOutput` JSON (`{"status":"PAYMENT_FAILED","count":6}`) and its decoded strings. Of 30 quotes, 18 are verbatim in the summary of the cited step and 0 in the raw output. The rest are runbook quotes that turn the `\n\n` escapes into single newlines, plus one with an invented `(cut)`.
+  - **Diagnosis quality:** all six drafts name `payment-service|DEPENDENCY_REJECTING`, whatever the fault. With a fixed check the run would still score at most 0/3 on service; F2's category is right.
 
 ## Next step
 
-The T5c3 full run (fourth) after T5c5.
+The human decides how to go on after the fourth run (see its progress entry); T5c3 stays open.
