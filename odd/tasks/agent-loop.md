@@ -103,10 +103,10 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - [ ] **T5 — Compose wiring and `verify-agent.sh` (F1–F3) run for real with `granite4.1:8b`;** record the results and docs. Branch `-04-check`. Route: delegated writer.
   - [x] **T5a** — budgets amended, warm-up, T4 review fixes (`206bf8e`, review `review-73eb7c52d4d33d38`).
   - [x] **T5b** — compose wiring, neutral traffic ids, `verify-agent.sh` (`1662569`, review `review-754658aa32761c24`).
-  - [ ] **T5c1 — model-call fixes (agent code, spec, ADR):** cap `num_predict` on `ACT` calls, with room for a phase's first answer, which carries the plan; put the instruction after the tool results and keep the parts that change at the end, so the model does not summarise and the cached prefix grows; abort the HTTP request when a call times out, so Ollama does not finish an abandoned call. Tests first. Route: delegated writer.
-  - [ ] **T5c2 — `verify-agent.sh` fixes:** read the reported cause only from `.report`; restart the agent when a wait times out; a per-fault window that excludes the previous fault's traffic; a fresh window after a 409 wait; the lab starts even when the agent cannot. Route: delegated writer (same worker as T5c1, separate commit).
+  - [x] **T5c1 — model-call fixes (agent code, spec, ADR):** cap `num_predict` on `ACT` calls, with room for a phase's first answer, which carries the plan; put the instruction after the tool results and keep the parts that change at the end, so the model does not summarise and the cached prefix grows; abort the HTTP request when a call times out, so Ollama does not finish an abandoned call. Tests first. Route: delegated writer.
+  - [x] **T5c2 — `verify-agent.sh` fixes:** read the reported cause only from `.report`; restart the agent when a wait times out; a per-fault window that excludes the previous fault's traffic; a fresh window after a 409 wait; the lab starts even when the agent cannot. Route: delegated writer (same worker as T5c1, separate commit).
   - [ ] **T5c3 — full run** of `verify-agent.sh`, results recorded. Route: parent.
-  - [ ] **T5c4 — a call deadline per task (the human's decision of 2026-10-14):** 240 s for `ACT` calls, 300 s for the `REPORT` call (`kintsugi.agent.model.call-timeout.act`/`.report`), each still bounded by the incident's time left and named in the timeout reason; the loop's read timeout follows the longest deadline. Tests first; spec and ADR-010 "Amended in T5c4". Route: delegated writer.
+  - [x] **T5c4 — a call deadline per task (the human's decision of 2026-10-14):** 240 s for `ACT` calls, 300 s for the `REPORT` call (`kintsugi.agent.model.call-timeout.act`/`.report`), each still bounded by the incident's time left and named in the timeout reason; the loop's read timeout follows the longest deadline. Tests first; spec and ADR-010 "Amended in T5c4". Route: delegated writer.
 
 ## Progress
 
@@ -279,7 +279,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - T5c review suggestions: the `ModelRouteProperties` javadoc no longer repeats the caps (it points at the spec); a missing `call-timeout` or `num-predict` now fails binding with a message naming the property, instead of a `NullPointerException` at the first call.
   - RED observed (behavioural, with a stub `CallTimeouts` that used the `ACT` deadline for every task): a report past the `ACT` but within the `REPORT` deadline ended `TIMED_OUT` instead of `COMPLETED`; a slow report named `3 s` instead of its own `300 ms`; `of(REPORT)` and the read timeout returned the `ACT` deadline. Then GREEN: `agent` 236 tests, 0 failures.
   - Durations in tests are scaled down (200 ms to 3 s) through the route's `CallTimeouts`.
+- 2026-10-14: third full `verify-agent.sh` run after T5c4 (`infra/scripts/out/verify-agent-20261014T162127Z/`, 74 min): **0/3, no report**, but every incident now reaches the end of the evidence phases.
+  - F1 `INVALID_REPORT` (1143 s, 16 steps): used the 8-call budget, then both `REPORT` answers (284 s and 154 s) were cut at 512 tokens. Each evidence `quote` copied a whole escaped log line (about 200 tokens per item), so the JSON never closed. Its draft named `payment-service|DEPENDENCY_REJECTING`; the truth is `gateway-mock|DEPENDENCY_LATENCY`, so it would have missed anyway.
+  - F2 `TIMED_OUT` (1023 s, 14 steps): used the budget, then the `REPORT` call took longer than 300 s.
+  - F3 `TIMED_OUT` (692 s, 9 steps): the first `KNOWLEDGE` `ACT` call took longer than 240 s.
+  - Call latencies: plan-carrying `ACT` 140–207 s, other `ACT` 74–103 s, `REPORT` 154–284 s or more. The F1/F2 `KNOWLEDGE` plan calls took 189 s and 207 s, close to the 240 s deadline.
+  - Reading: the loop, the tools, the evidence check and the abort all work end to end; on this CPU the run is limited by model speed (about 13 tokens/s prompt, 2.9 tokens/s answer) and by long evidence quotes in the report. The F1 draft also shows a wrong diagnosis (payment-service instead of gateway-mock). This needs the human's decision.
 
 ## Next step
 
-T5c1 and T5c2 on `feat/agent-loop-04-check` (one delegated writer, two commits), then the T5c3 full run.
+The human decides how to go on after the third run (see its progress entry); T5c3 stays open until then.
