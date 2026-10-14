@@ -107,6 +107,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - [x] **T5c2 — `verify-agent.sh` fixes:** read the reported cause only from `.report`; restart the agent when a wait times out; a per-fault window that excludes the previous fault's traffic; a fresh window after a 409 wait; the lab starts even when the agent cannot. Route: delegated writer (same worker as T5c1, separate commit).
   - [ ] **T5c3 — full run** of `verify-agent.sh`, results recorded. Route: parent.
   - [x] **T5c4 — a call deadline per task (the human's decision of 2026-10-14):** 240 s for `ACT` calls, 300 s for the `REPORT` call (`kintsugi.agent.model.call-timeout.act`/`.report`), each still bounded by the incident's time left and named in the timeout reason; the loop's read timeout follows the longest deadline. Tests first; spec and ADR-010 "Amended in T5c4". Route: delegated writer.
+  - [x] **T5c5 — short evidence quotes and longer call deadlines (the human's decision of 2026-10-14, after the third run):** the report prompt asks for a short verbatim fragment per evidence `quote` (at most 160 characters) and `ReportCheck` rejects a longer quote with a reason the retry can act on; the substring check stays. Call deadlines become 300 s for `ACT` and 420 s for `REPORT`; check that the incident's time budget and `verify-agent.sh`'s wait still fit them. Tests first; spec and ADR-010 "Amended in T5c5". Route: delegated writer (2+ non-trivial files).
 
 ## Progress
 
@@ -285,7 +286,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - F3 `TIMED_OUT` (692 s, 9 steps): the first `KNOWLEDGE` `ACT` call took longer than 240 s.
   - Call latencies: plan-carrying `ACT` 140–207 s, other `ACT` 74–103 s, `REPORT` 154–284 s or more. The F1/F2 `KNOWLEDGE` plan calls took 189 s and 207 s, close to the 240 s deadline.
   - Reading: the loop, the tools, the evidence check and the abort all work end to end; on this CPU the run is limited by model speed (about 13 tokens/s prompt, 2.9 tokens/s answer) and by long evidence quotes in the report. The F1 draft also shows a wrong diagnosis (payment-service instead of gateway-mock). This needs the human's decision.
+- 2026-10-14: T5c5 done by a delegated writer (uncommitted, one unit). Route: delegated writer (2+ non-trivial files: loop code, tests, spec, ADR, script docs).
+  - Quotes: `ReportCheck.MIN_QUOTE_LENGTH` 8 and `MAX_QUOTE_LENGTH` 160 (300 before) drive the check, the report schema (`Schemas`) and the report task (`Prompts`), which asks for "a short fragment ... only its distinctive part, such as an exception name, a status or an error message, not the whole line". A longer quote is rejected with `evidence[i].quote is longer than 160 characters; quote only its distinctive fragment, such as an exception name, a status or an error message, not the whole line`, which the retry receives; the substring check is unchanged, and a test shows a short fragment of an escaped event detail matching in both the raw (escaped) and the decoded text.
+  - Deadlines: `call-timeout.act` 300 s and `.report` 420 s; the loop's read timeout follows (420 s). **The incident budget no longer fitted:** the longest measured run (16 steps: 8 tool calls, 6 `ACT` answers, 2 reports) needs 6 x 300 + 2 x 420 = 2,640 s (44 min) with every model call at its deadline, so `incident-timeout` is 45 min (30 before). `verify-agent.sh`'s wait becomes 52 min (budget, 5 min warm-up, 2 min margin); its usage text and `docs/setup.md` say so. Compose sets none of these values.
+  - RED observed (behavioural, 7 failures): the schema's quote `maxLength` was 300; a 230-character quote present in the output passed; the report task did not name the limit; the bounds message said 8 to 300; the packaged defaults were 240/300 s, 30 min and a 300 s read timeout (`DefaultBudgetsTest` reads `application.yaml`). Then GREEN: `agent` 244 tests (surefire XML), 0 failures, 0 errors.
+  - `infra/scripts/lib.sh` (outside the writer's surface, done by the parent): `INCIDENT_WAIT_SECONDS=$((45 * 60 + 300 + 120))` (52 min), so the script waits until the agent's own 45 min budget ends.
 
 ## Next step
 
-The human decides how to go on after the third run (see its progress entry); T5c3 stays open until then.
+The T5c3 full run (fourth) after T5c5.

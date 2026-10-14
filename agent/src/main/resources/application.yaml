@@ -50,12 +50,12 @@ kintsugi:
       name: ${spring.ai.ollama.chat.model}
       temperature: ${spring.ai.ollama.chat.temperature}
       num-ctx: ${spring.ai.ollama.chat.num-ctx}
-      # The deadline of one call, per task (agent spec, "Budgets"; the human's decision of 2026-10-14): on the laptop's
-      # CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s, so plan-carrying
-      # ACT calls took 139 to 178 s and a 512-token report cannot fit in 180 s.
+      # The deadline of one call, per task (agent spec, "Budgets"; the human's decisions of 2026-10-14): on the laptop's
+      # CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s. In the third full
+      # run plan-carrying ACT calls took up to 207 s and a REPORT call ran past 300 s.
       call-timeout:
-        act: 240s
-        report: 300s
+        act: 300s
+        report: 420s
       # The most tokens an answer may hold, Ollama's num_predict (agent spec, "Answer caps", where the values are
       # justified). On the laptop's CPU an answer is written at about 3 tokens/s, so a cap also bounds the call's time:
       # a phase's first ACT answer carries the plan and its tool calls, a later one only tool calls, the report is JSON.
@@ -65,10 +65,11 @@ kintsugi:
         report: 512
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
     # run makes at most 10 model calls (8 ACT answers and 2 reports), so 12 is a guard; the warm-up, which loads the
-    # model before the run, counts against no budget and has its own bound.
+    # model before the run, counts against no budget and has its own bound. 45 min holds the longest run measured
+    # (16 steps: 6 ACT answers, 2 reports, 8 tool calls) with every model call at its deadline, 6 x 300 + 2 x 420 s.
     loop:
       max-model-calls: 12
-      incident-timeout: 30m
+      incident-timeout: 45m
       warm-up-timeout: 300s
 
 server:

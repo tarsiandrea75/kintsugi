@@ -478,11 +478,11 @@ start_lab() {
 # --- The diagnosing agent's incident API (openspec/specs/agent) ---
 
 AGENT=http://127.0.0.1:18086
-# Seconds between two reads of a running incident: a run lasts minutes, one model call alone 40 to 180 s on a CPU.
+# Seconds between two reads of a running incident: a run lasts minutes, one model call alone 40 to 420 s on a CPU.
 INCIDENT_POLL_SECONDS=15
-# Bounded wall clock for one incident: the agent's 30 min incident budget, plus its 300 s warm-up (which runs before
+# Bounded wall clock for one incident: the agent's 45 min incident budget, plus its 300 s warm-up (which runs before
 # that budget starts), plus a margin for the last call to be stored. Past it, the agent itself has ended the run.
-INCIDENT_WAIT_SECONDS=$((30 * 60 + 300 + 120))
+INCIDENT_WAIT_SECONDS=$((45 * 60 + 300 + 120))
 # How long an incident's window reaches past its fault's own traffic (incident_window): the tools take the window
 # back from the time of each call, and the calls that read the lab's evidence come in the run's first minutes.
 INCIDENT_WINDOW_MARGIN_MINUTES=10

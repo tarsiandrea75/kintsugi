@@ -13,7 +13,7 @@ import dev.kintsugi.agent.lab.Phase;
  * tests can make them small.
  *
  * @param maxModelCalls model calls per incident, 12; the warm-up is not one of them
- * @param incidentTimeout wall-clock time per incident from the end of its warm-up, tool calls included, 30 minutes
+ * @param incidentTimeout wall-clock time per incident from the end of its warm-up, tool calls included, 45 minutes
  * @param warmUpTimeout how long the warm-up request may take before the run ends {@code FAILED}, 300 s
  */
 @ConfigurationProperties("kintsugi.agent.loop")

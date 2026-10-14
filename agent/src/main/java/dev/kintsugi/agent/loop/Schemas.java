@@ -25,7 +25,7 @@ final class Schemas {
 		ObjectNode item = object(List.of("toolCallId", "tool", "quote", "why"));
 		item.withObject("properties").set("toolCallId", JSON.createObjectNode().put("type", "integer").put("minimum", 1));
 		item.withObject("properties").set("tool", JSON.createObjectNode().put("type", "string"));
-		item.withObject("properties").set("quote", string(8, 300));
+		item.withObject("properties").set("quote", string(ReportCheck.MIN_QUOTE_LENGTH, ReportCheck.MAX_QUOTE_LENGTH));
 		item.withObject("properties").set("why", string(0, 200));
 		ObjectNode report = object(
 				List.of("rootCauseService", "rootCauseCategory", "summary", "confidence", "evidence"));

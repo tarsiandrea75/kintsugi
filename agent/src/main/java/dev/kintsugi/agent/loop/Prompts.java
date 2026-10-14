@@ -66,8 +66,10 @@ final class Prompts {
 			Task: write the final report as a JSON object with these fields. rootCauseService and \
 			rootCauseCategory, from the values listed in the system message. summary: 1 to 500 characters. \
 			confidence: a number from 0 to 1. evidence: 1 to 5 items {toolCallId, tool, quote, why}, or none \
-			when both causes are UNKNOWN; toolCallId and tool come from a summary's header, quote is 8 to 300 \
-			characters copied exactly from that tool call's result, and why is at most 200 characters.""";
+			when both causes are UNKNOWN; toolCallId and tool come from a summary's header, and why is at most 200 \
+			characters. quote is a short fragment, at least %d and at most %d characters, copied exactly from \
+			that tool call's result: only its distinctive part, such as an exception name, a status or an error \
+			message, not the whole line.""";
 
 	/**
 	 * The warm-up's only message. It loads the model before the run; its answer is not read, and it holds nothing
@@ -105,7 +107,8 @@ final class Prompts {
 
 	/** The instruction of a report call; {@code errors} are those of the rejected previous report, if any. */
 	static String report(State state, List<String> errors) {
-		return state.text() + "\n\n" + REPORT_TASK + retry("report", errors);
+		return state.text() + "\n\n" + REPORT_TASK.formatted(ReportCheck.MIN_QUOTE_LENGTH,
+				ReportCheck.MAX_QUOTE_LENGTH) + retry("report", errors);
 	}
 
 	private static String retry(String what, List<String> errors) {

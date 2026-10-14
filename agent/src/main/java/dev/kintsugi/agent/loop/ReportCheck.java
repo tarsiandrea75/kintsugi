@@ -26,6 +26,15 @@ final class ReportCheck {
 
 	private static final Set<String> EVIDENCE_FIELDS = Set.of("toolCallId", "tool", "quote", "why");
 
+	/** The fewest characters of an evidence quote. */
+	static final int MIN_QUOTE_LENGTH = 8;
+
+	/**
+	 * The most characters of an evidence quote (T5c5): a distinctive fragment, not a whole line. In the third live run
+	 * the model copied whole escaped log lines, about 200 tokens per quote, and the 512-token report never closed.
+	 */
+	static final int MAX_QUOTE_LENGTH = 160;
+
 	private static final String TRUNCATED_SUFFIX = "\n[truncated]";
 
 	private static final JsonMapper JSON = JsonMapper.shared();
@@ -86,8 +95,14 @@ final class ReportCheck {
 		if (item.get("tool") == null || !item.get("tool").isString()) {
 			errors.add(name + ".tool must be a string");
 		}
-		if (!Causes.string(item.get("quote"), 8, 300)) {
-			errors.add(name + ".quote must be a string of 8 to 300 characters");
+		JsonNode quote = item.get("quote");
+		if (quote != null && quote.isString() && length(quote.asString()) > MAX_QUOTE_LENGTH) {
+			errors.add(name + ".quote is longer than " + MAX_QUOTE_LENGTH + " characters; quote only its distinctive "
+					+ "fragment, such as an exception name, a status or an error message, not the whole line");
+		}
+		else if (!Causes.string(quote, MIN_QUOTE_LENGTH, MAX_QUOTE_LENGTH)) {
+			errors.add(name + ".quote must be a string of " + MIN_QUOTE_LENGTH + " to " + MAX_QUOTE_LENGTH
+					+ " characters");
 		}
 		if (!Causes.string(item.get("why"), 0, 200)) {
 			errors.add(name + ".why must be a string of at most 200 characters");
@@ -152,6 +167,11 @@ final class ReportCheck {
 			}
 		}
 		return false;
+	}
+
+	/** Characters as the schema counts them: code points. */
+	private static int length(String text) {
+		return text.codePointCount(0, text.length());
 	}
 
 	static String normalized(String text) {

@@ -15,8 +15,8 @@ root-cause service and category of F1, F2 and F3 with the local model.
 
 For each fault it injects it through the fault injector, places a few orders as neutral customers, waits for the
 metrics and logs to land, then opens an incident (POST /incidents on 127.0.0.1:18086) with the same neutral symptom
-for every fault and a window that starts with that fault's own orders, and waits for the run to end (at most 37 min:
-the agent's 30 min budget, its 5 min warm-up and a margin). It restores the fault, reads the injection's truth row as
+for every fault and a window that starts with that fault's own orders, and waits for the run to end (at most 52 min:
+the agent's 45 min budget, its 5 min warm-up and a margin). It restores the fault, reads the injection's truth row as
 the faults role, and scores the report: it matches when the incident is COMPLETED and both rootCauseService and
 rootCauseCategory of its report equal the truth. Between two faults it waits until the previous fault's traffic is
 older than the next window (11 min after its restore). Nothing it writes into the lab, and nothing in the symptom,
@@ -26,7 +26,7 @@ incident with its steps and full tool outputs (<fault>-incident.json), and the s
 has one line per fault.
 Exits 0 when every selected fault is diagnosed correctly, non-zero otherwise. The injection is restored on every exit.
 Needs docker (with compose), curl and python3 on the host, and the local Ollama on 127.0.0.1:11434 with
-granite4.1:8b. Expect up to about 40 minutes per fault on a CPU.
+granite4.1:8b. Expect up to about 55 minutes per fault on a CPU.
 EOF
 }
 
@@ -77,7 +77,7 @@ cleanup() {
     printf '%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\n' "$current_fault" "${injection_id:--}" \
       "${current_incident:--}" >>"$RUN_DIR/summary.tsv"
   fi
-  # The API has no cancel: an incident left RUNNING would make the next run wait up to 37 min for it.
+  # The API has no cancel: an incident left RUNNING would make the next run wait up to 52 min for it.
   if [[ -n "$current_incident" ]]; then
     end_running_incident "$current_incident" || true
   fi

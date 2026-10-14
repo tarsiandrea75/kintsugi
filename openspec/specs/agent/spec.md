@@ -10,8 +10,8 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 | Rule | Value |
 |------|-------|
-| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task: `act` 240 s and `report` 300 s, see "Budgets"; `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its task's deadline itself, and aborts it ("An abandoned call is aborted") |
-| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longest of `call-timeout.act`, `call-timeout.report` and `warm-up-timeout` (300 s with the defaults), so the HTTP client never cuts a request before the loop's own deadline does. The same customizer buffers the request body, so every request to Ollama carries a `Content-Length` ("An abandoned call is aborted"). The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
+| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task: `act` 300 s and `report` 420 s, see "Budgets"; `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its task's deadline itself, and aborts it ("An abandoned call is aborted") |
+| HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longest of `call-timeout.act`, `call-timeout.report` and `warm-up-timeout` (420 s with the defaults), so the HTTP client never cuts a request before the loop's own deadline does. The same customizer buffers the request body, so every request to Ollama carries a `Content-Length` ("An abandoned call is aborted"). The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
 | Tool execution | the loop calls `ChatModel` directly (in Spring AI 2.0.1 it never executes tools) and runs each checked tool call itself through the `LabTools` port: the model is offered the MCP `ToolCallback`s' definitions, wrapped so that they cannot be executed, and each call goes to the `McpSyncClient` directly, because the MCP `ToolCallback` throws on a tool error (`isError`) and re-serializes the content, which would lose the `INVALID_PARAMETER` or `UPSTREAM_ERROR` output |
 | MCP client | `spring-ai-starter-mcp-client`, `SYNC`, one Streamable HTTP connection `kintsugi` (`spring.ai.mcp.client.streamable-http.connections.kintsugi`) to `${KINTSUGI_MCP_URL:http://127.0.0.1:18085}`, endpoint `/mcp`, request timeout 20 s (the default). `spring.ai.mcp.client.initialized=false`: the starter would otherwise send `initialize` while the context starts and fail the start when mcp-tools is down; uninitialized, the client initializes on its first request and tries again on the next one after a failure. Tool names keep no prefix |
 | Structured output | the report call carries its JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned. The plan travels in the text of a call that offers tools, which Ollama cannot also constrain by a schema, so code alone checks it ("The plan") |
@@ -19,7 +19,7 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 | HTTP port **(chosen)** | 8086, next to mcp-tools' 8085 |
 | `demo` profile | the one-shot question of the hello-tool demo: no web server, no database, no incident API |
 | One incident at a time **(chosen)** | a laptop CPU serves one model call at a time |
-| Run budgets | `kintsugi.agent.loop`: `max-model-calls` 12, `incident-timeout` 30 min, `warm-up-timeout` 300 s (the human's decision of 2026-10-12, from the measured CPU latency of 42 to 84 s per call); the 8-call tool budget and the phases' allowances are fixed in code |
+| Run budgets | `kintsugi.agent.loop`: `max-model-calls` 12, `incident-timeout` 45 min (30 min before T5c5), `warm-up-timeout` 300 s (the human's decision of 2026-10-12, from the measured CPU latency of 42 to 84 s per call; the incident budget raised in T5c5 to fit the longer call deadlines); the 8-call tool budget and the phases' allowances are fixed in code |
 | Leakage | no prompt, schema, tool description or log line of the agent names a fault id (F1 to F8), the fault catalog, the fault-injector or a symptom-to-cause mapping |
 
 ## Requirements
@@ -225,8 +225,8 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 |--------|-------|---------------|
 | Tool calls | 8 per incident, the sum of the phase caps | further requests are refused (`REFUSED_BUDGET`) and the loop moves on to the next phase |
 | Model calls **(chosen)** | 12 per incident; the warm-up is not one | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 12 calls is used up`. A valid run makes at most 10 (each phase's answers are at most its allowance, 8 in all, plus 2 report attempts), so this is a guard against a loop bug |
-| One model call **(T5c4)** | per task, `kintsugi.agent.model.call-timeout`: 240 s for an `ACT` call (`act`), 300 s for a `REPORT` call (`report`); never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call and its task's deadline (`model call ACT in <phase> took longer than 240 s`, `model call REPORT in CONCLUDE took longer than 300 s`), or the incident when its time ran out first |
-| One incident | 30 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 30 min, ...` |
+| One model call **(T5c4, T5c5)** | per task, `kintsugi.agent.model.call-timeout`: 300 s for an `ACT` call (`act`), 420 s for a `REPORT` call (`report`); never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call and its task's deadline (`model call ACT in <phase> took longer than 300 s`, `model call REPORT in CONCLUDE took longer than 420 s`), or the incident when its time ran out first |
+| One incident **(T5c5)** | 45 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 45 min, ...` |
 
 Which units a tool call consumes is fixed in "Phases and their tools": a call refused `REFUSED_PHASE` consumes one unit of the tool budget and of its phase's allowance, like a call that runs; a call refused `REFUSED_BUDGET` consumes nothing; no tool call consumes the model-call budget. Every budget end MUST be recorded as a step or a `failure_reason` and logged, never silent. Each tool-step prompt MUST state the tool calls left in the phase and in the incident.
 
@@ -238,10 +238,12 @@ Which units a tool call consumes is fixed in "Phases and their tools": a call re
 
 Why per task (the human's decision of 2026-10-14): on the laptop's CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s. In the second full run plan-carrying `ACT` calls took 139 to 178 s, at the edge of a single 180 s deadline, and two runs timed out on the `REPORT` call: a 512-token report needs about 176 s of writing alone. 240 s gives the longest `ACT` call about a minute of room; 300 s holds the prompt read and a full 512-token report.
 
+Why longer in T5c5 (the human's decision of 2026-10-14, after the third full run): plan-carrying `ACT` calls took up to 207 s, within 33 s of the 240 s deadline, one `KNOWLEDGE` plan call ran past it, and a `REPORT` call ran past 300 s. 300 s gives the slowest `ACT` call measured about 90 s of room, and 420 s gives a report about two minutes past the slowest measured (284 s). The incident budget follows: the longest run measured had 16 steps (8 tool calls, 6 `ACT` answers and 2 reports, one of them a retry), and with every model call at its deadline that run needs 6 x 300 + 2 x 420 = 2,640 s, 44 minutes, plus a few seconds of tool calls; 30 minutes would cut such a run before its report, so the budget is 45 minutes. `verify-agent.sh` waits for an incident for the budget, the warm-up and a margin.
+
 #### Scenario: Slow model call
-- GIVEN a model whose `ACT` answer does not come within the `ACT` deadline (240 s)
+- GIVEN a model whose `ACT` answer does not come within the `ACT` deadline (300 s)
 - WHEN the loop calls it
-- THEN the run ends `TIMED_OUT` with `model call ACT in <phase> took longer than 240 s` and no later step is recorded
+- THEN the run ends `TIMED_OUT` with `model call ACT in <phase> took longer than 300 s` and no later step is recorded
 
 #### Scenario: A report slower than an ACT call but within its own deadline
 - GIVEN a model whose report takes longer than the `ACT` deadline but less than the `REPORT` deadline
@@ -249,9 +251,9 @@ Why per task (the human's decision of 2026-10-14): on the laptop's CPU reading t
 - THEN it waits for the answer and the run can end `COMPLETED`
 
 #### Scenario: Slow report
-- GIVEN a model whose report does not come within the `REPORT` deadline (300 s)
+- GIVEN a model whose report does not come within the `REPORT` deadline (420 s)
 - WHEN the loop asks it for the report
-- THEN the run ends `TIMED_OUT` with `model call REPORT in CONCLUDE took longer than 300 s`
+- THEN the run ends `TIMED_OUT` with `model call REPORT in CONCLUDE took longer than 420 s`
 
 #### Scenario: Missing deadlines
 - GIVEN `kintsugi.agent.model.call-timeout` or `kintsugi.agent.model.num-predict` is not set, or a deadline is not positive
@@ -259,7 +261,7 @@ Why per task (the human's decision of 2026-10-14): on the laptop's CPU reading t
 - THEN it fails to start with a message naming the property, instead of failing at the first call
 
 #### Scenario: Incident too long
-- GIVEN the run has lasted 30 minutes since its warm-up ended
+- GIVEN the run has lasted 45 minutes since its warm-up ended
 - WHEN the loop is about to start another model or tool call
 - THEN the run ends `TIMED_OUT` instead
 
@@ -269,9 +271,9 @@ Every model call MUST carry Ollama's `num_predict`, the most tokens its answer m
 
 | Call | Cap | Why |
 |------|-----|-----|
-| a phase's first `ACT` answer (`first-act`) | 384 | it carries the plan and its tool calls. The first full run (2026-10-14) measured plans of 681 to 695 characters, about 170 to 200 tokens, with one tool call; 384 leaves about twice that. At the measured 2.9 tokens/s it takes at most about 130 s of writing, inside the 240 s `ACT` deadline |
+| a phase's first `ACT` answer (`first-act`) | 384 | it carries the plan and its tool calls. The first full run (2026-10-14) measured plans of 681 to 695 characters, about 170 to 200 tokens, with one tool call; 384 leaves about twice that. At the measured 2.9 tokens/s it takes at most about 130 s of writing, inside the 300 s `ACT` deadline |
 | a later `ACT` answer (`act`) | 160 | it only requests tool calls, or ends the phase with no text. The same run measured 30 to 66 tokens for one or two calls; 160 holds four, the most a phase allows, in about 55 s. The answer that passed the old 180 s deadline was a 650 to 800-token Markdown summary of the tool results |
-| a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) is about all the 300 s `REPORT` deadline can hold. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
+| a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) fits the 420 s `REPORT` deadline with room for a slow prompt read. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
 | the warm-up | 1 | "The warm-up" |
 
 Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:
@@ -433,7 +435,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step |
 | `evidence[].tool` | that step's `tool_name` |
-| `evidence[].quote` | 8 to 300 characters **(chosen)** |
+| `evidence[].quote` | 8 to 160 characters (300 before T5c5): a short verbatim fragment, not a whole line |
 | `evidence[].why` | at most 200 characters **(chosen)** |
 
 No other field is allowed, and all five are required. Code then adds `incidentId` and `stepsUsed` (the number of step rows, the accepted `REPORT` step included) and stores the report in `incidents.report`, in the order `incidentId`, the model's five fields, `stepsUsed`. Each attempt is a `REPORT` step, with the raw answer in `model_output` and `valid` or `invalid: <errors>` in `summary`.
@@ -448,7 +450,7 @@ No other field is allowed, and all five are required. Code then adds `incidentId
 
 ### Requirement: Evidence is checked
 
-Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId` that is another incident's step, or a plan, act or report step, is not one) whose `tool_name` equals `tool` and which ran (not `REFUSED_PHASE` or `REFUSED_BUDGET`). After whitespace normalization of both sides (trim, then every run of whitespace becomes one space; case is kept), its `quote` MUST be a substring of that step's `tool_output`, or of one of the string values of that output's JSON (decoded, so that escaped quotes and newlines compare as text) **(chosen)**. A report that fails the schema or any evidence check MUST get one retry, with the list of errors; a second failure MUST end the run `INVALID_REPORT`, with both reports stored on their steps and none in `incidents.report`.
+Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId` that is another incident's step, or a plan, act or report step, is not one) whose `tool_name` equals `tool` and which ran (not `REFUSED_PHASE` or `REFUSED_BUDGET`). After whitespace normalization of both sides (trim, then every run of whitespace becomes one space; case is kept), its `quote` MUST be at most 160 characters **(T5c5)** and a substring of that step's `tool_output`, or of one of the string values of that output's JSON (decoded, so that escaped quotes and newlines compare as text) **(chosen)**. A quote longer than 160 characters MUST be rejected with a reason that tells the model what to change: quote only the distinctive fragment (an exception name, a status, an error message), not the whole line. The report task MUST ask for such a fragment and name the limit, and the schema sent with the call MUST carry the same bounds (8 to 160). Why (T5c5): in the third full run the model copied whole escaped log lines, about 200 tokens per quote, so the 512-token report was cut before its JSON closed, twice, and the run ended `INVALID_REPORT`; five 160-character quotes are at most about 250 tokens. A report that fails the schema or any evidence check MUST get one retry, with the list of errors; a second failure MUST end the run `INVALID_REPORT`, with both reports stored on their steps and none in `incidents.report`.
 
 #### Scenario: Existing quote
 - GIVEN step 4 is `search_logs` and its output holds a line with `Connection refused`
@@ -458,6 +460,17 @@ Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId`
 #### Scenario: Invented quote
 - WHEN the report cites a quote that is in no recorded output
 - THEN the report is rejected and the model is asked once more, with the error naming the item
+
+#### Scenario: Short quote of an escaped line
+- GIVEN step 5 is `recent_events` and its output holds an event detail whose JSON is escaped, such as `{\"exception\":\"java.net.http.HttpTimeoutException\", ...}`
+- WHEN the report quotes only `HttpTimeoutException calling POST`, or the escaped `\"exception\":\"java.net.http.HttpTimeoutException\"`
+- THEN the evidence passes, from the decoded or the raw text
+
+#### Scenario: Quote too long
+- GIVEN a quote that is in the cited output but longer than 160 characters, such as a whole event detail
+- WHEN the report is checked
+- THEN it is rejected with `evidence[<i>].quote is longer than 160 characters; quote only its distinctive fragment, such as an exception name, a status or an error message, not the whole line`
+- AND the model is asked once more with that reason, like any invalid report
 
 #### Scenario: Wrong tool or step
 - WHEN the report cites `toolCallId` 2 with `tool` `search_logs` while step 2 is `query_metric`, or a step that does not exist

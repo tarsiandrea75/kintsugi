@@ -11,6 +11,10 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import dev.kintsugi.agent.lab.Phase;
 
 /** The report's schema and evidence rules, without a run (agent spec, "The report", "Evidence is checked"). */
 class ReportCheckTest {
@@ -20,6 +24,12 @@ class ReportCheckTest {
 			4, new ToolStep(4, "search_logs", "OK", fixture("search_logs-order.json")), //
 			5, new ToolStep(5, "recent_events", "OK", fixture("recent_events-order.json")), //
 			6, new ToolStep(6, "search_logs", "REFUSED_PHASE", null));
+
+	/** The first event detail of recent_events-order.json, decoded: a whole line, about 230 characters. */
+	private static final String WHOLE_DETAIL = "{\"exception\":\"java.net.http.HttpTimeoutException\","
+			+ "\"url\":\"http://payment-service:8081/payments\",\"message\":\"Payment of order "
+			+ "5c3034dc-dacc-474c-b272-3c5fac9023a4 failed: HttpTimeoutException calling POST "
+			+ "http://payment-service:8081/payments: Request cancelled\"}";
 
 	@Test
 	void aQuoteOfTheRawOutputPasses() {
@@ -86,7 +96,47 @@ class ReportCheckTest {
 	@Test
 	void aQuoteOutsideItsBoundsIsRejected() {
 		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", "PAID"))))
-			.containsExactly("evidence[0].quote must be a string of 8 to 300 characters");
+			.containsExactly("evidence[0].quote must be a string of 8 to 160 characters");
+	}
+
+	@Test
+	void aQuoteLongerThan160CharactersIsRejectedWithAReasonTheRetryCanActOn() {
+		// A whole event detail, decoded: it is in the output, so only its length is wrong (the third live run).
+		assertThat(WHOLE_DETAIL).hasSizeGreaterThan(160);
+		assertThat(ReportCheck.quoted(WHOLE_DETAIL, STEPS.get(5).output())).isTrue();
+
+		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY", evidence(5, "recent_events", WHOLE_DETAIL))))
+			.containsExactly("evidence[0].quote is longer than 160 characters; quote only its distinctive fragment, "
+					+ "such as an exception name, a status or an error message, not the whole line");
+	}
+
+	@Test
+	void aQuoteOfExactly160CharactersPasses() {
+		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY",
+				evidence(5, "recent_events", WHOLE_DETAIL.substring(0, 160))))).isEmpty();
+	}
+
+	@Test
+	void aShortFragmentOfAnEscapedLineMatchesEscapedOrDecoded() {
+		// The summary shows the detail as an escaped JSON literal; the model may copy it either way.
+		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY",
+				evidence(5, "recent_events", "\\\"exception\\\":\\\"java.net.http.HttpTimeoutException\\\""),
+				evidence(5, "recent_events", "HttpTimeoutException calling POST")))).isEmpty();
+	}
+
+	@Test
+	void theSchemaSentToTheModelHasTheSameQuoteBounds() {
+		JsonNode quote = JsonMapper.shared()
+			.readTree(Schemas.REPORT)
+			.at("/properties/evidence/items/properties/quote");
+		assertThat(quote.get("minLength").intValue()).isEqualTo(8);
+		assertThat(quote.get("maxLength").intValue()).isEqualTo(160);
+	}
+
+	@Test
+	void theReportTaskAsksForAShortFragmentPerQuote() {
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of());
+		assertThat(task).contains("at most 160 characters").contains("not the whole line");
 	}
 
 	@Test

@@ -80,8 +80,8 @@ Why the phase caps sum to the incident's 8-call budget: the model always gets to
 |--------|-------|----------------|
 | Tool calls | 8 per incident (2 + 4 + 2 per phase) | further calls are refused and recorded; the loop moves to the next phase |
 | Model calls | 12 per incident (16 before T5) | the run ends `BUDGET_EXCEEDED`. A valid run needs at most 8 `ACT` answers (each phase's answers are at most its allowance) + 2 report attempts = 10, so this is a guard against a loop bug, never a normal end |
-| One model call | per task since T5c4: 240 s for `ACT`, 300 s for `REPORT` (180 s for both in T5, 90 s before) | the run ends `TIMED_OUT` |
-| One incident | 30 minutes (10 before T5), wall clock from the end of the warm-up, tool calls included | the run ends `TIMED_OUT` |
+| One model call | per task since T5c4: 300 s for `ACT`, 420 s for `REPORT` since T5c5 (240 s and 300 s in T5c4, 180 s for both in T5, 90 s before) | the run ends `TIMED_OUT` |
+| One incident | 45 minutes since T5c5 (30 in T5, 10 before), wall clock from the end of the warm-up, tool calls included | the run ends `TIMED_OUT` |
 | Warm-up | one request before the run, at most 300 s, counted against no budget | the run ends `FAILED` |
 
 Statuses: `RUNNING`, `COMPLETED`, `INVALID_REPORT`, `BUDGET_EXCEEDED`, `TIMED_OUT`, `FAILED`. `FAILED` covers a failed warm-up, an unreachable model, an unexpected error (an `Error` included) and an incident left `RUNNING` by an agent restart. Every end records its reason; none is silent.
@@ -89,10 +89,10 @@ Statuses: `RUNNING`, `COMPLETED`, `INVALID_REPORT`, `BUDGET_EXCEEDED`, `TIMED_OU
 **Budgets amended in T5 (the human's decision of 2026-10-12).** The T1 values assumed ADR-003's latencies (a 14 s median, 63.5 s cold). T4's live smoke measured 42 to 84 s per call on the laptop's CPU, so 16 calls could not fit in 10 minutes and one call passed 90 s. The human chose, against that measurement:
 
 - **fewer calls:** the plan merges into the first `ACT` answer of each phase, which removes three plan calls and three possible retries per run (about 8 to 10 calls instead of up to 16). Ollama cannot constrain an answer by a schema while offering tools, so the plan travels as JSON in the answer's text and code checks it; a retry would cost a call again, so a bad plan is recorded instead;
-- **180 s per model call (per task since T5c4, below) and 30 minutes per incident**, to fit the measured latency with room for the longest calls;
+- **180 s per model call (per task since T5c4, below) and 30 minutes per incident (45 since T5c5, below)**, to fit the measured latency with room for the longest calls;
 - **a warm-up before each run:** one tiny request with the route's model and `num-ctx` and `num_predict` 1, so the model's load (T4's cold first call passed 90 s) is paid outside the budgets. It is logged and bounded at 300 s; a failure ends the run `FAILED`.
 
-The loop's HTTP read timeout is its own (T4 review): a `RestClientCustomizer` in the web profile sets it to the longest of the call deadlines and the warm-up (300 s since T5c4), so the HTTP client never cuts a request before the loop's own deadline; the `demo` profile keeps `spring.http.clients.read-timeout` at 5 minutes. A call the loop abandons at 180 s is cancelled through its thread's interrupt, which closes its connection; T5c found that Ollama still ran it to its end, and fixed it (see "Amended in T5c"). The vision's plan B trigger is one minute per agent step; the step table records every call's latency, so the evals can tell how often a run crosses it.
+The loop's HTTP read timeout is its own (T4 review): a `RestClientCustomizer` in the web profile sets it to the longest of the call deadlines and the warm-up (420 s since T5c5, 300 s in T5c4), so the HTTP client never cuts a request before the loop's own deadline; the `demo` profile keeps `spring.http.clients.read-timeout` at 5 minutes. A call the loop abandons at 180 s is cancelled through its thread's interrupt, which closes its connection; T5c found that Ollama still ran it to its end, and fixed it (see "Amended in T5c"). The vision's plan B trigger is one minute per agent step; the step table records every call's latency, so the evals can tell how often a run crosses it.
 
 ### Amended in T5c: answer caps, prompt order, aborted calls
 
@@ -108,12 +108,22 @@ The second full `verify-agent.sh` run (2026-10-14), after T5c, got through every
 
 The human chose (2026-10-14) **a deadline per task: 240 s for an `ACT` call, 300 s for the `REPORT` call**, configured as `kintsugi.agent.model.call-timeout.act` and `.report` (`CallTimeouts`). Each call still waits at most the smaller of its task's deadline and the incident's time left, and a timed-out call's reason names its own deadline. The 30-minute incident budget, the warm-up and the `num_predict` caps are unchanged; the loop's HTTP read timeout follows the longest deadline. A route without deadlines or caps now fails the start, naming the property, instead of the first call. Rejected: a single larger deadline for every call (an `ACT` call that runs on would hold the run up to the report's 300 s for nothing); lowering the report cap (a cut report is retried, which costs a second long call).
 
+### Amended in T5c5: short evidence quotes and longer call deadlines
+
+The third full `verify-agent.sh` run (2026-10-14), after T5c4, brought every incident to the end of its evidence phases, and still produced no report. F1 ended `INVALID_REPORT` after 1,143 s and 16 steps: each evidence `quote` copied a whole escaped log line, about 200 tokens, so both 512-token report answers were cut before the JSON closed. F2 timed out on a `REPORT` call past 300 s, F3 on a `KNOWLEDGE` plan call past 240 s; plan-carrying `ACT` calls took 140 to 207 s, reports 154 to 284 s or more.
+
+The human chose (2026-10-14):
+
+- **Short evidence quotes.** A quote is 8 to 160 characters (300 before): the distinctive fragment, such as an exception name, a status or an error message, not the whole line. The report task asks for it and names the limit, the schema sent with the call carries the same bounds, and `ReportCheck` rejects a longer quote with a reason the retry can act on ("quote only its distinctive fragment ..."). The substring check is unchanged, so a short fragment of an escaped line still matches in the raw or the decoded text. Five quotes now take at most about 250 tokens, so a report fits its 512-token cap. Rejected: raising the report cap (each extra token costs about 0.35 s on this CPU, and a longer quote proves nothing more than its distinctive part); cutting long quotes in code (code would be writing the model's evidence).
+- **Longer call deadlines: 300 s for `ACT`, 420 s for `REPORT`.** 300 s gives the slowest plan call measured about 90 s of room; 420 s gives a report about two minutes past the slowest measured.
+- **A 45-minute incident budget (30 before).** The longest run measured had 16 steps: 8 tool calls, 6 `ACT` answers and 2 reports. With every model call at its new deadline it needs 6 x 300 + 2 x 420 = 2,640 s, 44 minutes, which 30 minutes would cut before the report; 45 minutes holds it with the tool calls. `verify-agent.sh` waits for an incident for the budget, the 5-minute warm-up and a margin (52 minutes). The loop's HTTP read timeout follows the longest deadline, now 420 s. The `num_predict` caps and the warm-up are unchanged.
+
 ### Plan and report schemas
 
 - **Plan:** `hypotheses` (1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`), `nextTools` (0 to 4 of the phase's tools). Same enums as the report.
 - **Report (human's taxonomy):** `rootCauseService` is `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN`; `rootCauseCategory` is `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN`. These are the truth's own column vocabularies, generic SRE terms that reveal no fault id. Scoring is a mechanical equality on both fields.
 - The model writes `rootCauseService`, `rootCauseCategory`, `summary` (at most 500 characters), `confidence` (0 to 1) and `evidence[]`. Code adds `incidentId` and `stepsUsed`, which the model cannot know reliably.
-- Each evidence item is `{toolCallId, tool, quote, why}`. `toolCallId` is the step number code printed at the head of that tool's summary. A quote must be a substring of the full recorded output, after whitespace normalization; quoting from the summary works because summaries copy text verbatim.
+- Each evidence item is `{toolCallId, tool, quote, why}`. `toolCallId` is the step number code printed at the head of that tool's summary. A quote must be a substring of the full recorded output, after whitespace normalization; quoting from the summary works because summaries copy text verbatim. Since T5c5 a quote is at most 160 characters, a distinctive fragment rather than a whole line.
 
 ### State
 
@@ -127,7 +137,7 @@ The human chose (2026-10-14) **a deadline per task: 240 s for an `ACT` call, 300
 
 `ModelRouter` picks a chat model and its options per task (`ACT`, `REPORT`). In M2 it has one route: the auto-configured Ollama model, `granite4.1:8b`, for every task. The model name is recorded on every step. The interface exists now so that configurations A to D of the vision (M4) are a routing change, not a loop change.
 
-Settled in T4, amended in T5: the route is configured under `kintsugi.agent.model` (`name`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task since T5c4 (`act` 240 s, `report` 300 s; 180 s for both before), and since T5c `num-predict` 384, 160 and 512 per call kind) and every call carries these options, with the phase's tool definitions or the report schema. The loop runs each model call on its own thread and stops waiting at the smaller of its task's deadline and the incident's time left, so a hung call cannot outlive its budget. `ModelTask` is `ACT` or `REPORT`; the warm-up uses the `ACT` route. The route builds `OllamaChatOptions`; an API route will need its own options, which is part of the deferred API baseline. The loop runs on one thread with a queue of 2 runs; the database already admits one running incident.
+Settled in T4, amended in T5: the route is configured under `kintsugi.agent.model` (`name`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task since T5c4 (`act` 300 s, `report` 420 s since T5c5; 240 s and 300 s in T5c4; 180 s for both before), and since T5c `num-predict` 384, 160 and 512 per call kind) and every call carries these options, with the phase's tool definitions or the report schema. The loop runs each model call on its own thread and stops waiting at the smaller of its task's deadline and the incident's time left, so a hung call cannot outlive its budget. `ModelTask` is `ACT` or `REPORT`; the warm-up uses the `ACT` route. The route builds `OllamaChatOptions`; an API route will need its own options, which is part of the deferred API baseline. The loop runs on one thread with a queue of 2 runs; the database already admits one running incident.
 
 ### Prompt injection
 
