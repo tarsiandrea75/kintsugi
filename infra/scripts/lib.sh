@@ -13,6 +13,9 @@ export DOCKER_GID
 # The compose variables the fault injector sets for F3 and F4. start_lab removes them from the "up" environment, so a
 # value left in this shell cannot start the lab with a fault already applied.
 FAULT_VARIABLES=(ORDER_PAYMENT_BASEURL INVENTORY_POOL_SIZE INVENTORY_RESERVATION_DELAY)
+# The diagnosing agent's service. start_lab leaves it out: no other check needs it, and on a knowledge-data volume
+# created before the agent database it exits at startup. verify-agent.sh starts it with start_agent.
+AGENT_SERVICE=agent
 ORDERS=http://127.0.0.1:18080
 GATEWAY=http://127.0.0.1:18082
 INJECTOR=http://127.0.0.1:18084
@@ -50,6 +53,17 @@ fail() { echo "FAIL  $*"; failures=$((failures + 1)); }
 info() { echo "....  $*"; }
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+# "docker compose up" "$@", quiet, without the fault variables (FAULT_VARIABLES): a value left in this shell cannot
+# start a service with a fault already applied, and a service left faulted by an earlier run is put back on its defaults.
+compose_up() {
+  local unset_faults=() variable
+  for variable in "${FAULT_VARIABLES[@]}"; do unset_faults+=(-u "$variable"); done
+  env "${unset_faults[@]}" docker compose --progress quiet -f "$COMPOSE_FILE" up "$@"
+}
+
+# The services start_lab starts: every service of the compose file but the agent, one per line.
+lab_services() { compose config --services 2>/dev/null | grep -vx "$AGENT_SERVICE"; }
 
 # Prints the environment of service $1's container, one NAME=value per line; prints nothing when it is not running.
 container_env() {
@@ -379,7 +393,7 @@ lab_states() {
 knowledge_only_failure() {
   local states service state health code expected reasons=() indexer_failed=false proxy_down=false
   states=$(lab_states) || return 1
-  expected=$(compose config --services 2>/dev/null | grep -vxE 'knowledge-indexer|ollama-proxy') || return 1
+  expected=$(lab_services | grep -vxE 'knowledge-indexer|ollama-proxy') || return 1
   [[ -n "$expected" ]] || return 1
   for service in $expected; do
     read -r _ state health _ <<<"$(grep -E "^$service " <<<"$states" | head -n1)"
@@ -402,32 +416,33 @@ knowledge_only_failure() {
   printf '%s\n' "${reasons[@]}"
 }
 
-# After a failed "up --wait", which stops waiting at its first error, waits up to 300 s for every service but
-# knowledge-indexer and ollama-proxy to be running and healthy, without building, recreating or starting either of
-# those two. "$@" is the env options that unset the fault variables; compose's errors are appended to file $UP_ERRORS.
+# After a failed "up --wait", which stops waiting at its first error, waits up to 300 s for every service of
+# lab_services but knowledge-indexer and ollama-proxy to be running and healthy, without building, recreating or
+# starting either of those two. Compose's errors are appended to file $UP_ERRORS.
 wait_without_knowledge() {
   local services
-  services=$(compose config --services 2>/dev/null | grep -vxE 'knowledge-indexer|ollama-proxy') || return 1
+  services=$(lab_services | grep -vxE 'knowledge-indexer|ollama-proxy') || return 1
   # shellcheck disable=SC2086 # one word per service name
-  env "$@" docker compose --progress quiet -f "$COMPOSE_FILE" up -d --no-build --no-deps --wait --wait-timeout 300 \
-    $services >/dev/null 2>>"$UP_ERRORS"
+  compose_up -d --no-build --no-deps --wait --wait-timeout 300 $services >/dev/null 2>>"$UP_ERRORS"
 }
 
-# Starts or reuses the lab, waits for Loki, restores any injection an earlier run left blocking, and resets the gateway.
-# Exits on failure. A failure of the knowledge base's Ollama path alone (knowledge_only_failure) is reported as WARN
-# lines, with compose's own errors, and the lab is used: the evidence tools do not need Ollama.
+# Starts or reuses the lab, every service but the agent (lab_services), waits for Loki, restores any injection an
+# earlier run left blocking, and resets the gateway. Exits on failure. A failure of the knowledge base's Ollama path
+# alone (knowledge_only_failure) is reported as WARN lines, with compose's own errors, and the lab is used: the
+# evidence tools do not need Ollama. The agent is left as it is: running or not, it never fails a check that does not
+# use it (start_agent starts it).
 start_lab() {
-  info "starting or reusing the lab (docker compose up -d --build --wait)"
-  local unset_faults=() variable reasons line
-  for variable in "${FAULT_VARIABLES[@]}"; do unset_faults+=(-u "$variable"); done
+  info "starting or reusing the lab, all but the agent (docker compose up -d --build --wait)"
+  local reasons line services
+  services=$(lab_services) || true
+  [[ -n "$services" ]] || { fail "docker compose config lists no services"; exit 1; }
   UP_ERRORS=$(mktemp)
-  # Without the fault variables, "up" also puts a service left faulted by an earlier run back on its defaults.
   # "--progress quiet": compose's stderr then holds only its warnings and errors, which a failure path prints.
-  if env "${unset_faults[@]}" docker compose --progress quiet -f "$COMPOSE_FILE" up -d --build --wait \
-    >/dev/null 2>"$UP_ERRORS"; then
+  # shellcheck disable=SC2086 # one word per service name
+  if compose_up -d --build --wait $services >/dev/null 2>"$UP_ERRORS"; then
     rm -f "$UP_ERRORS"
     pass "every container is up and healthy"
-  elif wait_without_knowledge "${unset_faults[@]}" && reasons=$(knowledge_only_failure); then
+  elif wait_without_knowledge && reasons=$(knowledge_only_failure); then
     while IFS= read -r line; do echo "WARN  compose: $line" >&2; done <"$UP_ERRORS"
     rm -f "$UP_ERRORS"
     while IFS= read -r line; do echo "WARN  $line" >&2; done <<<"$reasons"
@@ -468,6 +483,25 @@ INCIDENT_POLL_SECONDS=15
 # Bounded wall clock for one incident: the agent's 30 min incident budget, plus its 300 s warm-up (which runs before
 # that budget starts), plus a margin for the last call to be stored. Past it, the agent itself has ended the run.
 INCIDENT_WAIT_SECONDS=$((30 * 60 + 300 + 120))
+# How long an incident's window reaches past its fault's own traffic (incident_window): the tools take the window
+# back from the time of each call, and the calls that read the lab's evidence come in the run's first minutes.
+INCIDENT_WINDOW_MARGIN_MINUTES=10
+AGENT_WAIT_SECONDS=180
+
+# Builds and starts the agent (and what it depends on, if down) and waits for it to be healthy. On failure, prints
+# the agent's last log lines and the usual cause, and fails.
+start_agent() {
+  info "starting or reusing the agent (docker compose up -d --build --wait $AGENT_SERVICE)"
+  if compose_up -d --build --wait --wait-timeout "$AGENT_WAIT_SECONDS" "$AGENT_SERVICE" >/dev/null 2>&1; then
+    pass "the agent is up and healthy"
+    return 0
+  fi
+  compose logs --tail 15 "$AGENT_SERVICE" >&2 || true
+  fail "the agent is not healthy after ${AGENT_WAIT_SECONDS}s. If its log says that database \"agent\" or role" \
+    "\"agent_app\" does not exist, the knowledge-data volume predates the agent: run" \
+    "infra/scripts/reset-volume.sh knowledge-data, then this script again"
+  return 1
+}
 
 # Calls the agent: $1 method, $2 path, $3 optional JSON body. Prints "<http code> <body>" on one line, "000 " on a
 # transport failure; never fails, like injector_call.
@@ -489,7 +523,8 @@ incident_status() {
 }
 
 # Waits until incident $1 is no longer RUNNING, for at most $2 seconds (INCIDENT_WAIT_SECONDS by default). Prints one
-# progress line every 5 minutes. True when the incident ended; its final status is then in incident_final_status.
+# progress line every 5 minutes. True when the incident ended; its final status is then in incident_final_status
+# (RUNNING or unreadable when it did not end in time).
 incident_final_status=""
 wait_incident() {
   local id=$1 seconds=${2:-$INCIDENT_WAIT_SECONDS} deadline next_note=$((SECONDS + 300)) waited=$SECONDS status
@@ -509,18 +544,44 @@ wait_incident() {
   done
 }
 
-# POST /incidents with symptom $1 (no double quotes or backslashes) and window $2 minutes. Prints the new incident's
-# id; prints nothing and fails on any other answer, after printing it on stderr. One incident runs at a time: on a 409
+# The window (sinceMinutes) of an incident about a fault whose own traffic started at epoch second $1: the whole
+# minutes since then, rounded up, plus INCIDENT_WINDOW_MARGIN_MINUTES, at most 360 (the API's limit). The window
+# reaches back at most one minute before $1 plus the margin; space_out keeps the previous fault's traffic older.
+incident_window() {
+  local elapsed minutes
+  elapsed=$(($(date +%s) - $1))
+  (( elapsed > 0 )) || elapsed=0
+  minutes=$(((elapsed + 59) / 60 + INCIDENT_WINDOW_MARGIN_MINUTES))
+  (( minutes <= 360 )) || minutes=360
+  echo "$minutes"
+}
+
+# Waits until INCIDENT_WINDOW_MARGIN_MINUTES + 1 minutes have passed since epoch second $1, the end of the previous
+# fault (its restore), before the next fault's traffic starts. So no window from incident_window reaches back to the
+# previous fault's orders, logs or restarts, however early that fault's incident ended. No wait when $1 is empty.
+space_out() {
+  [[ -n "$1" ]] || return 0
+  local wait=$(($1 + (INCIDENT_WINDOW_MARGIN_MINUTES + 1) * 60 - $(date +%s)))
+  if (( wait > 0 )); then
+    info "waiting ${wait}s, so that the previous fault's traffic stays out of the next incident's window"
+    sleep "$wait"
+  fi
+}
+
+# POST /incidents with symptom $1 (no double quotes or backslashes) and the window incident_window gives for traffic
+# that started at epoch second $2, computed for each attempt. Prints "<id> <window minutes>" of the new incident;
+# prints nothing and fails on any other answer, after printing it on stderr. One incident runs at a time: on a 409
 # naming a running incident (an earlier, interrupted run), it waits for that one to end (wait_incident) and tries once
-# more.
+# more, with a window recomputed after the wait.
 open_incident() {
-  local body code answer id attempt
-  body="{\"symptom\":\"$1\",\"sinceMinutes\":$2}"
+  local body code answer id attempt window
   for attempt in 1 2; do
+    window=$(incident_window "$2")
+    body="{\"symptom\":\"$1\",\"sinceMinutes\":$window}"
     read -r code answer <<<"$(agent_call POST /incidents "$body")" || true
     id=$(json_field id "$answer")
     if [[ "$code" == 202 ]] && is_uuid "$id"; then
-      echo "$id"
+      echo "$id $window"
       return 0
     fi
     if [[ "$code" == 409 && "$attempt" == 1 ]] && is_uuid "$id"; then
@@ -537,9 +598,46 @@ open_incident() {
 # RUNNING as FAILED ("agent restarted during the run"), so the next POST /incidents is accepted at once. By hand:
 #   bash -c 'source infra/scripts/lib.sh && restart_agent'
 restart_agent() {
-  compose restart agent >/dev/null 2>&1 || return 1
-  env -u ORDER_PAYMENT_BASEURL -u INVENTORY_POOL_SIZE -u INVENTORY_RESERVATION_DELAY \
-    docker compose --progress quiet -f "$COMPOSE_FILE" up -d --no-deps --no-build --wait agent >/dev/null 2>&1
+  compose restart "$AGENT_SERVICE" >/dev/null 2>&1 || return 1
+  compose_up -d --no-deps --no-build --wait --wait-timeout "$AGENT_WAIT_SECONDS" "$AGENT_SERVICE" >/dev/null 2>&1
+}
+
+# Ends incident $1 if it may still be RUNNING (RUNNING, or unreadable because the agent does not answer) by restarting
+# the agent. True when the incident is then neither RUNNING nor unreadable.
+end_running_incident() {
+  local status
+  status=$(incident_status "$1")
+  [[ "$status" == RUNNING || "$status" == unreadable ]] || return 0
+  info "restarting the agent to end incident $1, $status"
+  restart_agent || { echo "WARN  could not restart the agent; incident $1 may still be RUNNING" >&2; return 1; }
+  status=$(incident_status "$1")
+  [[ "$status" != RUNNING && "$status" != unreadable ]] ||
+    { echo "WARN  incident $1 is still $status after the restart" >&2; return 1; }
+}
+
+# Reads incident JSON $1 (the body of GET /incidents/{id}) with python3 and prints one tab-separated line: the status,
+# the failure reason (- when none), the reported "<rootCauseService>|<rootCauseCategory>" read from .report alone
+# (none when there is no report: a hypothesis in a plan or in tool arguments is never a report), and the number of
+# steps. Prints "unreadable	-	none	0" when $1 is not an incident.
+incident_fields() {
+  python3 -I -c '
+import json, sys
+try:
+    incident = json.load(sys.stdin)
+except ValueError:
+    incident = None
+if not isinstance(incident, dict):
+    print("unreadable\t-\tnone\t0")
+    sys.exit(0)
+report = incident.get("report")
+cause = "none"
+if isinstance(report, dict) and report.get("rootCauseService") and report.get("rootCauseCategory"):
+    cause = "%s|%s" % (report["rootCauseService"], report["rootCauseCategory"])
+steps = incident.get("steps")
+clean = lambda text: " ".join(str(text).split())
+print("\t".join([clean(incident.get("status") or "unreadable"), clean(incident.get("failureReason") or "-"), cause,
+                 str(len(steps) if isinstance(steps, list) else 0)]))
+' <<<"$1" 2>/dev/null || printf 'unreadable\t-\tnone\t0\n'
 }
 
 # Places an order and requires 201 PAID; exits otherwise. $1 names the order in the messages ("healthy", ...).

@@ -39,7 +39,8 @@ fi
 
 users=$(docker ps -aq --filter "volume=$full_name")
 if ! $assume_yes; then
-  read -r -p "Delete volume $full_name and remove the containers that use it? [y/N] " answer
+  # End of input (no terminal, or Ctrl-D) counts as "no".
+  read -r -p "Delete volume $full_name and remove the containers that use it? [y/N] " answer || { answer=""; echo; }
   [[ "$answer" == [yY] ]] || { echo "Aborted."; exit 1; }
 fi
 

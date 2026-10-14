@@ -259,6 +259,15 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - **Ruled out:** context overflow (at most 3354 of 8192 tokens, `truncated = 0`), model eviction (no loads or embedding calls in the window), large tool outputs (only summaries are sent).
   - Fix options: cap `num_predict` on `ACT` calls; put the instruction after the tool results and keep the changing parts at the end so the prefix stays cached; abort the HTTP request on timeout.
 
+- 2026-10-14: T5c1 and T5c2 done by a delegated writer (uncommitted, two units). Route: delegated writer.
+  - **T5c1 (agent, spec, ADR-010 "Amended in T5c"):**
+    - answer caps `kintsugi.agent.model.num-predict`: 384 for a phase's first `ACT` answer (plan measured 170–200 tokens), 160 for later ones (30–66 measured; holds 4 calls), 512 for the report (about all one 180 s call can write). A cut answer (`done_reason` `length`) is noted `answer cut at <cap> tokens` on its step, its tool calls are still checked; a cut report is retried with the reason;
+    - prompt order: system, evidence (append-only), previous answer and tool results, then the instruction (budgets left, plan, task) last; the task asks for tool calls or an empty answer, never a summary, and keeps the plan out of tool arguments;
+    - **aborted calls, root cause corrected:** the loop's interrupt already closed the connection; Ollama ran on because the request body was chunked (Reactor Netty), and Ollama's Go server watches for a client going away only after reading the body to its end. Measured: chunked request, client gone at 6 s, ran to `200` at 16.7 s; `Content-Length`, `500` at 6 s. Fix: `BufferingClientHttpRequestFactory` in the loop's `RestClientCustomizer`. Live check on the rebuilt image (8 s call timeout): the abandoned call ended in Ollama at 8.0 s (`500`), before the fix it ran 2 min 5 s to `200`.
+    - RED observed for each change (behavioural), then GREEN: `agent` 229 tests (surefire XML), 0 failures. Leakage regex clean on `Prompts.java`, `Schemas.java`.
+  - **T5c2 (scripts, docs):** the cause is read from `.report` only (`incident_fields`, python3; `none` without a report); a wait timeout ends the incident (`end_running_incident`) and the run goes on; per-fault window `incident_window` (minutes since the fault's first order, rounded up, plus 10, recomputed after a 409 wait) and `space_out` (11 min after the previous restore), so no window reaches the previous fault; `start_lab` starts everything but the agent, `start_agent` (verify-agent only) waits for it and points at `reset-volume.sh knowledge-data`; `compose_up` replaces the hard-coded fault-variable list; usage durations and the timeout message fixed; `reset-volume.sh` treats EOF as "no". `verify-f1.sh` passes; shellcheck 0.10.0 clean on the changed scripts.
+  - Probe incidents ("Probe of the call abort, please ignore", 3, `TIMED_OUT`) remain in the live `agent` database.
+
 ## Next step
 
 T5c1 and T5c2 on `feat/agent-loop-04-check` (one delegated writer, two commits), then the T5c3 full run.

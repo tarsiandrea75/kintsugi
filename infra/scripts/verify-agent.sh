@@ -15,25 +15,26 @@ root-cause service and category of F1, F2 and F3 with the local model.
 
 For each fault it injects it through the fault injector, places a few orders as neutral customers, waits for the
 metrics and logs to land, then opens an incident (POST /incidents on 127.0.0.1:18086) with the same neutral symptom
-for every fault, and waits for the run to end (at most 30 min plus the model warm-up). It restores the fault, reads
-the injection's truth row as the faults role, and scores the report: it matches when the incident is COMPLETED and
-both rootCauseService and rootCauseCategory equal the truth. Nothing it writes into the lab, and nothing in the
-symptom, names a fault.
+for every fault and a window that starts with that fault's own orders, and waits for the run to end (at most 37 min:
+the agent's 30 min budget, its 5 min warm-up and a margin). It restores the fault, reads the injection's truth row as
+the faults role, and scores the report: it matches when the incident is COMPLETED and both rootCauseService and
+rootCauseCategory of its report equal the truth. Between two faults it waits until the previous fault's traffic is
+older than the next window (11 min after its restore). Nothing it writes into the lab, and nothing in the symptom,
+names a fault.
 Every run, pass or fail, is logged under infra/scripts/out/verify-agent-<UTC time>/: run.log, and per fault the
 incident with its steps and full tool outputs (<fault>-incident.json), and the score (<fault>-score.txt); summary.tsv
 has one line per fault.
 Exits 0 when every selected fault is diagnosed correctly, non-zero otherwise. The injection is restored on every exit.
-Needs docker (with compose) and curl on the host, and the local Ollama on 127.0.0.1:11434 with granite4.1:8b.
-Expect up to about 35 minutes per fault on a CPU.
+Needs docker (with compose), curl and python3 on the host, and the local Ollama on 127.0.0.1:11434 with
+granite4.1:8b. Expect up to about 40 minutes per fault on a CPU.
 EOF
 }
 
 ALL_FAULTS=(F1 F2 F3)
 # The one symptom of every incident: what a user would report for each of the three faults, naming no cause.
 SYMPTOM="Customers report that checkout orders are not completing as expected"
-# The window offered to the model: it covers this fault's orders, but not the previous fault's, which the previous
-# incident's run (minutes long) pushes out of it.
-SINCE_MINUTES=10
+# Each incident's window starts with its fault's own orders (incident_window), and space_out keeps the previous fault's
+# traffic out of it, so a score never depends on how long the previous incident ran.
 HEALTHY_ORDERS=3
 FAULT_ORDERS=6
 # After the last order: Prometheus scrapes every 5 s, Loki needs a few seconds more to ingest Alloy's batch.
@@ -62,22 +63,23 @@ done
 RUN_DIR="$REPO_DIR/infra/scripts/out/verify-agent-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$RUN_DIR"
 exec > >(trap '' INT TERM; exec tee -a "$RUN_DIR/run.log") 2>&1
-printf 'fault\tinjection\tincident\tstatus\ttruth\treported\tsteps\tseconds\tverdict\n' >"$RUN_DIR/summary.tsv"
+printf 'fault\tinjection\tincident\tstatus\ttruth\treported\tsteps\twindow\tseconds\tverdict\n' >"$RUN_DIR/summary.tsv"
 
 # The fault being diagnosed and its incident, until its score is written; the exit trap records an interrupted one.
 current_fault=""
 current_incident=""
+# When the previous fault was restored (epoch seconds); space_out waits from it.
+previous_fault_end=""
 cleanup() {
   local status=$?
   if [[ -n "$current_fault" ]]; then
     fail "$current_fault: not scored, the run stopped before its score"
-    printf '%s\t%s\t%s\tnot scored\t-\t-\t-\t-\tMISS\n' "$current_fault" "${injection_id:--}" \
+    printf '%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\n' "$current_fault" "${injection_id:--}" \
       "${current_incident:--}" >>"$RUN_DIR/summary.tsv"
-    # The API has no cancel: an incident left RUNNING would make the next run wait up to 37 min for it.
-    if [[ -n "$current_incident" && "$(incident_status "$current_incident")" == RUNNING ]]; then
-      info "restarting the agent to end incident $current_incident, still RUNNING"
-      restart_agent || echo "WARN  could not restart the agent; incident $current_incident may still be RUNNING" >&2
-    fi
+  fi
+  # The API has no cancel: an incident left RUNNING would make the next run wait up to 37 min for it.
+  if [[ -n "$current_incident" ]]; then
+    end_running_incident "$current_incident" || true
   fi
   (exit "$status")
   on_exit
@@ -85,7 +87,13 @@ cleanup() {
 trap cleanup EXIT
 info "logging to $RUN_DIR; faults: ${selected[*]}"
 
-# 1. The local model must be served, or every incident ends FAILED at its warm-up.
+# 1. python3 reads the incidents' JSON; the local model must be served, or every incident ends FAILED at its warm-up.
+if command -v python3 >/dev/null; then
+  pass "python3 is available"
+else
+  fail "python3 is not on PATH; it reads the incidents' JSON"
+  exit 1
+fi
 if curl -fsS --max-time "$CURL_MAX_SECONDS" "$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
   pass "Ollama serves $MODEL on $OLLAMA"
 else
@@ -93,7 +101,8 @@ else
   exit 1
 fi
 
-# 2. Start or reuse the lab. start_lab tolerates a down ollama-proxy (the evidence tools do not need it); the agent does.
+# 2. Start or reuse the lab, then the agent, which start_lab leaves out. start_lab tolerates a down ollama-proxy (the
+# evidence tools do not need it); the agent does.
 start_lab
 read -r _ state health _ <<<"$(lab_states | grep -E '^ollama-proxy ' | head -n1)"
 if [[ "$state" == running && "$health" == healthy ]]; then
@@ -102,6 +111,7 @@ else
   fail "ollama-proxy is ${state:-missing} (health ${health:--}); the agent cannot reach the model"
   exit 1
 fi
+start_agent || exit 1
 
 # Places $1 orders, one every 2 s, and logs each answer; the agent sees them through its tools.
 place_orders() {
@@ -113,11 +123,14 @@ place_orders() {
   done
 }
 
-# Runs one fault: inject, traffic, incident, restore, score.
+# Runs one fault: space out from the previous one, traffic, inject, traffic, incident, restore, score.
 diagnose() {
-  local fault=$1 incident started_at seconds code body status reason reported truth steps verdict injection
+  local fault=$1 incident window opened traffic_start started_at seconds body status reason reported truth steps
+  local verdict injection why
   info "--- $fault"
   current_fault=$fault current_incident=""
+  space_out "$previous_fault_end"
+  traffic_start=$(date +%s)
   place_orders "$HEALTHY_ORDERS"
   inject_fault "$fault"
   injection=$injection_id
@@ -125,30 +138,32 @@ diagnose() {
   sleep "$SETTLE_SECONDS"
 
   started_at=$SECONDS
-  if ! incident=$(open_incident "$SYMPTOM" "$SINCE_MINUTES"); then
+  if ! opened=$(open_incident "$SYMPTOM" "$traffic_start"); then
     fail "$fault: the agent did not open an incident"
     exit 1
   fi
-  pass "$fault: incident $incident opened"
+  read -r incident window <<<"$opened"
+  pass "$fault: incident $incident opened, window $window min"
   current_incident=$incident
   if wait_incident "$incident"; then
     info "$fault: incident $incident ended $incident_final_status after $((SECONDS - started_at))s"
   else
-    fail "$fault: incident $incident still ${incident_final_status} after ${INCIDENT_WAIT_SECONDS}s"
+    fail "$fault: incident $incident did not end within $((INCIDENT_WAIT_SECONDS / 60)) min" \
+      "(last status ${incident_final_status:-unreadable}); ending it"
+    # A RUNNING incident would block every later POST: end it now, or stop the run (the exit trap tries again).
+    end_running_incident "$incident" || exit 1
   fi
   seconds=$((SECONDS - started_at))
 
   # The record: the incident with every step and the full tool outputs.
   curl -sS --max-time 30 -o "$RUN_DIR/$fault-incident.json" "$AGENT/incidents/$incident?full=true" ||
     echo "WARN  could not save incident $incident" >&2
-  read -r code body <<<"$(agent_call GET "/incidents/$incident")" || true
-  status=$(json_field status "$body")
-  reason=$(json_field failureReason "$body")
-  reported="$(json_field rootCauseService "$body")|$(json_field rootCauseCategory "$body")"
-  steps=$(grep -o '"stepNo":' <<<"$body" | wc -l || true)
+  read -r _ body <<<"$(agent_call GET "/incidents/$incident")" || true
+  IFS=$'\t' read -r status reason reported steps <<<"$(incident_fields "$body")"
 
   expect_restored
   injection_id=""
+  previous_fault_end=$(date +%s)
   truth=$(truth_cause "$injection")
 
   if [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
@@ -156,25 +171,25 @@ diagnose() {
     pass "$fault: the report names $reported, the truth"
   else
     verdict=MISS
-    fail "$fault: status ${status:-unreadable}${reason:+ ($reason)}, reported '$reported', truth '${truth:-unreadable}'"
+    if [[ "$reason" == - ]]; then why=""; else why=" ($reason)"; fi
+    fail "$fault: status $status$why, reported '$reported', truth '${truth:-unreadable}'"
   fi
   {
     echo "fault: $fault"
     echo "injection: $injection"
     echo "incident: $incident"
-    echo "status: ${status:-unreadable}"
-    echo "failure reason: ${reason:--}"
+    echo "status: $status"
+    echo "failure reason: $reason"
     echo "truth (service|category): ${truth:-unreadable}"
-    echo "reported (service|category): $reported"
+    echo "reported (service|category, from the report): $reported"
     echo "steps: $steps"
+    echo "window (minutes): $window"
     echo "seconds (incident opened to ended): $seconds"
     echo "verdict: $verdict"
   } >"$RUN_DIR/$fault-score.txt"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$fault" "$injection" "$incident" "${status:-unreadable}" \
-    "${truth:-unreadable}" "$reported" "$steps" "$seconds" "$verdict" >>"$RUN_DIR/summary.tsv"
-  current_fault=""
-  # A run still RUNNING would answer the next POST with 409; stop here rather than score the wrong incident.
-  [[ "$incident_final_status" != RUNNING ]] || exit 1
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$fault" "$injection" "$incident" "$status" \
+    "${truth:-unreadable}" "$reported" "$steps" "$window" "$seconds" "$verdict" >>"$RUN_DIR/summary.tsv"
+  current_fault="" current_incident=""
 }
 
 # 3. Each fault in turn.
