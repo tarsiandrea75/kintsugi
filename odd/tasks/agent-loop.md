@@ -267,6 +267,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - RED observed for each change (behavioural), then GREEN: `agent` 229 tests (surefire XML), 0 failures. Leakage regex clean on `Prompts.java`, `Schemas.java`.
   - **T5c2 (scripts, docs):** the cause is read from `.report` only (`incident_fields`, python3; `none` without a report); a wait timeout ends the incident (`end_running_incident`) and the run goes on; per-fault window `incident_window` (minutes since the fault's first order, rounded up, plus 10, recomputed after a 409 wait) and `space_out` (11 min after the previous restore), so no window reaches the previous fault; `start_lab` starts everything but the agent, `start_agent` (verify-agent only) waits for it and points at `reset-volume.sh knowledge-data`; `compose_up` replaces the hard-coded fault-variable list; usage durations and the timeout message fixed; `reset-volume.sh` treats EOF as "no". `verify-f1.sh` passes; shellcheck 0.10.0 clean on the changed scripts.
   - Probe incidents ("Probe of the call abort, please ignore", 3, `TIMED_OUT`) remain in the live `agent` database.
+- 2026-10-14: second full `verify-agent.sh` run after T5c1/T5c2 (`infra/scripts/out/verify-agent-20261014T151220Z/`): **0/3, all `TIMED_OUT`, no report**, but the runs now get much further.
+  - F2 and F3 went through every evidence phase with valid plans and real tool calls, used the 8-call tool budget, and then timed out on the **`REPORT` call** (more than 180 s). They lasted 13.5 min of 30.
+  - Plan-carrying `ACT` calls took 139–178 s, right at the edge; other `ACT` calls took 78–108 s.
+  - F1 timed out on the first `INVESTIGATE` call (plan-carrying) after a 164 s `TRIAGE` call.
+  - The abort works: Ollama logged the abandoned call as `500` at 3m0s.
+  - Estimate, not measured: about 90 s to read the prompt plus up to 512 report tokens at about 2.9 tokens/s (about 176 s) cannot fit in 180 s, so the per-call budget does not fit this CPU for the report and barely fits for plan calls. This needs the human's decision.
 
 ## Next step
 
