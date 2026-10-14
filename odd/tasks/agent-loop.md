@@ -110,6 +110,14 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - [x] **T5c5 — short evidence quotes and longer call deadlines (the human's decision of 2026-10-14, after the third run):** the report prompt asks for a short verbatim fragment per evidence `quote` (at most 160 characters) and `ReportCheck` rejects a longer quote with a reason the retry can act on; the substring check stays. Call deadlines become 300 s for `ACT` and 420 s for `REPORT`; check that the incident's time budget and `verify-agent.sh`'s wait still fit them. Tests first; spec and ADR-010 "Amended in T5c5". Route: delegated writer (2+ non-trivial files).
   - [x] **T5c6 — evidence check against what the model saw (the human's decision of 2026-10-14, after the fourth run):** `ReportCheck` also accepts a quote found verbatim in the cited step's summary, the text shown to the model, which is derived from the tool output deterministically. It compares with whitespace and line breaks collapsed, and decodes escapes such as `\n` first. The substring rule stays. Tests first, from the fourth run's real quotes; update the spec (the acceptance wording "exists in its cited tool output") and ADR-010 "Amended in T5c6". Route: delegated writer.
   - [x] **T5c7 — why every report blames `payment-service`:** a read-only investigation of the fourth run (prompts, summaries, tools, runbooks), returning the cause and a fix proposal for the human. Route: read-only explorer.
+  - [x] **T5c8 — diagnosis-quality fixes for T5c7 causes 1–4 (the human's decision of 2026-10-14):**
+    - (1) a prompt rule that for `DEPENDENCY_*` the root-cause service is the slow or refusing dependency, not its caller;
+    - (2) TRIAGE hypotheses cover at least two different services on the call path, and each phase starts from a fresh plan whose kept hypotheses cite a toolCallId, instead of re-showing the old plan verbatim;
+    - (3) tool and prompt text saying the lab logs failures at WARN/INFO; guidance to trace a non-terminal order found through `recent_events source=order`; `error_rate` described as 5xx only;
+    - (4) the runbook summary cap raised to about 900 characters;
+    - the two T5c6 review WARNINGs: a quote must not match code-authored summary text (header, aggregates, `(cut)` markers, outcome sentences), and an `AgentLoop`-level test proves the shown summary is stored.
+
+    Tests first where deterministic; spec, ADR-010 "Amended in T5c8". Route: delegated writer.
 
 ## Progress
 
@@ -321,6 +329,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
   Decisive signals: F1 gateway-mock INFO `latency_ms=10000` (not queried); F2 payment-service WARN `Gateway rejected … 429` (ERROR-only queries); F3 order event `PAYMENT_UNAVAILABLE` `ConnectException` to `:9999` (`recent_events source=order`, never queried). The existing tools can surface all three.
 
+- 2026-10-14: T5c8 done by a delegated writer, in two units. Route: delegated writer (2+ non-trivial files in two modules: prompts, loop, summarizers, check, tool descriptions, tests, two specs, ADR).
+  - `059141c` fix(mcp-tools): `search_logs`/`count_logs` descriptions say the lab logs failures at WARN and gateway decisions at INFO, "not ERROR"; `query_metric` says `error_rate` counts 5xx server responses only; the `search_runbooks` example is `orders stay pending after checkout`. mcp-tools spec: new requirement "Descriptions say where the lab's signals are". RED: `McpToolsEndpointTest` 1 failure; GREEN: mcp-tools 213 tests (surefire XML), 0 failures, 0 errors.
+  - fix(agent), the next commit: (1) the system message gives the call path and says that for `DEPENDENCY_*` the root cause is the slow or refusing component, not its caller; (2) a plan is shown only within its phase (`Your plan for this phase:`), never in the next phase or the report; `TRIAGE`'s plan task asks for at least two services along the call path, later phases for a fresh plan whose `why` starts with a `toolCallId` (asked, not validated: an invalid plan has no retry, so a check buys nothing); (3) the system message says to trace a `PAYMENT_PENDING`/`PAYMENT_FAILED` order found with `recent_events source=order`; (4) `RUNBOOK_TEXT_CHARS` 900 (300 before), and runbook chunks are shown while they fit the unchanged 1,500 cap, with an honest `shown` (usually one whole chunk); WARNING A: `ToolSummaries.quotableLines` keeps the summary lines that hold a JSON literal, minus the header and the code's `(cut)` markers, and `ReportCheck` matches a summary quote within one of them; WARNING B: an `AgentLoopTest` run quotes the summary-only `status="PAYMENT_PENDING" count=7` and completes at the first report.
+  - RED observed (behavioural, 13 failures, with the old code and a stub `quotableLines` returning every line): `PromptsTest` 6, `AgentLoopTest` 2 (plan shown per phase), `ToolSummariesTest` 4 (900 cap, fitting, quotable lines), `ReportCheckTest` 1 (code-written text). The WARNING B loop test passed before and after: it guards T5c6's existing wiring. GREEN: `agent` 262 tests (surefire XML), 0 failures, 0 errors.
+  - Replay (`LiveRunReportCheckTest`): unchanged, **20 of 26 quotes pass**, F1's retry valid; no quote of the run relied on text only the summary's code wrote.
+  - Cost: about 110 tokens added to the system message (read once per incident, then reused), about 60 to each plan task, about 100 to the log tools' definitions. Authored lines: about 500 with the new `PromptsTest`, over the 400 heuristic because of tests and two specs.
+
 ## Next step
 
-The human chooses the diagnosis-quality fixes from T5c7 before the fifth full run.
+T5c8 (delegated writer), then the fifth full run (T5c3).

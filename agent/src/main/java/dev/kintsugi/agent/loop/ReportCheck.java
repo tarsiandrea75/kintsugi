@@ -14,6 +14,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import dev.kintsugi.agent.summary.ToolSummaries;
+
 /**
  * Checks a report in code: its schema, then each evidence item against the recorded tool steps of this incident
  * (agent spec, "The report", "Evidence is checked"). The model proposes, this code verifies.
@@ -128,7 +130,7 @@ final class ReportCheck {
 			errors.add(name + ".tool is " + Causes.shown(item.get("tool")).replace("\"", "") + ", but step " + stepNo
 					+ " is " + step.tool());
 		}
-		else if (!quoted(quote.asString(), step.output()) && !inText(normalized(quote.asString()), step.summary())) {
+		else if (!quoted(quote.asString(), step.output()) && !inSummary(normalized(quote.asString()), step.summary())) {
 			errors.add(name + ".quote is not in the output of step " + stepNo);
 		}
 	}
@@ -136,7 +138,7 @@ final class ReportCheck {
 	/**
 	 * Whether {@code quote} is in {@code output}, both {@link #normalized normalized}: in the raw text, or in one of the
 	 * string values of its JSON, decoded, so that escaped quotes and newlines compare as text. The evidence check also
-	 * tries the step's summary, the text the model saw (T5c6).
+	 * tries the lines of the step's summary that copy the output, the text the model saw (T5c6, T5c8).
 	 */
 	static boolean quoted(String quote, String output) {
 		if (output == null) {
@@ -172,6 +174,15 @@ final class ReportCheck {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Whether {@code wanted}, normalized, is in one line of the summary that copies the tool output (T5c8, the T5c6
+	 * review): not in the header, a computed count or aggregate, an outcome sentence, the cut note or a {@code (cut)}
+	 * marker, which code wrote and the tool did not return ({@link ToolSummaries#quotableLines}).
+	 */
+	private static boolean inSummary(String wanted, String summary) {
+		return ToolSummaries.quotableLines(summary).stream().anyMatch(line -> inText(wanted, line));
 	}
 
 	/** Characters as the schema counts them: code points. */

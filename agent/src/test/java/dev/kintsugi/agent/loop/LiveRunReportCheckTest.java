@@ -18,7 +18,9 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * The evidence check against the fourth full verify-agent run (2026-10-14), whose six reports were all rejected
  * because the model quoted the summaries it was shown (T5c6; agent spec, "Evidence is checked"). The fixture holds
- * that run's tool steps (output and summary) and its report answers, unchanged.
+ * that run's tool steps (output and summary) and its report answers, unchanged. Since T5c8 a summary quote counts only
+ * from a line that copies the output; the replay is unchanged by it, since none of the run's quotes relied on text only
+ * the summary's code wrote.
  */
 class LiveRunReportCheckTest {
 

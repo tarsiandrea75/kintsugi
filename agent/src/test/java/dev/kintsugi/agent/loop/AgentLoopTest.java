@@ -416,9 +416,51 @@ class AgentLoopTest {
 			.contains("nextTools[0]")
 			.contains("search_runbooks");
 		assertThat(step(5)).containsEntry("summary", "no tool call; the phase ends; plan valid");
-		// Only a valid plan becomes the latest plan that later prompts show.
-		assertThat(userText(this.model.prompts().get(3))).contains("Latest plan: none yet");
-		assertThat(userText(this.model.prompts().get(4))).contains("Latest plan: {").contains("payment-service");
+		// No valid plan is shown at the start of a phase, nor in the report's instruction (T5c8).
+		assertThat(userText(this.model.prompts().get(3))).doesNotContain("Your plan");
+		assertThat(userText(this.model.prompts().get(4))).doesNotContain("Your plan").doesNotContain("CONFIGURATION");
+		assertThat(this.model.calls()).isEqualTo(5);
+	}
+
+	@Test
+	void aValidPlanIsShownOnlyWithinItsOwnPhase() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.text("")
+			.planned(call("search_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}"))
+			.text("")
+			.plan()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		List<Prompt> prompts = this.model.prompts();
+		assertThat(prompts).hasSize(6);
+		assertThat(userText(prompts.get(1))).contains("Phase: TRIAGE").contains("Your plan for this phase: {");
+		// A new phase asks for a fresh plan instead of showing the previous one (T5c8).
+		assertThat(userText(prompts.get(2))).contains("Phase: INVESTIGATE")
+			.contains("a fresh plan")
+			.doesNotContain("Your plan");
+		assertThat(userText(prompts.get(3))).contains("Phase: INVESTIGATE").contains("Your plan for this phase: {");
+		assertThat(userText(prompts.get(4))).contains("Phase: KNOWLEDGE").doesNotContain("Your plan");
+		assertThat(userText(prompts.get(5))).contains("Phase: CONCLUDE").doesNotContain("Your plan");
+	}
+
+	@Test
+	void aQuoteOfTheSummaryTheModelSawIsAcceptedBecauseTheLoopStoresThatSummary() {
+		// Summary-only: the summary shows status="PAYMENT_PENDING" count=7, the raw output {"status":...,"count":7}.
+		String quote = "status=\"PAYMENT_PENDING\" count=7";
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.text("")
+			.quietPhasesAfterTriage()
+			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(2, "status_summary", quote)));
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(ReportCheck.quoted(quote, this.lab.output("status_summary"))).isFalse();
+		assertThat(toolResponses(this.model.prompts().get(1)).getResponses()).singleElement()
+			.satisfies(response -> assertThat(response.responseData()).contains(quote)
+				.isEqualTo(step(2).get("summary")));
+		assertThat(storedReport().get("evidence").get(0).get("quote").asString()).isEqualTo(quote);
 		assertThat(this.model.calls()).isEqualTo(5);
 	}
 

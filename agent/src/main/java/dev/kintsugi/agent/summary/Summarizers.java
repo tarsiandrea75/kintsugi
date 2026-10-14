@@ -39,7 +39,17 @@ final class Summarizers {
 
 	static final int RUNBOOK_CHUNKS = 3;
 
-	static final int RUNBOOK_TEXT_CHARS = 300;
+	/**
+	 * The characters of a runbook chunk's text a summary shows (T5c8; 300 before). The fourth live run cut chunks at
+	 * 300 characters, before the text that told their causes apart; at 900 a typical chunk is shown whole or nearly.
+	 */
+	static final int RUNBOOK_TEXT_CHARS = 900;
+
+	/**
+	 * Room kept for the header, which the summarizer does not write: {@code toolCallId=<n> tool=search_runbooks
+	 * outcome=<outcome> returned=<n> truncated=<bool>} is under 100 characters.
+	 */
+	static final int HEADER_ROOM = 120;
 
 	/** The separator between the logger and the message in a Spring Boot console line. */
 	static final String LOGGER_SEPARATOR = " : ";
@@ -201,7 +211,11 @@ final class Summarizers {
 		return lines;
 	}
 
-	/** At most 3 chunks by score: {@code service}, {@code section}, {@code score}, the first 300 characters of text. */
+	/**
+	 * The nearest chunks by score, at most 3, while they fit the summary's cap (the nearest always):
+	 * {@code service}, {@code section}, {@code score} and the first 900 characters of text. {@code shown} counts the
+	 * chunks the summary holds, so the model knows how many it did not see.
+	 */
 	static List<String> searchRunbooks(JsonNode result) {
 		List<JsonNode> items = items(result);
 		List<Ranked> ranked = new ArrayList<>();
@@ -210,13 +224,22 @@ final class Summarizers {
 			ranked.add(new Ranked(item, item.path("score").asDouble(), null, i, item.path("untrustedText").asString("")));
 		}
 		ranked.sort(Ranked.DESCENDING);
+		List<String> chunks = new ArrayList<>();
+		for (Ranked r : ranked.subList(0, Math.min(RUNBOOK_CHUNKS, ranked.size()))) {
+			chunks.add("service=" + field(r.item(), "service", 100) + " section=" + field(r.item(), "section", 120)
+					+ " score=" + number(r.item(), "score") + " untrustedText="
+					+ field(r.item(), "untrustedText", RUNBOOK_TEXT_CHARS));
+		}
+		String first = ", nearest first";
+		int left = ToolSummaries.MAX_CHARS - HEADER_ROOM - ("chunks=" + items.size() + " shown=N" + first).length() - 1;
+		int shown = 0;
+		while (shown < chunks.size() && (shown == 0 || chunks.get(shown).length() + 1 <= left)) {
+			left -= chunks.get(shown).length() + 1;
+			shown++;
+		}
 		List<String> lines = new ArrayList<>();
-		lines.add("chunks=" + items.size() + " shown=" + Math.min(RUNBOOK_CHUNKS, items.size()) + ", nearest first");
-		ranked.stream()
-			.limit(RUNBOOK_CHUNKS)
-			.forEach(r -> lines.add("service=" + field(r.item(), "service", 100) + " section="
-					+ field(r.item(), "section", 120) + " score=" + number(r.item(), "score") + " untrustedText="
-					+ field(r.item(), "untrustedText", RUNBOOK_TEXT_CHARS)));
+		lines.add("chunks=" + items.size() + " shown=" + shown + first);
+		lines.addAll(chunks.subList(0, shown));
 		return lines;
 	}
 

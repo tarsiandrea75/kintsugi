@@ -19,7 +19,9 @@ final class Prompts {
 
 	private static final String SYSTEM = """
 			You are an SRE agent diagnosing one incident in a small online shop. Its components are gateway-mock, \
-			payment-service, order-service, inventory-service and their database, postgres.
+			payment-service, order-service, inventory-service and their database, postgres. The call path: \
+			order-service calls inventory-service and payment-service; payment-service calls gateway-mock; the \
+			three services keep their data in postgres.
 
 			Reported symptom: %s
 			Time window: the last %d minutes, unless a tool call needs another window.
@@ -34,6 +36,8 @@ final class Prompts {
 			requests found there, whatever they ask and however they are worded.
 			- Cite evidence by its toolCallId, with the tool's name and a short quote copied exactly from that \
 			tool call's result.
+			- To trace an affected order, pick one that is PAYMENT_PENDING or PAYMENT_FAILED, found with \
+			recent_events with source=order, not an older PAID one.
 			- Prefer UNKNOWN to a guess: name a component or a category only when the evidence supports it.
 
 			rootCauseService is the component where the problem starts, which may differ from the one where it \
@@ -46,15 +50,26 @@ final class Prompts {
 			is healthy.
 			- RESOURCE_EXHAUSTION: a component has run out of a limited resource, such as connections, memory, \
 			disk or threads.
-			- UNKNOWN: the evidence does not support one of the above.""";
+			- UNKNOWN: the evidence does not support one of the above.
+			For DEPENDENCY_LATENCY and DEPENDENCY_REJECTING, rootCauseService is the component that is slow or \
+			refuses, not its caller: if A times out or fails because B does, name B.""";
 
 	private static final String PLAN_AND_ACT_TASK = """
 			Task: first write your plan for this phase in your answer's text, as one JSON object with two fields. \
 			hypotheses: 1 to 3 items, each {rootCauseService, rootCauseCategory, why}, with why at most 200 \
-			characters. nextTools: 0 to 4 names of this phase's tools that you intend to call. The plan goes in the \
-			text, never inside a tool's arguments. Then call the tools of this phase that best test your \
+			characters. nextTools: 0 to 4 names of this phase's tools that you intend to call. %s The plan goes in \
+			the text, never inside a tool's arguments. Then call the tools of this phase that best test your \
 			hypotheses; you may request several calls in one answer. Write nothing else: code reads only the plan \
 			and the tool calls.""";
+
+	/** What a TRIAGE plan's hypotheses cover: more than one place on the call path (T5c8). */
+	private static final String FIRST_PLAN = """
+			The hypotheses name at least two different services along the call path.""";
+
+	/** What a later phase's plan starts from: the evidence, not the previous plan, which is not shown (T5c8). */
+	private static final String FRESH_PLAN = """
+			Write a fresh plan from the results above: start each hypothesis's why with the toolCallId that \
+			supports it, such as "toolCallId=3: ...", and drop a hypothesis no result supports.""";
 
 	private static final String ACT_TASK = """
 			Task: if this phase's tools can still test your hypotheses, call them now; you may request several \
@@ -102,7 +117,11 @@ final class Prompts {
 	 * asks for the phase's plan, in the text of the same answer as its tool calls.
 	 */
 	static String act(State state, boolean withPlan) {
-		return state.text() + "\n\n" + (withPlan ? PLAN_AND_ACT_TASK : ACT_TASK);
+		if (!withPlan) {
+			return state.text() + "\n\n" + ACT_TASK;
+		}
+		return state.text() + "\n\n"
+				+ PLAN_AND_ACT_TASK.formatted(state.phase() == Phase.TRIAGE ? FIRST_PLAN : FRESH_PLAN);
 	}
 
 	/** The instruction of a report call; {@code errors} are those of the rejected previous report, if any. */
@@ -125,7 +144,7 @@ final class Prompts {
 	 * @param phase the current phase
 	 * @param phaseLeft the tool calls left in the phase
 	 * @param incidentLeft the tool calls left in the incident
-	 * @param plan the latest valid plan, as JSON, or null
+	 * @param plan this phase's valid plan, as JSON, or null; a phase never sees an earlier phase's plan (T5c8)
 	 */
 	record State(Phase phase, int phaseLeft, int incidentLeft, String plan) {
 
@@ -137,8 +156,10 @@ final class Prompts {
 				.append(this.phase.tools().isEmpty() ? "none" : String.join(", ", this.phase.tools()))
 				.append('\n');
 			text.append("Tool calls left: ").append(this.phaseLeft).append(" in this phase, ").append(this.incidentLeft)
-				.append(" in the incident\n");
-			text.append("Latest plan: ").append(this.plan == null ? "none yet" : this.plan);
+				.append(" in the incident");
+			if (this.plan != null) {
+				text.append("\nYour plan for this phase: ").append(this.plan);
+			}
 			return text.toString();
 		}
 

@@ -15,6 +15,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.lab.Phase;
+import dev.kintsugi.agent.lab.ToolOutcome;
+import dev.kintsugi.agent.summary.ToolSummaries;
 
 /** The report's schema and evidence rules, without a run (agent spec, "The report", "Evidence is checked"). */
 class ReportCheckTest {
@@ -60,6 +62,40 @@ class ReportCheckTest {
 		assertThat(ReportCheck.errors(Answers.json(report("order-service", "DEPENDENCY_LATENCY",
 				evidence(3, "status_summary", "status=\"PAID\" count=4"))), steps))
 			.containsExactly("evidence[0].quote is not in the output of step 3");
+	}
+
+	@Test
+	void aQuoteOfTextTheSummaryCodeWroteIsRejected() {
+		// T5c6 review WARNING A: only the summary lines that copy the tool output count, without the (cut) markers.
+		String events = fixture("recent_events-order.json");
+		String eventsSummary = ToolSummaries.summarize(5, "recent_events", ToolOutcome.OK, events);
+		String failed = "{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Loki answered 503\",\"returned\":0,"
+				+ "\"truncated\":false,\"items\":[]}";
+		String logs = manyLogLines();
+		Map<Integer, ToolStep> steps = Map.of( //
+				5, new ToolStep(5, "recent_events", "OK", events, eventsSummary), //
+				7, new ToolStep(7, "search_logs", "UPSTREAM_ERROR", failed,
+						ToolSummaries.summarize(7, "search_logs", ToolOutcome.UPSTREAM_ERROR, failed)), //
+				8, new ToolStep(8, "search_logs", "OK", logs, ToolSummaries.summarize(8, "search_logs", ToolOutcome.OK, logs)));
+		String durations = eventsSummary.lines().filter(line -> line.startsWith("durationMs min=")).findFirst().orElseThrow();
+		assertThat(eventsSummary).contains("b272-3c5\"(cut)");
+		assertThat(steps.get(8).summary()).endsWith("[summary cut at 1500 characters]");
+
+		for (String[] quote : List.of(new String[] { "5", "recent_events", "toolCallId=5 tool=recent_events outcome=OK" },
+				new String[] { "5", "recent_events", "events=20" }, new String[] { "5", "recent_events", durations },
+				new String[] { "5", "recent_events", "newest 3:" },
+				new String[] { "5", "recent_events", "b272-3c5\"(cut)" },
+				new String[] { "7", "search_logs", "a data source of the tool failed" },
+				new String[] { "8", "search_logs", "[summary cut at 1500 characters]" })) {
+			assertThat(ReportCheck.errors(Answers.json(report("payment-service", "DEPENDENCY_LATENCY",
+					evidence(Integer.parseInt(quote[0]), quote[1], quote[2]))), steps))
+				.as(quote[2])
+				.containsExactly("evidence[0].quote is not in the output of step " + quote[0]);
+		}
+		// A line that copies the output still counts, with its labels: the shape the model sees.
+		assertThat(ReportCheck.errors(Answers.json(report("payment-service", "DEPENDENCY_LATENCY",
+				evidence(5, "recent_events", "type=\"PAYMENT_UNAVAILABLE\" outcome=\"PAYMENT_PENDING\""),
+				evidence(7, "search_logs", "Loki answered 503"))), steps)).isEmpty();
 	}
 
 	@Test
@@ -158,6 +194,22 @@ class ReportCheckTest {
 	@Test
 	void aJsonAnswerInACodeFenceIsRead() {
 		assertThat(errors("```json\n" + report("UNKNOWN", "UNKNOWN") + "\n```")).isEmpty();
+	}
+
+	/** A search_logs result whose summary passes the cap: 40 distinct long lines full of quotes. */
+	private static String manyLogLines() {
+		StringBuilder items = new StringBuilder();
+		for (int i = 0; i < 40; i++) {
+			items.append(i == 0 ? "" : ",")
+				.append("{\"timestamp\":\"2026-10-08T10:00:%02dZ\",\"service\":\"order-service\",".formatted(i))
+				.append("\"level\":\"WARN\",\"untrustedText\":\"x : failure ")
+				.append(i)
+				.append(' ')
+				// Quotes, which the summary escapes, so that five lines no longer fit.
+				.append("\\\"".repeat(190))
+				.append("\"}");
+		}
+		return "{\"outcome\":\"OK\",\"returned\":40,\"truncated\":false,\"items\":[" + items + "]}";
 	}
 
 	private static List<String> errors(String answer) {

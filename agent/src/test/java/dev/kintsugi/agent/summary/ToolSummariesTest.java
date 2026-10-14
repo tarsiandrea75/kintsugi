@@ -212,23 +212,69 @@ class ToolSummariesTest {
 
 	@Test
 	void aSummaryLongerThanTheCapDropsWholeLinesAndSaysSo() {
+		// Five distinct messages, each cut at 200 characters, whose quotes and newlines double in the escaped literal.
 		ArrayNode items = JSON.createArrayNode();
-		for (int i = 0; i < 3; i++) {
-			items.addObject()
-				.put("service", "payment-service")
-				.put("section", "Section " + i)
-				.put("score", 0.9 - i / 10.0)
-				.put("untrustedText", "\"quoted\"\n".repeat(60));
+		for (int i = 0; i < 5; i++) {
+			log(items, "2026-10-08T10:00:0%dZ".formatted(i), i + " " + "\"quoted\"\n".repeat(30));
 		}
 		String output = ok(items);
 
-		String summary = ToolSummaries.summarize(6, "search_runbooks", OK, output);
+		String summary = ToolSummaries.summarize(6, "search_logs", OK, output);
 
 		assertThat(summary.length()).isLessThanOrEqualTo(ToolSummaries.MAX_CHARS);
 		assertThat(summary).endsWith("\n" + ToolSummaries.CUT_NOTE);
-		assertThat(summary.lines().filter(line -> line.startsWith("service=")).toList()).isNotEmpty()
+		assertThat(summary.lines().filter(line -> line.startsWith("count=")).toList()).hasSizeBetween(1, 4)
 			.allSatisfy(line -> assertThat(line).endsWith("\"(cut)"));
 		assertEveryLiteralIsInTheOutput(summary, output);
+	}
+
+	@Test
+	void aRunbookChunkShowsItsFirst900Characters() {
+		// T5c7: at 300 characters the summary cut a chunk before the text that told its causes apart.
+		ArrayNode items = JSON.createArrayNode();
+		items.addObject().put("service", "order-service").put("section", "Long").put("score", 0.7)
+			.put("untrustedText", "a".repeat(899) + "bc");
+
+		List<String> body = body(ToolSummaries.summarize(8, "search_runbooks", OK, ok(items)));
+
+		assertThat(Summarizers.RUNBOOK_TEXT_CHARS).isEqualTo(900);
+		assertThat(body.get(1)).endsWith("untrustedText=\"" + "a".repeat(899) + "b\"(cut)");
+	}
+
+	@Test
+	void runbookChunksAreShownWhileTheyFitTheCapAndShownSaysHowMany() {
+		ArrayNode items = JSON.createArrayNode();
+		for (String name : List.of("first", "second", "third")) {
+			items.addObject().put("service", "order-service").put("section", name).put("score", 0.5)
+				.put("untrustedText", name + " " + "t".repeat(800));
+		}
+		String long3 = ToolSummaries.summarize(8, "search_runbooks", OK, ok(items));
+
+		assertThat(body(long3)).hasSize(2).first().isEqualTo("chunks=3 shown=1, nearest first");
+		assertThat(long3).doesNotContain(ToolSummaries.CUT_NOTE).hasSizeLessThanOrEqualTo(ToolSummaries.MAX_CHARS);
+
+		items.forEach(item -> ((tools.jackson.databind.node.ObjectNode) item).put("untrustedText", "t".repeat(300)));
+		String short3 = ToolSummaries.summarize(8, "search_runbooks", OK, ok(items));
+
+		assertThat(body(short3)).hasSize(4).first().isEqualTo("chunks=3 shown=3, nearest first");
+	}
+
+	@Test
+	void theQuotableLinesAreThoseThatCopyTheOutputWithoutTheCutMarkers() {
+		String summary = ToolSummaries.summarize(5, "recent_events", OK, fixture("recent_events-order.json"));
+
+		List<String> quotable = ToolSummaries.quotableLines(summary);
+
+		// Not the header, the counts, the durations or "newest 3:": no string of the output is on them.
+		assertThat(quotable).noneMatch(line -> line.startsWith("toolCallId=") || line.startsWith("events=")
+				|| line.startsWith("durationMs") || line.startsWith("newest"));
+		assertThat(quotable).anySatisfy(line -> assertThat(line).startsWith("type=\"PAYMENT_UNAVAILABLE\""));
+		assertThat(quotable).noneMatch(line -> line.contains("(cut)"))
+			.anySatisfy(line -> assertThat(line).endsWith("5c3034dc-dacc-474c-b272-3c5\""));
+		// A "(cut)" inside copied text is the output's own and stays; so do an escaped quote and backslash before it.
+		assertThat(ToolSummaries.quotableLines("h\nx=\"a \\\"(cut)\" y=\"b\\\\\"(cut)"))
+			.containsExactly("x=\"a \\\"(cut)\" y=\"b\\\\\"");
+		assertThat(ToolSummaries.quotableLines(null)).isEmpty();
 	}
 
 	@Test
@@ -266,7 +312,8 @@ class ToolSummariesTest {
 	@Test
 	void runbookChunksAreTheThreeNearestWithTiesInOutputOrder() {
 		String summary = ToolSummaries.summarize(8, "search_runbooks", OK, fixture("search_runbooks.json"));
-		assertThat(body(summary).get(0)).isEqualTo("chunks=3 shown=3, nearest first");
+		// The nearest chunk, cut at 900 characters, leaves no room under the cap for the next one.
+		assertThat(body(summary).get(0)).isEqualTo("chunks=3 shown=1, nearest first");
 		assertThat(body(summary).get(1)).startsWith(
 				"service=\"payment-service\" section=\"5. Key signals\" score=0.633 untrustedText=\"## 5. Key signals\\n\\n");
 

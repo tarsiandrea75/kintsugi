@@ -227,11 +227,14 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * The phase's tool calls. The model is offered the phase's tools only; each call it requests is checked in order
 	 * (budget, then phase) and runs only when both allow it. The phase ends when the model answers without a tool call
 	 * or nothing is left of the phase's allowance or of the incident's budget. The first answer also carries the
-	 * phase's plan in its text: it is checked and recorded on its {@code ACT} step, and only a valid plan becomes the
-	 * latest plan; a missing or invalid one never ends the run, and is not asked for again.
+	 * phase's plan in its text: it is checked and recorded on its {@code ACT} step, and only a valid plan is shown in
+	 * the phase's later calls; a missing or invalid one never ends the run, and is not asked for again. The next phase
+	 * starts without it.
 	 */
 	private void act(Run run, Phase phase, List<ToolCallback> tools) {
 		int phaseLeft = LoopSettings.ALLOWANCES.get(phase);
+		// Each phase plans afresh from the evidence: re-showing the previous plan anchored the model on it (T5c8).
+		run.plan = null;
 		AssistantMessage lastAnswer = null;
 		List<ToolResponse> lastResponses = List.of();
 		while (phaseLeft > 0 && run.toolsLeft > 0) {
@@ -290,7 +293,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * Reads and checks the plan in the text of a phase's first answer; a valid one becomes the run's latest plan.
+	 * Reads and checks the plan in the text of a phase's first answer; a valid one becomes the phase's plan.
 	 * @return the verdict for the {@code ACT} step: {@code plan valid}, {@code plan missing} or {@code plan invalid: ...}
 	 */
 	private static String plan(Run run, Phase phase, String text) {
@@ -334,6 +337,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/** The report: one call without tools, constrained by the report schema, checked in code, with one retry. */
 	private String conclude(Run run) {
+		// The report is written from the evidence, not from the last phase's plan (T5c8).
+		run.plan = null;
 		List<String> errors = List.of();
 		for (int attempt = 1; attempt <= 2; attempt++) {
 			List<Message> messages = run.opening(0);

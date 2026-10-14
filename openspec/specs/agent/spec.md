@@ -200,7 +200,9 @@ The first model call of `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE` MUST ask for the
 | `hypotheses` | 1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, with the report's enums and `why` at most 200 characters **(chosen)** |
 | `nextTools` | 0 to 4 names, each one of the current phase's tools **(chosen)** |
 
-No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A valid plan becomes the latest plan, shown in the phase's later prompts and the next phases'.
+No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A valid plan is shown, as `Your plan for this phase:`, in the phase's later prompts only: a new phase and the report start without it **(T5c8)**.
+
+The plan's task MUST say, in `TRIAGE`, that the hypotheses name at least two different services along the call path; in a later phase, that the plan is a fresh one written from the results so far, whose hypotheses each start their `why` with the `toolCallId` that supports them (`toolCallId=3: ...`), and that a hypothesis no result supports is dropped **(T5c8)**. These are asked, not checked: code still checks only the shape above. Why (T5c7): in the fourth full run the `TRIAGE` plan, written before any tool call, named payment-service, inventory-service and postgres in all three incidents; it was then shown verbatim as "Latest plan" in every later prompt, the tool arguments followed it, and the services it left out were never queried. A check would only turn a plan `invalid` without a retry, and so hide it from the phase's later prompts, which buys nothing; the wording is cheaper and the verdicts stay comparable across runs.
 
 A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked for again; the answer's tool calls are checked and run as usual. A plan cut by the answer's cap ("Answer caps") is no exception: it is recorded `plan missing` or `plan invalid`, like any other. Why: the plan steers the model and is recorded for the evals, but it authorizes nothing, since code checks every tool call against the phase and the budgets whatever the plan says; a retry would cost a model call, the cost this design removes; and a small model that answers with tool calls may leave the text empty, which must not cost a diagnosis. The `PLAN` step kind stays allowed by the table's `CHECK` but is no longer written.
 
@@ -213,11 +215,22 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 - GIVEN the loop starts `INVESTIGATE`
 - WHEN the model's plan lists `search_runbooks` in `nextTools`
 - THEN the `ACT` step's summary says `plan invalid:` with the error naming `nextTools[0]`
-- AND the run goes on, and the latest plan stays the previous valid one
+- AND the run goes on, and no plan is shown in the phase's later prompts
 
 #### Scenario: No plan in the text
 - WHEN the first answer of a phase holds tool calls and no JSON object in its text
 - THEN the `ACT` step's summary says `plan missing`, and the tool calls are checked and run as usual
+
+#### Scenario: Each phase plans afresh (T5c8)
+- GIVEN `TRIAGE` wrote a valid plan
+- WHEN the loop builds `TRIAGE`'s next call, then `INVESTIGATE`'s first call, then the report call
+- THEN the first shows `Your plan for this phase:` with that plan
+- AND `INVESTIGATE`'s first call does not show it, and asks for a fresh plan whose hypotheses cite a `toolCallId`
+- AND the report call shows no plan
+
+#### Scenario: The first plan looks along the call path (T5c8)
+- WHEN the loop builds `TRIAGE`'s first call
+- THEN its task asks for hypotheses that name at least two different services along the call path
 
 ### Requirement: Budgets
 
@@ -373,14 +386,16 @@ Every string copied from the output is written as a JSON string literal after it
 | `count_logs` | `service` and `count` |
 | `recent_events` | counts by `type` and `outcome` pair; min, median (the lower one for an even count) and max `durationMs`; the 3 newest events with `untrustedText` at most 150 characters |
 | `get_order_trace` | the order's `status`, `createdAt`, `updatedAt`; its first 10 events in time order (`source`, `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` at most 150 characters) |
-| `search_runbooks` | at most 3 chunks: `service`, `section`, `score` and the first 300 characters of `untrustedText` |
+| `search_runbooks` | the nearest chunks, at most 3, while they fit the 1,500 characters (the nearest always): `service`, `section`, `score` and the first 900 characters of `untrustedText` **(T5c8)**; `shown` counts the chunks the summary holds |
 
 Every "top N" or "at most N" selection above MUST be deterministic, with no tie left to the order of a hash map or of the output:
 
 - a ranking by frequency (the `search_logs` messages) sorts by count descending, then by the time of the item's first occurrence ascending, then lexicographically by the item's text;
 - a ranking by another value (the 10 lowest `available`, the 3 newest events, the runbook chunks by `score`, the 5 metric series) sorts by that value in its stated direction, then by the time of the item's first occurrence ascending (its position in the output when it has no time), then lexicographically by the item's text (for a series, its labels serialized with the keys sorted). The metric series are ranked by their max value, descending, ignoring `NaN` points (a series with only `NaN` points comes last); a series' first occurrence is its first point's time.
 
-Each model call MUST be built from the incident state (symptom, window, phase, budgets left, latest plan, summaries so far, refusals), not from an accumulated chat history, in the order of "What one call sees".
+Why 900 runbook characters (T5c8; 300 before): in the fourth full run the cut at 300 fell before the text that told a runbook's causes apart, such as which status code a `FAILED` payment meant and the gateway rows of a symptom table, so the model read only the payment-centric opening of each chunk. A chunk line then takes about 1,000 characters, so a summary usually holds the nearest chunk whole and a second only when both are short; the 1,500-character cap is unchanged, since every summary stays in every later prompt (about 400 tokens each, read at about 13 tokens/s on the CPU). The model sees `chunks=<n> shown=<m>` and can search again with another query within `KNOWLEDGE`'s two calls. Three chunks of 900 characters would need a cap of about 3,200 characters for runbook summaries alone.
+
+Each model call MUST be built from the incident state (symptom, window, phase, budgets left, this phase's plan, summaries so far, refusals), not from an accumulated chat history, in the order of "What one call sees".
 
 #### Scenario: Deterministic and capped
 - GIVEN a recorded `search_logs` output of 8 KB
@@ -402,14 +417,28 @@ Each model call MUST be built from the incident state (symptom, window, phase, b
 - WHEN the summary is built
 - THEN the message first seen at 10:00:01 comes first, the 5 listed are the 5 seen earliest, and a tie on both count and first time is ordered by the message text
 
+#### Scenario: Runbook chunks that fit (T5c8)
+- GIVEN `search_runbooks` returns 3 chunks of about 800 characters each
+- WHEN the summary is built
+- THEN it shows the nearest chunk whole, says `chunks=3 shown=1`, and stays within 1,500 characters without the cut note
+- AND with 3 chunks of 300 characters it shows all three and says `shown=3`
+
 ### Requirement: What one call sees
 
 The messages of every model call MUST come in this order, what changes least first **(T5c)**:
 
-1. the system message (role, symptom, window, rules, the two enums), the same for the whole incident;
+1. the system message (role, the components and the call path between them, symptom, window, rules, the two enums), the same for the whole incident;
 2. the evidence message, a user message `Evidence so far, oldest first:` followed by the summaries of the tool steps before the previous answer, refusals included, in step order; absent while there are none;
 3. within a phase after its first call, the previous answer with its tool calls, then one tool-response message with their summaries;
-4. last, the instruction, a user message: the phase, its tools, the tool calls left in the phase and the incident, the latest plan, and the task.
+4. last, the instruction, a user message: the phase, its tools, the tool calls left in the phase and the incident, this phase's plan once it has a valid one, and the task.
+
+The system message MUST also say **(T5c8)**:
+
+- the call path: order-service calls inventory-service and payment-service, payment-service calls gateway-mock, and the three services keep their data in postgres;
+- that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING`, `rootCauseService` is the component that is slow or refuses, not its caller: if A times out or fails because B does, name B;
+- that an affected order to trace is one that is `PAYMENT_PENDING` or `PAYMENT_FAILED`, found with `recent_events` with `source=order`, not an older `PAID` one.
+
+Why (T5c7): in the fourth full run all six reports named payment-service, whatever the cause, although the summaries named gateway-mock: the category definitions said what a slow or refusing component is, but not that the cause is that component rather than its caller; and the one order traced was a `PAID` order from before the incident, taken from `source=payment`. These lines describe the lab and the categories, never a cause the lab may be put through, and add about 110 tokens to a message Ollama reads once per incident and then reuses.
 
 Why: a call's evidence always starts with the previous call's, so the prompt's beginning stays the same from call to call within a phase, and Ollama reuses what it already read instead of reading it again at about 13 tokens/s; before T5c the rebuilt state came first and changed every call, so only the system message and the tool definitions (1,368 tokens) were reused. The instruction comes after the tool results, so the model's next step is to act on it, not to answer the results: before T5c it came before them, and the model wrote a long summary of the results instead of calling tools. The task of a later `ACT` call says to call the phase's tools or answer with no text and no tool call, and not to summarise or explain the results; the plan's task says that the plan goes in the text, never inside a tool's arguments (the first full run found it there).
 
@@ -421,6 +450,12 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 #### Scenario: The beginning of the prompt only grows
 - WHEN a run makes several model calls
 - THEN every call has the same system message, and each call's evidence message starts with the previous call's
+
+#### Scenario: The cause is the dependency, not its caller (T5c8)
+- WHEN the loop builds the system message
+- THEN it describes the call path and says that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING` the root-cause service is the slow or refusing component, not its caller
+- AND it says to trace a `PAYMENT_PENDING` or `PAYMENT_FAILED` order found with `recent_events` with `source=order`
+- AND it names no cause the lab may be put through
 
 ### Requirement: The report
 
@@ -450,7 +485,7 @@ No other field is allowed, and all five are required. Code then adds `incidentId
 
 ### Requirement: Evidence is checked
 
-Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId` that is another incident's step, or a plan, act or report step, is not one) whose `tool_name` equals `tool` and which ran (not `REFUSED_PHASE` or `REFUSED_BUDGET`). Its `quote` MUST be at most 160 characters **(T5c5)** and, after normalization of both sides, a substring of that step's `tool_output`, of one of the string values of that output's JSON (decoded, so that escaped quotes and newlines compare as text) **(chosen)**, or of that step's summary, the text the model was shown **(T5c6)**. Normalization decodes the escapes `\n`, `\t`, `\"` and `\\`, then turns every run of whitespace, line breaks included, into one space, then trims; case is kept. Why (T5c6): the model quotes what it sees, and it sees only the summary. A summary reshapes the output (`status="PAYMENT_FAILED" count=6` for `{"status":"PAYMENT_FAILED","count":6}`) and shows untrusted text as an escaped literal, which the model copies with real line breaks; in the fourth full run 16 of 26 quotes were verbatim in their step's summary and none in the raw output, so all six reports were rejected; with this check 20 of 26 pass and one report is valid. The summary is built from the output by deterministic code, so a quote of it is still a quote of what the tool returned, and a quote in neither form is still rejected. A quote longer than 160 characters MUST be rejected with a reason that tells the model what to change: quote only the distinctive fragment (an exception name, a status, an error message), not the whole line. The report task MUST ask for such a fragment and name the limit, and the schema sent with the call MUST carry the same bounds (8 to 160). Why (T5c5): in the third full run the model copied whole escaped log lines, about 200 tokens per quote, so the 512-token report was cut before its JSON closed, twice, and the run ended `INVALID_REPORT`; five 160-character quotes are at most about 250 tokens. A report that fails the schema or any evidence check MUST get one retry, with the list of errors; a second failure MUST end the run `INVALID_REPORT`, with both reports stored on their steps and none in `incidents.report`.
+Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId` that is another incident's step, or a plan, act or report step, is not one) whose `tool_name` equals `tool` and which ran (not `REFUSED_PHASE` or `REFUSED_BUDGET`). Its `quote` MUST be at most 160 characters **(T5c5)** and, after normalization of both sides, a substring of that step's `tool_output`, of one of the string values of that output's JSON (decoded, so that escaped quotes and newlines compare as text) **(chosen)**, or of a line of that step's summary, the text the model was shown **(T5c6)**, that copies the output **(T5c8)**: every line but the header that holds a JSON string literal, with the `(cut)` markers code wrote after a cut literal removed. So a quote of text only code wrote is rejected: the header, the counts and aggregates code computed (`events=20`, `durationMs min=... max=...`, `newest 3:`, `chunks=3 shown=1`), the outcome sentences, the cut note and the `(cut)` markers. Every string copied from the output is written as a literal, so a line without one copies nothing; a kept line keeps its labels and per-item figures (`status="PAID" count=3`), the shape the model saw, and a quote is matched within one line. Why (the T5c6 review): matching the whole summary let a quote of the header or of a computed aggregate pass as evidence, though the tool never returned it; asking the summarizers to tag their lines would change every summarizer for what one rule on the literals already tells; and the fourth run's replay is unchanged by it (still 20 of 26). Normalization decodes the escapes `\n`, `\t`, `\"` and `\\`, then turns every run of whitespace, line breaks included, into one space, then trims; case is kept. Why (T5c6): the model quotes what it sees, and it sees only the summary. A summary reshapes the output (`status="PAYMENT_FAILED" count=6` for `{"status":"PAYMENT_FAILED","count":6}`) and shows untrusted text as an escaped literal, which the model copies with real line breaks; in the fourth full run 16 of 26 quotes were verbatim in their step's summary and none in the raw output, so all six reports were rejected; with this check 20 of 26 pass and one report is valid. The summary is built from the output by deterministic code, so a quote of it is still a quote of what the tool returned, and a quote in neither form is still rejected. A quote longer than 160 characters MUST be rejected with a reason that tells the model what to change: quote only the distinctive fragment (an exception name, a status, an error message), not the whole line. The report task MUST ask for such a fragment and name the limit, and the schema sent with the call MUST carry the same bounds (8 to 160). Why (T5c5): in the third full run the model copied whole escaped log lines, about 200 tokens per quote, so the 512-token report was cut before its JSON closed, twice, and the run ended `INVALID_REPORT`; five 160-character quotes are at most about 250 tokens. A report that fails the schema or any evidence check MUST get one retry, with the list of errors; a second failure MUST end the run `INVALID_REPORT`, with both reports stored on their steps and none in `incidents.report`.
 
 #### Scenario: Existing quote
 - GIVEN step 4 is `search_logs` and its output holds a line with `Connection refused`
@@ -475,6 +510,17 @@ Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId`
 - GIVEN step 11's summary shows `| Gatewa"(cut)`
 - WHEN the report quotes `Gatewa...(cut)`, or text that is in neither the output nor the summary, such as `| **g` for `| gateway-mock`
 - THEN the report is rejected with `evidence[<i>].quote is not in the output of step <n>`
+
+#### Scenario: Text only code wrote (T5c8)
+- GIVEN step 5 is `recent_events` and its summary shows its header, `events=20`, a `durationMs min=... max=... of ... events` line, `newest 3:` and a newest event cut as `...b272-3c5"(cut)`
+- WHEN the report quotes the header, one of those computed lines, `b272-3c5"(cut)`, an outcome sentence such as `a data source of the tool failed` or the note `[summary cut at 1500 characters]`
+- THEN each is rejected with `evidence[<i>].quote is not in the output of step <n>`
+- AND a quote of a line that copies the output, such as `type="PAYMENT_UNAVAILABLE" outcome="PAYMENT_PENDING"`, passes
+
+#### Scenario: The loop checks against the summary it showed (T5c8)
+- GIVEN a run whose `status_summary` step showed the model `status="PAYMENT_PENDING" count=7`, which is not in the raw output
+- WHEN the report quotes that line
+- THEN the report is accepted at its first attempt and the incident ends `COMPLETED`, since the loop stored on the step the summary it sent
 
 #### Scenario: Short quote of an escaped line
 - GIVEN step 5 is `recent_events` and its output holds an event detail whose JSON is escaped, such as `{\"exception\":\"java.net.http.HttpTimeoutException\", ...}`

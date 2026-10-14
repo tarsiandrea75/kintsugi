@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -43,7 +44,33 @@ public final class ToolSummaries {
 			"get_order_trace", Summarizers::orderTrace, //
 			"search_runbooks", Summarizers::searchRunbooks);
 
+	/**
+	 * The {@code (cut)} marker {@link SummaryText#quote} writes after a cut literal: a {@code "} that closes a literal
+	 * (not escaped: preceded by an even number of backslashes), then {@code (cut)}.
+	 */
+	private static final Pattern CUT_MARKER = Pattern.compile("((?:^|[^\\\\])(?:\\\\\\\\)*)\"\\(cut\\)");
+
 	private ToolSummaries() {
+	}
+
+	/**
+	 * The lines of {@code summary} that copy text from the tool output, without the {@code (cut)} markers code wrote:
+	 * what a quote of the summary may come from (T5c8, the T5c6 review). Every string the output holds is written as a
+	 * JSON string literal, so a line without a {@code "} holds none: the header, the counts and aggregates the code
+	 * computed ({@code events=20}, {@code durationMs min=... max=...}, {@code newest 3:}), the outcome sentences and
+	 * the cut note. A kept line keeps its labels and per-item figures ({@code status="PAID" count=3}), the shape the
+	 * model saw.
+	 * @param summary a summary as {@link #summarize} built it, or null
+	 */
+	public static List<String> quotableLines(String summary) {
+		if (summary == null) {
+			return List.of();
+		}
+		return summary.lines()
+			.skip(1)
+			.filter(line -> line.indexOf('"') >= 0)
+			.map(line -> CUT_MARKER.matcher(line).replaceAll("$1\""))
+			.toList();
 	}
 
 	/**
