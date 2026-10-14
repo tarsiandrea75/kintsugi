@@ -59,6 +59,13 @@ public class ObservabilityTools {
 
 	private static final String LEVEL = "Optional log level: ERROR, WARN, INFO or DEBUG.";
 
+	/**
+	 * Where the lab's own lines are (T5c8): its services log failures at WARN and the gateway's decisions at INFO, so a
+	 * level=ERROR query finds none of them, as every log query of the fourth live run showed.
+	 */
+	private static final String LEVELS = " The lab services log failures at WARN and gateway decisions at INFO: filter"
+			+ " on WARN or give no level, not ERROR.";
+
 	private final LokiClient loki;
 
 	private final PrometheusClient prometheus;
@@ -75,7 +82,7 @@ public class ObservabilityTools {
 	}
 
 	@McpTool(name = "search_logs", description = "Search the log lines of one lab service in the last minutes,"
-			+ " newest first. Returns timestamp, service, level and the line." + UNTRUSTED)
+			+ " newest first. Returns timestamp, service, level and the line." + LEVELS + UNTRUSTED)
 	public CallToolResult searchLogs(@McpToolParam(description = SERVICE) String service,
 			@McpToolParam(description = CONTAINS, required = false) String contains,
 			@McpToolParam(description = LEVEL, required = false) String level,
@@ -97,7 +104,7 @@ public class ObservabilityTools {
 	}
 
 	@McpTool(name = "count_logs", description = "Count the log lines of one lab service in the last minutes,"
-			+ " optionally only those containing a text or at a level.")
+			+ " optionally only those containing a text or at a level." + LEVELS)
 	public CallToolResult countLogs(@McpToolParam(description = SERVICE) String service,
 			@McpToolParam(description = CONTAINS, required = false) String contains,
 			@McpToolParam(description = LEVEL, required = false) String level,
@@ -117,7 +124,8 @@ public class ObservabilityTools {
 
 	@McpTool(name = "query_metric", description = "Read one metric of the lab over the last minutes, as series of"
 			+ " [unixSeconds, value] points, oldest first (at most 10 series, 60 points each). Metrics: request_rate, error_rate"
-			+ " (5xx per second), latency_avg and latency_max (seconds), lab_orders and lab_payments (stored rows per"
+			+ " (5xx server responses per second only; refusals answered 4xx and timeouts seen by the caller are not"
+			+ " counted), latency_avg and latency_max (seconds), lab_orders and lab_payments (stored rows per"
 			+ " status), gateway_authorize_inflight, hikaricp_connections_active, hikaricp_connections_idle,"
 			+ " hikaricp_connections_pending, hikaricp_connections_max, hikaricp_connections_timeout_rate,"
 			+ " client_request_outcomes (outgoing calls per second by client, outcome and exception).")

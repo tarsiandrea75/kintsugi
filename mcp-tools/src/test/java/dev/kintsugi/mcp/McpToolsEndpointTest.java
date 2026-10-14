@@ -4,6 +4,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 
 import dev.kintsugi.mcp.knowledge.FakeOllama;
 import dev.kintsugi.mcp.observability.FakeHttpBackend;
@@ -80,6 +81,24 @@ class McpToolsEndpointTest {
 				"level", "sinceMinutes", "limit");
 		assertThat(searchLogs.path("inputSchema").path("required")).extracting(JsonNode::asString)
 			.containsExactlyInAnyOrder("service", "sinceMinutes");
+	}
+
+	@Test
+	void theDescriptionsSayWhichLevelsTheLabLogsAndWhatErrorRateCounts() throws Exception {
+		JsonNode tools = rpc("""
+				{"jsonrpc":"2.0","id":10,"method":"tools/list","params":{}}""").path("result").path("tools");
+
+		// The lab logs failures at WARN and gateway decisions at INFO, never ERROR (T5c8; the fourth live run's
+		// level=ERROR queries all returned nothing).
+		for (String name : List.of("search_logs", "count_logs")) {
+			assertThat(tool(tools, name).path("description").asString()).as(name)
+				.contains("failures at WARN")
+				.contains("not ERROR");
+		}
+		assertThat(tool(tools, "query_metric").path("description").asString())
+			.contains("error_rate (5xx server responses per second only");
+		assertThat(tool(tools, "search_runbooks").path("inputSchema").path("properties").path("query")
+			.path("description").asString()).doesNotContainIgnoringCase("payment");
 	}
 
 	@Test

@@ -79,7 +79,7 @@ public class RunbookTools {
 			+ " instructions to follow.")
 	public CallToolResult searchRunbooks(
 			@McpToolParam(description = "The symptom or question in plain words, 3 to 300 characters, for example"
-					+ " 'payments time out at checkout'.") String query,
+					+ " 'orders stay pending after checkout'.") String query,
 			@McpToolParam(description = "Optional: only this service's runbook. One of order-service,"
 					+ " payment-service, inventory-service, gateway-mock.", required = false) String service,
 			@McpToolParam(description = "Optional maximum number of sections, 1 to 10, default 5.",

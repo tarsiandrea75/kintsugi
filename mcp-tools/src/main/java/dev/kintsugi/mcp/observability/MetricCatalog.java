@@ -19,6 +19,10 @@ public enum MetricCatalog {
 
 	REQUEST_RATE("request_rate", "sum by (service, uri) (rate(http_server_requests_seconds_count{{sel}}[{w}]))"),
 
+	/**
+	 * Server responses with a 5xx status only: a 4xx refusal or a call the caller gave up on is not counted, so this
+	 * rate stays flat when a dependency is slow or refuses with 4xx (T5c8).
+	 */
 	ERROR_RATE("error_rate",
 			"sum by (service, uri, status) (rate(http_server_requests_seconds_count{{sel},status=~\"5..\"}[{w}]))"),
 
