@@ -47,6 +47,16 @@ class DefaultBudgetsTest {
 	}
 
 	@Test
+	void theModelCallBudgetHoldsAValidRunWithEveryUncountedRefusal() {
+		// Each phase's answers are at most its allowance (8 in all); each uncounted refusal can add one answer (T5c9);
+		// then 2 report attempts. A valid run never reaches the model-call budget, which only guards against loop bugs.
+		int longestValidRun = LoopSettings.TOOL_BUDGET + LoopSettings.UNCOUNTED_REFUSALS + 2;
+
+		assertThat(LoopSettings.UNCOUNTED_REFUSALS).isEqualTo(2);
+		assertThat(loop.maxModelCalls()).isEqualTo(12).isGreaterThanOrEqualTo(longestValidRun);
+	}
+
+	@Test
 	void theLoopsReadTimeoutFollowsTheReportDeadline() {
 		ModelRouteProperties route = new ModelRouteProperties("granite4.1:8b", 0, 8192, deadlines,
 				new NumPredict(384, 160, 512));

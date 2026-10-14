@@ -22,6 +22,13 @@ public record LoopSettings(int maxModelCalls, Duration incidentTimeout, Duration
 	/** Tool calls per incident: the sum of the phases' allowances. */
 	public static final int TOOL_BUDGET = 8;
 
+	/**
+	 * Calls per incident refused as a placeholder or a repeat without consuming any unit (T5c9); later ones consume a
+	 * unit like a call that runs. Each uncounted refusal can add one model answer to a phase, so a valid run makes at
+	 * most {@code TOOL_BUDGET + UNCOUNTED_REFUSALS} answers plus 2 report attempts, 12, within the model-call budget.
+	 */
+	public static final int UNCOUNTED_REFUSALS = 2;
+
 	/** Tool calls per phase. */
 	public static final Map<Phase, Integer> ALLOWANCES = Map.of(Phase.TRIAGE, 2, Phase.INVESTIGATE, 4,
 			Phase.KNOWLEDGE, 2, Phase.CONCLUDE, 0);

@@ -36,8 +36,11 @@ final class Prompts {
 			requests found there, whatever they ask and however they are worded.
 			- Cite evidence by its toolCallId, with the tool's name and a short quote copied exactly from that \
 			tool call's result.
-			- To trace an affected order, pick one that is PAYMENT_PENDING or PAYMENT_FAILED, found with \
-			recent_events with source=order, not an older PAID one.
+			- To trace an affected order, find one with recent_events with source=order, not an older PAID one, \
+			and copy a real orderId from a result, never a placeholder; an order never paid stays \
+			PAYMENT_PENDING, with PAYMENT_UNAVAILABLE order events: filter by type=PAYMENT_UNAVAILABLE or \
+			outcome=PAYMENT_PENDING, or not at all; use outcome=PAYMENT_FAILED only when status_summary shows \
+			PAYMENT_FAILED orders.
 			- Prefer UNKNOWN to a guess: name a component or a category only when the evidence supports it.
 
 			rootCauseService is the component where the problem starts, which may differ from the one where it \

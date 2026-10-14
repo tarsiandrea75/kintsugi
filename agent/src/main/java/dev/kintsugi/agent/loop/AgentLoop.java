@@ -266,21 +266,37 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			boolean exhausted = false;
 			for (ToolCall call : calls) {
 				String summary;
+				// A call without a name is refused like any tool the phase does not offer (List.contains(null) throws).
+				boolean offered = call.name() != null && phase.tools().contains(call.name());
+				Waste waste = offered ? waste(run, call) : null;
 				if (exhausted || phaseLeft == 0 || run.toolsLeft == 0) {
 					// Nothing left to consume: refused, and so is every later call of this answer.
 					exhausted = true;
 					summary = refuse(run, phase, call, answer.model(), "REFUSED_BUDGET",
 							"no tool calls are left in this phase or in the incident");
 				}
+				else if (waste != null && run.uncountedLeft > 0) {
+					// A placeholder or a repeat consumes nothing, up to a cap, so that a model that keeps sending one
+					// still spends its budget and the phase ends (T5c9).
+					run.uncountedLeft--;
+					summary = refuse(run, phase, call, answer.model(), waste.outcome(), waste.why());
+				}
 				else {
 					phaseLeft--;
 					run.toolsLeft--;
-					// A call without a name is refused like any tool the phase does not offer (List.contains(null) throws).
-					boolean offered = call.name() != null && phase.tools().contains(call.name());
-					summary = offered ? runTool(run, phase, call, answer.model())
-							: refuse(run, phase, call, answer.model(), "REFUSED_PHASE", label(call.name())
-									+ " is not available in " + phase + "; this phase offers "
-									+ String.join(", ", phase.tools()));
+					if (!offered) {
+						summary = refuse(run, phase, call, answer.model(), "REFUSED_PHASE", label(call.name())
+								+ " is not available in " + phase + "; this phase offers "
+								+ String.join(", ", phase.tools()));
+					}
+					else if (waste != null) {
+						summary = refuse(run, phase, call, answer.model(), waste.outcome(), waste.why()
+								+ "; it counts against the budget, since the " + LoopSettings.UNCOUNTED_REFUSALS
+								+ " uncounted refusals of this incident are used up");
+					}
+					else {
+						summary = runTool(run, phase, call, answer.model());
+					}
 				}
 				responses.add(new ToolResponse(call.id() == null ? "" : call.id(), String.valueOf(call.name()), summary));
 			}
@@ -309,11 +325,31 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		return "plan valid";
 	}
 
+	/**
+	 * Why an offered call is not worth running, or null: an argument that is a placeholder, not a value, or the same
+	 * tool and arguments as a call that already ran in this incident, whose result the model already has (T5c9).
+	 */
+	private static Waste waste(Run run, ToolCall call) {
+		String placeholder = ToolArgs.placeholder(call.arguments());
+		if (placeholder != null) {
+			return new Waste("REFUSED_PLACEHOLDER", "argument " + placeholder + " is a placeholder, not a value; use a "
+					+ "real value from an earlier tool result, such as an orderId in a recent_events result");
+		}
+		for (Ran earlier : run.ran) {
+			if (earlier.tool().equals(call.name()) && ToolArgs.same(earlier.arguments(), call.arguments())) {
+				return new Waste("REFUSED_DUPLICATE", "the same tool with the same arguments was already called as "
+						+ "toolCallId " + earlier.stepNo() + "; read that result");
+			}
+		}
+		return null;
+	}
+
 	/** Runs one checked call through mcp-tools and records the full output with the summary the model will see. */
 	private String runTool(Run run, Phase phase, ToolCall call, String model) {
 		checkTime(run);
 		ToolResult result = this.labTools.call(call.name(), call.arguments());
 		int stepNo = run.steps + 1;
+		run.ran.add(new Ran(call.name(), call.arguments(), stepNo));
 		String summary = ToolSummaries.summarize(stepNo, result.tool(), result.outcome(), result.rawOutput());
 		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, result.tool(), result.args(),
 				result.rawOutput(), result.outcome().name(), summary, null, (int) result.durationMs(), now()));
@@ -574,6 +610,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		int toolsLeft = LoopSettings.TOOL_BUDGET;
 
+		/** Placeholder or repeated calls that may still be refused without consuming a unit (T5c9). */
+		int uncountedLeft = LoopSettings.UNCOUNTED_REFUSALS;
+
+		/** The calls that ran, with their arguments as the model wrote them, so that a repeat is caught (T5c9). */
+		final List<Ran> ran = new ArrayList<>();
+
 		String plan;
 
 		/** Where the incident's time budget starts: the end of the warm-up, so the model's load is not counted. */
@@ -605,6 +647,14 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			return messages;
 		}
 
+	}
+
+	/** A call that ran: its tool, its arguments as the model wrote them, and its step. */
+	private record Ran(String tool, String arguments, int stepNo) {
+	}
+
+	/** Why a call is refused without running: its {@code tool_outcome} and the reason the model is shown. */
+	private record Waste(String outcome, String why) {
 	}
 
 	/** A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. */

@@ -118,6 +118,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - the two T5c6 review WARNINGs: a quote must not match code-authored summary text (header, aggregates, `(cut)` markers, outcome sentences), and an `AgentLoop`-level test proves the shown summary is stored.
 
     Tests first where deterministic; spec, ADR-010 "Amended in T5c8". Route: delegated writer.
+  - [x] **T5c9 — stop wasting the tool budget (the human's decision of 2026-10-14, after the fifth run):**
+    - a tool call whose arguments hold a placeholder (`<…>`) is refused without spending budget, with a reason the model can act on;
+    - a call identical to an earlier one in the incident (same tool, same arguments) is not run and not counted; the model is told "already called, see toolCallId N";
+    - the log tools' text says gateway-mock logs its decisions at INFO, so search it without a level filter;
+    - the prompt says stuck orders are `PAYMENT_PENDING`, with `PAYMENT_UNAVAILABLE` events, not `PAYMENT_FAILED`, unless the status summary shows them.
+
+    Tests first; spec, ADR-010 "Amended in T5c9". Route: delegated writer.
 
 ## Progress
 
@@ -349,7 +356,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - F3 filtered `recent_events source=order` by `outcome=PAYMENT_FAILED`, but its orders are `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, so it saw nothing;
     - F3's `count_logs service=postgres` was invalid; F1's KNOWLEDGE plan named a tool not allowed in that phase.
   - The budget runs out in INVESTIGATE before the decisive call (F1: the trace of a real order and gateway-mock logs were refused).
+- 2026-10-14: T5c9 done by a delegated writer, in two units. Route: delegated writer (2+ non-trivial files in two modules: loop, argument checks, migration, prompt, tool descriptions, tests, two specs, ADR).
+  - mcp-tools (`be241fd`): the `search_logs`/`count_logs` descriptions say gateway-mock logs its decisions at INFO, so search it with no level filter. RED: `McpToolsEndpointTest` 1 failure; GREEN: `mcp-tools` 213 tests (surefire XML), 0 failures, 0 errors.
+  - agent: an offered call whose argument is a placeholder (`<name>`) is refused `REFUSED_PLACEHOLDER`; a call with the same tool and arguments (parsed JSON, key order ignored) as one that ran is refused `REFUSED_DUPLICATE`, "already called as toolCallId N; read that result". Neither runs. The first 2 per incident consume nothing; later ones consume a unit, so a repeating model still ends its phase. With the cap a valid run makes at most 8 + 2 `ACT` answers and 2 reports, the 12-call model budget (`DefaultBudgetsTest`). Migration V3 widens the `tool_outcome` check. The system message says an order never paid stays `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, filter by those, `PAYMENT_FAILED` only when the status summary shows it, and copy a real `orderId`.
+  - RED observed against stubs (9 failures): 3 `AgentLoopTest` (placeholder, duplicate, cap), 3 `ToolArgsTest`, 2 `PromptsTest`, 1 `DefaultBudgetsTest`. GREEN: `agent` 272 tests (surefire XML), 0 failures, 0 errors; the `AgentLoopTest` leak check still passes.
+  - Open: the 45 min incident budget does not hold the new worst case (10 `ACT` + 2 `REPORT` at their deadlines), as it already did not for 8 + 2.
 
 ## Next step
 
-The human decides the fixes for the budget waste seen in the fifth run; T5c3 stays open.
+The sixth full run (T5c3).

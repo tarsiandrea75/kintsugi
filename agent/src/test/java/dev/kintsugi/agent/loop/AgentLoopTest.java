@@ -402,6 +402,70 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void aPlaceholderArgumentIsRefusedWithoutSpendingTheBudget() {
+		// The fifth live run: every INVESTIGATE plan sent get_order_trace with this literal placeholder (T5c9).
+		this.model.planned(call("status_summary", "{\"table\":\"<SELECT_A_TABLE>\",\"sinceMinutes\":15}"))
+			.text("done")
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.lab.calls()).isEmpty();
+		assertThat(step(2)).containsEntry("kind", "TOOL_CALL")
+			.containsEntry("tool_name", "status_summary")
+			.containsEntry("tool_outcome", "REFUSED_PLACEHOLDER")
+			.containsEntry("tool_output", null);
+		assertThat((String) step(2).get("summary"))
+			.startsWith("toolCallId=2 tool=status_summary outcome=REFUSED_PLACEHOLDER")
+			.contains("argument table is a placeholder")
+			.contains("use a real value from an earlier tool result");
+		assertThat(userText(this.model.prompts().get(1))).contains("Tool calls left: 2 in this phase, 8 in the incident");
+	}
+
+	@Test
+	void anIdenticalCallIsNotRunAgainAndPointsAtTheFirstWithoutSpendingTheBudget() {
+		// The fifth live run repeated recent_events source=payment with the same arguments (T5c9); key order differs.
+		this.model.planned(call("status_summary", "{\"table\":\"orders\",\"sinceMinutes\":15}"))
+			.tools(call("status_summary", "{\"sinceMinutes\":15, \"table\":\"orders\"}"))
+			.tools(call("status_summary", "{\"table\":\"payments\",\"sinceMinutes\":15}"))
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.lab.calls()).containsExactly("status_summary", "status_summary");
+		assertThat(step(4)).containsEntry("tool_name", "status_summary")
+			.containsEntry("tool_outcome", "REFUSED_DUPLICATE")
+			.containsEntry("tool_output", null);
+		assertThat((String) step(4).get("summary")).contains("already called as toolCallId 2; read that result");
+		assertThat(userText(this.model.prompts().get(2))).contains("Tool calls left: 1 in this phase, 7 in the incident");
+		assertThat(step(6)).containsEntry("tool_outcome", "OK");
+	}
+
+	@Test
+	void uncountedRefusalsAreCappedSoARepeatingModelStillSpendsItsBudget() {
+		String placeholder = "{\"table\":\"<TABLE>\"}";
+		this.model.planned(call("status_summary", placeholder))
+			.tools(call("status_summary", placeholder))
+			.tools(call("status_summary", placeholder))
+			.tools(call("status_summary", placeholder))
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.lab.calls()).isEmpty();
+		assertThat(List.of(step(2), step(4), step(6), step(8))).extracting(row -> row.get("tool_outcome"))
+			.containsOnly("REFUSED_PLACEHOLDER");
+		assertThat((String) step(4).get("summary")).doesNotContain("counts against the budget");
+		assertThat((String) step(6).get("summary")).contains("counts against the budget");
+		assertThat(userText(this.model.prompts().get(3))).contains("Tool calls left: 1 in this phase, 7 in the incident");
+		// The fourth refusal spends the phase's last unit, so the phase ends without another ACT call.
+		assertThat(this.model.calls()).isEqualTo(4 + 2 + 1);
+	}
+
+	@Test
 	void aMissingOrInvalidPlanIsRecordedAndTheRunGoesOn() {
 		this.model.tools(call("status_summary", "{\"table\":\"orders\"}"))
 			.text("done")

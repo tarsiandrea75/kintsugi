@@ -79,7 +79,7 @@ Why the phase caps sum to the incident's 8-call budget: the model always gets to
 | Budget | Value | When it is hit |
 |--------|-------|----------------|
 | Tool calls | 8 per incident (2 + 4 + 2 per phase) | further calls are refused and recorded; the loop moves to the next phase |
-| Model calls | 12 per incident (16 before T5) | the run ends `BUDGET_EXCEEDED`. A valid run needs at most 8 `ACT` answers (each phase's answers are at most its allowance) + 2 report attempts = 10, so this is a guard against a loop bug, never a normal end |
+| Model calls | 12 per incident (16 before T5) | the run ends `BUDGET_EXCEEDED`. A valid run needs at most 8 `ACT` answers (each phase's answers are at most its allowance) + 2 for the uncounted refusals (since T5c9) + 2 report attempts = 12, so this is a guard against a loop bug, never a normal end |
 | One model call | per task since T5c4: 300 s for `ACT`, 420 s for `REPORT` since T5c5 (240 s and 300 s in T5c4, 180 s for both in T5, 90 s before) | the run ends `TIMED_OUT` |
 | One incident | 45 minutes since T5c5 (30 in T5, 10 before), wall clock from the end of the warm-up, tool calls included | the run ends `TIMED_OUT` |
 | Warm-up | one request before the run, at most 300 s, counted against no budget | the run ends `FAILED` |
@@ -136,6 +136,17 @@ Every report of the fourth run named `payment-service|DEPENDENCY_REJECTING`, wha
 These add about 110 tokens to the system message, which Ollama reads once per incident and reuses, about 60 to each plan task and about 100 to the tool definitions of `INVESTIGATE` and `TRIAGE`.
 
 The same change closes the T5c6 review's two warnings. A quote now passes from the summary only when it is in a line that copies the tool output: every line but the header that holds a JSON string literal, without the `(cut)` markers code wrote. Every string from the output is written as a literal, so a line without one, such as the header, a computed count or aggregate, an outcome sentence or the cut note, copies nothing, and a quote of it is rejected. Rejected: tagging each summarizer's lines as computed or copied (a change to every summarizer for what one rule on the literals already tells); recomputing the summary from the output in the check (the step keeps the summary the model saw, and an `AgentLoop` test now proves a quote of it completes the run). The fourth run's replay is unchanged: 20 of 26 quotes pass.
+
+### Amended in T5c9: no tool budget spent on placeholders or repeats
+
+In the fifth run all three incidents ended `COMPLETED` and one matched, but the 8-call tool budget ran out in `INVESTIGATE` before the decisive call. The human decided (2026-10-14) to stop four kinds of waste:
+
+- **Placeholder arguments.** Every `INVESTIGATE` plan sent `get_order_trace` with `"<SELECT_A_PENDING_ORDER_ID>"`, which mcp-tools rejected after spending a call. Code now refuses an offered call whose arguments hold a string that is wholly `<name>` (word characters and spaces) before it runs: `tool_outcome` `REFUSED_PLACEHOLDER`, with a reason naming the argument and saying to use a real value from an earlier result.
+- **Identical repeats.** Two incidents repeated `recent_events source=payment` with the same arguments. A call with the same tool and arguments as one that already ran, compared as parsed JSON (key order and spacing ignored), is refused `REFUSED_DUPLICATE` with "already called as toolCallId N; read that result".
+- **A cap on free refusals.** These two refusals consume nothing, up to 2 per incident; later ones consume a unit like any call. A refusal that consumes nothing keeps the phase open, so without the cap a model repeating one would run until the model-call budget, which ends the run `BUDGET_EXCEEDED` with no report. With the cap a valid run makes at most 8 + 2 `ACT` answers and 2 reports, exactly the 12-call budget. Rejected: charging them like `REFUSED_PHASE` (the fifth run's waste stays), and no cap (the run can lose its report). The incident's time budget does not hold every model call at its deadline in this worst case (10 x 300 + 2 x 420 s), as it already did not for 8 + 2 (the T5c5 review's follow-up); the measured runs stay well within it.
+- **Signals the queries missed.** mcp-tools' log tool descriptions now say to search gateway-mock with no level filter, since it logs its decisions at INFO (the run's `level=WARN` searches of it returned 0). The system message says an order never paid stays `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` order events, to filter `source=order` by those, and by `PAYMENT_FAILED` only when the status summary shows such orders; and to copy a real `orderId`, never a placeholder.
+
+The new outcomes need migration V3, which widens the `tool_outcome` check. The evidence check treats them as refused, like the other `REFUSED_` outcomes. The prompt lines add about 60 tokens to the system message, read once per incident and then reused.
 
 ### Plan and report schemas
 

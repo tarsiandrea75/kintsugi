@@ -33,7 +33,21 @@ class PromptsTest {
 	@Test
 	void anAffectedOrderToTraceIsOneThatDidNotEndPaid() {
 		assertThat(Prompts.system("orders are slow", 15)).contains("recent_events with source=order")
-			.contains("PAYMENT_PENDING or PAYMENT_FAILED");
+			.contains("not an older PAID one");
+	}
+
+	@Test
+	void anOrderNeverPaidIsFoundAsPendingNotAsFailed() {
+		// The fifth live run filtered source=order by outcome=PAYMENT_FAILED while its orders were PAYMENT_PENDING (T5c9).
+		assertThat(Prompts.system("orders are slow", 15))
+			.contains("an order never paid stays PAYMENT_PENDING, with PAYMENT_UNAVAILABLE order events")
+			.contains("type=PAYMENT_UNAVAILABLE or outcome=PAYMENT_PENDING")
+			.contains("outcome=PAYMENT_FAILED only when status_summary shows PAYMENT_FAILED orders");
+	}
+
+	@Test
+	void aToolArgumentIsARealValueNeverAPlaceholder() {
+		assertThat(Prompts.system("orders are slow", 15)).contains("copy a real orderId from a result, never a placeholder");
 	}
 
 	@Test
