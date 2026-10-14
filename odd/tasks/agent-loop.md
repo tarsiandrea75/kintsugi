@@ -228,7 +228,8 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - `verify-agent.sh` does not exist yet;
   - the live `knowledge-db` volume predates the `agent` database and role, which `01-knowledge.sh` creates only on a fresh volume;
   - compose defaults `AGENT_DB_PASSWORD` to `agent_app`, while `application.yaml` has no default. **Decided by the human (2026-10-14): keep the compose default**, like every other lab role. compose is the local lab's configuration, `application.yaml` is the app's contract and fails fast outside compose. The human adds `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`.
+- 2026-10-14: added `infra/scripts/reset-volume.sh` (documented in `docs/setup.md`, "Reset a volume") and used it, with the human's ok, to delete `kintsugi-lab_knowledge-data`, so the next start creates the `agent` database and role. The human asked that every repeatable fix-up operation become a script in the repo.
 
 ## Next step
 
-T5 part B on `feat/agent-loop-04-check`: write `verify-agent.sh`, recreate or migrate the `knowledge-db` volume for the `agent` database, then run F1–F3 for real with `granite4.1:8b` and record the results.
+T5 part B on `feat/agent-loop-04-check`: write `verify-agent.sh`, then run F1–F3 for real with `granite4.1:8b` and record the results.

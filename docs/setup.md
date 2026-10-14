@@ -357,6 +357,18 @@ infra/scripts/verify-rag.sh --down   # the same, then `down -v`
 
 The script waits for `knowledge-indexer` to exit 0, then checks with `psql` that `index_metadata` records `nomic-embed-text`, 768 dimensions and the digest the local Ollama serves now (read from `GET /api/tags`) and that every service runbook has chunks. Through MCP it asks four symptom-worded questions and expects the right runbook in the top 3 and no hit from the README's "Authoring rule", and checks the `service` filter. It checks that `kintsugi_agent` cannot insert into the knowledge store, that the store has no `faults` database, and that `kintsugi_agent` cannot connect to `faults` on the lab's postgres. It runs the indexer again and expects it to embed nothing and to name every `docs/runbooks/*.md` file as skipped, then starts a one-off mcp-tools configured with `mxbai-embed-large` and expects `search_runbooks` to refuse the index. No fault is injected. It needs `docker`, `curl` and Ollama, and takes about a minute on a running lab.
 
+### Reset a volume
+
+Init scripts (`infra/postgres/init/`, `infra/knowledge-db/init/`) run only when their volume is empty. When one changes after the volume was created (for example when the `agent` database was added to `knowledge-db`), or when a volume's state is broken, delete that one volume and start the lab again:
+
+```bash
+infra/scripts/reset-volume.sh knowledge-data         # asks for confirmation
+infra/scripts/reset-volume.sh knowledge-data --yes   # no prompt
+docker compose -f infra/compose.yaml up -d           # recreates the volume and runs its init scripts
+```
+
+The script accepts only the volume keys of `infra/compose.yaml` (it lists them on a wrong name), removes the containers that use the volume and leaves the rest of the lab running. `knowledge-data` loses nothing that cannot be rebuilt: `knowledge-indexer` re-embeds the runbooks at the next start. `postgres-data`, `prometheus-data` and `loki-data` lose their recorded orders, metrics and logs.
+
 ## Run the lab services without Docker Compose
 
 To debug one service from the IDE, run each service by hand, each with its own PostgreSQL database. The ports below are the services' defaults, not the compose ones.
