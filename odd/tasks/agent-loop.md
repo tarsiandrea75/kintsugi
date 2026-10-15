@@ -420,7 +420,15 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
   Candidate fix: keep `key=value` numbers in the template, or show the newest line of each distinct value.
 - 2026-10-15: the eighth full run started on `bffdb9c`.
+- 2026-10-15: eighth full `verify-agent.sh` run on `bffdb9c` (`infra/scripts/out/verify-agent-20261015T114730Z/`, 60 min): **1/3**. F2 MATCH; F1 and F3 `UNKNOWN|UNKNOWN`, both valid reports with no evidence.
+  - **F1:** TRIAGE kept to 2 calls (the stated limit worked), but `status_summary payments` showed only `AUTHORIZED`. The INVESTIGATE answer was cut at 384 tokens: the model wrote its plan and then described its calls in Markdown, made no tool call, and the phase ended. The investigation never ran.
+  - **F3:** asked `recent_events source=payment` twice and `search_logs gateway-mock`; all showed authorized payments. It never asked `source=order`. `outcome=PAYMENT_FAILED` for payment was rejected as `INVALID_PARAMETER`.
+  - **KNOWLEDGE, third run in a row:** the plan names `search_logs`, so it is invalid. The model writes its calls as Markdown, and no runbook is ever searched.
+  - Pattern: an ACT answer with no tool call ends the phase, even with calls left. This lost all of F1.
+  - Proposed T5c12:
+    - an ACT answer with no tool call, while the phase has calls left, gets one short retry that asks for a tool call now and no plan;
+    - the plan check drops `nextTools` entries outside the phase instead of rejecting the plan.
 
 ## Next step
 
-The eighth full run (T5c3); then the log-template follow-up if the run shows it.
+T5c12 (retry an ACT answer with no tool call; drop out-of-phase nextTools), awaiting the human's approval; then the ninth full run (T5c3).
