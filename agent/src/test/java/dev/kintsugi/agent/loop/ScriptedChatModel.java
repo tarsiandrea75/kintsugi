@@ -56,6 +56,17 @@ final class ScriptedChatModel implements ChatModel {
 		return this;
 	}
 
+	/** Answers {@code text} and these tool calls. */
+	ScriptedChatModel answer(String text, ToolCall... calls) {
+		this.script.add(prompt -> response(AssistantMessage.builder().content(text).toolCalls(List.of(calls)).build()));
+		return this;
+	}
+
+	/** Answers with no text and no tool call: the ACT task's way to end a phase, which gets no retry (T5c12). */
+	ScriptedChatModel quiet() {
+		return text("");
+	}
+
 	/** Answers with these tool calls. */
 	ScriptedChatModel tools(ToolCall... calls) {
 		this.script.add(prompt -> response(AssistantMessage.builder().content("").toolCalls(List.of(calls)).build()));
@@ -107,19 +118,22 @@ final class ScriptedChatModel implements ChatModel {
 		return this;
 	}
 
-	/** Answers a valid plan and no tool call: a phase that ends at its first answer. */
+	/**
+	 * Answers a valid plan and no tool call. As a phase's first answer, it gets the phase's one retry, which the script
+	 * must answer too (T5c12).
+	 */
 	ScriptedChatModel plan() {
 		return text(plan("order-service", "DEPENDENCY_LATENCY"));
 	}
 
-	/** Answers the three evidence phases with a plan and no tool call each. */
+	/** Answers the three evidence phases with no text and no tool call each: each phase ends at its first answer. */
 	ScriptedChatModel quietPhases() {
-		return plan().plan().plan();
+		return quiet().quiet().quiet();
 	}
 
-	/** Answers INVESTIGATE and KNOWLEDGE with a plan and no tool call each. */
+	/** Answers INVESTIGATE and KNOWLEDGE with no text and no tool call each. */
 	ScriptedChatModel quietPhasesAfterTriage() {
-		return plan().plan();
+		return quiet().quiet();
 	}
 
 	/** Answers the warm-up with {@code answer} instead of {@code OK}, for every run from now on. */

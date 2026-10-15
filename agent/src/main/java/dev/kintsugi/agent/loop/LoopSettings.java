@@ -12,7 +12,7 @@ import dev.kintsugi.agent.lab.Phase;
  * are fixed by the spec; the model-call budget, the incident's time budget and the warm-up's bound are settings, so
  * tests can make them small.
  *
- * @param maxModelCalls model calls per incident, 12; the warm-up is not one of them
+ * @param maxModelCalls model calls per incident, 15 (12 before T5c12); the warm-up is not one of them
  * @param incidentTimeout wall-clock time per incident from the end of its warm-up, tool calls included, 45 minutes
  * @param warmUpTimeout how long the warm-up request may take before the run ends {@code FAILED}, 300 s
  */
@@ -24,8 +24,9 @@ public record LoopSettings(int maxModelCalls, Duration incidentTimeout, Duration
 
 	/**
 	 * Calls per incident refused as a placeholder or a repeat without consuming any unit (T5c9); later ones consume a
-	 * unit like a call that runs. Each uncounted refusal can add one model answer to a phase, so a valid run makes at
-	 * most {@code TOOL_BUDGET + UNCOUNTED_REFUSALS} answers plus 2 report attempts, 12, within the model-call budget.
+	 * unit like a call that runs. Each uncounted refusal can add one model answer to a phase, and so can each phase's
+	 * one retry (T5c12), so a valid run makes at most {@code TOOL_BUDGET + UNCOUNTED_REFUSALS + 3} answers plus 2 report
+	 * attempts, 15, within the model-call budget.
 	 */
 	public static final int UNCOUNTED_REFUSALS = 2;
 

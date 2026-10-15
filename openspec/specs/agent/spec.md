@@ -19,7 +19,7 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 | HTTP port **(chosen)** | 8086, next to mcp-tools' 8085 |
 | `demo` profile | the one-shot question of the hello-tool demo: no web server, no database, no incident API |
 | One incident at a time **(chosen)** | a laptop CPU serves one model call at a time |
-| Run budgets | `kintsugi.agent.loop`: `max-model-calls` 12, `incident-timeout` 45 min (30 min before T5c5), `warm-up-timeout` 300 s (the human's decision of 2026-10-12, from the measured CPU latency of 42 to 84 s per call; the incident budget raised in T5c5 to fit the longer call deadlines); the 8-call tool budget and the phases' allowances are fixed in code |
+| Run budgets | `kintsugi.agent.loop`: `max-model-calls` 15 (12 before T5c12), `incident-timeout` 45 min (30 min before T5c5), `warm-up-timeout` 300 s (the human's decision of 2026-10-12, from the measured CPU latency of 42 to 84 s per call; the incident budget raised in T5c5 to fit the longer call deadlines); the 8-call tool budget and the phases' allowances are fixed in code |
 | Leakage | no prompt, schema, tool description or log line of the agent names a fault id (F1 to F8), the fault catalog, the fault-injector or a symptom-to-cause mapping |
 
 ## Requirements
@@ -149,7 +149,7 @@ The loop MUST run the phases in this order, offering the model only the tools of
 | `KNOWLEDGE` | `search_runbooks` | at most 2 |
 | `CONCLUDE` | none | 0 |
 
-A phase MUST end when the model answers without a tool call or the phase's cap is reached. Each model answer in a phase is recorded as an `ACT` step (its text and the calls it requested in `model_output`), followed by one `TOOL_CALL` step per requested call. Code MUST check each tool call the model requests, in order, before running it:
+A phase MUST end when the model answers without a tool call or the phase's cap is reached, with one exception **(T5c12)**: an answer with text but no tool call, while the phase and the incident still allow a tool call, MUST get one retry first. The retry is one `ACT` call built like the others, the same messages with its own instruction last: `Your previous answer made no tool call, so nothing ran. Make exactly one tool call now, ...`, with no plan asked for. Its answer is handled like any other, except that a second answer without a tool call ends the phase. A phase gets at most one retry, whether its tool calls come before or after it. An answer with no text and no tool call is the `ACT` task's way to move on and ends the phase at once. The retry goes through the model-call budget, its `ACT` deadline and the incident's time left like any `ACT` call, and consumes no tool unit. The answer before a retry is recorded with `summary` `no tool call; one retry asks for a tool call`, and the retry's own `ACT` step starts its `summary` with `retry: `. Each model answer in a phase is recorded as an `ACT` step (its text and the calls it requested in `model_output`), followed by one `TOOL_CALL` step per requested call. Code MUST check each tool call the model requests, in order, before running it:
 
 1. If the phase's allowance or the incident's 8-call tool budget has no unit left, the call MUST NOT run, MUST be recorded with `tool_outcome` `REFUSED_BUDGET`, and consumes nothing, since nothing is left. The phase then ends, and every later call of the same answer is refused the same way.
 2. A call to an offered tool that is not worth running MUST NOT run **(T5c9)**:
@@ -160,7 +160,9 @@ A phase MUST end when the model answers without a tool call or the phase's cap i
 3. Otherwise the call consumes one unit of the incident's tool budget and one unit of the phase's allowance, whether it then runs or is refused.
 4. A call to a tool not offered in the current phase, including an unknown name, MUST NOT run and MUST be recorded with `tool_outcome` `REFUSED_PHASE`. It has already consumed its units, so a model that keeps asking for the wrong tool cannot loop.
 
-Why (T5c9, the human's decision of 2026-10-14 after the fifth full run): in all three incidents the `INVESTIGATE` plan sent `get_order_trace` with the literal `"<SELECT_A_PENDING_ORDER_ID>"`, and two incidents repeated `recent_events source=payment` with the same arguments; each spent one of the 8 tool calls for nothing, and the budget ran out before the decisive call. Why a cap: a refusal that consumes nothing leaves the phase open, so a model that keeps sending one would only stop at the model-call budget, which ends the run without a report. With at most 2 uncounted refusals, a valid run makes at most 8 + 2 `ACT` answers and 2 report attempts, 12, the model-call budget.
+Why (T5c9, the human's decision of 2026-10-14 after the fifth full run): in all three incidents the `INVESTIGATE` plan sent `get_order_trace` with the literal `"<SELECT_A_PENDING_ORDER_ID>"`, and two incidents repeated `recent_events source=payment` with the same arguments; each spent one of the 8 tool calls for nothing, and the budget ran out before the decisive call. Why a cap: a refusal that consumes nothing leaves the phase open, so a model that keeps sending one would only stop at the model-call budget, which ends the run without a report. With at most 2 uncounted refusals, a valid run made at most 8 + 2 `ACT` answers and 2 report attempts, 12, the model-call budget (15 since T5c12, with one retry per phase; see "Budgets").
+
+Why the retry (T5c12, the human's decision of 2026-10-15 after the eighth full run): F1's `INVESTIGATE` answer wrote its plan, then described its calls in Markdown, and was cut at its cap with no tool call; the phase ended with its 4 calls unused, and the investigation never ran. In three runs in a row the `KNOWLEDGE` answer also wrote its calls as Markdown, so no runbook was ever searched. Why only an answer with text: an empty answer is what the `ACT` task asks for when the phase's tools cannot help any more, so retrying it would override the model's choice and spend a call.
 
 A tool call never consumes the model-call budget: the model answer that requested it is the one model call.
 
@@ -188,8 +190,30 @@ The definitions of a phase's tools are listed at the start of the phase, before 
 
 #### Scenario: Phase ends without a tool call
 - GIVEN the loop is in `INVESTIGATE` after one tool call
-- WHEN the model answers without a tool call
-- THEN the loop moves to `KNOWLEDGE`
+- WHEN the model answers with no text and no tool call
+- THEN the loop moves to `KNOWLEDGE`, with no retry
+
+#### Scenario: An answer with text but no tool call gets one retry (T5c12)
+- GIVEN the loop starts `INVESTIGATE` with 4 calls left and 7 in the incident
+- WHEN the model's answer holds a valid plan and its calls described in Markdown, cut at 384 tokens, and no tool call
+- THEN its `ACT` step's summary is `no tool call; one retry asks for a tool call; answer cut at 384 tokens; plan valid`
+- AND the next call has the same messages but its instruction, which asks for exactly one tool call now and no plan, shows the plan and `Tool calls left: 4 in this phase, 7 in the incident`, offers the phase's tools and carries `num_predict` 160
+- AND when the retry's answer requests `search_logs`, its `ACT` step's summary is `retry: 1 tool call(s)`, the call runs, and the phase goes on
+
+#### Scenario: The retry also makes no tool call (T5c12)
+- GIVEN `TRIAGE`'s first answer held a plan and no tool call
+- WHEN the retry's answer has text and no tool call either
+- THEN its `ACT` step's summary is `retry: no tool call; the phase ends`, and the loop moves to `INVESTIGATE`
+
+#### Scenario: At most one retry per phase (T5c12)
+- GIVEN `TRIAGE` already had its retry, which requested `status_summary`
+- WHEN a later answer of `TRIAGE` has text and no tool call
+- THEN its summary is `no tool call; the phase ends`, and the loop moves to `INVESTIGATE`
+
+#### Scenario: The retry is a model call like the others (T5c12)
+- GIVEN a model-call budget of 2, or an `ACT` deadline the retry's answer does not meet
+- WHEN `TRIAGE`'s first answer has text and no tool call
+- THEN the retry is made, and the next call ends the run `BUDGET_EXCEEDED`, or the retry itself ends it `TIMED_OUT` with `model call ACT in TRIAGE took longer than <deadline>`
 
 #### Scenario: Several calls in one answer
 - GIVEN the loop is in `TRIAGE` with 2 calls left
@@ -226,9 +250,9 @@ The first model call of `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE` MUST ask for the
 | Field | Rule |
 |-------|------|
 | `hypotheses` | 1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, with the report's enums and `why` at most 300 characters **(T5c10; 200 before)** |
-| `nextTools` | 0 to 4 names, each one of the current phase's tools **(chosen)** |
+| `nextTools` | 0 to 4 names, each one of the current phase's tools **(chosen)**; a name of a tool outside the phase is dropped, not an error **(T5c12)** |
 
-No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A valid plan is shown, as `Your plan for this phase:`, in the phase's later prompts only: a new phase and the report start without it **(T5c8)**. Why 300 characters (T5c10): in the sixth full run plans were rejected in every incident for a `why` just over 200, often because it starts with the `toolCallId` it cites; a rejected plan has no retry, so its phase ran without one.
+No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A `nextTools` entry that is a string naming a tool outside the phase is dropped and the plan stays valid when its other fields are: the verdict reads `plan valid; dropped: nextTools[<i>] "<name>" is not a tool of <phase>, which offers <tools>`, one item per entry, joined by `; `, and the plan kept, and shown later, is the one without the dropped entries; an entry that is not a string, or more than 4 entries, still makes it invalid **(T5c12)**. A valid plan is shown, as `Your plan for this phase:`, in the phase's later prompts only: a new phase and the report start without it **(T5c8)**. Why 300 characters (T5c10): in the sixth full run plans were rejected in every incident for a `why` just over 200, often because it starts with the `toolCallId` it cites; a rejected plan has no retry, so its phase ran without one.
 
 The plan's task MUST say, in `TRIAGE`, that the hypotheses name at least two different services along the call path; in a later phase, that the plan is a fresh one written from the results so far, whose hypotheses each start their `why` with the `toolCallId` that supports them (`toolCallId=3: ...`), and that a hypothesis no result supports is dropped **(T5c8)**. These are asked, not checked: code still checks only the shape above. Why (T5c7): in the fourth full run the `TRIAGE` plan, written before any tool call, named payment-service, inventory-service and postgres in all three incidents; it was then shown verbatim as "Latest plan" in every later prompt, the tool arguments followed it, and the services it left out were never queried. A check would only turn a plan `invalid` without a retry, and so hide it from the phase's later prompts, which buys nothing; the wording is cheaper and the verdicts stay comparable across runs.
 
@@ -239,11 +263,15 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 - WHEN the model answers with a valid plan in its text and a `status_summary` call
 - THEN one `ACT` step records both, with `summary` `1 tool call(s); plan valid`, and the call runs
 
-#### Scenario: Plan with a tool of another phase
-- GIVEN the loop starts `INVESTIGATE`
-- WHEN the model's plan lists `search_runbooks` in `nextTools`
-- THEN the `ACT` step's summary says `plan invalid:` with the error naming `nextTools[0]`
-- AND the run goes on, and no plan is shown in the phase's later prompts
+#### Scenario: Plan with a tool of another phase (T5c12)
+- GIVEN the loop starts `KNOWLEDGE`
+- WHEN the model's plan lists `search_logs` and `search_runbooks` in `nextTools`, with a `search_runbooks` call
+- THEN the `ACT` step's summary is `1 tool call(s); plan valid; dropped: nextTools[0] "search_logs" is not a tool of KNOWLEDGE, which offers search_runbooks`
+- AND the phase's next prompt shows the plan with `"nextTools":["search_runbooks"]`
+
+#### Scenario: A plan invalid for another reason stays invalid (T5c12)
+- WHEN a plan has no hypotheses, or a `nextTools` entry that is not a string, besides an entry outside the phase
+- THEN the `ACT` step's summary says `plan invalid:` with those errors, and no plan is shown in the phase's later prompts
 
 #### Scenario: No plan in the text
 - WHEN the first answer of a phase holds tool calls and no JSON object in its text
@@ -265,7 +293,7 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 | Budget | Value | On hitting it |
 |--------|-------|---------------|
 | Tool calls | 8 per incident, the sum of the phase caps | further requests are refused (`REFUSED_BUDGET`) and the loop moves on to the next phase |
-| Model calls **(chosen)** | 12 per incident; the warm-up is not one | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 12 calls is used up`. A valid run makes at most 12 (each phase's answers are at most its allowance, 8 in all, plus one per uncounted refusal, at most 2 **(T5c9)**, plus 2 report attempts), so this is a guard against a loop bug |
+| Model calls **(chosen)** | 15 per incident (12 before T5c12); the warm-up is not one | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 15 calls is used up`. A valid run makes at most 15 (each phase's answers are at most its allowance, 8 in all, plus one per uncounted refusal, at most 2 **(T5c9)**, plus one retry per phase, 3 **(T5c12)**, plus 2 report attempts), so this is a guard against a loop bug |
 | One model call **(T5c4, T5c5)** | per task, `kintsugi.agent.model.call-timeout`: 300 s for an `ACT` call (`act`), 420 s for a `REPORT` call (`report`); never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call and its task's deadline (`model call ACT in <phase> took longer than 300 s`, `model call REPORT in CONCLUDE took longer than 420 s`), or the incident when its time ran out first |
 | One incident **(T5c5)** | 45 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 45 min, ...` |
 
@@ -319,13 +347,13 @@ Every model call MUST carry Ollama's `num_predict`, the most tokens its answer m
 | Call | Cap | Why |
 |------|-----|-----|
 | a phase's first `ACT` answer (`first-act`) | 384 | it carries the plan and its tool calls. The first full run (2026-10-14) measured plans of 681 to 695 characters, about 170 to 200 tokens, with one tool call; 384 leaves about twice that. At the measured 2.9 tokens/s it takes at most about 130 s of writing, inside the 300 s `ACT` deadline |
-| a later `ACT` answer (`act`) | 160 | it only requests tool calls, or ends the phase with no text. The same run measured 30 to 66 tokens for one or two calls; 160 holds four, the most a phase allows, in about 55 s. The answer that passed the old 180 s deadline was a 650 to 800-token Markdown summary of the tool results |
+| a later `ACT` answer (`act`), and a phase's retry **(T5c12)** | 160 | it only requests tool calls, or ends the phase with no text; the retry asks for one call and no plan, so it needs no room for one. The same run measured 30 to 66 tokens for one or two calls; 160 holds four, the most a phase allows, in about 55 s. The answer that passed the old 180 s deadline was a 650 to 800-token Markdown summary of the tool results |
 | a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) fits the 420 s `REPORT` deadline with room for a slow prompt read. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
 | the warm-up | 1 | "The warm-up" |
 
 Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:
 
-- a cut `ACT` answer is recorded with `answer cut at <cap> tokens` in its step's `summary` (after the tool-call count, before the plan's verdict), and its tool calls, if any, are checked and run as usual; with no tool call it ends the phase, like any answer without one;
+- a cut `ACT` answer is recorded with `answer cut at <cap> tokens` in its step's `summary` (after the tool-call count, before the plan's verdict), and its tool calls, if any, are checked and run as usual; with no tool call it is handled like any answer with text and no tool call, so it gets the phase's retry if it has not had it **(T5c12)**;
 - a cut `REPORT` answer that fails the schema or the evidence check gets, first in its list of errors, `the answer was cut at <cap> tokens before it ended; write a shorter report, ...`; the retry rules of "Evidence is checked" apply unchanged. A cut answer that still passes both checks is accepted.
 
 #### Scenario: Caps by call
@@ -335,7 +363,8 @@ Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it det
 #### Scenario: A cut answer that summarises
 - GIVEN a later `ACT` answer in `TRIAGE` cut at its cap, with Markdown text and no tool call
 - WHEN the loop records it
-- THEN the `ACT` step's summary is `no tool call; the phase ends; answer cut at 160 tokens`, and the run moves to `INVESTIGATE`
+- THEN the `ACT` step's summary is `no tool call; one retry asks for a tool call; answer cut at 160 tokens`, and the phase's retry follows **(T5c12)**
+- AND when the retry's answer has no tool call either, the run moves to `INVESTIGATE`
 
 #### Scenario: A cut plan
 - GIVEN a phase's first answer cut in the middle of its plan, with one tool call

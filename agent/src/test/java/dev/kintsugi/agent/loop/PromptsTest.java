@@ -64,6 +64,20 @@ class PromptsTest {
 	}
 
 	@Test
+	void theRetryAsksForExactlyOneToolCallNowAndNoPlan() {
+		// The eighth live run: F1's INVESTIGATE answer wrote its plan, then described its calls in Markdown (T5c12).
+		String retry = Prompts.actRetry(new Prompts.State(Phase.INVESTIGATE, 4, 6, null));
+
+		assertThat(retry).startsWith("Phase: INVESTIGATE")
+			.contains("Your previous answer made no tool call")
+			.contains("exactly one tool call now")
+			.contains("no plan")
+			.doesNotContain("first write your plan")
+			.doesNotContain("hypotheses")
+			.doesNotContain("answer with no text");
+	}
+
+	@Test
 	void aTriagePlanCoversTwoServicesOnTheCallPath() {
 		String triage = Prompts.act(new Prompts.State(Phase.TRIAGE, 2, 8, null), true);
 

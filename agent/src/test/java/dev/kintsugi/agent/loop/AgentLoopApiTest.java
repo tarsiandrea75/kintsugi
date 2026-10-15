@@ -75,7 +75,7 @@ class AgentLoopApiTest {
 	@Test
 	void anIncidentPostedToTheApiRunsToCompletion() throws Exception {
 		MODEL.planned(call("status_summary", "{\"table\":\"orders\"}"))
-			.text("done")
+			.quiet()
 			.quietPhasesAfterTriage()
 			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(2, "status_summary", "PAYMENT_PENDING")));
 		assertThat(this.runner).isInstanceOf(AgentLoop.class);

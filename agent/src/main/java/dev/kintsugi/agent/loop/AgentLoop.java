@@ -226,10 +226,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/**
 	 * The phase's tool calls. The model is offered the phase's tools only; each call it requests is checked in order
 	 * (budget, then phase) and runs only when both allow it. The phase ends when the model answers without a tool call
-	 * or nothing is left of the phase's allowance or of the incident's budget. The first answer also carries the
-	 * phase's plan in its text: it is checked and recorded on its {@code ACT} step, and only a valid plan is shown in
-	 * the phase's later calls; a missing or invalid one never ends the run, and is not asked for again. The next phase
-	 * starts without it.
+	 * or nothing is left of the phase's allowance or of the incident's budget. An answer with text but no tool call
+	 * gets one retry per phase first, which asks for one call and no plan (T5c12); an empty answer is the task's way to
+	 * move on, and ends the phase at once. The first answer also carries the phase's plan in its text: it is checked
+	 * and recorded on its {@code ACT} step, and only a valid plan is shown in the phase's later calls; a missing or
+	 * invalid one never ends the run, and is not asked for again. The next phase starts without it.
 	 */
 	private void act(Run run, Phase phase, List<ToolCallback> tools) {
 		int phaseLeft = LoopSettings.ALLOWANCES.get(phase);
@@ -237,8 +238,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		run.plan = null;
 		AssistantMessage lastAnswer = null;
 		List<ToolResponse> lastResponses = List.of();
+		boolean retried = false;
+		boolean retry = false;
 		while (phaseLeft > 0 && run.toolsLeft > 0) {
-			boolean withPlan = lastAnswer == null;
+			boolean withPlan = lastAnswer == null && !retry;
 			// What changes least comes first, so that Ollama reuses the prompt it has already read: the system
 			// message, the evidence before the previous answer, which only grows, then the previous answer's calls
 			// and what they gave, as the model expects tool results, and last the instruction with the budgets left.
@@ -247,10 +250,19 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 				messages.add(lastAnswer);
 				messages.add(ToolResponseMessage.builder().responses(lastResponses).build());
 			}
-			messages.add(new UserMessage(Prompts.act(run.state(phase, phaseLeft), withPlan)));
+			// The retry is rebuilt like any call, the same messages with its own instruction last, and goes through the
+			// same budgets and deadline. It asks for no plan, so it gets the later answers' cap.
+			Prompts.State state = run.state(phase, phaseLeft);
+			messages.add(new UserMessage(retry ? Prompts.actRetry(state) : Prompts.act(state, withPlan)));
 			Answer answer = call(run, ModelTask.ACT, phase, withPlan, messages, tools, null);
 			List<ToolCall> calls = answer.message().getToolCalls();
-			String note = calls.isEmpty() ? "no tool call; the phase ends" : calls.size() + " tool call(s)";
+			// The eighth live run lost F1's INVESTIGATE to an answer that described its calls in Markdown (T5c12).
+			boolean retryNext = calls.isEmpty() && !retried && !answer.text().isBlank();
+			String note = !calls.isEmpty() ? calls.size() + " tool call(s)"
+					: retryNext ? "no tool call; one retry asks for a tool call" : "no tool call; the phase ends";
+			if (retry) {
+				note = "retry: " + note;
+			}
 			if (answer.cut()) {
 				note += "; answer cut at " + answer.cap() + " tokens";
 			}
@@ -260,8 +272,14 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			write(run, new StepRow(run.steps + 1, "ACT", phase.name(), answer.model(), answer.tokens(), null, null,
 					null, null, note, actOutput(answer), answer.latencyMs(), now()));
 			if (calls.isEmpty()) {
-				return;
+				if (!retryNext) {
+					return;
+				}
+				retried = true;
+				retry = true;
+				continue;
 			}
+			retry = false;
 			List<ToolResponse> responses = new ArrayList<>();
 			boolean exhausted = false;
 			for (ToolCall call : calls) {
@@ -310,19 +328,21 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * Reads and checks the plan in the text of a phase's first answer; a valid one becomes the phase's plan.
-	 * @return the verdict for the {@code ACT} step: {@code plan valid}, {@code plan missing} or {@code plan invalid: ...}
+	 * @return the verdict for the {@code ACT} step: {@code plan valid}, with the dropped {@code nextTools} if any,
+	 *     {@code plan missing} or {@code plan invalid: ...}
 	 */
 	private static String plan(Run run, Phase phase, String text) {
 		JsonNode plan = Answers.embedded(text);
 		if (plan == null) {
 			return "plan missing";
 		}
-		List<String> errors = PlanCheck.errors(plan, phase);
-		if (!errors.isEmpty()) {
-			return "plan invalid: " + String.join("; ", errors);
+		PlanCheck.Result checked = PlanCheck.check(plan, phase);
+		if (!checked.errors().isEmpty()) {
+			return "plan invalid: " + String.join("; ", checked.errors());
 		}
-		run.plan = JSON.writeValueAsString(plan);
-		return "plan valid";
+		// The plan shown later is the checked one, without the nextTools the phase does not offer (T5c12).
+		run.plan = JSON.writeValueAsString(checked.plan());
+		return checked.dropped().isEmpty() ? "plan valid" : "plan valid; dropped: " + String.join("; ", checked.dropped());
 	}
 
 	/**

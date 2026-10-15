@@ -47,13 +47,15 @@ class DefaultBudgetsTest {
 	}
 
 	@Test
-	void theModelCallBudgetHoldsAValidRunWithEveryUncountedRefusal() {
-		// Each phase's answers are at most its allowance (8 in all); each uncounted refusal can add one answer (T5c9);
-		// then 2 report attempts. A valid run never reaches the model-call budget, which only guards against loop bugs.
-		int longestValidRun = LoopSettings.TOOL_BUDGET + LoopSettings.UNCOUNTED_REFUSALS + 2;
+	void theModelCallBudgetHoldsAValidRunWithEveryUncountedRefusalAndEveryRetry() {
+		// Each phase's answers are at most its allowance (8 in all); each uncounted refusal can add one answer (T5c9),
+		// and so can each evidence phase's one retry (T5c12); then 2 report attempts. A valid run never reaches the
+		// model-call budget, which only guards against loop bugs.
+		int phaseRetries = 3;
+		int longestValidRun = LoopSettings.TOOL_BUDGET + LoopSettings.UNCOUNTED_REFUSALS + phaseRetries + 2;
 
 		assertThat(LoopSettings.UNCOUNTED_REFUSALS).isEqualTo(2);
-		assertThat(loop.maxModelCalls()).isEqualTo(12).isGreaterThanOrEqualTo(longestValidRun);
+		assertThat(loop.maxModelCalls()).isEqualTo(15).isGreaterThanOrEqualTo(longestValidRun);
 	}
 
 	@Test

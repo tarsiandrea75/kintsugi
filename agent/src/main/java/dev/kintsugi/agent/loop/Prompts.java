@@ -81,6 +81,11 @@ final class Prompts {
 			summarise or explain the results above: code reads only your tool calls, and the report comes at the \
 			end of the run.""";
 
+	private static final String RETRY_TASK = """
+			Task: Your previous answer made no tool call, so nothing ran. Make exactly one tool call now, to the \
+			tool of this phase most likely to show the cause, with real argument values. Write no plan and no \
+			text: code reads only the tool call.""";
+
 	private static final String REPORT_TASK = """
 			Task: write the final report as a JSON object with these fields. rootCauseService and \
 			rootCauseCategory, from the values listed in the system message. summary: 1 to 500 characters. \
@@ -124,6 +129,15 @@ final class Prompts {
 		String task = withPlan
 				? PLAN_AND_ACT_TASK.formatted(state.phase() == Phase.TRIAGE ? FIRST_PLAN : FRESH_PLAN) : ACT_TASK;
 		return state.text() + "\n\n" + task + " " + callLimit(state);
+	}
+
+	/**
+	 * The instruction of a phase's one retry (T5c12), after an answer with text but no tool call while the phase still
+	 * allows calls: in the eighth live run F1's INVESTIGATE answer wrote its plan, then described its calls in Markdown,
+	 * and the phase ended unrun. It asks for one call and no plan, so the answer fits the later answers' cap.
+	 */
+	static String actRetry(State state) {
+		return state.text() + "\n\n" + RETRY_TASK;
 	}
 
 	/**

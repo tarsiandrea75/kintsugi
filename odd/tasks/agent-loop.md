@@ -137,6 +137,11 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - the ACT task states how many tool calls this phase still allows.
 
     Tests first; spec, ADR-010 "Amended in T5c11". Route: delegated writer.
+  - [x] **T5c12 — no lost phases (the human's decision of 2026-10-15, after the eighth run):**
+    - an `ACT` answer with no tool call, while the phase still allows calls, gets one short retry that asks for one tool call now and no plan; a second answer with no tool call ends the phase as today. The retry is one model call per phase at most.
+    - the plan check drops `nextTools` entries outside the phase (and records them as dropped) instead of rejecting the plan; the plan stays valid when its other fields are valid.
+
+    Tests first; spec, ADR-010 "Amended in T5c12". Route: delegated writer (2+ non-trivial files: `AgentLoop`, `PlanCheck`, `Prompts`, their tests, spec, ADR).
 
 ## Progress
 
@@ -428,7 +433,16 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Proposed T5c12:
     - an ACT answer with no tool call, while the phase has calls left, gets one short retry that asks for a tool call now and no plan;
     - the plan check drops `nextTools` entries outside the phase instead of rejecting the plan.
+- 2026-10-15: T5c12 done by a delegated writer, in one unit (agent only). Route: delegated writer (2+ non-trivial files: `AgentLoop`, `PlanCheck`, `Prompts`, their tests, the spec, ADR-010).
+  - The retry: an `ACT` answer with text but no tool call, while the phase and the incident still allow a call, gets one more `ACT` call per phase, with the same messages and `Prompts.actRetry` last (`Your previous answer made no tool call, so nothing ran. Make exactly one tool call now, ... Write no plan and no text`). It goes through `call()`, so the model-call budget, the `ACT` deadline and the incident's time left apply; it asks for no plan, so it gets the `act` cap (160), not `first-act`. The answer before it is recorded `no tool call; one retry asks for a tool call`, and the retry's `ACT` step starts `retry: `. A second answer without a tool call ends the phase, and a later one in the same phase gets no retry.
+  - Accepted design choice: an answer with no text and no tool call ends the phase at once, with no retry. It is the `ACT` task's documented exit ("answer with no text and no tool call, and the run moves on"); retrying it would force a call in every phase.
+  - The plan check: `PlanCheck.check` returns `Result(errors, dropped, plan)`; a string `nextTools` entry outside the phase is dropped and named in the verdict (`plan valid; dropped: nextTools[0] "search_logs" is not a tool of KNOWLEDGE, which offers search_runbooks`), and the plan shown later is the one without it. A non-string entry, more than 4 entries, and every other rule still invalidate the plan.
+  - Budget: `max-model-calls` 12 → 15 (`application.yaml`). Each phase's retry can add one answer, so a valid run makes at most 8 + 2 (uncounted refusals) + 3 (retries) `ACT` answers and 2 report attempts; at 12 a run using retries could end `BUDGET_EXCEEDED` without a report. The incident's time budget is unchanged: it holds the longest run measured, not the worst case.
+  - RED observed (10 failures, with compile-only stubs for `PlanCheck.check` and `Prompts.actRetry`): `AgentLoopTest` 6, `PlanCheckTest` 3 (new class), `PromptsTest` 1; then `DefaultBudgetsTest` 1 (expected 15) until the yaml changed. About 25 existing `AgentLoopTest` scripts ended phases with a non-empty answer; the quiet-phase helpers now answer with no text (`ScriptedChatModel.quiet()`), and `aCutAnswer...` and `aMissingOrInvalidPlan...` were rewritten for the new rules.
+  - GREEN: `agent` 295 tests (surefire XML), 0 failures, 0 errors. Specs: `openspec/specs/agent/spec.md` ("Phases and their tools", "The plan", "Budgets", "Answer caps", with seven new or rewritten scenarios). ADR-010 has "Amended in T5c12".
+  - Follow-up: the comment above `max-model-calls` in `application.yaml` still says a valid run makes at most 10 model calls and 12 is a guard; only the value was in scope.
+  - Authored lines: about 450 (code about 90, tests about 250, spec and ADR about 110), plus this entry.
 
 ## Next step
 
-T5c12 (retry an ACT answer with no tool call; drop out-of-phase nextTools), awaiting the human's approval; then the ninth full run (T5c3).
+The ninth full run (T5c3) on the T5c12 commit.
