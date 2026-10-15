@@ -33,14 +33,21 @@ trap 'rm -f "$tmp_bundle"' EXIT
 git -C "$repo_dir" bundle create "$tmp_bundle" --all
 git -C "$repo_dir" bundle verify --quiet "$tmp_bundle" >/dev/null
 
-# Every local branch tip must be in the bundle.
+# Every local branch tip and every tag must be in the bundle.
 bundle_refs="$(git bundle list-heads "$tmp_bundle")"
 while read -r sha ref; do
   grep -qx "$sha $ref" <<<"$bundle_refs" || { echo "Ref $ref ($sha) is missing from the bundle." >&2; exit 1; }
 done < <(git -C "$repo_dir" for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags)
 
+# Checksum the temporary file under the final name, then swap both in. The old checksum is removed first, so an
+# interrupted run leaves a bundle with no checksum (recompute it) instead of a good bundle with a wrong one.
+tmp_sum="$backup_dir/.$name.sha256.tmp"
+trap 'rm -f "$tmp_bundle" "$tmp_sum"' EXIT
+echo "$(sha256sum < "$tmp_bundle" | cut -d' ' -f1)  $name" > "$tmp_sum"
+rm -f "$backup_dir/$name.sha256"
 mv -f "$tmp_bundle" "$backup_dir/$name"
-(cd "$backup_dir" && sha256sum "$name" > "$name.sha256" && sha256sum --quiet -c "$name.sha256")
+mv -f "$tmp_sum" "$backup_dir/$name.sha256"
+(cd "$backup_dir" && sha256sum --quiet -c "$name.sha256")
 
 echo "Backup written: $backup_dir/$name"
 echo "Refs: $(wc -l <<<"$bundle_refs"), HEAD: $(git -C "$repo_dir" rev-parse --short HEAD), size: $(du -h "$backup_dir/$name" | cut -f1)"
