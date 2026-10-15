@@ -148,9 +148,20 @@ In the fifth run all three incidents ended `COMPLETED` and one matched, but the 
 
 The new outcomes need migration V3, which widens the `tool_outcome` check. The evidence check treats them as refused, like the other `REFUSED_` outcomes. The prompt lines add about 60 tokens to the system message, read once per incident and then reused.
 
+### Amended in T5c10: log groups, citable calls, log services and longer plan reasons
+
+The sixth run scored 0/3. The human decided (2026-10-15) on four deterministic fixes:
+
+- **Log summaries group lines alike but for numbers and ids.** F1's search of gateway-mock returned 20 lines, newest first: 9 per-request `Authorize answered: ... latency_ms=10000 ...` lines and 11 one-off startup lines. mcp-tools kept the right lines; the agent's summarizer lost them. It grouped by exact text, so each request line, with its own order id, was seen once, and ties went to the earliest lines: the 5 shown were Spring and Tomcat startup lines. A message's template now replaces UUIDs, hex ids (8 or more characters holding a digit and a letter) and numbers (decimals and timestamp parts included); a group shows its newest message, with its count and newest time, and groups of equal size come newest first. Rejected: raising the 5 shown (it costs prompt in every later call and still loses to 20 one-off lines); filtering startup lines by name (a list of noise to keep up, and it hides a restart, which is evidence). The cost: values of one template (`latency_ms=0` and `latency_ms=10000`) count together, and only the newest is shown.
+- **The report task names the citable calls.** Both reports of F2 cited a refused call (`REFUSED_DUPLICATE`, then `REFUSED_PLACEHOLDER`) and the run ended `INVALID_REPORT`. The report task now ends `Citable toolCallIds: ...` and, when there are any, `Refused calls did not run and are not citable: ...`. The evidence check still rejects such a citation, and its retry already names every invalid item at once.
+- **mcp-tools says postgres has no logs.** Every incident called `count_logs service=postgres` and got `INVALID_PARAMETER`. The `search_logs` and `count_logs` descriptions now list the four services with logs and say postgres has none.
+- **A hypothesis's `why` may hold 300 characters** (200 before): plans were rejected in every incident for a `why` just over 200, and a rejected plan has no retry.
+
+The report task grows by about 25 tokens; the log tool definitions by about 25.
+
 ### Plan and report schemas
 
-- **Plan:** `hypotheses` (1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`), `nextTools` (0 to 4 of the phase's tools). Same enums as the report.
+- **Plan:** `hypotheses` (1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, `why` at most 300 characters since T5c10), `nextTools` (0 to 4 of the phase's tools). Same enums as the report.
 - **Report (human's taxonomy):** `rootCauseService` is `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN`; `rootCauseCategory` is `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN`. These are the truth's own column vocabularies, generic SRE terms that reveal no fault id. Scoring is a mechanical equality on both fields.
 - The model writes `rootCauseService`, `rootCauseCategory`, `summary` (at most 500 characters), `confidence` (0 to 1) and `evidence[]`. Code adds `incidentId` and `stepsUsed`, which the model cannot know reliably.
 - Each evidence item is `{toolCallId, tool, quote, why}`. `toolCallId` is the step number code printed at the head of that tool's summary. A quote must be a substring of the full recorded output, after whitespace normalization; quoting from the summary works because summaries copy text verbatim. Since T5c5 a quote is at most 160 characters, a distinctive fragment rather than a whole line.

@@ -187,7 +187,7 @@ class ReportCheckTest {
 
 	@Test
 	void theReportTaskAsksForAShortFragmentPerQuote() {
-		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of());
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), STEPS.values());
 		assertThat(task).contains("at most 160 characters").contains("not the whole line");
 	}
 
@@ -203,7 +203,8 @@ class ReportCheckTest {
 			items.append(i == 0 ? "" : ",")
 				.append("{\"timestamp\":\"2026-10-08T10:00:%02dZ\",\"service\":\"order-service\",".formatted(i))
 				.append("\"level\":\"WARN\",\"untrustedText\":\"x : failure ")
-				.append(i)
+				// A letter, not a number: lines that differ only in a number form one group (T5c10).
+				.append("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN".charAt(i))
 				.append(' ')
 				// Quotes, which the summary escapes, so that five lines no longer fit.
 				.append("\\\"".repeat(190))

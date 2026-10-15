@@ -11,13 +11,15 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import tools.jackson.databind.JsonNode;
 
 /**
  * One summarizer per tool, for an {@code OK} result (agent spec, "Summaries built in code"). Each returns the lines
  * after the header. Every "top N" sorts by its value, then by the time of the item's first occurrence (its position
- * when it has no time), then by its text, so no tie is left to the order of the output or of a hash map.
+ * when it has no time), then by its text, so no tie is left to the order of the output or of a hash map. Log groups
+ * are the exception: they break a tie by their newest time, newest first ({@link #searchLogs}).
  */
 final class Summarizers {
 
@@ -55,6 +57,15 @@ final class Summarizers {
 	static final String LOGGER_SEPARATOR = " : ";
 
 	private static final Comparator<Instant> EARLIEST_FIRST = Comparator.nullsLast(Comparator.naturalOrder());
+
+	private static final Comparator<Instant> NEWEST_FIRST = Comparator.nullsLast(Comparator.reverseOrder());
+
+	private static final Pattern UUID = Pattern
+		.compile("\\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\b");
+
+	private static final Pattern HEX_ID = Pattern.compile("\\b(?=[0-9a-fA-F]*\\d)(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{8,}\\b");
+
+	private static final Pattern NUMBER = Pattern.compile("\\d+(?:\\.\\d+)*");
 
 	private Summarizers() {
 	}
@@ -116,8 +127,11 @@ final class Summarizers {
 	}
 
 	/**
-	 * The 5 most frequent distinct messages (the text after the logger separator), each at most 200 characters, with
-	 * its count and newest timestamp.
+	 * The 5 largest groups of log messages (the text after the logger separator), each shown by its newest message, at
+	 * most 200 characters, with its count and newest timestamp. Messages that differ only in numbers, UUIDs, hex ids
+	 * and times form one group (T5c10): grouped by exact text, the sixth live run's per-request gateway lines were each
+	 * seen once, and the oldest one-off startup lines filled the 5 shown. Groups of equal size come newest first, so a
+	 * current signal outranks old noise.
 	 */
 	static List<String> searchLogs(JsonNode result) {
 		Map<String, Message> messages = new LinkedHashMap<>();
@@ -125,20 +139,33 @@ final class Summarizers {
 			String line = item.path("untrustedText").asString("");
 			int separator = line.indexOf(LOGGER_SEPARATOR);
 			String text = separator < 0 ? line : line.substring(separator + LOGGER_SEPARATOR.length());
-			messages.computeIfAbsent(text, Message::new).add(item);
+			messages.computeIfAbsent(template(text), Message::new).add(item, text);
 		}
 		List<Message> ranked = new ArrayList<>(messages.values());
 		ranked.sort(Comparator.comparingInt(Message::count)
 			.reversed()
-			.thenComparing(Message::first, EARLIEST_FIRST)
-			.thenComparing(Message::text));
+			.thenComparing(Message::newest, NEWEST_FIRST)
+			.thenComparing(Message::template)
+			.thenComparing(Message::example));
 		List<String> lines = new ArrayList<>();
-		lines.add("lines=" + items(result).size() + " distinctMessages=" + ranked.size() + ", most frequent first");
+		lines.add("lines=" + items(result).size() + " groups=" + ranked.size()
+				+ " (same text but for numbers and ids), most frequent then newest first");
 		ranked.stream()
 			.limit(LOG_MESSAGES)
 			.forEach(m -> lines.add("count=" + m.count() + " newest=" + quote(m.newestTimestamp(), 40) + " untrustedText="
-					+ quote(m.text(), MESSAGE_CHARS)));
+					+ quote(m.example(), MESSAGE_CHARS)));
 		return lines;
+	}
+
+	/**
+	 * The message with its variable parts replaced, in this order: UUIDs and hex ids of 8 or more characters holding
+	 * both a digit and a letter become {@code <id>}; then every number, decimals and the parts of a timestamp included,
+	 * becomes {@code #}. Words are kept, so messages that say different things stay apart.
+	 */
+	static String template(String message) {
+		String text = UUID.matcher(message).replaceAll("<id>");
+		text = HEX_ID.matcher(text).replaceAll("<id>");
+		return NUMBER.matcher(text).replaceAll("#");
 	}
 
 	/** {@code service} and {@code count}. */
@@ -288,45 +315,53 @@ final class Summarizers {
 
 	}
 
-	/** One distinct log message: how often it occurred, and its earliest and newest times. */
+	/**
+	 * One group of log messages with the same {@link #template}: how often it occurred, its newest time, and its newest
+	 * message as the example shown (the first one seen while no message has a time).
+	 */
 	private static final class Message {
 
-		private final String text;
+		private final String template;
+
+		private String example;
 
 		private int count;
-
-		private Instant first;
 
 		private Instant newest;
 
 		private String newestTimestamp = "";
 
-		Message(String text) {
-			this.text = text;
+		Message(String template) {
+			this.template = template;
 		}
 
-		void add(JsonNode line) {
+		void add(JsonNode line, String text) {
 			this.count++;
-			Instant at = time(line, "timestamp");
-			if (at != null && (this.first == null || at.isBefore(this.first))) {
-				this.first = at;
+			if (this.example == null) {
+				this.example = text;
 			}
+			Instant at = time(line, "timestamp");
 			if (at != null && (this.newest == null || at.isAfter(this.newest))) {
 				this.newest = at;
 				this.newestTimestamp = line.path("timestamp").asString();
+				this.example = text;
 			}
 		}
 
-		String text() {
-			return this.text;
+		String template() {
+			return this.template;
+		}
+
+		String example() {
+			return this.example;
 		}
 
 		int count() {
 			return this.count;
 		}
 
-		Instant first() {
-			return this.first;
+		Instant newest() {
+			return this.newest;
 		}
 
 		String newestTimestamp() {

@@ -35,6 +35,8 @@ class ToolSummariesTest {
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
+	private static final String LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP";
+
 	/** A JSON string literal as summaries write it: the text between its quotes, escapes included. */
 	private static final Pattern LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
 
@@ -145,14 +147,15 @@ class ToolSummariesTest {
 
 		List<String> body = body(ToolSummaries.summarize(4, "search_logs", OK, ok(items)));
 
-		assertThat(body).containsExactly("lines=20 distinctMessages=1, most frequent first",
+		assertThat(body).containsExactly("lines=20 groups=1 (same text but for numbers and ids), most frequent then newest first",
 				"count=20 newest=\"2026-10-08T10:00:59Z\" untrustedText=\"Payment call failed: Connection refused\"");
 	}
 
 	@Test
-	void tiedLogCountsAreOrderedByFirstTimeThenText() {
-		// Six messages seen 3 times each; F is first seen at 10:00:01, then B and A at 10:00:02 (a tie on both count
-		// and first time, broken by the text), then C, D and E. E, first seen last, is the one left out.
+	void tiedLogCountsAreOrderedByNewestTimeThenText() {
+		// Six messages seen 3 times each, last at 10:20:05 (E), 10:20:04 (D), 10:20:03 (C), 10:20:02 (B and A, a tie on
+		// both count and newest time, broken by the text) and 10:20:01 (F). F, seen last the earliest, is left out
+		// (T5c10: the newest come first, so a current signal is not crowded out by older one-off lines).
 		ArrayNode items = JSON.createArrayNode();
 		String[][] seen = { { "F", "01" }, { "B", "02" }, { "A", "02" }, { "C", "03" }, { "D", "04" }, { "E", "05" } };
 		for (int round = 0; round < 3; round++) {
@@ -165,18 +168,18 @@ class ToolSummariesTest {
 
 		assertThat(body).hasSize(6);
 		assertThat(body.subList(1, 6)).extracting(line -> line.substring(line.indexOf("untrustedText=")))
-			.containsExactly("untrustedText=\"message F\"", "untrustedText=\"message A\"", "untrustedText=\"message B\"",
-					"untrustedText=\"message C\"", "untrustedText=\"message D\"");
-		assertThat(body.get(1)).startsWith("count=3 newest=\"2026-10-08T10:20:01Z\"");
+			.containsExactly("untrustedText=\"message E\"", "untrustedText=\"message D\"", "untrustedText=\"message C\"",
+					"untrustedText=\"message A\"", "untrustedText=\"message B\"");
+		assertThat(body.get(1)).startsWith("count=3 newest=\"2026-10-08T10:20:05Z\"");
 	}
 
 	@Test
 	void theLogMessageIsTheTextAfterTheLoggerAndIsCutAt200Characters() {
 		String summary = ToolSummaries.summarize(4, "search_logs", OK, fixture("search_logs-payment-warn.json"));
 
-		// Three distinct messages seen once each: the earliest comes first.
-		assertThat(body(summary).get(1)).isEqualTo("count=1 newest=\"2026-10-08T16:04:38.926981773Z\" untrustedText="
-				+ "\"Gateway rejected the payment of order 36c8b7c8-169e-4702-8773-5c4436af704c with status 429;"
+		// Three lines that differ only in the order id: one group, shown by its newest line (T5c10).
+		assertThat(body(summary).get(1)).isEqualTo("count=3 newest=\"2026-10-08T16:04:39.051612923Z\" untrustedText="
+				+ "\"Gateway rejected the payment of order 3466912c-ee95-4c93-9a47-1b10c24ebf6f with status 429;"
 				+ " recording it as FAILED\"");
 
 		ArrayNode items = JSON.createArrayNode();
@@ -186,10 +189,42 @@ class ToolSummariesTest {
 	}
 
 	@Test
+	void requestLinesThatDifferOnlyInNumbersAndIdsOutrankStartupNoise() {
+		// The sixth live run's F1 search of gateway-mock: 9 per-request lines and 11 one-off lines, 12 groups. Grouped by exact
+		// text, every line was its own message and the oldest startup lines filled the 5 shown (T5c10).
+		String output = fixture("search_logs-gateway-latency.json");
+
+		List<String> body = body(ToolSummaries.summarize(6, "search_logs", OK, output));
+
+		assertThat(body.get(0)).isEqualTo("lines=20 groups=12 (same text but for numbers and ids), most frequent then newest first");
+		assertThat(body.get(1)).isEqualTo("count=9 newest=\"2026-10-14T23:49:55.505046412Z\" untrustedText=\"Authorize"
+				+ " answered: event=AUTHORIZE order=f80a7232-4864-4bca-819e-f0278f98c7de latency_ms=10000 answered=200"
+				+ " duration_ms=10000\"");
+		assertThat(body.get(2)).contains("Gateway behavior changed");
+		assertThat(String.join("\n", body)).doesNotContain("Starting service [Tomcat]");
+		assertEveryLiteralIsInTheOutput(String.join("\n", body), output);
+	}
+
+	@Test
+	void linesGroupWhenTheyDifferOnlyInNumbersUuidsHexIdsAndTimes() {
+		ArrayNode items = JSON.createArrayNode();
+		log(items, "2026-10-08T10:00:01Z", "Call 1 for 3f2a9c81-0d3e-4b7a-9c1e-2a3b4c5d6e7f took 12 ms at 2026-10-08T10:00:01Z, conn@6d7b001b");
+		log(items, "2026-10-08T10:00:02Z", "Call 22 for 0a1b2c3d-4e5f-4a7b-8c9d-0e1f2a3b4c5d took 3.5 ms at 2026-10-08T10:00:02Z, conn@1f2e3d4c");
+		log(items, "2026-10-08T10:00:03Z", "Call 1 for 3f2a9c81-0d3e-4b7a-9c1e-2a3b4c5d6e7f took 12 ms after a retry");
+
+		List<String> body = body(ToolSummaries.summarize(4, "search_logs", OK, ok(items)));
+
+		assertThat(body).hasSize(3);
+		assertThat(body.get(0)).startsWith("lines=3 groups=2 ");
+		assertThat(body.get(1)).startsWith("count=2 newest=\"2026-10-08T10:00:02Z\" untrustedText=\"Call 22 for");
+		assertThat(body.get(2)).startsWith("count=1 newest=\"2026-10-08T10:00:03Z\"").endsWith("after a retry\"");
+	}
+
+	@Test
 	void anEmptyResultSaysSo() {
 		String summary = ToolSummaries.summarize(4, "search_logs", OK, fixture("search_logs-order-error.json"));
 
-		assertThat(body(summary)).containsExactly("lines=0 distinctMessages=0, most frequent first");
+		assertThat(body(summary)).containsExactly("lines=0 groups=0 (same text but for numbers and ids), most frequent then newest first");
 		assertThat(body(ToolSummaries.summarize(9, "recent_events", OK, ok(JSON.createArrayNode()))))
 			.containsExactly("events=0", "durationMs: none recorded", "newest 0:");
 	}
@@ -198,7 +233,8 @@ class ToolSummariesTest {
 	void anOversizedLogOutputIsCappedTheSameWayEveryTime() {
 		ArrayNode items = JSON.createArrayNode();
 		for (int i = 0; i < 40; i++) {
-			log(items, "2026-10-08T10:00:%02dZ".formatted(i), "distinct failure number " + i + " " + "y".repeat(180));
+			// Letters, not numbers, keep the messages apart: lines that differ only in a number form one group.
+			log(items, "2026-10-08T10:00:%02dZ".formatted(i), "distinct failure " + LETTERS.charAt(i) + " " + "y".repeat(180));
 		}
 		String output = ok(items);
 		assertThat(output.length()).isGreaterThan(8000);
@@ -215,7 +251,7 @@ class ToolSummariesTest {
 		// Five distinct messages, each cut at 200 characters, whose quotes and newlines double in the escaped literal.
 		ArrayNode items = JSON.createArrayNode();
 		for (int i = 0; i < 5; i++) {
-			log(items, "2026-10-08T10:00:0%dZ".formatted(i), i + " " + "\"quoted\"\n".repeat(30));
+			log(items, "2026-10-08T10:00:0%dZ".formatted(i), LETTERS.charAt(i) + " " + "\"quoted\"\n".repeat(30));
 		}
 		String output = ok(items);
 

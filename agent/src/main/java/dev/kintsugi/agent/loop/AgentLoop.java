@@ -378,7 +378,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		List<String> errors = List.of();
 		for (int attempt = 1; attempt <= 2; attempt++) {
 			List<Message> messages = run.opening(0);
-			messages.add(new UserMessage(Prompts.report(run.state(Phase.CONCLUDE, 0), errors)));
+			messages.add(new UserMessage(Prompts.report(run.state(Phase.CONCLUDE, 0), errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(), Schemas.REPORT);
 			JsonNode report = Answers.json(answer.text());
 			errors = ReportCheck.errors(report, run.toolSteps);

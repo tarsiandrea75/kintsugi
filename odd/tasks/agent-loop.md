@@ -125,6 +125,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - the prompt says stuck orders are `PAYMENT_PENDING`, with `PAYMENT_UNAVAILABLE` events, not `PAYMENT_FAILED`, unless the status summary shows them.
 
     Tests first; spec, ADR-010 "Amended in T5c9". Route: delegated writer.
+  - [x] **T5c10 — deterministic fixes from the sixth run (the human's decision of 2026-10-15):**
+    - log results group lines that differ only in numbers and ids into one message template with a count, and the decisive lines are not crowded out by startup noise;
+    - refused steps are not offered as citable evidence to the report;
+    - the log tools' text says postgres has no logs to search;
+    - `hypotheses[].why` is allowed up to 300 characters.
+
+    Tests first; the specs, and ADR-010 "Amended in T5c10". Route: delegated writer.
 
 ## Progress
 
@@ -376,6 +383,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - the KNOWLEDGE plan names a tool outside the phase.
   - The new refusals worked: `REFUSED_PLACEHOLDER` and `REFUSED_DUPLICATE` cost no budget, and F2 then traced a real order.
 
+- 2026-10-15: T5c10 done by a delegated writer, in two units. Route: delegated writer (2+ non-trivial files in two modules: summarizer, prompts, plan check, tool descriptions, tests, two specs, ADR).
+  - Cause of the crowded-out log lines, found in code and in F1's stored step 6: mcp-tools asks Loki for the newest lines (`direction=backward`, `limit` 20), and its output held all 9 `Authorize answered … latency_ms=…` lines. The agent's `Summarizers.searchLogs` lost them: it grouped by exact message text, so each request line (its own order id) was seen once, and the tie on count went to the earliest lines, the startup ones. Loki was not queried: the stored output already shows the real line shapes.
+  - mcp-tools (`c0950b7`): the `search_logs`/`count_logs` descriptions say logs exist only for order-service, payment-service, inventory-service and gateway-mock, and postgres has no logs to search (`ToolInputs.SERVICES` accepts only those four). RED: `McpToolsEndpointTest` 1 failure; GREEN: `mcp-tools` 213 tests (surefire XML), 0 failures, 0 errors.
+  - agent: log messages group by a template (UUIDs and hex ids of 8+ characters with a digit and a letter become `<id>`, numbers `#`), each group shown by its newest message, ranked by count then newest time; the header reads `lines=<n> groups=<m> (same text but for numbers and ids), most frequent then newest first`. On F1's recorded output (new fixture `search_logs-gateway-latency.json`) the first group is `Authorize answered` with count 9 and `latency_ms=10000`. The report task ends `Citable toolCallIds: …` and `Refused calls did not run and are not citable: …`; `ReportCheck` stays the guard, and its retry already names every invalid item at once (`aWrongToolAMissingStepOrARefusedCallIsRejected`). `PlanCheck.MAX_WHY_LENGTH` 300 (200 before), and the plan task says so; the report's `evidence[].why` stays 200.
+  - RED observed (9 failures, with a stub `Prompts.report` overload that ignored the steps): `PromptsTest` 3, `ToolSummariesTest` 6. Two existing tests built "distinct" lines that differ only by a number, which now group; they use letters instead. GREEN: `agent` 277 tests (surefire XML), 0 failures, 0 errors; the `AgentLoopTest` leak check still passes.
+  - Cost: about 25 tokens on the report task, about 25 on the log tools' definitions. Authored lines: about 300 (agent about 280, mcp-tools about 20), plus this entry.
+
 ## Next step
 
-The human decides how to go on after the sixth run; T5c3 stays open.
+The seventh full run (T5c3).

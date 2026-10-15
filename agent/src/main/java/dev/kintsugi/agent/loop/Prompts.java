@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import java.util.Collection;
 import java.util.List;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -59,7 +60,7 @@ final class Prompts {
 
 	private static final String PLAN_AND_ACT_TASK = """
 			Task: first write your plan for this phase in your answer's text, as one JSON object with two fields. \
-			hypotheses: 1 to 3 items, each {rootCauseService, rootCauseCategory, why}, with why at most 200 \
+			hypotheses: 1 to 3 items, each {rootCauseService, rootCauseCategory, why}, with why at most 300 \
 			characters. nextTools: 0 to 4 names of this phase's tools that you intend to call. %s The plan goes in \
 			the text, never inside a tool's arguments. Then call the tools of this phase that best test your \
 			hypotheses; you may request several calls in one answer. Write nothing else: code reads only the plan \
@@ -127,10 +128,32 @@ final class Prompts {
 				+ PLAN_AND_ACT_TASK.formatted(state.phase() == Phase.TRIAGE ? FIRST_PLAN : FRESH_PLAN);
 	}
 
-	/** The instruction of a report call; {@code errors} are those of the rejected previous report, if any. */
-	static String report(State state, List<String> errors) {
+	/**
+	 * The instruction of a report call; {@code errors} are those of the rejected previous report, if any. It names the
+	 * tool calls a report may cite, and the refused ones it may not (T5c10): the sixth live run's F2 cited a refused call
+	 * in both reports. {@link ReportCheck} still rejects such a citation.
+	 * @param toolSteps this incident's tool steps, refused calls included
+	 */
+	static String report(State state, List<String> errors, Collection<ToolStep> toolSteps) {
 		return state.text() + "\n\n" + REPORT_TASK.formatted(ReportCheck.MIN_QUOTE_LENGTH,
-				ReportCheck.MAX_QUOTE_LENGTH) + retry("report", errors);
+				ReportCheck.MAX_QUOTE_LENGTH) + citable(toolSteps) + retry("report", errors);
+	}
+
+	private static String citable(Collection<ToolStep> toolSteps) {
+		List<String> ran = ids(toolSteps, false);
+		List<String> refused = ids(toolSteps, true);
+		String text = " Citable toolCallIds: " + (ran.isEmpty() ? "none" : String.join(", ", ran)) + ".";
+		return refused.isEmpty() ? text
+				: text + " Refused calls did not run and are not citable: " + String.join(", ", refused) + ".";
+	}
+
+	private static List<String> ids(Collection<ToolStep> toolSteps, boolean refused) {
+		return toolSteps.stream()
+			.filter(step -> step.refused() == refused)
+			.map(ToolStep::stepNo)
+			.sorted()
+			.map(String::valueOf)
+			.toList();
 	}
 
 	private static String retry(String what, List<String> errors) {

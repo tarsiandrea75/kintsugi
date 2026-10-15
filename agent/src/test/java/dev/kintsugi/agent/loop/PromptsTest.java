@@ -2,7 +2,11 @@ package dev.kintsugi.agent.loop;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.lab.Phase;
 
@@ -69,6 +73,45 @@ class PromptsTest {
 		assertThat(new Prompts.State(Phase.INVESTIGATE, 3, 5, PLAN).text()).contains("Your plan for this phase: " + PLAN)
 			.doesNotContain("Latest plan");
 		assertThat(new Prompts.State(Phase.INVESTIGATE, 4, 6, null).text()).doesNotContain("plan");
+	}
+
+	@Test
+	void theReportTaskListsTheCitableCallsAndMarksTheRefusedOnesNotCitable() {
+		// The sixth live run's F2 cited a refused call in both reports and ended INVALID_REPORT (T5c10).
+		List<ToolStep> steps = List.of(new ToolStep(2, "query_metric", "OK", "{}", null),
+				new ToolStep(7, "get_order_trace", "REFUSED_PLACEHOLDER", null, null),
+				new ToolStep(8, "count_logs", "INVALID_PARAMETER", "{}", null),
+				new ToolStep(9, "recent_events", "REFUSED_DUPLICATE", null, null));
+
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), steps);
+
+		assertThat(task).contains("Citable toolCallIds: 2, 8.")
+			.contains("Refused calls did not run and are not citable: 7, 9.");
+	}
+
+	@Test
+	void withNoRefusedCallTheReportTaskListsOnlyTheCitableOnes() {
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(),
+				List.of(new ToolStep(3, "status_summary", "OK", "{}", null)));
+
+		assertThat(task).contains("Citable toolCallIds: 3.").doesNotContain("not citable");
+		assertThat(Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), List.of()))
+			.contains("Citable toolCallIds: none.");
+	}
+
+	@Test
+	void aPlanHypothesisWhyMayHold300Characters() {
+		// Plans of the sixth live run were rejected for a why over 200 characters (T5c10).
+		assertThat(Prompts.act(new Prompts.State(Phase.TRIAGE, 2, 8, null), true)).contains("why at most 300 characters");
+		assertThat(PlanCheck.errors(plan("w".repeat(300)), Phase.TRIAGE)).isEmpty();
+		assertThat(PlanCheck.errors(plan("w".repeat(301)), Phase.TRIAGE))
+			.containsExactly("hypotheses[0].why must be a string of at most 300 characters");
+	}
+
+	private static JsonNode plan(String why) {
+		return JsonMapper.shared()
+			.readTree("{\"hypotheses\":[{\"rootCauseService\":\"postgres\",\"rootCauseCategory\":\"CONFIGURATION\","
+					+ "\"why\":\"" + why + "\"}],\"nextTools\":[]}");
 	}
 
 }

@@ -17,6 +17,12 @@ final class PlanCheck {
 
 	private static final Set<String> HYPOTHESIS_FIELDS = Set.of("rootCauseService", "rootCauseCategory", "why");
 
+	/**
+	 * The most characters of a hypothesis's {@code why} (T5c10; 200 before): plans of the sixth live run were rejected
+	 * for a why just over 200, often because it starts with the toolCallId it cites.
+	 */
+	static final int MAX_WHY_LENGTH = 300;
+
 	private PlanCheck() {
 	}
 
@@ -62,8 +68,8 @@ final class PlanCheck {
 				Causes.SERVICES));
 		addIfError(errors, Causes.enumError(name + ".rootCauseCategory", hypothesis.get("rootCauseCategory"),
 				Causes.CATEGORIES));
-		if (!Causes.string(hypothesis.get("why"), 0, 200)) {
-			errors.add(name + ".why must be a string of at most 200 characters");
+		if (!Causes.string(hypothesis.get("why"), 0, MAX_WHY_LENGTH)) {
+			errors.add(name + ".why must be a string of at most " + MAX_WHY_LENGTH + " characters");
 		}
 	}
 
