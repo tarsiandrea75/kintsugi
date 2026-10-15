@@ -444,6 +444,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Authored lines: about 450 (code about 90, tests about 250, spec and ADR about 110), plus this entry.
 - 2026-10-15: T5c12 committed as `3c77f6f`.
 - 2026-10-15: T5c12 commits `3c77f6f`, `4695993`, config comment `3e6edc2`. Spot check: `PlanCheckTest`, `DefaultBudgetsTest` green. Assess from `807ae72`: medium, `slice_budget_reached`; review approved and acknowledged. The ninth full run started on `3e6edc2`.
+- 2026-10-15: ninth full `verify-agent.sh` run on `968b8a2` (`infra/scripts/out/verify-agent-20261015T161014Z/`, 58 min): **0/3, not a diagnosis result.** Every fault ended `TIMED_OUT` on a model call over 300 s (F1 in KNOWLEDGE, F2 and F3 on the first TRIAGE call, which took about 150 s in every earlier run). Ollama's own timings show the host slowing down during the run: prompt eval from 13-14 tokens/s (run 8) to 7-8 and then under 5.4 tokens/s, generation from about 4.0 to 2.1-2.8 tokens/s. The prompts did not grow, so the cause is host CPU, not the code. T5c12's retry worked in F1: INVESTIGATE answered with no tool call, the retry made one, and the phase went on with 3 more calls. The run is repeated as the tenth run.
 
 ## Next step
 
