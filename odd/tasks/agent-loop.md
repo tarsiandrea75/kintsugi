@@ -442,6 +442,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - GREEN: `agent` 295 tests (surefire XML), 0 failures, 0 errors. Specs: `openspec/specs/agent/spec.md` ("Phases and their tools", "The plan", "Budgets", "Answer caps", with seven new or rewritten scenarios). ADR-010 has "Amended in T5c12".
   - Follow-up: the comment above `max-model-calls` in `application.yaml` still says a valid run makes at most 10 model calls and 12 is a guard; only the value was in scope.
   - Authored lines: about 450 (code about 90, tests about 250, spec and ADR about 110), plus this entry.
+- 2026-10-15: T5c12 committed as `3c77f6f`.
 
 ## Next step
 
