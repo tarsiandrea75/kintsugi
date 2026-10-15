@@ -366,7 +366,16 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - SUGGESTION: duplicates count across phases, although time-relative queries can return new data later;
   - SUGGESTION: `<init>`-like search terms would count as placeholders;
   - SUGGESTION: `DefaultBudgetsTest` only adds up constants; no loop-level worst-case test.
+- 2026-10-15: sixth full `verify-agent.sh` run after T5c9 (`infra/scripts/out/verify-agent-20261014T234745Z/`, 70 min): **0/3** (run 5 was 1/3). With one sample per fault, the result is noisy.
+  - **F1 `UNKNOWN`:** `search_logs gateway-mock` with no level returned 20 lines, all Spring/Tomcat startup lines. Every line is distinct and the cap is 20, so the per-request `Authorize answered … latency_ms=10000` lines were crowded out. Tool-side cause: the lines are grouped by exact message, so lines that differ only in their numbers do not group.
+  - **F2 `INVALID_REPORT`:** right path, with 6 `FAILED` attempts and a trace of a `PAYMENT_FAILED` order. Both reports cited a refused step (`REFUSED_DUPLICATE`, then `REFUSED_PLACEHOLDER`) in one evidence item; the retry fixed one and broke another.
+  - **F3 `gateway-mock|DEPENDENCY_REJECTING`:** it traced a `PAID` order again and over-applied the callee rule without evidence.
+  - Recurring, all runs:
+    - `count_logs service=postgres` is invalid, because postgres is not a log service;
+    - plans fail on `hypotheses[].why` over 200 characters;
+    - the KNOWLEDGE plan names a tool outside the phase.
+  - The new refusals worked: `REFUSED_PLACEHOLDER` and `REFUSED_DUPLICATE` cost no budget, and F2 then traced a real order.
 
 ## Next step
 
-The sixth full run (T5c3).
+The human decides how to go on after the sixth run; T5c3 stays open.
