@@ -64,7 +64,8 @@ kintsugi:
         act: 160
         report: 512
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
-    # run makes at most 10 model calls (8 ACT answers and 2 reports), so 12 is a guard; the warm-up, which loads the
+    # run makes at most 15 model calls (8 ACT answers, 2 for uncounted refusals, 3 phase retries and 2 report
+    # attempts), so 15 is a guard against a loop bug; the warm-up, which loads the
     # model before the run, counts against no budget and has its own bound. 45 min holds the longest run measured
     # (16 steps: 6 ACT answers, 2 reports, 8 tool calls) with every model call at its deadline, 6 x 300 + 2 x 420 s.
     loop:
