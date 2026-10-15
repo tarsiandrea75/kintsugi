@@ -413,7 +413,14 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - RED observed (4 failures, with a stub `check` that only wrapped `errors`): `ReportCheckTest` 2 (one bad quote among verified ones; an `UNKNOWN` report whose only quote is dropped), `PromptsTest` 1 (the call limit), and `AgentLoopTest` 1 (the run ended `FAILED`, because the script had no answer for the retry). `LiveRunReportCheckTest`'s replay was rewritten for the new rule: the fourth run's six reports are all valid now, with the same non-verbatim items dropped.
   - GREEN: `agent` 283 tests (surefire XML), 0 failures, 0 errors. Specs: `openspec/specs/agent/spec.md` ("Budgets", "The report", "Evidence is checked", with four new scenarios). ADR-010 has "Amended in T5c11".
   - Authored lines: about 255 (code about 105, tests about 100, spec and ADR about 50), plus this entry.
+- 2026-10-15: T5c11 committed as `bffdb9c`. Spot check: `ReportCheckTest` and `PromptsTest` green. Assess from `f9d2b25` (covering T5c10 and T5c11): medium, `slice_budget_reached`. Review `review-aba6cf1194eeab4b` (reliability lens) approved and acknowledged. Follow-up, WARNING:
+  - the T5c10 log template masks every number, so `answered=429` and `answered=200` (or `latency_ms=0` and `latency_ms=10000`) fall into one group, and the group shows only its newest line (`Summarizers.java:165-168`);
+  - when the gateway's answers change within the window, the older decisive variant can vanish from the summary;
+  - no test covers a 429 group followed by newer 200 lines.
+
+  Candidate fix: keep `key=value` numbers in the template, or show the newest line of each distinct value.
+- 2026-10-15: the eighth full run started on `bffdb9c`.
 
 ## Next step
 
-T5c11 (drop unverifiable evidence items; state the per-phase call limit), awaiting the human's approval; then the eighth full run (T5c3).
+The eighth full run (T5c3); then the log-template follow-up if the run shows it.
