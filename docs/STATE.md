@@ -4,40 +4,39 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-08 (session 02)
+2026-10-15 (session 01)
 
 ## Milestone
 
-**M2 — First agent: in progress.** M1 is complete. Two M2 items are done: the MCP tools server and RAG on the runbooks.
+**M2 — First agent: in progress.** Done: the MCP tools server, RAG on the runbooks, and the agent loop through T5c11. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3).
 
 ## Last action
 
-`runbook-rag` is done ([feature document](../odd/tasks/runbook-rag.md), [ADR-002](adr/ADR-002-pgvector-knowledge-base.md), [spec](../openspec/specs/knowledge-base/spec.md)).
-- **Embedding model:** `nomic-embed-text`, chosen by the human, at digest `0a109f42…`, 768 dimensions.
-  - It is configurable, but the index records the model name, digest, dimensions and prefixes.
-  - `search_runbooks` refuses to search on any mismatch. This was verified live with `mxbai-embed-large`.
-- **Store:** a separate pgvector container, `knowledge-db` (`0.8.7-pg18-trixie` pinned by digest), not published on the host.
-  - `knowledge_indexer` owns the data; `kintsugi_agent` has SELECT only.
-  - Neither role is a superuser, and the store holds no `faults` database.
-- **Indexer:** `knowledge/`, a one-shot job.
-  - It indexes only `docs/runbooks/*.md`, mounted read-only, behind a leakage gate `\b(F[1-8]\b|fault|inject)`.
-  - It splits by heading, with at most 800 tokens per chunk, and skips files whose hash is unchanged. A run commits atomically.
-  - 51 chunks in about 50 s.
-- **Tool:** `search_runbooks` is the 8th mcp-tools tool. Chunks come back as `untrustedText`; the `section` field is sanitized and marked untrusted.
-- **Ollama from containers:** an `ollama-proxy` socat container, chosen by the human, binds only to `172.17.0.1:11434`; Ollama stays on loopback. A failed bind leaves the rest of the lab working.
-- **Checks:**
-  - mcp-tools: 212 tests; knowledge: 31;
-  - `verify-rag.sh`, `verify-mcp.sh` and `verify-f1.sh` … `verify-f4.sh` pass.
-- **Status:** every range is reviewed and approved. Nothing is pushed.
-- **Process deviations:**
-  - the feature stayed on one branch, `feat/runbook-rag`, with per-range reviews, instead of a feature-branch chain;
-  - T4's tool code was written before its tests; a mutation check replaced RED.
+`agent-loop` T5 ([feature document](../odd/tasks/agent-loop.md), [ADR-010](adr/ADR-010-agent-loop.md), [spec](../openspec/specs/agent/spec.md)) is on branch `feat/agent-loop-04-check`, last commit `9f7f648`, with a clean tree.
+- Eight full `verify-agent.sh` runs with `granite4.1:8b` on CPU, about 60–90 min each. Best score 1/3 (runs 5 and 8: F2 MATCH). Every run is one sample per fault, so scores are noisy.
+- T5c4 … T5c11 are deterministic fixes driven by those runs:
+  - call deadlines;
+  - short verbatim quotes, checked against the summary the model saw;
+  - the callee-not-caller rule;
+  - refusals of placeholder and duplicate calls;
+  - log lines grouped by template;
+  - citable toolCallIds named in the report prompt;
+  - unverifiable evidence items dropped instead of rejecting the report (T5c11, `bffdb9c`);
+  - the per-phase call limit stated in the prompt.
+- Every code range is reviewed and approved; the last review was `review-aba6cf1194eeab4b`, from `f9d2b25` to `bffdb9c`. The next review base is `bffdb9c`. Nothing is pushed.
+- Run 8 (`infra/scripts/out/verify-agent-20261015T114730Z/`):
+  - F1 lost its whole investigation, because an `ACT` answer with no tool call ends the phase;
+  - F3 never asked `recent_events source=order`;
+  - KNOWLEDGE never searched a runbook: its plan is invalid when `nextTools` names a tool outside the phase.
 
 ## Next action
 
-1. Waiting for the human: review the decisions marked "to review" in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
-2. Waiting for the human (approved, needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
-3. Waiting for the human: add these lines to the protected `infra/.env.example`:
+1. Proposed, awaiting the human's approval: **T5c12**.
+   - An `ACT` answer with no tool call, while the phase has calls left, gets one short retry asking for a tool call now.
+   - The plan check drops `nextTools` entries outside the phase instead of rejecting the plan.
+   - Then the ninth full run (T5c3).
+2. Proposed earlier, not approved: a replay harness that replays recorded tool outputs without the lab, to measure several samples per fault quickly.
+3. Waiting for the human: add `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`, and the other lines listed in the 2026-10-08 state:
    - `KINTSUGI_REPO_DIR=`
    - `DOCKER_GID=`
    - `POSTGRES_BOOTSTRAP_PASSWORD=postgres`
@@ -48,9 +47,8 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
    - `KNOWLEDGE_INDEXER_DB_PASSWORD=knowledge_indexer`
    - `KNOWLEDGE_AGENT_DB_PASSWORD=knowledge_agent`
    - `OLLAMA_PROXY_BIND_IP=172.17.0.1`
-4. M2 continues:
-   - the agent loop with `IncidentState` and a JSON report with cited evidence, calling mcp-tools as an MCP client;
-   - then the Python eval harness for the M2 check (F1–F3 correctly diagnosed).
+4. Waiting for the human (needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
+5. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
 
 ## Local branch chains (not pushed)
 
@@ -66,7 +64,8 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 - `feat/event-recording` → `-01-inventory` → `-02-payment` → `-03-order` → `-04-gateway-check`
 - `feat/fault-injector` → `-01-core` → `-02-api` → `-03-lab-control` → `-04-wiring`
 - `feat/mcp-tools` → `-01-observability-tools` → `-02-evidence-tools` → `-03-wiring`
-- `feat/runbook-rag` (one branch; see the process deviation above)
+- `feat/runbook-rag` (one branch)
+- `feat/agent-loop` → `-01-state` → `-02-tools` → `-03-loop` → `-04-check` (current, clean)
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -85,6 +84,15 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+agent-loop (details in `odd/tasks/agent-loop.md`):
+- The 45 min incident budget does not hold the worst case (every `ACT` and `REPORT` call at its deadline).
+- A runbook chunk can escape the summary cap.
+- A call that failed transiently is refused as a duplicate on retry.
+- `<init>`-like search terms count as placeholders.
+- `DefaultBudgetsTest` only adds up constants.
+- The recorded `tools-list.json` holds old tool descriptions.
+- Log templates mask every number, so `answered=429` and `answered=200` merge into one group (review WARNING on T5c10).
 
 runbook-rag (details in the feature document):
 - Retrieval: the gateway runbook has no rate-limit section, so a 429-worded query ranks it 2nd.
