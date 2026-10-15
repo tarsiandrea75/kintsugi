@@ -4,37 +4,26 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-15 (session 01)
+2026-10-15 (session 02)
 
 ## Milestone
 
-**M2 — First agent: in progress.** Done: the MCP tools server, RAG on the runbooks, and the agent loop through T5c11. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3).
+**M2 — First agent: in progress.** Done: the MCP tools server, RAG on the runbooks, and the agent loop through T5c12. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3).
 
 ## Last action
 
-`agent-loop` T5 ([feature document](../odd/tasks/agent-loop.md), [ADR-010](adr/ADR-010-agent-loop.md), [spec](../openspec/specs/agent/spec.md)) is on branch `feat/agent-loop-04-check`, last commit `9f7f648`, with a clean tree.
-- Eight full `verify-agent.sh` runs with `granite4.1:8b` on CPU, about 60–90 min each. Best score 1/3 (runs 5 and 8: F2 MATCH). Every run is one sample per fault, so scores are noisy.
-- T5c4 … T5c11 are deterministic fixes driven by those runs:
-  - call deadlines;
-  - short verbatim quotes, checked against the summary the model saw;
-  - the callee-not-caller rule;
-  - refusals of placeholder and duplicate calls;
-  - log lines grouped by template;
-  - citable toolCallIds named in the report prompt;
-  - unverifiable evidence items dropped instead of rejecting the report (T5c11, `bffdb9c`);
-  - the per-phase call limit stated in the prompt.
-- Every code range is reviewed and approved; the last review was `review-aba6cf1194eeab4b`, from `f9d2b25` to `bffdb9c`. The next review base is `bffdb9c`. Nothing is pushed.
-- Run 8 (`infra/scripts/out/verify-agent-20261015T114730Z/`):
-  - F1 lost its whole investigation, because an `ACT` answer with no tool call ends the phase;
-  - F3 never asked `recent_events source=order`;
-  - KNOWLEDGE never searched a runbook: its plan is invalid when `nextTools` names a tool outside the phase.
+- **Backups automated:** `infra/scripts/backup-bundle.sh` writes a full bundle and its sha256 to `C:\Users\andrea.tarsi\kintsugi-backups\`. The session-close protocol in `CLAUDE.md` runs it.
+- **T5c12 done** (`3c77f6f`): an `ACT` answer with no tool call gets one retry per phase; out-of-phase `nextTools` entries are dropped; the model-call budget is 15. Review approved.
+- **Runs 9 and 10** (`infra/scripts/out/verify-agent-20261015T161014Z/`, `...T173441Z/`): 0/3 and 1/3, both on a slow host. In run 9, Ollama fell from 13-14 to under 5.4 prompt tokens/s. In run 10 it was about 9 prompt and 3 generation tokens/s.
+  - Run 10: F2 MATCH, with T5c12 working end to end: two retries, and KNOWLEDGE searched the runbooks.
+  - F1 and F3 timed out on the first INVESTIGATE answer, which sits right on the 300 s `ACT` deadline at that speed.
+- Branch `feat/agent-loop-04-check`, clean tree, nothing pushed. Every code commit is reviewed. The next review base is `3e6edc2`; later commits are docs only.
+- The human is restarting the PC to rule out a degraded host.
 
 ## Next action
 
-1. Proposed, awaiting the human's approval: **T5c12**.
-   - An `ACT` answer with no tool call, while the phase has calls left, gets one short retry asking for a tool call now.
-   - The plan check drops `nextTools` entries outside the phase instead of rejecting the plan.
-   - Then the ninth full run (T5c3).
+1. After the restart, check Ollama's speed against run 8 (prompt eval 13-14 tokens/s, generation about 4), then run the eleventh full run (T5c3).
+   - If the host is still slow, the human decides: investigate the host (power profile, `.wslconfig`), or raise the `ACT` deadline.
 2. Proposed earlier, not approved: a replay harness that replays recorded tool outputs without the lab, to measure several samples per fault quickly.
 3. Waiting for the human: add `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`, and the other lines listed in the 2026-10-08 state:
    - `KINTSUGI_REPO_DIR=`
@@ -75,6 +64,7 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 - Over-budget features use `feature-branch-chain` without asking.
 - Native review consent is always granted: run the review and report it in one line.
+- Review per commit. The stop hook's whole-history candidate (base `49d55bd`) is skipped, because it exceeds the reviewer context budget.
 
 ## Open questions
 
