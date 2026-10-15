@@ -55,6 +55,15 @@ class PromptsTest {
 	}
 
 	@Test
+	void theActTaskStatesHowManyToolCallsThePhaseStillAllows() {
+		// The seventh live run: TRIAGE planned 3 calls against a phase allowance of 2, and the third was refused (T5c11).
+		assertThat(Prompts.act(new Prompts.State(Phase.TRIAGE, 2, 8, null), true))
+			.contains("You may make at most 2 tool calls in this phase; more are refused.");
+		assertThat(Prompts.act(new Prompts.State(Phase.INVESTIGATE, 3, 1, null), false))
+			.contains("You may make at most 1 tool call in this phase; more are refused.");
+	}
+
+	@Test
 	void aTriagePlanCoversTwoServicesOnTheCallPath() {
 		String triage = Prompts.act(new Prompts.State(Phase.TRIAGE, 2, 8, null), true);
 

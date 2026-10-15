@@ -106,10 +106,52 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void aFabricatedQuoteIsRejectedNamingTheItem() {
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(4, "search_logs", "Connection refused by peer"))))
-			.containsExactly("evidence[1].quote is not in the output of step 4");
+	void aFabricatedQuoteAmongVerifiedItemsIsDroppedAndRecorded() {
+		// The seventh live run: one item's quote was not verbatim, the others were (T5c11).
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(4, "search_logs", "Connection refused by peer"),
+				evidence(5, "recent_events", "HttpTimeoutException calling POST")));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[1].quote is not in the output of step 4");
+		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").intValue()).containsExactly(3, 5);
+	}
+
+	@Test
+	void aReportWhoseEveryQuoteIsFabricatedIsRejectedNamingEachItem() {
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", "PAYMENT_FAILED badly"), evidence(4, "search_logs", "Connection refused by peer")));
+
+		assertThat(result.errors()).containsExactly("evidence[0].quote is not in the output of step 3",
+				"evidence[1].quote is not in the output of step 4");
+		assertThat(result.evidence()).isNull();
+	}
+
+	@Test
+	void aCitedRefusedCallStillRejectsTheReportAndTheRetryNamesTheBadQuoteToo() {
+		// Only a quote that is not in its step is dropped; a refused, missing or wrong step still rejects the report.
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(6, "search_logs", "PAYMENT_PENDING"),
+				evidence(4, "search_logs", "Connection refused by peer")));
+
+		assertThat(result.errors()).containsExactly("evidence[1].toolCallId 6 was refused (REFUSED_PHASE) and did not run",
+				"evidence[2].quote is not in the output of step 4");
+		assertThat(result.evidence()).isNull();
+	}
+
+	@Test
+	void anItemOutsideItsQuoteBoundsIsNeverDropped() {
+		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", "PAYMENT_PENDING"),
+				evidence(3, "status_summary", "PAID")))).containsExactly("evidence[1].quote must be a string of 8 to 160 characters");
+	}
+
+	@Test
+	void anUnknownReportStaysValidWhenItsOnlyQuoteIsDropped() {
+		ReportCheck.Result result = check(report("UNKNOWN", "UNKNOWN", evidence(4, "search_logs", "Connection refused by peer")));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[0].quote is not in the output of step 4");
+		assertThat(result.evidence()).isEmpty();
 	}
 
 	@Test
@@ -211,6 +253,10 @@ class ReportCheckTest {
 				.append("\"}");
 		}
 		return "{\"outcome\":\"OK\",\"returned\":40,\"truncated\":false,\"items\":[" + items + "]}";
+	}
+
+	private static ReportCheck.Result check(String answer) {
+		return ReportCheck.check(Answers.json(answer), STEPS);
 	}
 
 	private static List<String> errors(String answer) {

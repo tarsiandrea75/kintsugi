@@ -381,7 +381,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			messages.add(new UserMessage(Prompts.report(run.state(Phase.CONCLUDE, 0), errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(), Schemas.REPORT);
 			JsonNode report = Answers.json(answer.text());
-			errors = ReportCheck.errors(report, run.toolSteps);
+			ReportCheck.Result checked = ReportCheck.check(report, run.toolSteps);
+			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
 				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one.
 				errors = new ArrayList<>(errors);
@@ -390,19 +391,25 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 						+ "evidence items");
 			}
 			write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), answer.model(), answer.tokens(),
-					null, null, null, null, verdict(errors), answer.text(), answer.latencyMs(), now()));
+					null, null, null, null, verdict(errors, checked.dropped()), answer.text(), answer.latencyMs(),
+					now()));
 			if (errors.isEmpty()) {
-				return stored(run, report);
+				return stored(run, report, checked.evidence());
 			}
 		}
 		throw new RunEnd(IncidentStatus.INVALID_REPORT, REPORT_INVALID);
 	}
 
-	/** The report as stored: the model's fields, with {@code incidentId} and {@code stepsUsed} filled in by code. */
-	private String stored(Run run, JsonNode report) {
+	/**
+	 * The report as stored: the model's fields, with {@code incidentId} and {@code stepsUsed} filled in by code, and
+	 * only the verified evidence items (T5c11): what is stored and scored has been checked. The dropped items stay in
+	 * the {@code REPORT} step's answer, and its summary names them.
+	 */
+	private String stored(Run run, JsonNode report, List<JsonNode> evidence) {
 		ObjectNode stored = JSON.createObjectNode();
 		stored.put("incidentId", run.incident.id().toString());
 		ReportCheck.MODEL_FIELDS.forEach(field -> stored.set(field, report.get(field)));
+		stored.putArray("evidence").addAll(evidence);
 		stored.put("stepsUsed", run.steps);
 		return JSON.writeValueAsString(stored);
 	}
@@ -523,8 +530,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		return this.clock.instant();
 	}
 
-	private static String verdict(List<String> errors) {
-		return errors.isEmpty() ? "valid" : "invalid: " + String.join("; ", errors);
+	private static String verdict(List<String> errors, List<String> dropped) {
+		if (!errors.isEmpty()) {
+			return "invalid: " + String.join("; ", errors);
+		}
+		return dropped.isEmpty() ? "valid" : "valid; dropped: " + String.join("; ", dropped);
 	}
 
 	/** What an {@code ACT} step stores as the model's answer: its text and the calls it requested. */

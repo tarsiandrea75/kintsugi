@@ -159,6 +159,13 @@ The sixth run scored 0/3. The human decided (2026-10-15) on four deterministic f
 
 The report task grows by about 25 tokens; the log tool definitions by about 25.
 
+### Amended in T5c11: unverified evidence items are dropped, and the ACT task states the call limit
+
+The seventh run scored 0/3, but two reports named the right root cause and lost it to the evidence check. Each was rejected twice because one evidence item, out of up to five, quoted text not verbatim in its step (a shortened JSON fragment closed with an added `}`, a log line with its middle tokens skipped, `(no logs found)` for an empty result), while the other items were verbatim. Every `TRIAGE` also planned and requested three calls against its allowance of two, so the third was refused every time. The human decided (2026-10-15):
+
+- **An unverified evidence item is dropped, not fatal.** An item that passes every rule but the substring test is removed from the report and named in the `REPORT` step's summary, `valid; dropped: evidence[i].quote is not in the output of step N`; the raw answer stays in `model_output`. The report stays valid while at least one verified item is left (or none is needed, both causes `UNKNOWN`), and `incidents.report` keeps only the verified items, so what is stored and scored has been checked by code. Every other rule still rejects the report: a missing, refused or other-tool step, a quote outside 8 to 160 characters, the schema, the enums, or no verified item left; the retry's errors then name the unverified quotes too. The matching rules are unchanged. Rejected: loosening the match (fuzzy or token-skipping matching would let fabricated quotes pass); storing the dropped items in the report (an unverified quote would be scored as evidence); a column or table for them (the step's summary and answer already record them, so no migration is needed). Replayed over the fourth run's reports, all six are now valid, each with its non-verbatim items dropped.
+- **The `ACT` task states the phase's call limit.** It ends `You may make at most N tool calls in this phase; more are refused.`, N being the lesser of the phase's and the incident's calls left. The state lines already showed the count; a rule in the task says what happens past it. It adds about 15 tokens to each `ACT` instruction.
+
 ### Plan and report schemas
 
 - **Plan:** `hypotheses` (1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, `why` at most 300 characters since T5c10), `nextTools` (0 to 4 of the phase's tools). Same enums as the report.

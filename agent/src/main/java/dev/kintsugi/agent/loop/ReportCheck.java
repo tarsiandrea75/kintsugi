@@ -50,12 +50,31 @@ final class ReportCheck {
 	}
 
 	/**
-	 * Every rule {@code report} breaks, each naming its field or evidence item; empty when the report is valid.
+	 * What the check found.
+	 * @param errors every rule the report breaks, each naming its field or evidence item; empty when it is valid
+	 * @param dropped when the report is valid, the evidence items dropped because their quote is not in their step
+	 * (T5c11), each named like an error; empty otherwise
+	 * @param evidence when the report is valid, its verified evidence items, in order; null otherwise
+	 */
+	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence) {
+	}
+
+	/** Every rule {@code report} breaks; empty when the report is valid ({@link #check}). */
+	static List<String> errors(JsonNode report, Map<Integer, ToolStep> toolSteps) {
+		return check(report, toolSteps).errors();
+	}
+
+	/**
+	 * Checks {@code report}. An evidence item whose quote is not in its step's output, nor in the summary lines that
+	 * copy it, is dropped rather than fatal (T5c11): in the seventh live run two reports naming the right cause were
+	 * rejected for one item each whose quote was not verbatim, while their other items were. The report stays valid
+	 * while at least one verified item is left, or none is needed because both causes are UNKNOWN. Any other broken
+	 * rule still rejects it, and then the errors name the dropped items too, so that the retry fixes them all.
 	 * @param toolSteps this incident's tool steps by step number, refused calls included
 	 */
-	static List<String> errors(JsonNode report, Map<Integer, ToolStep> toolSteps) {
+	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps) {
 		if (report == null || !report.isObject()) {
-			return List.of("the answer is not a JSON object");
+			return invalid(List.of("the answer is not a JSON object"));
 		}
 		List<String> errors = new ArrayList<>();
 		unexpected(report, FIELDS, "", errors);
@@ -72,7 +91,7 @@ final class ReportCheck {
 		JsonNode evidence = report.get("evidence");
 		if (evidence == null || !evidence.isArray()) {
 			errors.add("evidence must be an array of at most 5 items");
-			return errors;
+			return invalid(errors);
 		}
 		boolean unknown = Causes.UNKNOWN.equals(report.path("rootCauseService").asString(""))
 				&& Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""));
@@ -82,16 +101,43 @@ final class ReportCheck {
 		else if (evidence.isEmpty() && !unknown) {
 			errors.add("evidence must hold 1 to 5 items unless both causes are UNKNOWN");
 		}
+		boolean fatal = !errors.isEmpty();
+		List<String> dropped = new ArrayList<>();
+		List<JsonNode> verified = new ArrayList<>();
 		for (int i = 0; i < evidence.size(); i++) {
-			item(evidence.get(i), "evidence[" + i + "]", toolSteps, errors);
+			int before = errors.size();
+			String unquoted = item(evidence.get(i), "evidence[" + i + "]", toolSteps, errors);
+			if (unquoted != null) {
+				// Listed with the errors, in item order, for the retry when the report is rejected for another reason.
+				errors.add(unquoted);
+				dropped.add(unquoted);
+			}
+			else if (errors.size() > before) {
+				fatal = true;
+			}
+			else {
+				verified.add(evidence.get(i));
+			}
 		}
-		return errors;
+		if (fatal || (verified.isEmpty() && !unknown)) {
+			return invalid(errors);
+		}
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified));
 	}
 
-	private static void item(JsonNode item, String name, Map<Integer, ToolStep> toolSteps, List<String> errors) {
+	private static Result invalid(List<String> errors) {
+		return new Result(List.copyOf(errors), List.of(), null);
+	}
+
+	/**
+	 * Checks one evidence item, adding to {@code errors} each rule it breaks.
+	 * @return the item's only error when it breaks no rule but quotes text that is not in its step, so that it can be
+	 * dropped; null otherwise
+	 */
+	private static String item(JsonNode item, String name, Map<Integer, ToolStep> toolSteps, List<String> errors) {
 		if (!item.isObject()) {
 			errors.add(name + " must be an object {toolCallId, tool, quote, why}");
-			return;
+			return null;
 		}
 		int before = errors.size();
 		unexpected(item, EVIDENCE_FIELDS, name + ".", errors);
@@ -115,7 +161,7 @@ final class ReportCheck {
 			errors.add(name + ".why must be a string of at most 200 characters");
 		}
 		if (errors.size() > before) {
-			return;
+			return null;
 		}
 		int stepNo = id.intValue();
 		String tool = item.get("tool").asString();
@@ -131,8 +177,9 @@ final class ReportCheck {
 					+ " is " + step.tool());
 		}
 		else if (!quoted(quote.asString(), step.output()) && !inSummary(normalized(quote.asString()), step.summary())) {
-			errors.add(name + ".quote is not in the output of step " + stepNo);
+			return name + ".quote is not in the output of step " + stepNo;
 		}
+		return null;
 	}
 
 	/**

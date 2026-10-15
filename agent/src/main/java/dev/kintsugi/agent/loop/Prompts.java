@@ -121,11 +121,19 @@ final class Prompts {
 	 * asks for the phase's plan, in the text of the same answer as its tool calls.
 	 */
 	static String act(State state, boolean withPlan) {
-		if (!withPlan) {
-			return state.text() + "\n\n" + ACT_TASK;
-		}
-		return state.text() + "\n\n"
-				+ PLAN_AND_ACT_TASK.formatted(state.phase() == Phase.TRIAGE ? FIRST_PLAN : FRESH_PLAN);
+		String task = withPlan
+				? PLAN_AND_ACT_TASK.formatted(state.phase() == Phase.TRIAGE ? FIRST_PLAN : FRESH_PLAN) : ACT_TASK;
+		return state.text() + "\n\n" + task + " " + callLimit(state);
+	}
+
+	/**
+	 * The calls the phase still allows, as a rule (T5c11): in the seventh live run TRIAGE planned and requested three
+	 * calls against an allowance of two, every time, and the third was refused.
+	 */
+	private static String callLimit(State state) {
+		int left = Math.min(state.phaseLeft(), state.incidentLeft());
+		return "You may make at most " + left + (left == 1 ? " tool call" : " tool calls")
+				+ " in this phase; more are refused.";
 	}
 
 	/**

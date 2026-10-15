@@ -60,15 +60,19 @@ class LiveRunReportCheckTest {
 	}
 
 	@Test
-	void replayingTheRunsReportsLeavesOnlyTheQuotesThatAreNotVerbatim() {
-		Map<String, List<String>> errors = new LinkedHashMap<>();
+	void replayingTheRunsReportsDropsOnlyTheQuotesThatAreNotVerbatim() {
+		// Since T5c11 an item whose quote is not in its step is dropped, and each report keeps a verified item, so all
+		// six are valid; before, four of them were rejected for these items.
+		Map<String, List<String>> dropped = new LinkedHashMap<>();
 		for (String incident : List.of("F1", "F2", "F3")) {
 			for (JsonNode report : RUN.at("/incidents/" + incident + "/reports")) {
-				errors.put(incident + "#" + report.get("stepNo").intValue(),
-						ReportCheck.errors(Answers.json(report.get("answer").asString()), toolSteps(incident)));
+				ReportCheck.Result result = ReportCheck.check(Answers.json(report.get("answer").asString()),
+						toolSteps(incident));
+				assertThat(result.errors()).as(incident).isEmpty();
+				dropped.put(incident + "#" + report.get("stepNo").intValue(), result.dropped());
 			}
 		}
-		assertThat(errors).containsExactly( //
+		assertThat(dropped).containsExactly( //
 				Map.entry("F1#15", List.of("evidence[1].quote is not in the output of step 5")),
 				Map.entry("F1#16", List.of()),
 				Map.entry("F2#15", List.of("evidence[4].quote is not in the output of step 13")),

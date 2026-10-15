@@ -565,6 +565,30 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void aQuoteNotInItsStepIsDroppedAndTheVerifiedReportIsStored() {
+		// The seventh live run lost two right reports to one bad quote each (T5c11).
+		this.model.plan()
+			.planned(call("search_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}"))
+			.text("done")
+			.plan()
+			.text(report("order-service", "DEPENDENCY_LATENCY",
+					evidence(3, "search_logs", "Connection refused to payment-service"),
+					evidence(3, "search_logs", "16:32:03.395Z INFO 1 --- [order-service]")));
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		// One report call: the dropped item asks for no retry.
+		assertThat(kinds().stream().filter(kind -> kind.startsWith("REPORT"))).hasSize(1);
+		JsonNode stored = storedReport();
+		assertThat(stored.get("evidence")).singleElement()
+			.satisfies(item -> assertThat(item.get("quote").asString()).isEqualTo("16:32:03.395Z INFO 1 --- [order-service]"));
+		assertThat(step(stored.get("stepsUsed").asInt())).containsEntry("kind", "REPORT")
+			.containsEntry("summary", "valid; dropped: evidence[0].quote is not in the output of step 3");
+		assertThat((String) step(stored.get("stepsUsed").asInt()).get("model_output"))
+			.contains("Connection refused to payment-service");
+	}
+
+	@Test
 	void aToolCallIdOfAnotherIncidentIsRejected() {
 		UUID other = open(UUID.randomUUID(), "FAILED");
 		AgentDatabase.admin()

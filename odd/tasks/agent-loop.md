@@ -132,6 +132,11 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
     - `hypotheses[].why` is allowed up to 300 characters.
 
     Tests first; the specs, and ADR-010 "Amended in T5c10". Route: delegated writer.
+  - [x] **T5c11 — deterministic fixes from the seventh run (the human's decision of 2026-10-15):**
+    - an evidence item whose quote is not in its step is dropped and recorded as dropped. The report stays valid while at least one verified evidence item remains; all other report checks still invalidate it.
+    - the ACT task states how many tool calls this phase still allows.
+
+    Tests first; spec, ADR-010 "Amended in T5c11". Route: delegated writer.
 
 ## Progress
 
@@ -401,6 +406,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Proposed T5c11:
     - `ReportCheck` drops an evidence item whose quote is not in its step, and records it as dropped. The report stays valid while at least one verified item remains. Every remaining item is still checked by code.
     - The ACT task states the phase's tool-call limit.
+- 2026-10-15: T5c11 done by a delegated writer, in one unit (agent only). Route: delegated writer (2+ non-trivial files: `ReportCheck`, `AgentLoop`, `Prompts`, their tests, the spec, ADR-010).
+  - `ReportCheck.check` returns a `Result(errors, dropped, evidence)`; `errors(...)` stays as its shortcut. An item that passes every rule but the substring test is dropped. The report stays valid while one verified item is left, or both causes are `UNKNOWN`. Every other item error is fatal: a missing, refused or other-tool step, the quote bounds, the schema, the enums, or no verified item left. A rejected report's errors name the unverified quotes too, in item order, so the retry fixes them all. The matching rules are unchanged.
+  - Recording: the `REPORT` step's summary reads `valid; dropped: evidence[i].quote is not in the output of step N; ...`, and its `model_output` keeps the raw answer. `incidents.report` keeps only the verified items, so what is stored and scored is verified. No migration: no column or constraint changes.
+  - The `ACT` task, with or without the plan, ends `You may make at most N tool calls in this phase; more are refused.` N is the lesser of the phase's and the incident's calls left, and the sentence says `1 tool call` when N is 1. It adds about 15 tokens per `ACT` call, and the `AgentLoopTest` leak check still passes.
+  - RED observed (4 failures, with a stub `check` that only wrapped `errors`): `ReportCheckTest` 2 (one bad quote among verified ones; an `UNKNOWN` report whose only quote is dropped), `PromptsTest` 1 (the call limit), and `AgentLoopTest` 1 (the run ended `FAILED`, because the script had no answer for the retry). `LiveRunReportCheckTest`'s replay was rewritten for the new rule: the fourth run's six reports are all valid now, with the same non-verbatim items dropped.
+  - GREEN: `agent` 283 tests (surefire XML), 0 failures, 0 errors. Specs: `openspec/specs/agent/spec.md` ("Budgets", "The report", "Evidence is checked", with four new scenarios). ADR-010 has "Amended in T5c11".
+  - Authored lines: about 255 (code about 105, tests about 100, spec and ADR about 50), plus this entry.
 
 ## Next step
 
