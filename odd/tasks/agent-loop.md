@@ -443,6 +443,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Follow-up: the comment above `max-model-calls` in `application.yaml` still says a valid run makes at most 10 model calls and 12 is a guard; only the value was in scope.
   - Authored lines: about 450 (code about 90, tests about 250, spec and ADR about 110), plus this entry.
 - 2026-10-15: T5c12 committed as `3c77f6f`.
+- 2026-10-15: T5c12 commits `3c77f6f`, `4695993`, config comment `3e6edc2`. Spot check: `PlanCheckTest`, `DefaultBudgetsTest` green. Assess from `807ae72`: medium, `slice_budget_reached`; review approved and acknowledged. The ninth full run started on `3e6edc2`.
 
 ## Next step
 
