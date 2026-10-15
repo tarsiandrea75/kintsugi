@@ -448,4 +448,4 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 ## Next step
 
-The ninth full run (T5c3) on the T5c12 commit.
+The tenth full run (T5c3) on the T5c12 code; the ninth was lost to a slow host.
