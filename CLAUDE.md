@@ -26,6 +26,7 @@ End of session, or when the human says "chiudiamo":
 
 1. Overwrite `docs/STATE.md` with: milestone, last completed action, next action, open questions, blockers.
 2. Add `docs/journal/YYYY-MM-DD-NN.md` (NN = per-day counter): what we did, decisions and why, links to specs, ADRs and commits.
+3. Commit them, then run `infra/scripts/backup-bundle.sh` and report its output line. Also run it whenever a milestone or feature closes.
 
 ## Working conventions
 

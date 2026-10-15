@@ -408,6 +408,17 @@ docker compose -f infra/compose.yaml up -d           # recreates the volume and 
 
 The script accepts only the volume keys of `infra/compose.yaml` (it lists them on a wrong name), removes the containers that use the volume and leaves the rest of the lab running. `knowledge-data` loses nothing that cannot be rebuilt: `knowledge-indexer` re-embeds the runbooks at the next start. `postgres-data`, `prometheus-data` and `loki-data` lose their recorded orders, metrics and logs.
 
+### Back up the repository
+
+The repository has no remote, so a full `git bundle` kept outside WSL is its only backup. Run this at the end of every session and when a milestone or feature closes:
+
+```bash
+infra/scripts/backup-bundle.sh                                  # writes to C:\Users\andrea.tarsi\kintsugi-backups
+KINTSUGI_BACKUP_DIR=/mnt/d/backups infra/scripts/backup-bundle.sh   # another folder
+```
+
+The script bundles every branch and tag into `kintsugi-YYYY-MM-DD-full.bundle`, checks that every local branch tip is in it, and writes its sha256 next to it. A second run on the same day replaces that day's bundle. Uncommitted changes are not included (the script warns). To restore: `git clone <bundle> kintsugi`, after `sha256sum -c <bundle>.sha256`.
+
 ## Run the lab services without Docker Compose
 
 To debug one service from the IDE, run each service by hand, each with its own PostgreSQL database. The ports below are the services' defaults, not the compose ones.
