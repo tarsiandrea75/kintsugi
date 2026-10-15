@@ -417,7 +417,7 @@ infra/scripts/backup-bundle.sh                                  # writes to C:\U
 KINTSUGI_BACKUP_DIR=/mnt/d/backups infra/scripts/backup-bundle.sh   # another folder
 ```
 
-The script bundles every branch and tag into `kintsugi-YYYY-MM-DD-full.bundle`, checks that every local branch tip and every tag is in it, and writes its sha256 next to it. A bundle with no `.sha256` comes from an interrupted run: recompute the checksum with `sha256sum`. A second run on the same day replaces that day's bundle. Uncommitted changes are not included (the script warns). To restore: `git clone <bundle> kintsugi`, after `sha256sum -c <bundle>.sha256`.
+The script bundles every branch and tag into `kintsugi-YYYY-MM-DD-full.bundle`, checks that every local branch tip and every tag is in it, and writes its sha256 next to it. A bundle with no `.sha256` comes from an interrupted run: check it with `git bundle verify <bundle>` before you recompute the checksum with `sha256sum`, and keep an older bundle if the check fails. A second run on the same day replaces that day's bundle. Uncommitted changes are not included (the script warns). To restore: `git clone <bundle> kintsugi`, after `sha256sum -c <bundle>.sha256`.
 
 ## Run the lab services without Docker Compose
 
