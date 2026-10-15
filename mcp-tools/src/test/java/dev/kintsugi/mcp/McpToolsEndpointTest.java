@@ -95,7 +95,10 @@ class McpToolsEndpointTest {
 				.contains("failures at WARN")
 				.contains("not ERROR")
 				// The fifth run searched gateway-mock with level=WARN and found nothing: it logs at INFO (T5c9).
-				.contains("gateway-mock logs its decisions at INFO, so search gateway-mock with no level filter");
+				.contains("gateway-mock logs its decisions at INFO, so search gateway-mock with no level filter")
+				// Every sixth-run incident asked for postgres logs and spent a call on INVALID_PARAMETER (T5c10).
+				.contains("Logs exist only for order-service, payment-service, inventory-service and gateway-mock;"
+						+ " postgres has no logs to search");
 		}
 		assertThat(tool(tools, "query_metric").path("description").asString())
 			.contains("error_rate (5xx server responses per second only");

@@ -67,6 +67,13 @@ public class ObservabilityTools {
 	private static final String LEVELS = " The lab services log failures at WARN, not ERROR: filter on WARN or give no"
 			+ " level. gateway-mock logs its decisions at INFO, so search gateway-mock with no level filter.";
 
+	/**
+	 * Which services have logs (T5c10): every incident of the sixth live run asked for postgres logs and spent a tool
+	 * call on {@code INVALID_PARAMETER}. Only the four services ship their lines to Loki.
+	 */
+	private static final String LOG_SERVICES = " Logs exist only for order-service, payment-service, inventory-service"
+			+ " and gateway-mock; postgres has no logs to search.";
+
 	private final LokiClient loki;
 
 	private final PrometheusClient prometheus;
@@ -83,7 +90,7 @@ public class ObservabilityTools {
 	}
 
 	@McpTool(name = "search_logs", description = "Search the log lines of one lab service in the last minutes,"
-			+ " newest first. Returns timestamp, service, level and the line." + LEVELS + UNTRUSTED)
+			+ " newest first. Returns timestamp, service, level and the line." + LOG_SERVICES + LEVELS + UNTRUSTED)
 	public CallToolResult searchLogs(@McpToolParam(description = SERVICE) String service,
 			@McpToolParam(description = CONTAINS, required = false) String contains,
 			@McpToolParam(description = LEVEL, required = false) String level,
@@ -105,7 +112,7 @@ public class ObservabilityTools {
 	}
 
 	@McpTool(name = "count_logs", description = "Count the log lines of one lab service in the last minutes,"
-			+ " optionally only those containing a text or at a level." + LEVELS)
+			+ " optionally only those containing a text or at a level." + LOG_SERVICES + LEVELS)
 	public CallToolResult countLogs(@McpToolParam(description = SERVICE) String service,
 			@McpToolParam(description = CONTAINS, required = false) String contains,
 			@McpToolParam(description = LEVEL, required = false) String level,
