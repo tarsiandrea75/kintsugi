@@ -390,7 +390,18 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - RED observed (9 failures, with a stub `Prompts.report` overload that ignored the steps): `PromptsTest` 3, `ToolSummariesTest` 6. Two existing tests built "distinct" lines that differ only by a number, which now group; they use letters instead. GREEN: `agent` 277 tests (surefire XML), 0 failures, 0 errors; the `AgentLoopTest` leak check still passes.
   - Cost: about 25 tokens on the report task, about 25 on the log tools' definitions. Authored lines: about 300 (agent about 280, mcp-tools about 20), plus this entry.
 - 2026-10-15: T5c10 committed as `c0950b7` (mcp-tools) and `46da2c4` (agent). Spot check: `ToolSummariesTest` and `PromptsTest` green. Assess from `f9d2b25`: medium, `under_budget`; the review is deferred to the next commit that reaches the budget. The seventh full run started.
+- 2026-10-15: seventh full `verify-agent.sh` run after T5c10 (`infra/scripts/out/verify-agent-20261015T010641Z/`, 84 min): **0/3**, but F1 and F2 named the right root cause and lost it to the quote check.
+  - **F1 `INVALID_REPORT`:** both reports said `gateway-mock|DEPENDENCY_LATENCY`. Each time, one evidence item out of 5 was invalid. The model shortened a JSON quote from `recent_events` and closed it with a `}` that is not in the output. It also quoted `(no logs found)` for a search that returned no lines. The other items were verbatim.
+  - **F2 `INVALID_REPORT`:** both reports said `gateway-mock|DEPENDENCY_REJECTING`, with the `Authorize answered … answered=429` line as evidence. One item dropped the middle tokens of the `Gateway behavior changed … error_status=429` line; the same line, quoted in full in another item, passed.
+  - **F3 `gateway-mock|DEPENDENCY_REJECTING`:** it traced a `PAID` order and never asked for `recent_events source=order`, the decisive signal.
+  - Recurring, all three:
+    - TRIAGE plans 3 calls against a phase budget of 2, so `status_summary` is refused every time;
+    - the KNOWLEDGE plan names `search_logs`, the plan is invalid, and the model writes its calls as Markdown, so no runbook was searched.
+  - T5c10 worked: the grouped log lines put `Authorize answered` first, and no report cited a refused step.
+  - Proposed T5c11:
+    - `ReportCheck` drops an evidence item whose quote is not in its step, and records it as dropped. The report stays valid while at least one verified item remains. Every remaining item is still checked by code.
+    - The ACT task states the phase's tool-call limit.
 
 ## Next step
 
-The seventh full run (T5c3).
+T5c11 (drop unverifiable evidence items; state the per-phase call limit), awaiting the human's approval; then the eighth full run (T5c3).
