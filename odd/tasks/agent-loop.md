@@ -445,7 +445,9 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - 2026-10-15: T5c12 committed as `3c77f6f`.
 - 2026-10-15: T5c12 commits `3c77f6f`, `4695993`, config comment `3e6edc2`. Spot check: `PlanCheckTest`, `DefaultBudgetsTest` green. Assess from `807ae72`: medium, `slice_budget_reached`; review approved and acknowledged. The ninth full run started on `3e6edc2`.
 - 2026-10-15: ninth full `verify-agent.sh` run on `968b8a2` (`infra/scripts/out/verify-agent-20261015T161014Z/`, 58 min): **0/3, not a diagnosis result.** Every fault ended `TIMED_OUT` on a model call over 300 s (F1 in KNOWLEDGE, F2 and F3 on the first TRIAGE call, which took about 150 s in every earlier run). Ollama's own timings show the host slowing down during the run: prompt eval from 13-14 tokens/s (run 8) to 7-8 and then under 5.4 tokens/s, generation from about 4.0 to 2.1-2.8 tokens/s. The prompts did not grow, so the cause is host CPU, not the code. T5c12's retry worked in F1: INVESTIGATE answered with no tool call, the retry made one, and the phase went on with 3 more calls. The run is repeated as the tenth run.
+- 2026-10-15: tenth full `verify-agent.sh` run on `b75379f` (`infra/scripts/out/verify-agent-20261015T173441Z/`): **1/3**, F2 MATCH (19 steps). F1 and F3 ended `TIMED_OUT` on the first INVESTIGATE answer, over the 300 s `ACT` deadline. The host is still slower than in run 8: prompt eval about 9 tokens/s (13-14 in run 8), generation about 3 tokens/s (about 4). A first INVESTIGATE answer cut at 384 tokens costs about 128 s of generation plus about 160 s of prompt at this speed, so it sits on the deadline: F2's took 266 s, F1's and F3's did not finish.
+  - T5c12 worked in F2: INVESTIGATE and KNOWLEDGE each answered with no tool call, and each retry made one (38 s and 45 s). KNOWLEDGE's plan stayed valid with an out-of-phase `nextTools` entry dropped, and for the first time in four runs it searched the runbooks.
 
 ## Next step
 
-The tenth full run (T5c3) on the T5c12 code; the ninth was lost to a slow host.
+Decide how to handle the slower host (the human's choice), then the eleventh full run (T5c3).
