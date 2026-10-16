@@ -89,6 +89,13 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
   - [x] **T4a — gathering and model:** the deterministic calls to the MCP tools for the incident and previous windows, and an immutable dossier model of facts (no rendering). Branch `-04a`.
   - [x] **T4b — Markdown rendering:** golden files, the vocabulary test and the token-size test. Branch `-04b`.
 - [ ] **T5 — Wire the dossier into the loop behind a mode switch** (explorer vs dossier): adjust phases and budgets for dossier mode, record the mode on the incident and report. Tests first with the scripted fake chat model; spec; ADR-010 "Amended in T5" (or the next free label). Branch `-05`. Route: delegated writer.
+  - Design accepted by the human on 2026-10-16:
+    - the rendered dossier is the first user message, before the first phase, not part of the system prompt, so Ollama keeps reusing the cached system-prompt prefix;
+    - dossier mode skips TRIAGE (the dossier covers its tools); INVESTIGATE keeps 4 follow-up calls and KNOWLEDGE 2;
+    - the dossier has its own citable id, `dossier`; the deterministic check accepts an evidence item citing it when its quote appears verbatim in the rendered dossier;
+    - the mode is a configuration property (`explorer` or `dossier`), recorded on the incident and the report.
+  - [ ] **T5a — mode switch, dossier message and phases:** branch `-05a`.
+  - [ ] **T5b — citing the dossier in the report:** branch `-05b`.
 - [ ] **T6 — Verify:** `verify-agent.sh` runs in dossier mode on F1-F3, and in explorer mode for comparison, the same number of runs each; results recorded here and in the agent-loop document (T5c3). Branch `-06`. Route: parent (runs), delegated writer (script changes, if any).
 
 ## Progress
@@ -142,4 +149,4 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 
 ## Next step
 
-T5: wire the dossier into the loop behind a mode switch.
+T5a: mode switch, dossier message and phases.
