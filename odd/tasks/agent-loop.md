@@ -154,7 +154,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
     Tests first; spec, ADR-010 "Amended in T5c14". Route: delegated writer (2+ non-trivial files: `ReportCheck`, its test, spec, ADR).
 
-  - [ ] **T5c15 — a 420 s `ACT` deadline (the human's decision of 2026-10-16, after runs 11-13):**
+  - [x] **T5c15 — a 420 s `ACT` deadline (the human's decision of 2026-10-16, after runs 11-13):**
     - `kintsugi.agent.model.call-timeout.act` goes from 300 s to 420 s, like `REPORT`. A phase's first answer, which carries the plan, took 213-300 s in runs 11-13 and caused every F1 timeout; the other `ACT` answers stayed under 175 s.
     - `incident-timeout` stays at 45 min (the human's decision). Its justification changes: 45 min holds every measured run (the longest took 1915 s), but no longer a run with every model call at its deadline (about 56 min).
     - `verify-agent.sh`'s waits still fit; the loop's read timeout follows the longest deadline.
@@ -490,6 +490,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - F2 MATCH (19 steps); its report was valid with nothing dropped.
   - F3 `INVALID_REPORT` (21 steps): both report attempts were cut at 512 tokens and were not JSON. Their heads named `gateway-mock|DEPENDENCY_LATENCY`, so F3 would have missed anyway. In INVESTIGATE the model again filtered `recent_events` by `source=payment`, never by `source=order`, and never called `get_order_trace`.
   - Runs 11-13 together: F1 1 MATCH out of 3 (2 runs lost to timeouts), F2 2 of 3 (1 lost to the wrong-tool rule fixed in T5c14), F3 0 of 3 (always blames gateway-mock). Every lost F1/F2 run hit the 300 s `ACT` deadline on a phase's first answer, which carries the plan and takes 215-300 s on this host, or a check that no longer rejects.
+- 2026-10-16: T5c15 done by a delegated writer in one unit, committed as `767acdd`. `kintsugi.agent.model.call-timeout.act` is 420 s; `incident-timeout` stays 45 min, now justified by the longest incident measured (1915 s), not by a run with every call at its deadline (56 min, the recorded follow-up). RED: `DefaultBudgetsTest.anActCallAndTheReportMayTake420Seconds` failed against the 300 s default; GREEN: full `agent` suite 299 tests (surefire XML), 0 failures, 0 errors. `DefaultBudgetsTest`'s worst-case test now asserts the budget holds the longest incident measured. `verify-agent.sh` and `lib.sh` unchanged: their waits derive from the 45 min budget and the warm-up. Spec: the Budgets row, the slow-call scenario and a T5c15 "Why"; ADR-010 has "Amended in T5c15". Not updated (outside the task's surface): `docs/STATE.md` still names the 300 s deadline as open.
 
 ## Next step
 
