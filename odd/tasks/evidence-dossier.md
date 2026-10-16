@@ -46,14 +46,14 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
   | Section | Existing source | Gap |
   |---|---|---|
   | Service status | `service_restarts` | none known; uptime derived from the newest start time (**to check**) |
-  | Order states | `status_summary` (`sinceMinutes`); `recent_events source=order outcome=...` for UUIDs | "before the fault window" needs a bounded range, not only "last N minutes" (**to check**) |
+  | Order states | `status_summary` (`sinceMinutes`); `recent_events source=order outcome=...` for UUIDs | the previous window needs a bounded range `[now-2N, now-N)`, not only "last N minutes" (known gap) |
   | Traffic matrix | `query_metric client_request_outcomes`, `request_rate` | known gap: exact per-edge counts with `uri` and `status` labels (current queries are `rate()` without them) |
   | Log signatures | `search_logs`, `count_logs` | grouping by signature over more than 100 lines (**to check**) |
   | Event counts | `recent_events` (rows, at most 100) | known gap: window counts by type and outcome |
 
 - **Open design points (decided in T4/T5, recorded here):**
   - the dossier's Markdown layout and token target (about 1.5k tokens inside `num-ctx` 8192);
-  - the window boundaries: what "before the fault window" means without telling the agent when the fault began (the agent knows only `sinceMinutes`) (**to check**);
+  - the window boundaries: decided in ADR-011 "Windows" (the incident window is the last N minutes, the previous window the N minutes just before it; the fault start is never given);
   - which phases remain in dossier mode, and how many follow-up tool calls (today 8 per incident);
   - how reports record the mode, so the eval can split results.
 
@@ -76,11 +76,12 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 
 ## Tasks
 
-- [x] **T1 — ADR-011 and this document.** Writing done; accepted by the human: pending. Branch `-01`. Route: delegated writer.
+- [x] **T1 — ADR-011 and this document.** Written and accepted by the human on 2026-10-16, with the windows "last N minutes" vs "the N minutes just before". Branch `-01`. Route: delegated writer.
 - [ ] **T2 — Lab instrumentation:** build payment-service's gateway client from Spring's auto-configured `RestClient.Builder`, so the payment-service → gateway-mock edge gets `http_client_requests_seconds_count`. Tests first (a metric is recorded for a call to `/authorize`); update `openspec/specs/payment-service/spec.md`. Branch `-02`. Route: delegated writer.
 - [ ] **T3 — MCP read tools or parameters for the dossier:** map each section to existing tools first, then add only what is missing.
   - Known gaps: window counts of events by type and outcome; exact per-edge counter deltas (raw samples, reset handling) with `uri`, `status`, `outcome`, `exception`.
-  - To check: a bounded "before" window for order states; log signatures beyond 100 lines; uptime from `service_restarts`.
+  - Known gap: a bounded previous window `[now-2N, now-N)` for order states and event counts.
+  - To check: log signatures beyond 100 lines; uptime from `service_restarts`.
   - Tests first; living spec `openspec/specs/mcp-tools/spec.md`. Branch `-03`. Route: delegated writer.
 - [ ] **T4 — The dossier builder in `agent/`:** deterministic, facts only, same shape for every fault. Golden-file tests on recorded tool outputs (F1-F3 and a healthy window); a test that no interpretive vocabulary appears; a token-size test. Living spec `openspec/specs/agent/spec.md`. Branch `-04`. Route: delegated writer.
 - [ ] **T5 — Wire the dossier into the loop behind a mode switch** (explorer vs dossier): adjust phases and budgets for dossier mode, record the mode on the incident and report. Tests first with the scripted fake chat model; spec; ADR-010 "Amended in T5" (or the next free label). Branch `-05`. Route: delegated writer.
@@ -89,8 +90,9 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 ## Progress
 
 - 2026-10-16: dry run of F3 in the live lab, queried by hand. Caller-side `ConnectException` series on order-service → payment-service `/payments` = 6; no client-side series for payment-service → gateway-mock (`HttpPaymentGateway.java:50`); payment-service `POST /payments` flat at 24 during the window; the recreate visible in `process_start_time_seconds`; `increase()` gives non-integers, so exact counts need raw deltas; `lab_orders` is all-time; 6 WARN lines in order-service with `ConnectException` only in the cause text; `PAYMENT_UNAVAILABLE` events with outcome `PAYMENT_PENDING`. Full list: ADR-011, "Feasibility".
-- 2026-10-16: branch `feat/evidence-dossier-01` starts from `feat/agent-loop-04-check` at `7204423`. T1 written by a delegated writer: ADR-011 (Proposed) and this document.
+- 2026-10-16: branch `feat/evidence-dossier-01` starts from `feat/agent-loop-04-check` at `7204423`. T1 written by a delegated writer: ADR-011 (Proposed) and this document, committed as `3971024`.
+- 2026-10-16: the human accepted ADR-011, defining the windows as the last N minutes vs the N minutes just before (no fault start given to the agent). T1 done.
 
 ## Next step
 
-The human accepts or amends ADR-011. Then T2.
+T2: instrument payment-service's gateway client.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-16). To be accepted or amended by the human.
+Accepted (2026-10-16), with the windows defined below.
 
 ## Date
 
@@ -61,7 +61,7 @@ Why: interpretive text would encode the answer and teach the test. The core rule
 ### Sections
 
 1. **Service status:** per service, restarts in the window (process start times) and uptime.
-2. **Order states:** counts per status before the fault window and during the incident window, with 2-3 real order UUIDs per status for drill-down.
+2. **Order states:** counts per status in the previous window and in the incident window, with 2-3 real order UUIDs per status for drill-down.
 3. **Traffic matrix per edge:** caller-side attempts with `status`, `outcome` and `exception` labels, next to server-side received counts. The edges are:
    - client → order-service;
    - order-service → inventory-service `POST /reservations`;
@@ -69,6 +69,13 @@ Why: interpretive text would encode the answer and teach the test. The core rule
    - payment-service → gateway-mock `POST /authorize`.
 4. **Log signatures:** WARN and ERROR signatures per service, with counts.
 5. **Event counts:** order and payment events by type and outcome, with the real names (order events `ORDER_RECEIVED`, `INVENTORY_RESERVED`, `PAYMENT_AUTHORIZED`, `PAYMENT_UNAVAILABLE`, ...; payment events `PAYMENT_ATTEMPT` with its outcomes).
+
+### Windows
+
+- The agent is never told when the fault began; that would leak the answer.
+- The **incident window** is the last N minutes before the incident opened (N is the incident's `sinceMinutes`).
+- The **previous window** is the N minutes just before it, of the same length.
+- Every section that compares before and during uses these two windows, the way an on-call engineer compares a dashboard with the previous period.
 
 ### Budgets
 
