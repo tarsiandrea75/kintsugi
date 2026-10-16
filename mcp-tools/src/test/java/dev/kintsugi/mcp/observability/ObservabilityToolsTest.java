@@ -225,7 +225,8 @@ class ObservabilityToolsTest {
 		assertThat(body.path("truncated").asBoolean()).isTrue();
 		assertThat(this.prometheus.lastRequest().params()).containsEntry("query",
 				"sum by (service, uri) (rate(http_server_requests_seconds_count"
-						+ "{service=~\"order-service|payment-service|inventory-service|gateway-mock\"}[60s]))")
+						+ "{service=~\"order-service|payment-service|inventory-service|gateway-mock\","
+						+ "uri!~\"/admin(/.*)?\"}[60s]))")
 			// 300 s over at most 60 points: ceil(300 / 59) = 6 s.
 			.containsEntry("step", "6");
 	}
@@ -234,8 +235,22 @@ class ObservabilityToolsTest {
 	void everyMetricTemplateIsFilledForAService() {
 		for (MetricCatalog metric : MetricCatalog.values()) {
 			String query = metric.query("inventory-service", 30);
-			assertThat(query).as(metric.id()).contains("service=\"inventory-service\"").doesNotContain("{sel}", "{w}");
+			assertThat(query).as(metric.id()).contains("service=\"inventory-service\"").doesNotContain("{sel}", "{http}", "{w}");
 		}
+	}
+
+	@Test
+	void everyHttpRequestMetricLeavesOutTheLabsControlPlane() {
+		// The fault-injector drives F1 and F2 through gateway-mock's /admin/behavior: a real system has no such calls.
+		for (MetricCatalog metric : MetricCatalog.values()) {
+			String query = metric.query(null, 30);
+			int httpSelectors = query.split("http_(server|client)_requests_seconds_\\w+\\{", -1).length - 1;
+			int adminFilters = query.split(java.util.regex.Pattern.quote("uri!~\"/admin(/.*)?\""), -1).length - 1;
+			assertThat(adminFilters).as(metric.id()).isEqualTo(httpSelectors);
+		}
+		assertThat(MetricCatalog.byId("latency_max").query("gateway-mock", 30)).isEqualTo(
+				"max by (service, uri) (http_server_requests_seconds_max{service=\"gateway-mock\",uri!~\"/admin(/.*)?\"})");
+		assertThat(MetricCatalog.byId("lab_orders").query("order-service", 30)).doesNotContain("uri");
 	}
 
 	// service_restarts

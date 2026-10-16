@@ -39,7 +39,7 @@ These apply to every tool.
 | `event_counts` | `source`, `sinceMinutes`, `untilMinutesAgo?` | `order_events`, `payment_events` or `reservation_events`, rows with `occurred_at` in the window `[now - sinceMinutes, now - untilMinutesAgo)` | one item: `total`, the number of events in the window, and `groups`, one per (`type`, `outcome`) with its `count`, sorted by `count` descending, then `type`, then `outcome` (an absent outcome is left out and sorts last). No individual events, so nothing is cut; an empty window gives `total` 0 and no groups |
 | `search_runbooks` | `query`, `service?`, `limit?` | the `knowledge` database on the knowledge store: the query, with the query prefix, is embedded by the configured model, then the nearest chunks by cosine distance are read, filtered on `service` when given | chunks, nearest first: `service` (absent for README chunks), `section` (the heading, untrusted: control characters, the line and paragraph separators U+2028 and U+2029, and format characters such as the bidi controls become spaces, and past 100 characters it is cut and ends with `[truncated]`), `score` (1 minus the cosine distance, rounded to 3 decimals), `untrustedText` (the chunk text). Whole chunks are dropped from the end to fit the output cap; when the nearest chunk alone exceeds it, its text is cut and ends with `[truncated]` |
 | `service_restarts` | `sinceMinutes` | Prometheus `max by (service) (process_start_time_seconds{service=~"<allowed services>"})`, same step as `query_metric` | per service: `startTimes` seen in the window, oldest first, and `restartsInWindow`, the start times inside the window (each a restart or deploy). Two restarts within one step show as one |
-| `traffic_counts` | `sinceMinutes`, `untilMinutesAgo?` | Prometheus `query_range` over the raw series `{__name__=~"http_server_requests_seconds_count|http_client_requests_seconds_count|process_start_time_seconds",service=~"<allowed services>",uri!~"/actuator(/.*)?"}`, from `now - sinceMinutes` to `now - untilMinutesAgo`, step 5 s (the scrape interval) | rows, one per edge and side: `side` (`client` or `server`), `service`, `clientName` (client only), `method`, `uri`, `status`, `outcome`, `exception` (client only) and `count`, the exact number of requests in the window; a label the series does not carry is left out. Series that differ only in other labels (`instance`, `job`, `error`, and `exception` on the server side) are summed. Rows with `count` 0 and `/actuator` URIs are not returned. Sorted by `side`, `service`, then the labels in the order above, an absent label first |
+| `traffic_counts` | `sinceMinutes`, `untilMinutesAgo?` | Prometheus `query_range` over the raw series `{__name__=~"http_server_requests_seconds_count|http_client_requests_seconds_count|process_start_time_seconds",service=~"<allowed services>",uri!~"/actuator(/.*)?|/admin(/.*)?"}`, from `now - sinceMinutes` to `now - untilMinutesAgo`, step 5 s (the scrape interval) | rows, one per edge and side: `side` (`client` or `server`), `service`, `clientName` (client only), `method`, `uri`, `status`, `outcome`, `exception` (client only) and `count`, the exact number of requests in the window; a label the series does not carry is left out. Series that differ only in other labels (`instance`, `job`, `error`, and `exception` on the server side) are summed. Rows with `count` 0, `/actuator` URIs and the lab's control plane (`/admin` URIs) are not returned. Sorted by `side`, `service`, then the labels in the order above, an absent label first |
 
 Parameter domains:
 
@@ -61,20 +61,20 @@ Parameter domains:
 
 ### Metric allow-list
 
-Each name maps to one PromQL template. Names come from the "Lab — Faults" dashboard and the runbooks' key signals. `<sel>` is `service="<service>"`, or `service=~"order-service|payment-service|inventory-service|gateway-mock"` when `service` is omitted. `<w>` is the larger of 60 s and the step.
+Each name maps to one PromQL template. Names come from the "Lab — Faults" dashboard and the runbooks' key signals. `<sel>` is `service="<service>"`, or `service=~"order-service|payment-service|inventory-service|gateway-mock"` when `service` is omitted. `<http>` is `<sel>` followed by `,uri!~"/admin(/.*)?"`, used by every HTTP request metric so the lab's control plane is left out (see "The lab's control plane is not visible to the agent"). `<w>` is the larger of 60 s and the step.
 
 | `metric` | PromQL |
 |----------|--------|
-| `request_rate` | `sum by (service, uri) (rate(http_server_requests_seconds_count{<sel>}[<w>]))` |
-| `error_rate` | `sum by (service, uri, status) (rate(http_server_requests_seconds_count{<sel>,status=~"5.."}[<w>]))` |
-| `latency_avg` | `sum by (service, uri) (rate(http_server_requests_seconds_sum{<sel>}[<w>])) / sum by (service, uri) (rate(http_server_requests_seconds_count{<sel>}[<w>]))` |
-| `latency_max` | `max by (service, uri) (http_server_requests_seconds_max{<sel>})` |
+| `request_rate` | `sum by (service, uri) (rate(http_server_requests_seconds_count{<http>}[<w>]))` |
+| `error_rate` | `sum by (service, uri, status) (rate(http_server_requests_seconds_count{<http>,status=~"5.."}[<w>]))` |
+| `latency_avg` | `sum by (service, uri) (rate(http_server_requests_seconds_sum{<http>}[<w>])) / sum by (service, uri) (rate(http_server_requests_seconds_count{<http>}[<w>]))` |
+| `latency_max` | `max by (service, uri) (http_server_requests_seconds_max{<http>})` |
 | `lab_orders` | `sum by (service, status) (lab_orders{<sel>})` |
 | `lab_payments` | `sum by (service, status) (lab_payments{<sel>})` |
 | `gateway_authorize_inflight` | `sum by (service) (gateway_authorize_inflight{<sel>})` |
 | `hikaricp_connections_active`, `_idle`, `_pending`, `_max` | `sum by (service) (hikaricp_connections_<kind>{<sel>})` |
 | `hikaricp_connections_timeout_rate` | `sum by (service) (rate(hikaricp_connections_timeout_total{<sel>}[<w>]))` |
-| `client_request_outcomes` | `sum by (service, client_name, outcome, exception) (rate(http_client_requests_seconds_count{<sel>}[<w>]))` |
+| `client_request_outcomes` | `sum by (service, client_name, outcome, exception) (rate(http_client_requests_seconds_count{<http>}[<w>]))` |
 
 There is no latency p95: the lab services publish no `http_server_requests_seconds_bucket` histogram, so `latency_avg` and `latency_max` stand in for it.
 
@@ -276,11 +276,12 @@ mcp-tools MUST write one structured INFO log line per tool call, valid or not, w
 `traffic_counts` MUST return, for the window `[now - sinceMinutes, now - untilMinutesAgo)`, the exact number of HTTP requests per edge: server side from `http_server_requests_seconds_count` per service, method, uri, status and outcome; client side from `http_client_requests_seconds_count` per service, client name, method, uri, status, outcome and exception. It MUST NOT use `increase()` or `rate()`, which extrapolate and give non-integers over short windows (ADR-011, "Feasibility"). Each series' count is computed from its raw samples, oldest first:
 
 - a sample at the window start is the baseline and is not counted;
-- a series whose first sample comes after the window start was born inside the window (Micrometer creates a counter at its first request), so its first value counts in full. Its first scrape may include requests from up to one scrape interval (5 s) before the window start;
+- a series whose first sample comes after the window start counts its first value in full only when it was born inside the window (Micrometer creates a counter at its first request). It was when the service's `process_start_time_seconds` at that sample is after the window start, or when the service's start-time series has a sample at the window start, of the same process, and the counter series has none. Its first scrape may include requests from up to one scrape interval (5 s) before the window start;
+- otherwise the first sample is the baseline and is not counted: a long-lived series can miss the window-start sample after a failed or stale scrape, and counting it would add its whole lifetime as new requests. Without start-time data for the service the same conservative rule applies, so a series born inside the window on such a service loses its first scrape's requests;
 - each later sample counts its rise over the previous one; when the value drops, or the service's `process_start_time_seconds` differs between the two samples, the process was restarted or recreated, and the new value counts from zero;
 - a series that stops reporting counts up to its last sample.
 
-A restart without a start-time series and without a drop cannot be told from growth and counts as a rise. `/actuator` endpoints are left out. The result holds numbers and labels only, with no wording that interprets them.
+A restart without a start-time series and without a drop cannot be told from growth and counts as a rise. `/actuator` endpoints and the lab's control plane are left out. The result holds numbers and labels only, with no wording that interprets them.
 
 #### Scenario: Monotonic counter
 - GIVEN gateway-mock's `POST /authorize` `200` series reads 10, 12 and 15 over the window
@@ -297,10 +298,25 @@ A restart without a start-time series and without a drop cannot be told from gro
 - WHEN `traffic_counts` is called
 - THEN its row has `count` 7: 2, then 5 counted from zero
 
-#### Scenario: Series born in the window
-- GIVEN a series has no sample at the window start and reads 3, then 5
+#### Scenario: Series of a process started in the window
+- GIVEN order-service's start time is 20 s after the window start, and its `POST /orders` `201` series has no sample at the window start and reads 3, then 5
 - WHEN `traffic_counts` is called
 - THEN its row has `count` 5
+
+#### Scenario: Series created in the window by a running process
+- GIVEN gateway-mock's start time has a sample at the window start, before it, and its `POST /authorize` `429` series has none there and reads 2, then 4
+- WHEN `traffic_counts` is called
+- THEN its row has `count` 4
+
+#### Scenario: Long-lived series missing the window-start sample
+- GIVEN order-service started before the window, the scrape at the window start failed (neither its start time nor its `POST /orders` `201` series has a sample there), and the series reads 100, 102 and 105
+- WHEN `traffic_counts` is called
+- THEN its row has `count` 5: 100 is the baseline
+
+#### Scenario: Missing window-start sample without start times
+- GIVEN a series has no sample at the window start, reads 7, then 9, and its service has no start-time series
+- WHEN `traffic_counts` is called
+- THEN its row has `count` 2: 7 is the baseline
 
 #### Scenario: Flat and actuator series
 - GIVEN payment-service's `POST /payments` series stays at 24, and an `/actuator/prometheus` series rises
@@ -315,6 +331,35 @@ A restart without a start-time series and without a drop cannot be told from gro
 - WHEN `traffic_counts` is called with `sinceMinutes` = 15 and `untilMinutesAgo` = 15
 - THEN the result is an `INVALID_PARAMETER` error stating that `untilMinutesAgo` must be less than `sinceMinutes`
 - AND Prometheus is not queried
+
+### Requirement: The lab's control plane is not visible to the agent
+
+The fault-injector breaks and restores the lab through a control plane: F1 and F2 through gateway-mock's `/admin/behavior` (`PUT` to break, `DELETE` to restore; `GET` reads it), F3 and F4 through a compose recreate of the target service, which has no HTTP call. The verify scripts also reset gateway-mock with `DELETE /admin/behavior`. A real system has no such calls, and they would tell the agent where a fault was injected, so no tool MAY return them:
+
+- every HTTP request metric of `query_metric` (`request_rate`, `error_rate`, `latency_avg`, `latency_max`, `client_request_outcomes`) and `traffic_counts` MUST leave out the URIs `/admin` and `/admin/...`;
+- `search_logs` and `count_logs` MUST leave out the lines of gateway-mock's `BehaviorStore` logger, which logs only the admin calls (`Gateway behavior changed: event=BEHAVIOR_CHANGED ...`, `Gateway behavior reset: event=BEHAVIOR_RESET ...`), with a `!~` line filter on the logger column of Spring Boot's console line, ``!~ `\.BehaviorStore\s+:\s` ``, before the other filters.
+
+The filter removes only the control plane. The fault's effects stay visible: the requests, errors, latencies and log lines of the lab's own traffic, and the restart of a recreated service in `service_restarts` and `traffic_counts`.
+
+#### Scenario: Admin calls not counted
+- GIVEN gateway-mock's `PUT /admin/behavior` and `DELETE /admin/behavior` series rise in the window, and its `POST /authorize` series rises too
+- WHEN `traffic_counts` is called
+- THEN only the `/authorize` row is returned
+
+#### Scenario: Admin calls not in the request metrics
+- WHEN `query_metric` is called with any HTTP request metric
+- THEN every `http_server_requests_seconds_*` and `http_client_requests_seconds_*` selector in the PromQL carries `uri!~"/admin(/.*)?"`
+- AND the other metrics' PromQL is unchanged
+
+#### Scenario: Behavior changes not in the logs
+- GIVEN gateway-mock logged "Gateway behavior changed: event=BEHAVIOR_CHANGED ... error_status=429" and "Authorize answered: event=AUTHORIZE ... answered=429"
+- WHEN `search_logs` or `count_logs` is called for gateway-mock, with or without `contains` and `level`
+- THEN the LogQL carries ``!~ `\.BehaviorStore\s+:\s` `` right after the stream selector
+- AND only the "Authorize answered" line can be returned or counted
+
+#### Scenario: Other services unchanged
+- WHEN `search_logs` is called for order-service
+- THEN its LogQL has no control-plane filter, since order-service logs no control-plane line
 
 ### Requirement: Database access runs as kintsugi_agent
 

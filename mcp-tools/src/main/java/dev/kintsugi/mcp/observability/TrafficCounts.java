@@ -41,10 +41,14 @@ final class TrafficCounts {
 	private TrafficCounts() {
 	}
 
-	/** The raw counters and start times of the allowed services, without the {@code /actuator} endpoints. */
+	/**
+	 * The raw counters and start times of the allowed services, without the {@code /actuator} endpoints and the lab's
+	 * control plane ({@link MetricCatalog#CONTROL_PLANE_URIS}).
+	 */
 	static String query() {
 		return "{__name__=~\"" + SERVER_METRIC + "|" + CLIENT_METRIC + "|" + START_TIME_METRIC + "\","
-				+ MetricCatalog.serviceMatcher(null) + ",uri!~\"/actuator(/.*)?\"}";
+				+ MetricCatalog.serviceMatcher(null) + ",uri!~\"/actuator(/.*)?|" + MetricCatalog.CONTROL_PLANE_URIS
+				+ "\"}";
 	}
 
 	/** The rows with a count above zero, sorted by side, service, then labels. */
@@ -66,7 +70,8 @@ final class TrafficCounts {
 			}
 			NavigableMap<Long, Double> times = startTimes.getOrDefault(key.service(), new TreeMap<>());
 			long count = CounterDelta.increments(samples(result), windowStart,
-					(before, after) -> restarted(times, before, after));
+					(before, after) -> restarted(times, before, after),
+					firstTime -> bornInside(times, windowStart, firstTime));
 			counts.merge(key, count, Long::sum);
 		}
 		List<Row> rows = new ArrayList<>();
@@ -80,12 +85,13 @@ final class TrafficCounts {
 
 	/**
 	 * The row a series adds to, without its count: server series by service, method, uri, status and outcome; client
-	 * series also by client name and exception. {@code null} for start times and {@code /actuator} URIs.
+	 * series also by client name and exception. {@code null} for start times, {@code /actuator} and {@code /admin}
+	 * URIs.
 	 */
 	private static Row key(JsonNode metric) {
 		String name = metric.path("__name__").asString("");
 		String uri = label(metric, "uri");
-		if (uri != null && (uri.equals("/actuator") || uri.startsWith("/actuator/"))) {
+		if (uri != null && (isUnder(uri, "/actuator") || isUnder(uri, "/admin"))) {
 			return null;
 		}
 		boolean client = CLIENT_METRIC.equals(name);
@@ -95,6 +101,10 @@ final class TrafficCounts {
 		return new Row(client ? "client" : "server", label(metric, "service"),
 				client ? label(metric, "client_name") : null, label(metric, "method"), uri, label(metric, "status"),
 				label(metric, "outcome"), client ? label(metric, "exception") : null, 0);
+	}
+
+	private static boolean isUnder(String uri, String root) {
+		return uri.equals(root) || uri.startsWith(root + "/");
 	}
 
 	private static String label(JsonNode metric, String name) {
@@ -108,6 +118,27 @@ final class TrafficCounts {
 			samples.add(new CounterDelta.Sample(point.path(0).asLong(), Double.parseDouble(point.path(1).asString())));
 		}
 		return samples;
+	}
+
+	/**
+	 * Whether a series whose first sample is at {@code firstTime}, after the window start, was created inside the
+	 * window. It was when the service's process started after the window start, or when the process was already
+	 * scraped at the window start (its start time has a sample there, of the same process) and the series was not.
+	 * Without start times, or when the process missed the window-start scrape too, nothing tells a new series from an
+	 * old one whose window-start sample is missing, so it counts as not born inside (its first value is the baseline).
+	 */
+	private static boolean bornInside(NavigableMap<Long, Double> startTimes, long windowStart, long firstTime) {
+		Map.Entry<Long, Double> process = startTimes.floorEntry(firstTime);
+		if (process == null) {
+			process = startTimes.ceilingEntry(firstTime);
+		}
+		if (process == null) {
+			return false;
+		}
+		if (process.getValue() > windowStart) {
+			return true;
+		}
+		return process.getValue().equals(startTimes.get(windowStart));
 	}
 
 	/** Whether the service's process start time differs at the two sample times; unknown counts as not restarted. */

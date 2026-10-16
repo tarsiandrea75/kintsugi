@@ -13,23 +13,25 @@ import dev.kintsugi.mcp.tool.ToolInputs;
  *
  * <p>
  * Placeholders: {@code {sel}} is the service matcher, {@code service="<service>"} or a regex over the allowed services
- * only; {@code {w}} is the rate window, the larger of 60 s and the query step, so a wide step does not skip samples.
+ * only; {@code {http}} is the same matcher for the HTTP request metrics, with the lab's control plane left out
+ * ({@link #CONTROL_PLANE_URIS}); {@code {w}} is the rate window, the larger of 60 s and the query step, so a wide step
+ * does not skip samples.
  */
 public enum MetricCatalog {
 
-	REQUEST_RATE("request_rate", "sum by (service, uri) (rate(http_server_requests_seconds_count{{sel}}[{w}]))"),
+	REQUEST_RATE("request_rate", "sum by (service, uri) (rate(http_server_requests_seconds_count{{http}}[{w}]))"),
 
 	/**
 	 * Server responses with a 5xx status only: a 4xx refusal or a call the caller gave up on is not counted, so this
 	 * rate stays flat when a dependency is slow or refuses with 4xx (T5c8).
 	 */
 	ERROR_RATE("error_rate",
-			"sum by (service, uri, status) (rate(http_server_requests_seconds_count{{sel},status=~\"5..\"}[{w}]))"),
+			"sum by (service, uri, status) (rate(http_server_requests_seconds_count{{http},status=~\"5..\"}[{w}]))"),
 
-	LATENCY_AVG("latency_avg", "sum by (service, uri) (rate(http_server_requests_seconds_sum{{sel}}[{w}]))"
-			+ " / sum by (service, uri) (rate(http_server_requests_seconds_count{{sel}}[{w}]))"),
+	LATENCY_AVG("latency_avg", "sum by (service, uri) (rate(http_server_requests_seconds_sum{{http}}[{w}]))"
+			+ " / sum by (service, uri) (rate(http_server_requests_seconds_count{{http}}[{w}]))"),
 
-	LATENCY_MAX("latency_max", "max by (service, uri) (http_server_requests_seconds_max{{sel}})"),
+	LATENCY_MAX("latency_max", "max by (service, uri) (http_server_requests_seconds_max{{http}})"),
 
 	LAB_ORDERS("lab_orders", "sum by (service, status) (lab_orders{{sel}})"),
 
@@ -50,7 +52,14 @@ public enum MetricCatalog {
 			"sum by (service) (rate(hikaricp_connections_timeout_total{{sel}}[{w}]))"),
 
 	CLIENT_REQUEST_OUTCOMES("client_request_outcomes", "sum by (service, client_name, outcome, exception)"
-			+ " (rate(http_client_requests_seconds_count{{sel}}[{w}]))");
+			+ " (rate(http_client_requests_seconds_count{{http}}[{w}]))");
+
+	/**
+	 * The URIs of the lab's control plane: the fault-injector applies F1 and F2 through gateway-mock's
+	 * {@code /admin/behavior} ({@code PUT} to break, {@code DELETE} to restore). A real system has no such calls, and
+	 * they would tell the agent where a fault was injected, so every HTTP request metric leaves them out.
+	 */
+	static final String CONTROL_PLANE_URIS = "/admin(/.*)?";
 
 	/**
 	 * At most this many points per series: the step is chosen so that the window holds no more. 60 compact points of a
@@ -94,7 +103,9 @@ public enum MetricCatalog {
 	/** The PromQL for {@code service} ({@code null} for every allowed service) over a window of {@code sinceMinutes}. */
 	public String query(String service, int sinceMinutes) {
 		long window = Math.max(MIN_RATE_WINDOW_SECONDS, stepSeconds(sinceMinutes));
-		return this.template.replace("{sel}", serviceMatcher(service)).replace("{w}", window + "s");
+		return this.template.replace("{http}", serviceMatcher(service) + ",uri!~\"" + CONTROL_PLANE_URIS + "\"")
+			.replace("{sel}", serviceMatcher(service))
+			.replace("{w}", window + "s");
 	}
 
 	/**

@@ -2,6 +2,7 @@ package dev.kintsugi.mcp.observability;
 
 import java.util.List;
 import java.util.function.BiPredicate;
+import java.util.function.LongPredicate;
 
 /**
  * The exact increments of one Prometheus counter series from its raw samples (mcp-tools spec, "Exact traffic counts
@@ -12,8 +13,10 @@ import java.util.function.BiPredicate;
  * Rules, oldest sample first:
  * <ul>
  * <li>a sample at the window start is the baseline and is not counted;</li>
- * <li>a series whose first sample is after the window start was born inside it (Micrometer creates a counter at its
- * first request), so its first value counts in full;</li>
+ * <li>a series whose first sample is after the window start counts its first value in full only when it was born
+ * inside the window (Micrometer creates a counter at its first request), as {@code bornInside} decides. Otherwise the
+ * series may be older and only missed the window-start sample (a failed or stale scrape), so its first value is the
+ * baseline and is not counted: counting it would add the series' whole lifetime as new requests;</li>
  * <li>each later step counts its rise; after a drop, or when the process start time changed between two samples, the
  * process was restarted or recreated and the new value counts from zero;</li>
  * <li>a series that stops (stale) counts up to its last sample.</li>
@@ -28,13 +31,16 @@ final class CounterDelta {
 	 * @param samples the raw samples, oldest first
 	 * @param windowStart the window start, in epoch seconds (the first point of the range query)
 	 * @param restartedBetween true when the process start time changed between two sample times, in epoch seconds
+	 * @param bornInside true when a series whose first sample is at this time, in epoch seconds, after the window
+	 * start, is known to have been created inside the window
 	 */
-	static long increments(List<Sample> samples, long windowStart, BiPredicate<Long, Long> restartedBetween) {
+	static long increments(List<Sample> samples, long windowStart, BiPredicate<Long, Long> restartedBetween,
+			LongPredicate bornInside) {
 		if (samples.isEmpty()) {
 			return 0;
 		}
 		Sample first = samples.get(0);
-		double total = first.time() > windowStart ? first.value() : 0;
+		double total = first.time() > windowStart && bornInside.test(first.time()) ? first.value() : 0;
 		Sample previous = first;
 		for (Sample sample : samples.subList(1, samples.size())) {
 			boolean reset = sample.value() < previous.value() || restartedBetween.test(previous.time(), sample.time());

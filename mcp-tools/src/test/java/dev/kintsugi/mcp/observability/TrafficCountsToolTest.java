@@ -54,7 +54,7 @@ class TrafficCountsToolTest {
 		assertThat(request.path()).isEqualTo("/api/v1/query_range");
 		assertThat(request.params()).containsEntry("query", "{__name__=~\"http_server_requests_seconds_count"
 				+ "|http_client_requests_seconds_count|process_start_time_seconds\","
-				+ "service=~\"order-service|payment-service|inventory-service|gateway-mock\",uri!~\"/actuator(/.*)?\"}")
+				+ "service=~\"order-service|payment-service|inventory-service|gateway-mock\",uri!~\"/actuator(/.*)?|/admin(/.*)?\"}")
 			.containsEntry("start", String.valueOf(START))
 			.containsEntry("end", String.valueOf(NOW.getEpochSecond()))
 			.containsEntry("step", "5");
@@ -117,6 +117,68 @@ class TrafficCountsToolTest {
 		JsonNode items = body(this.tools.trafficCounts(10, null)).path("items");
 
 		assertThat(items.get(0).path("count").asLong()).isEqualTo(2 + 5);
+	}
+
+	@Test
+	void aLongLivedSeriesMissingTheWindowStartSampleCountsOnlyItsLaterRises() {
+		// R3-001: the scrape at the window start failed (no point for any series of order-service there), and the
+		// process started before the window, so 100 is the baseline, not 100 new requests.
+		this.prometheus.replyWith(200, matrix(
+				seriesFrom(START + 10, server("order-service", "POST", "/orders", "201", "SUCCESS"), 100, 102, 105),
+				seriesFrom(START + 10, startTime("order-service"), 900, 900, 900)));
+
+		JsonNode items = body(this.tools.trafficCounts(10, null)).path("items");
+
+		assertThat(items.get(0).path("count").asLong()).isEqualTo(5);
+	}
+
+	@Test
+	void aSeriesOfAProcessStartedInsideTheWindowCountsItsFirstValueInFull() {
+		// order-service was recreated 20 s into the window; its first scrape already reads 3.
+		this.prometheus.replyWith(200, matrix(
+				seriesFrom(START + 25, server("order-service", "POST", "/orders", "201", "SUCCESS"), 3, 5),
+				seriesFrom(START + 25, startTime("order-service"), START + 20, START + 20)));
+
+		JsonNode items = body(this.tools.trafficCounts(10, null)).path("items");
+
+		assertThat(items.get(0).path("count").asLong()).isEqualTo(5);
+	}
+
+	@Test
+	void aSeriesCreatedInsideTheWindowOfAProcessScrapedAtItsStartCountsItsFirstValueInFull() {
+		// gateway-mock was scraped at the window start without a 429 series: its first 429 came inside the window.
+		this.prometheus.replyWith(200, matrix(
+				seriesFrom(START + 10, server("gateway-mock", "POST", "/authorize", "429", "CLIENT_ERROR"), 2, 4),
+				series(startTime("gateway-mock"), 900, 900, 900, 900)));
+
+		JsonNode items = body(this.tools.trafficCounts(10, null)).path("items");
+
+		assertThat(items.get(0).path("count").asLong()).isEqualTo(4);
+	}
+
+	@Test
+	void withoutStartTimesASeriesMissingTheWindowStartSampleTakesItsFirstValueAsTheBaseline() {
+		// Nothing proves the series is new, so the conservative rule applies: 7 is the baseline.
+		this.prometheus.replyWith(200, matrix(
+				seriesFrom(START + 10, server("order-service", "POST", "/orders", "201", "SUCCESS"), 7, 9)));
+
+		JsonNode items = body(this.tools.trafficCounts(10, null)).path("items");
+
+		assertThat(items.get(0).path("count").asLong()).isEqualTo(2);
+	}
+
+	@Test
+	void theFaultInjectorsAdminCallsAreLeftOut() {
+		// The lab's control plane: a real system would not show where a fault was injected.
+		this.prometheus.replyWith(200, matrix(
+				series(server("gateway-mock", "PUT", "/admin/behavior", "200", "SUCCESS"), 0, 1),
+				series(server("gateway-mock", "DELETE", "/admin/behavior", "200", "SUCCESS"), 0, 1),
+				series(server("gateway-mock", "POST", "/authorize", "200", "SUCCESS"), 10, 12)));
+
+		JsonNode items = body(this.tools.trafficCounts(10, null)).path("items");
+
+		assertThat(items).hasSize(1);
+		assertThat(items.get(0).path("uri").asString()).isEqualTo("/authorize");
 	}
 
 	@Test
@@ -202,9 +264,14 @@ class TrafficCountsToolTest {
 
 	/** One series with a sample every 5 s from the window start. */
 	private static String series(Map<String, String> labels, double... values) {
+		return seriesFrom(START, labels, values);
+	}
+
+	/** One series with a sample every 5 s from {@code first}. */
+	private static String seriesFrom(long first, Map<String, String> labels, double... values) {
 		List<String> points = new ArrayList<>();
 		for (int i = 0; i < values.length; i++) {
-			points.add("[" + (START + 5L * i) + ",\"" + values[i] + "\"]");
+			points.add("[" + (first + 5L * i) + ",\"" + values[i] + "\"]");
 		}
 		return "{\"metric\":" + JSON.writeValueAsString(labels) + ",\"values\":[" + String.join(",", points) + "]}";
 	}
