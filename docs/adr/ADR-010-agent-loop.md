@@ -80,7 +80,7 @@ Why the phase caps sum to the incident's 8-call budget: the model always gets to
 |--------|-------|----------------|
 | Tool calls | 8 per incident (2 + 4 + 2 per phase) | further calls are refused and recorded; the loop moves to the next phase |
 | Model calls | 15 per incident (16 before T5, 12 from T5 to T5c11) | the run ends `BUDGET_EXCEEDED`. A valid run needs at most 8 `ACT` answers (each phase's answers are at most its allowance) + 2 for the uncounted refusals (since T5c9) + 3 phase retries (since T5c12) + 2 report attempts = 15, so this is a guard against a loop bug, never a normal end |
-| One model call | per task since T5c4: 300 s for `ACT`, 420 s for `REPORT` since T5c5 (240 s and 300 s in T5c4, 180 s for both in T5, 90 s before) | the run ends `TIMED_OUT` |
+| One model call | per task since T5c4: 420 s for `ACT` since T5c15 (300 s in T5c5), 420 s for `REPORT` since T5c5 (240 s and 300 s in T5c4, 180 s for both in T5, 90 s before) | the run ends `TIMED_OUT` |
 | One incident | 45 minutes since T5c5 (30 in T5, 10 before), wall clock from the end of the warm-up, tool calls included | the run ends `TIMED_OUT` |
 | Warm-up | one request before the run, at most 300 s, counted against no budget | the run ends `FAILED` |
 
@@ -184,6 +184,13 @@ The eleventh run scored 2/3. In F3, `recent_events` with `type=PAYMENT_UNAVAILAB
 The twelfth run scored 0/3. In F2 both report attempts named the true cause, `gateway-mock|DEPENDENCY_REJECTING`, but cited `toolCallId` 12, a `recent_events` step, with `tool` `search_runbooks`; the wrong tool invalidated each whole report, and the run ended `INVALID_REPORT`. Since T5c11 a wrong quote only drops its item. The agent decided (2026-10-16, under the human's overnight go-ahead, extending the human's T5c11 decision):
 
 - **An item whose `tool` is not its step's tool is dropped, not fatal.** It is removed and named in the `REPORT` step's summary, `valid; dropped: evidence[2].tool is search_runbooks, but step 12 is recent_events`, exactly like an unverified quote: the report stays valid while at least one verified item is left (or none is needed, both causes `UNKNOWN`), and when it is rejected for another reason, or no verified item is left, the retry's errors name the wrong-tool items too. A missing or refused step, a quote outside 8 to 160 characters, the schema and the enums stay fatal: a citation of a call that never ran is fabricated, not mislabelled. Rejected: correcting `tool` to the step's tool (code would be rewriting the model's evidence; the item's quote would still have been written against the wrong tool's output).
+
+### Amended in T5c15: a 420 s ACT deadline
+
+Runs 11 to 13 timed out F1 every time on a phase's first `ACT` answer, the one that carries the plan: those answers took 213 to 300 s (`INVESTIGATE`'s 265 to 300 s), while every other `ACT` answer stayed under 175 s. Most of that time is reading the prompt: each phase starts from a fresh plan, so the prompt cache covers only the system prompt and the tool definitions. The human decided (2026-10-16):
+
+- **`ACT` gets the `REPORT` deadline, 420 s.** It gives the slowest first answer measured about two minutes of room. The loop's HTTP read timeout follows the longest deadline and stays 420 s. Rejected: shortening the first answer (its writing is the smaller part of the call, so a lower cap would save little).
+- **The incident budget stays 45 minutes, with a new justification.** It holds every incident measured, the longest 1,915 s (32 minutes), but no longer a run with every model call at its deadline: 6 x 420 + 2 x 420 = 3,360 s, 56 minutes. That gap is a recorded follow-up. `verify-agent.sh`'s waits derive from the budget and the warm-up, so they are unchanged.
 
 ### Plan and report schemas
 

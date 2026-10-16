@@ -50,11 +50,13 @@ kintsugi:
       name: ${spring.ai.ollama.chat.model}
       temperature: ${spring.ai.ollama.chat.temperature}
       num-ctx: ${spring.ai.ollama.chat.num-ctx}
-      # The deadline of one call, per task (agent spec, "Budgets"; the human's decisions of 2026-10-14): on the laptop's
-      # CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s. In the third full
-      # run plan-carrying ACT calls took up to 207 s and a REPORT call ran past 300 s.
+      # The deadline of one call, per task (agent spec, "Budgets"; the human's decisions of 2026-10-14 and 2026-10-16):
+      # on the laptop's CPU reading the prompt takes about 70 to 90 s and an answer is written at about 2.9 tokens/s. In
+      # the third full run a REPORT call ran past 300 s. In runs 11-13 a phase's first ACT answer, which carries the
+      # plan, took 213-300 s and caused every F1 timeout, while the other ACT answers stayed under 175 s; most of that
+      # time is reading the prompt (each phase starts from a fresh plan), so a shorter answer would save little.
       call-timeout:
-        act: 300s
+        act: 420s
         report: 420s
       # The most tokens an answer may hold, Ollama's num_predict (agent spec, "Answer caps", where the values are
       # justified). On the laptop's CPU an answer is written at about 3 tokens/s, so a cap also bounds the call's time:
@@ -66,8 +68,9 @@ kintsugi:
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
     # run makes at most 15 model calls (8 ACT answers, 2 for uncounted refusals, 3 phase retries and 2 report
     # attempts), so 15 is a guard against a loop bug; the warm-up, which loads the
-    # model before the run, counts against no budget and has its own bound. 45 min holds the longest run measured
-    # (16 steps: 6 ACT answers, 2 reports, 8 tool calls) with every model call at its deadline, 6 x 300 + 2 x 420 s.
+    # model before the run, counts against no budget and has its own bound. 45 min holds every incident measured (the
+    # longest took 1915 s), but not a run with every model call at its deadline (6 ACT answers and 2 reports at 420 s,
+    # 56 min): a recorded follow-up.
     loop:
       max-model-calls: 15
       incident-timeout: 45m

@@ -14,8 +14,8 @@ import org.springframework.core.io.ClassPathResource;
 
 /**
  * The deadlines and budgets the agent ships with, read from the packaged application.yaml (agent spec, "Budgets"; the
- * human's decision of 2026-10-14 after the third full run): each call deadline fits the longest call measured, and
- * the incident's time budget holds a whole run with every model call at its deadline.
+ * human's decisions of 2026-10-14 and 2026-10-16): each call deadline fits the longest call measured, and the
+ * incident's time budget holds the longest incident measured.
  */
 class DefaultBudgetsTest {
 
@@ -34,16 +34,17 @@ class DefaultBudgetsTest {
 	}
 
 	@Test
-	void anActCallMayTake300SecondsAndTheReport420() {
-		assertThat(deadlines).isEqualTo(new CallTimeouts(Duration.ofSeconds(300), Duration.ofSeconds(420)));
+	void anActCallAndTheReportMayTake420Seconds() {
+		assertThat(deadlines).isEqualTo(new CallTimeouts(Duration.ofSeconds(420), Duration.ofSeconds(420)));
 	}
 
 	@Test
-	void theIncidentBudgetHoldsTheLongestRunWithEveryModelCallAtItsDeadline() {
-		// The longest run of the third live run: 16 steps, 8 tool calls, 6 ACT answers and 2 reports (one retry).
-		Duration longestRun = deadlines.of(ModelTask.ACT).multipliedBy(6).plus(deadlines.of(ModelTask.REPORT).multipliedBy(2));
+	void theIncidentBudgetHoldsTheLongestIncidentMeasured() {
+		// The longest incident measured (runs 11-13) took 1915 s. Since T5c15 the budget no longer holds a run with every model
+		// call at its deadline (6 ACT answers and 2 reports at 420 s, 56 min): a recorded follow-up.
+		Duration longestIncidentMeasured = Duration.ofSeconds(1915);
 
-		assertThat(loop.incidentTimeout()).isEqualTo(Duration.ofMinutes(45)).isGreaterThan(longestRun);
+		assertThat(loop.incidentTimeout()).isEqualTo(Duration.ofMinutes(45)).isGreaterThan(longestIncidentMeasured);
 	}
 
 	@Test
