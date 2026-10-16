@@ -23,8 +23,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Next action
 
-1. The human decides, with runs 11-13 as evidence (details in `odd/tasks/agent-loop.md`, Next step):
-   - the 300 s `ACT` deadline, which every phase's first answer (the plan) reaches on this host: raise it, or shorten that answer;
+1. **Decided 2026-10-16: the `ACT` deadline is 420 s (T5c15, `767acdd`, reviewed); the incident budget stays 45 min.** The human still decides, with runs 11-13 as evidence (details in `odd/tasks/agent-loop.md`, Next step):
    - F3: a prompt or tool change toward order-side evidence (close to teaching the test), or record F3 as a known limit of the local model;
    - the replay harness, to measure several samples per fault without the lab.
 2. Then the fourteenth full run (T5c3).
