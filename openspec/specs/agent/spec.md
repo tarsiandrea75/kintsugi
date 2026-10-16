@@ -491,6 +491,43 @@ It MUST hold no judgment, threshold or marker; the only computed values are the 
 - WHEN the dossier is gathered
 - THEN no call is offered to the model or passes the loop's checks, and none counts against the 8-call tool budget
 
+### Requirement: Evidence dossier rendering
+
+`DossierRenderer` MUST write a gathered dossier as compact Markdown for the model's prompt (ADR-011 "Facts only", "Budgets"). It writes facts only: headings and column labels are neutral, and no word, mark, threshold or sentence says what a value means. A header states the two windows and the gathering time as facts (`the last N min, <from> to <to>`, `the N min before it, <from> to <to>`, ISO-8601 UTC), and that `-` means no value.
+
+Every section and every fixed row is written for every dossier, in this order, whatever the values:
+1. **Service status (incident window):** one row per lab service, in the gatherer's order: restarts in the window, the newest 3 of their start times (and how many earlier ones), uptime at gathering (`1 h 59 min 49.3 s`).
+2. **Order states** and **Payment states:** one row per status present in either window, previous and incident counts side by side, and up to 3 sample order ids of the incident window.
+3. **Traffic:** the fixed edges external client → order-service `POST /orders` (server side only), order-service → inventory-service `POST /reservations`, order-service → payment-service `POST /payments`, payment-service → gateway-mock `POST /authorize`. Each edge has its caller-side (`client`) rows by status, outcome and exception, then its server-side rows by status and outcome, previous and incident counts side by side; a row missing from one window counts 0 there. A side with no row in either window is written as one `no rows` row with counts 0, since `traffic_counts` leaves out rows of count 0. Rows that belong to no fixed edge follow under "Other rows", with all their labels.
+4. **Log signatures (incident window):** per service and level (`WARN`, `ERROR`), `count_logs`' exact count and `search_logs`' returned lines, truncation and number of signatures; then the signatures, each with its count, newest time and newest message.
+5. **Event counts:** per source, the totals and one row per type and outcome, previous and incident side by side.
+
+Variable rows are sorted by incident count, then previous count, largest first, then by their labels. Caps keep the size bounded, and what they leave out is stated as a fact (`not shown: rows=<n>, previous=<sum>, incident=<sum>`; `not shown: signatures=<n> lines=<sum>`): at most 5 rows per table and per side of an edge; at most 3 signatures per service and level and 8 in the whole log section, handed out one per level per round in the section's order; table values cut at 40 characters, log messages at 300, failure reasons at 200. A failed call is written as one line in its section, `<tool> failed[ for the <previous|incident> window]: outcome=<outcome> reason="<reason>"`, and the section keeps its fixed rows, with `-` for the counts it could not read. Log messages are written as `untrustedText="..."` literals, and reasons as `reason="..."`, with the same JSON escaping as the tool summaries ("Summaries built in code"), so text from the lab can never close its literal or start a line of its own; table values are escaped the same way, without quotes, and with `|` escaped. The rendering is deterministic: the same dossier always gives the same text, whatever the default locale or time zone.
+
+#### Scenario: Facts only
+- WHEN the F3 dossier, the healthy dossier, a dossier with failed calls and a stress dossier are rendered with every value from the lab masked
+- THEN none of the renderer's own words is interpretive ("anomalous", "unusual", "suspicious", "likely", "should", "expected", "because", "cause", "root", "healthy", "normal", "spike", "drop", "fault", "degraded", ...) and no mark such as ⚠, ✅ or ❌ appears
+
+#### Scenario: Same shape for every incident
+- WHEN the F3 dossier and the healthy dossier are rendered
+- THEN they have the same headings, table headers, service rows and log level lines, in the same order
+
+#### Scenario: Failed section
+- GIVEN `traffic_counts` answers `UPSTREAM_ERROR` for the incident window and `service_restarts` cannot reach mcp-tools
+- WHEN the dossier is rendered
+- THEN the traffic section holds `traffic_counts failed for the incident window: outcome=UPSTREAM_ERROR reason="..."` and every edge with `-` as its incident counts
+- AND the service status section holds `service_restarts failed: outcome=CLIENT_ERROR reason="..."` and the four service rows with `-`
+
+#### Scenario: Size ceiling
+- WHEN the F3 and healthy dossiers are rendered
+- THEN each is at most 2,500 tokens by a conservative estimate of one token per 3 characters (about 1.4k for F3)
+- AND a stress dossier, every list far above its cap and every value at its length limit, is at most 4,500 by the same estimate
+
+#### Scenario: Untrusted text marked
+- GIVEN a log message holding a quote, a newline and the text "## Service status"
+- WHEN the dossier is rendered
+- THEN the message is inside one `untrustedText="..."` literal on its signature line, with the quote and newline escaped, and the heading "## Service status (incident window)" appears once
+
 ### Requirement: Summaries built in code
 
 The model MUST never receive a raw tool output. For each recorded call, code MUST build a summary that is deterministic (the same output always gives the same summary), at most 1,500 characters, and starts with the header `toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n> truncated=<bool>` (`returned` is 0 and `truncated` false when the output is not a readable result, as for `CLIENT_ERROR`; `truncated` is also true when the output ends with mcp-tools' `[truncated]` marker). Text copied from the output MUST be copied verbatim (cut only at its end), so that a quote of a copied string is a quote of the output; the lines around it reshape the output (`status="PAID" count=3`), which is why the evidence check also reads the summary **(T5c6)**. Text from `untrustedText` fields MUST stay labelled as `untrustedText` in the summary.
