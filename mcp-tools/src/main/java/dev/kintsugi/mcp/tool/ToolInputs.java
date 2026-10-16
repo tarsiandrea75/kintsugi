@@ -45,6 +45,26 @@ public final class ToolInputs {
 		return value;
 	}
 
+	/**
+	 * The optional end of a bounded window {@code [now - sinceMinutes, now - untilMinutesAgo)}: 0 to 359 and less than
+	 * {@code sinceMinutes}; {@code null} is 0, a window open at now. The same rule as {@code status_summary} and
+	 * {@code event_counts}.
+	 */
+	public static int untilMinutesAgo(Integer value, int sinceMinutes) {
+		if (value == null) {
+			return 0;
+		}
+		if (value < 0 || value >= MAX_SINCE_MINUTES) {
+			throw new InvalidParameterException("untilMinutesAgo",
+					"must be an integer from 0 to " + (MAX_SINCE_MINUTES - 1));
+		}
+		if (value >= sinceMinutes) {
+			throw new InvalidParameterException("untilMinutesAgo",
+					"must be less than sinceMinutes (" + sinceMinutes + ")");
+		}
+		return value;
+	}
+
 	public static int limit(Integer value) {
 		if (value == null) {
 			return DEFAULT_LIMIT;

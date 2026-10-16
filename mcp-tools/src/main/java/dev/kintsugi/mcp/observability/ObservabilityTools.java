@@ -167,6 +167,27 @@ public class ObservabilityTools {
 		});
 	}
 
+	@McpTool(name = "traffic_counts", description = "Exact numbers of HTTP requests per edge in a window of minutes:"
+			+ " server side per service, method, uri, status and outcome; client side (outgoing calls) per service,"
+			+ " clientName, method, uri, status, outcome and exception. Counted from raw samples, so a restarted"
+			+ " process counts from zero. Rows with count 0 and /actuator endpoints are left out.")
+	public CallToolResult trafficCounts(@McpToolParam(description = SINCE) Integer sinceMinutes,
+			@McpToolParam(description = "Optional end of the window, this many minutes ago, 0 to 359 and less than"
+					+ " sinceMinutes; the window is [now - sinceMinutes, now - untilMinutesAgo). Default 0, up to now.",
+					required = false) Integer untilMinutesAgo) {
+		return this.runner.run("traffic_counts",
+				params("sinceMinutes", sinceMinutes, "untilMinutesAgo", untilMinutesAgo), () -> {
+					int minutes = ToolInputs.sinceMinutes(sinceMinutes);
+					int until = ToolInputs.untilMinutesAgo(untilMinutesAgo, minutes);
+					Instant now = this.clock.instant();
+					Instant start = now.minus(Duration.ofMinutes(minutes));
+					JsonNode data = this.prometheus.queryRange(TrafficCounts.query(), start,
+							now.minus(Duration.ofMinutes(until)), TrafficCounts.STEP_SECONDS);
+					List<TrafficCounts.Row> rows = TrafficCounts.rows(data, start.getEpochSecond());
+					return new ToolResult(rows, false, rows.stream().mapToLong(TrafficCounts.Row::count).sum());
+				});
+	}
+
 	private static ToolResult logLines(JsonNode data, String service, int limit) {
 		List<LogLine> lines = new ArrayList<>();
 		boolean truncated = false;
