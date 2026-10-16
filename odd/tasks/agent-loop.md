@@ -143,7 +143,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
     Tests first; spec, ADR-010 "Amended in T5c12". Route: delegated writer (2+ non-trivial files: `AgentLoop`, `PlanCheck`, `Prompts`, their tests, spec, ADR).
 
-  - [ ] **T5c13 — a repeated failed call says why it failed (the human's decision of 2026-10-16, after the eleventh run):**
+  - [x] **T5c13 — a repeated failed call says why it failed (the human's decision of 2026-10-16, after the eleventh run):**
     - a call refused as a duplicate of an earlier call that did not end `OK` repeats that call's outcome and reason in the refusal (for `INVALID_PARAMETER`, the tool's reason, such as "type must be one of [PAYMENT_ATTEMPT] for source payment"), and asks for different arguments instead of "read that result";
     - a duplicate of an `OK` call keeps today's text.
 
@@ -459,6 +459,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - F3's miss is reasoning, not speed. TRIAGE's `status_summary` returned only `AUTHORIZED count=3`, and the plan held only gateway-mock and payment-service hypotheses; no call ever looked at order-service.
   - In INVESTIGATE, `recent_events` with `type=PAYMENT_UNAVAILABLE` got `INVALID_PARAMETER` ("type must be one of [PAYMENT_ATTEMPT] for source payment"). The model then repeated that call and the same `search_logs` for two more turns; all four were `REFUSED_DUPLICATE`: the first two used the incident's 2 uncounted refusals, the last two counted against the 8-call tool budget, and the two answers that sent them cost about 4 minutes of model time (125 s and 107 s). KNOWLEDGE used the rest, and the report cites a gateway-mock `answered=200` log line as evidence of rejection.
   - Candidate fix, not approved: a duplicate refusal of a call that failed with `INVALID_PARAMETER` repeats the original reason, so the model can correct its arguments instead of looping.
+- 2026-10-16: T5c13 done by a delegated writer in one unit, committed as `f29401f`. The refusal reuses the `reason="..."` line of the earlier call's summary (escaped, cut at 300 characters by `ToolSummaries`). RED: the two new `AgentLoopTest` cases failed on the old "read that result" text; GREEN: `AgentLoopTest` 47 tests, full `agent` suite 297 tests (surefire XML), 0 failures, 0 errors. Spec: "Phases and their tools" rule 2 and the scenario "A repeated failed call says why it failed". ADR-010 has "Amended in T5c13".
 
 ## Next step
 
