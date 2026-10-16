@@ -143,6 +143,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
     Tests first; spec, ADR-010 "Amended in T5c12". Route: delegated writer (2+ non-trivial files: `AgentLoop`, `PlanCheck`, `Prompts`, their tests, spec, ADR).
 
+  - [ ] **T5c13 — a repeated failed call says why it failed (the human's decision of 2026-10-16, after the eleventh run):**
+    - a call refused as a duplicate of an earlier call that did not end `OK` repeats that call's outcome and reason in the refusal (for `INVALID_PARAMETER`, the tool's reason, such as "type must be one of [PAYMENT_ATTEMPT] for source payment"), and asks for different arguments instead of "read that result";
+    - a duplicate of an `OK` call keeps today's text.
+
+    Tests first; spec, ADR-010 "Amended in T5c13". Route: delegated writer (2+ non-trivial files: `AgentLoop`, its test, spec, ADR).
+
 ## Progress
 
 - 2026-10-08: read-only research done.
@@ -451,9 +457,9 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - 2026-10-15: after a host restart, an Ollama probe (922-token prompt) read prompts at 10.6-11.1 tokens/s and generated at 4.1-4.2 tokens/s; generation is back to run 8, prompt eval is about 20% under it.
 - 2026-10-15: eleventh full `verify-agent.sh` run on `8d664fc` (`infra/scripts/out/verify-agent-20261015T192159Z/`, 111 min): **2/3**, the best so far, and no fault timed out. F1 MATCH (22 steps, 1915 s), F2 MATCH (21 steps, 1643 s), F3 MISS (19 steps, 1492 s): reported `gateway-mock|DEPENDENCY_REJECTING`, truth `order-service|CONFIGURATION`. INVESTIGATE `ACT` calls took 107-125 s, well under the 300 s deadline, so the deadline stays.
   - F3's miss is reasoning, not speed. TRIAGE's `status_summary` returned only `AUTHORIZED count=3`, and the plan held only gateway-mock and payment-service hypotheses; no call ever looked at order-service.
-  - In INVESTIGATE, `recent_events` with `type=PAYMENT_UNAVAILABLE` got `INVALID_PARAMETER` ("type must be one of [PAYMENT_ATTEMPT] for source payment"). The model then repeated that call and the same `search_logs` for two more turns; all four were `REFUSED_DUPLICATE` and used half of the 8-call tool budget. KNOWLEDGE used the rest, and the report cites a gateway-mock `answered=200` log line as evidence of rejection.
+  - In INVESTIGATE, `recent_events` with `type=PAYMENT_UNAVAILABLE` got `INVALID_PARAMETER` ("type must be one of [PAYMENT_ATTEMPT] for source payment"). The model then repeated that call and the same `search_logs` for two more turns; all four were `REFUSED_DUPLICATE`: the first two used the incident's 2 uncounted refusals, the last two counted against the 8-call tool budget, and the two answers that sent them cost about 4 minutes of model time (125 s and 107 s). KNOWLEDGE used the rest, and the report cites a gateway-mock `answered=200` log line as evidence of rejection.
   - Candidate fix, not approved: a duplicate refusal of a call that failed with `INVALID_PARAMETER` repeats the original reason, so the model can correct its arguments instead of looping.
 
 ## Next step
 
-The human decides whether F3's duplicate loop becomes a task (T5c13) before the twelfth full run (T5c3).
+T5c13, then the twelfth full run (T5c3).
