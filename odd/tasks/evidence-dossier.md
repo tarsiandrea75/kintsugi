@@ -124,6 +124,11 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 - 2026-10-16: the blocker above fixed inline by the parent in the same unit: `Phase.DOSSIER_TOOLS` (`event_counts`, `traffic_counts`) are lab tools for `McpLabTools.call`, and no phase offers them. RED: the new `McpLabToolsTest.theDossierToolsAreCallableButNeverOfferedToTheModel` failed with `IllegalArgumentException: not an mcp-tools tool: event_counts`. GREEN: full agent `./mvnw test` 314 tests, 0 failures, 0 errors.
   - Open for T4b: the fixed edge list of the traffic matrix (rows absent from `traffic_counts` render as 0); how a `Failed` section renders; how the window bounds and uptime are written; a cap on the signatures shown per level.
   - Open for T5: how the dossier's 29 calls are stored (steps of their own kind, or not at all) and whether reports cite them by `toolCallId`; the previous window is invalid for N above 180 (`sinceMinutes` 2N above 360), so the tools reject it and the dossier records the rejection; whether to share one signature rule between `Summarizers` and `LogSignatures`.
+- 2026-10-16: T4a committed as `f5c13fa`. Reviewed T3d and T4a together, from `8764347` to `f5c13fa` (four lenses, consent granted): approved and acknowledged (`review-c2d9bb0501f7041f`). Findings:
+  - Fixed by the parent in a follow-up commit: (WARNING, R2 and R3) `restartsInWindow` assumed `startTimes` oldest first; they are now sorted. RED: `DossierGathererTest.restartsAreTheNewestStartTimesWhateverTheOrderOfTheOutput` failed without the sort; GREEN: full agent suite 315 tests, 0 failures, 0 errors. (WARNING, R2 and R3) the gateway-mock spec's requirement prose still named the configured latency; reworded. (SUGGESTION) an unused import in `LogSignatures`.
+  - No change: (WARNING, R4 and R3) "truncated output is broken JSON": mcp-tools drops whole items until the text fits and then appends the marker (`ToolCallRunner`), so what is left after the marker is valid JSON.
+  - Follow-ups: (SUGGESTION) the signature rule is copied from `Summarizers.template` with no test that both group alike; (SUGGESTION) the previous-window rejection for N above 180 is untested, and `2 * sinceMinutes` could overflow for huge N.
+  - The next review base is `f5c13fa`.
 
 ## Next step
 

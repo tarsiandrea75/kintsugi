@@ -142,6 +142,8 @@ public final class DossierGatherer {
 			for (JsonNode time : item.path("startTimes")) {
 				startTimes.add(Instant.parse(time.asString()));
 			}
+			// Oldest first, so the restarts in the window are the newest entries whatever the order of the output.
+			startTimes.sort(null);
 			int restarts = (int) Math.min(number(item, "restartsInWindow"), startTimes.size());
 			Duration uptime = startTimes.isEmpty() ? null
 					: Duration.between(startTimes.stream().max(Instant::compareTo).orElseThrow(), at);

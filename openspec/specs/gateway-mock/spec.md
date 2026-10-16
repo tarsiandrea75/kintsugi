@@ -88,7 +88,7 @@ The service MUST expose the Micrometer gauge `gateway.authorize.inflight`: the n
 
 ### Requirement: Every authorize call is logged
 
-The gateway has no database by design, so its record of each call is a log line, which reaches Loki. Every `POST /authorize` that passes validation MUST log exactly one structured line with `key=value` pairs, readable by Loki's `logfmt` parser: the order id, the configured latency, the status answered and the actual duration, measured from before the latency.
+The gateway has no database by design, so its record of each call is a log line, which reaches Loki. Every `POST /authorize` that passes validation MUST log exactly one structured line with `key=value` pairs, readable by Loki's `logfmt` parser: the order id, the status answered and the actual duration, measured from before the latency. The configured latency is not logged: it is a fault parameter, and the agent must see only what the system does (ADR-011).
 
 ```
 Authorize answered: event=AUTHORIZE order=<order id> answered=<200|429|500|503> duration_ms=<actual ms>

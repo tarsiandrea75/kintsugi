@@ -106,6 +106,19 @@ class DossierGathererTest {
 	}
 
 	@Test
+	void restartsAreTheNewestStartTimesWhateverTheOrderOfTheOutput() {
+		RecordedLab lab = new RecordedLab("healthy").answer("service_restarts",
+				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"service\":\"order-service\","
+						+ "\"startTimes\":[\"2026-10-16T09:53:12.400Z\",\"2026-10-16T08:00:20.300Z\"],\"restartsInWindow\":1}]}");
+
+		ServiceStatus order = ok(new DossierGatherer(lab, CLOCK).gather(10).services()).get(0);
+
+		assertThat(order.startTimes()).containsExactly(Instant.parse("2026-10-16T08:00:20.300Z"),
+				Instant.parse("2026-10-16T09:53:12.400Z"));
+		assertThat(order.restartsInWindow()).containsExactly(Instant.parse("2026-10-16T09:53:12.400Z"));
+	}
+
+	@Test
 	void aServiceMissingFromTheOutputKeepsItsPlaceWithoutStartTimes() {
 		RecordedLab lab = new RecordedLab("healthy").answer("service_restarts",
 				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"service\":\"gateway-mock\","
