@@ -4,27 +4,30 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-15 (session 02)
+2026-10-16 (session 01, overnight, run autonomously with the human's go-ahead)
 
 ## Milestone
 
-**M2 — First agent: in progress.** Done: the MCP tools server, RAG on the runbooks, and the agent loop through T5c12. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3).
+**M2 — First agent: in progress.** Done: the MCP tools server, RAG on the runbooks, and the agent loop through T5c14. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3). The best run is 2/3; the check needs the human's decisions below.
 
 ## Last action
 
-- **Backups automated:** `infra/scripts/backup-bundle.sh` writes a full bundle and its sha256 to `C:\Users\andrea.tarsi\kintsugi-backups\`. The session-close protocol in `CLAUDE.md` runs it.
-- **T5c12 done** (`3c77f6f`): an `ACT` answer with no tool call gets one retry per phase; out-of-phase `nextTools` entries are dropped; the model-call budget is 15. Review approved.
-- **Runs 9 and 10** (`infra/scripts/out/verify-agent-20261015T161014Z/`, `...T173441Z/`): 0/3 and 1/3, both on a slow host. In run 9, Ollama fell from 13-14 to under 5.4 prompt tokens/s. In run 10 it was about 9 prompt and 3 generation tokens/s.
-  - Run 10: F2 MATCH, with T5c12 working end to end: two retries, and KNOWLEDGE searched the runbooks.
-  - F1 and F3 timed out on the first INVESTIGATE answer, which sits right on the 300 s `ACT` deadline at that speed.
-- Branch `feat/agent-loop-04-check`, clean tree, nothing pushed. Every code commit is reviewed. The next review base is `3e6edc2`; later commits are docs only.
-- The human is restarting the PC to rule out a degraded host.
+- **Host back to speed after the restart:** an Ollama probe read prompts at 10.6-11.1 tokens/s and generated at 4.1-4.2 tokens/s; latencies stayed level through runs 11-13.
+- **Runs 11-13** (`infra/scripts/out/verify-agent-20261015T192159Z/`, `-20261016T024609Z/`, `-20261016T042636Z/`): 2/3, 0/3, 1/3.
+  - F1: 1 MATCH, 2 timeouts on a phase's first answer (over the 300 s `ACT` deadline).
+  - F2: 2 MATCH, 1 report invalidated by an evidence item citing the wrong tool, with the right cause.
+  - F3: 0 of 3; the model always blames gateway-mock and never looks at order-side evidence.
+- **T5c13** (`f29401f`): a repeat of a failed call is refused with the first call's outcome and reason. Review approved.
+- **T5c14** (`fc3a00c`, decided by the agent overnight, extending the human's T5c11 rule): an evidence item citing the wrong tool is dropped, not fatal. Review approved.
+- Branch `feat/agent-loop-04-check`, clean tree, nothing pushed. The next review base is `4801fb7`; later commits are docs only.
 
 ## Next action
 
-1. After the restart, check Ollama's speed against run 8 (prompt eval 13-14 tokens/s, generation about 4), then run the eleventh full run (T5c3).
-   - If the host is still slow, the human decides: investigate the host (power profile, `.wslconfig`), or raise the `ACT` deadline.
-2. Proposed earlier, not approved: a replay harness that replays recorded tool outputs without the lab, to measure several samples per fault quickly.
+1. The human decides, with runs 11-13 as evidence (details in `odd/tasks/agent-loop.md`, Next step):
+   - the 300 s `ACT` deadline, which every phase's first answer (the plan) reaches on this host: raise it, or shorten that answer;
+   - F3: a prompt or tool change toward order-side evidence (close to teaching the test), or record F3 as a known limit of the local model;
+   - the replay harness, to measure several samples per fault without the lab.
+2. Then the fourteenth full run (T5c3).
 3. Waiting for the human: add `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`, and the other lines listed in the 2026-10-08 state:
    - `KINTSUGI_REPO_DIR=`
    - `DOCKER_GID=`
@@ -76,6 +79,9 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 ## Follow-ups
 
 agent-loop (details in `odd/tasks/agent-loop.md`):
+- T5c13 review: the branch for an earlier failure with no `reason` is untested (WARNING); the reason is read from the first `reason=` line; "change the arguments" is wrong advice after a transient failure.
+- T5c14 review: no test for an item with both a wrong tool and a bad quote.
+- A phase's plan `why` over 300 characters makes the plan invalid when the answer is cut at 384 tokens (F3, run 12).
 - The 45 min incident budget does not hold the worst case (every `ACT` and `REPORT` call at its deadline).
 - A runbook chunk can escape the summary cap.
 - A call that failed transiently is refused as a duplicate on retry.
