@@ -126,13 +126,17 @@ class AgentLoopDossierModeTest {
 		this.model.quiet().quiet().quiet().text(unknownReport());
 		run(AgentMode.EXPLORER);
 		String explorer = this.model.prompts().get(0).getInstructions().get(0).getText();
+		int explorerPrompts = this.model.prompts().size();
 		this.loop.close();
 		this.loop = null;
 
 		this.id = open();
 		this.model.quiet().quiet().text(unknownReport());
 		run(AgentMode.DOSSIER);
-		String dossier = this.model.prompts().get(3).getInstructions().get(0).getText();
+		// The dossier run's first prompt, proved to be one by its dossier message.
+		var dossierPrompt = this.model.prompts().get(explorerPrompts);
+		assertThat(dossierPrompt.getInstructions().get(1).getText()).startsWith(Prompts.DOSSIER_INTRO);
+		String dossier = dossierPrompt.getInstructions().get(0).getText();
 
 		assertThat(dossier).isEqualTo(explorer).isEqualTo(Prompts.system(SYMPTOM, 15));
 	}
