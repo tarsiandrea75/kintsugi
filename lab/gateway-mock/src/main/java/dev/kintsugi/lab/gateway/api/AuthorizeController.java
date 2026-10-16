@@ -67,7 +67,7 @@ class AuthorizeController {
 		catch (InterruptedException ex) {
 			Thread.currentThread().interrupt();
 			log.warn("Authorize interrupted: {} interrupted=true",
-					fields(request, behavior, HttpStatus.SERVICE_UNAVAILABLE.value(), start));
+					fields(request, HttpStatus.SERVICE_UNAVAILABLE.value(), start));
 			throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Interrupted while simulating latency",
 					ex);
 		}
@@ -76,17 +76,19 @@ class AuthorizeController {
 		}
 		Integer errorStatus = behavior.errorStatus();
 		int answered = errorStatus != null ? errorStatus : HttpStatus.OK.value();
-		log.info("Authorize answered: {}", fields(request, behavior, answered, start));
+		log.info("Authorize answered: {}", fields(request, answered, start));
 		if (errorStatus != null) {
 			return ResponseEntity.status(errorStatus).body(GatewayErrorResponse.forStatus(errorStatus));
 		}
 		return ResponseEntity.ok(AuthorizeResponse.AUTHORIZED);
 	}
 
-	/** The configured latency, the status answered and the actual duration, measured from before the latency. */
-	private static String fields(AuthorizeRequest request, GatewayBehavior behavior, int answered, long startNanos) {
-		return "event=AUTHORIZE order=" + request.orderId() + " latency_ms=" + behavior.latencyMs() + " answered="
-				+ answered + " duration_ms=" + Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+	/**
+	 * The status answered and the actual duration, measured from before the latency. The configured latency is left
+	 * out: it is a fault parameter, and the agent must see only what the system does.
+	 */
+	private static String fields(AuthorizeRequest request, int answered, long startNanos) {
+		return "event=AUTHORIZE order=" + request.orderId() + " answered=" + answered + " duration_ms=" + Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
 	}
 
 }

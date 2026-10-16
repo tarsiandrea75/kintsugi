@@ -59,8 +59,8 @@ The admin API changes how `POST /authorize` answers, at runtime and without a re
 
 | Level | Message |
 |-------|---------|
-| INFO | `Authorize answered: event=AUTHORIZE order=<id> latency_ms=<configured ms> answered=<200, 429, 500 or 503> duration_ms=<actual ms>` |
-| WARN | `Authorize interrupted: event=AUTHORIZE order=<id> latency_ms=<configured ms> answered=503 duration_ms=<actual ms> interrupted=true` |
+| INFO | `Authorize answered: event=AUTHORIZE order=<id> answered=<200, 429, 500 or 503> duration_ms=<actual ms>` |
+| WARN | `Authorize interrupted: event=AUTHORIZE order=<id> answered=503 duration_ms=<actual ms> interrupted=true` |
 | INFO | `Gateway behavior changed: event=BEHAVIOR_CHANGED previous_latency_ms=<old> latency_ms=<new> previous_error_status=<old> error_status=<new>` |
 | INFO | `Gateway behavior reset: event=BEHAVIOR_RESET previous_latency_ms=<old> latency_ms=0 previous_error_status=<old> error_status=none` |
 

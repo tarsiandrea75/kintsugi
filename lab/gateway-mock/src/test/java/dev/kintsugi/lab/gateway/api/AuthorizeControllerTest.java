@@ -178,8 +178,8 @@ class AuthorizeControllerTest {
 		List<String> lines = authorizeLines(output);
 		assertThat(lines).singleElement()
 			.satisfies(line -> assertThat(line).contains(" INFO ")
-				.contains("Authorize answered: event=AUTHORIZE order=" + orderId + " latency_ms=" + latencyMs
-						+ " answered=" + answered + " duration_ms="));
+				.contains("Authorize answered: event=AUTHORIZE order=" + orderId + " answered=" + answered + " duration_ms=")
+				.doesNotContain("latency_ms="));
 		assertThat(durationMs(lines.get(0))).isGreaterThanOrEqualTo(latencyMs);
 	}
 
@@ -201,8 +201,8 @@ class AuthorizeControllerTest {
 
 		assertThat(authorizeLines(output)).singleElement()
 			.satisfies(line -> assertThat(line).contains(" WARN ")
-				.contains("Authorize interrupted: event=AUTHORIZE order=" + orderId + " latency_ms="
-						+ GatewayBehavior.MAX_LATENCY_MS + " answered=503 duration_ms=")
+				.contains("Authorize interrupted: event=AUTHORIZE order=" + orderId + " answered=503 duration_ms=")
+				.doesNotContain("latency_ms=")
 				.contains(" interrupted=true"));
 	}
 

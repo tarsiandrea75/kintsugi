@@ -91,13 +91,13 @@ The service MUST expose the Micrometer gauge `gateway.authorize.inflight`: the n
 The gateway has no database by design, so its record of each call is a log line, which reaches Loki. Every `POST /authorize` that passes validation MUST log exactly one structured line with `key=value` pairs, readable by Loki's `logfmt` parser: the order id, the configured latency, the status answered and the actual duration, measured from before the latency.
 
 ```
-Authorize answered: event=AUTHORIZE order=<order id> latency_ms=<configured ms> answered=<200|429|500|503> duration_ms=<actual ms>
+Authorize answered: event=AUTHORIZE order=<order id> answered=<200|429|500|503> duration_ms=<actual ms>
 ```
 
 The line is `INFO`. When the latency is interrupted the one line is `WARN` instead, says so, and reports the 503 answered:
 
 ```
-Authorize interrupted: event=AUTHORIZE order=<order id> latency_ms=<configured ms> answered=503 duration_ms=<actual ms> interrupted=true
+Authorize interrupted: event=AUTHORIZE order=<order id> answered=503 duration_ms=<actual ms> interrupted=true
 ```
 
 A body rejected with 400 never reaches the controller and logs no such line.
@@ -105,7 +105,8 @@ A body rejected with 400 never reaches the controller and logs no such line.
 #### Scenario: One line per call
 - GIVEN any configured latency and error status
 - WHEN `POST /authorize` is called with a valid order id
-- THEN exactly one `INFO` line contains `event=AUTHORIZE`, `order=<order id>`, `latency_ms=<configured latency>` and `answered=<status returned>`
+- THEN exactly one `INFO` line contains `event=AUTHORIZE`, `order=<order id>` and `answered=<status returned>`
+- AND it does not contain the configured latency (`latency_ms`), a fault parameter the agent must not see
 - AND its `duration_ms` is at least the configured latency
 
 #### Scenario: Interrupted call
