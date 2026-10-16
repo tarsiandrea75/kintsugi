@@ -476,6 +476,7 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - T5c13 had no repeat of an `INVALID_PARAMETER` call to act on: F3's step 5 failed, and its later calls used different arguments (one was then a plain duplicate of an `OK` call).
 
 - 2026-10-16: T5c14 done by a delegated writer in one unit, committed as `fc3a00c`. `ReportCheck` returns the wrong-tool error as droppable, like an unverified quote; a missing or refused step stays fatal. RED: the new `ReportCheckTest` case for a wrong-tool item among verified ones failed (the report was invalid); GREEN: `ReportCheckTest` 30 tests, full `agent` suite 299 tests (surefire XML), 0 failures, 0 errors. Spec: the evidence rule and the scenario "An item citing the wrong tool is dropped". ADR-010 has "Amended in T5c14".
+- 2026-10-16: T5c14 spot check: `ReportCheckTest` 30 tests green. Reviewed from `13c783b` to `4801fb7` (committed only, one reliability lens, consent granted): approved and acknowledged (`review-99ff09d8fa4f8d71`). Non-blocking follow-up (SUGGESTION): no test for an item with both a wrong tool and a bad quote. The next review base is `4801fb7`. The thirteenth full run starts on the next commit.
 
 ## Next step
 
