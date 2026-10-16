@@ -17,8 +17,9 @@ import tools.jackson.databind.json.JsonMapper;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
- * Checks a report in code: its schema, then each evidence item against the recorded tool steps of this incident
- * (agent spec, "The report", "Evidence is checked"). The model proposes, this code verifies.
+ * Checks a report in code: its schema, then each evidence item against the recorded tool steps of this incident, or,
+ * in dossier mode, against the rendered dossier (agent spec, "The report", "Evidence is checked"). The model proposes,
+ * this code verifies.
  */
 final class ReportCheck {
 
@@ -29,6 +30,12 @@ final class ReportCheck {
 	private static final Set<String> FIELDS = Set.copyOf(MODEL_FIELDS);
 
 	private static final Set<String> EVIDENCE_FIELDS = Set.of("toolCallId", "tool", "quote", "why");
+
+	/**
+	 * The citation id of the dossier (T5b): an evidence item cites it with {@code toolCallId} and {@code tool} both
+	 * {@code "dossier"}.
+	 */
+	static final String DOSSIER = "dossier";
 
 	/** The fewest characters of an evidence quote. */
 	static final int MIN_QUOTE_LENGTH = 8;
@@ -53,15 +60,21 @@ final class ReportCheck {
 	 * What the check found.
 	 * @param errors every rule the report breaks, each naming its field or evidence item; empty when it is valid
 	 * @param dropped when the report is valid, the evidence items dropped because their quote is not in their step
-	 * (T5c11) or their tool is not their step's tool (T5c14), each named like an error; empty otherwise
+	 * (T5c11) or their tool is not their step's tool (T5c14), or because they cite a dossier the run has not got or
+	 * quote text that is not in it (T5b), each named like an error; empty otherwise
 	 * @param evidence when the report is valid, its verified evidence items, in order; null otherwise
 	 */
 	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence) {
 	}
 
-	/** Every rule {@code report} breaks; empty when the report is valid ({@link #check}). */
+	/** Every rule an explorer-mode {@code report} breaks; empty when the report is valid ({@link #check}). */
 	static List<String> errors(JsonNode report, Map<Integer, ToolStep> toolSteps) {
 		return check(report, toolSteps).errors();
+	}
+
+	/** Checks an explorer-mode {@code report}: it has no dossier to cite. */
+	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps) {
+		return check(report, toolSteps, AgentMode.EXPLORER, null);
 	}
 
 	/**
@@ -72,9 +85,13 @@ final class ReportCheck {
 	 * right cause and lost it to one item citing a recent_events step as search_runbooks. The report stays valid
 	 * while at least one verified item is left, or none is needed because both causes are UNKNOWN. Any other broken
 	 * rule still rejects it, and then the errors name the dropped items too, so that the retry fixes them all.
+	 * An item citing the dossier is dropped in the same way when the run has no dossier (explorer mode, or a gathering
+	 * that gave none), when its tool is not {@code "dossier"}, or when its quote is not in the dossier (T5b).
 	 * @param toolSteps this incident's tool steps by step number, refused calls included
+	 * @param mode the run's mode: only dossier mode lets a {@code toolCallId} be {@code "dossier"}
+	 * @param dossier the rendered dossier the model read, without its introduction; null when there is none
 	 */
-	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps) {
+	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier) {
 		if (report == null || !report.isObject()) {
 			return invalid(List.of("the answer is not a JSON object"));
 		}
@@ -108,7 +125,7 @@ final class ReportCheck {
 		List<JsonNode> verified = new ArrayList<>();
 		for (int i = 0; i < evidence.size(); i++) {
 			int before = errors.size();
-			String droppable = item(evidence.get(i), "evidence[" + i + "]", toolSteps, errors);
+			String droppable = item(evidence.get(i), "evidence[" + i + "]", toolSteps, mode, dossier, errors);
 			if (droppable != null) {
 				// Listed with the errors, in item order, for the retry when the report is rejected for another reason.
 				errors.add(droppable);
@@ -134,9 +151,11 @@ final class ReportCheck {
 	/**
 	 * Checks one evidence item, adding to {@code errors} each rule it breaks.
 	 * @return the item's only error when it breaks no other rule but names another tool than its step's (T5c14) or
-	 * quotes text that is not in its step (T5c11), so that it can be dropped; null otherwise
+	 * quotes text that is not in its step (T5c11), or a dossier citation that does not verify (T5b), so that it can be
+	 * dropped; null otherwise
 	 */
-	private static String item(JsonNode item, String name, Map<Integer, ToolStep> toolSteps, List<String> errors) {
+	private static String item(JsonNode item, String name, Map<Integer, ToolStep> toolSteps, AgentMode mode,
+			String dossier, List<String> errors) {
 		if (!item.isObject()) {
 			errors.add(name + " must be an object {toolCallId, tool, quote, why}");
 			return null;
@@ -144,8 +163,9 @@ final class ReportCheck {
 		int before = errors.size();
 		unexpected(item, EVIDENCE_FIELDS, name + ".", errors);
 		JsonNode id = item.get("toolCallId");
-		if (id == null || !id.isIntegralNumber() || !id.canConvertToInt()) {
-			errors.add(name + ".toolCallId must be an integer");
+		boolean citesDossier = id != null && id.isString() && DOSSIER.equals(id.asString());
+		if (!citesDossier && (id == null || !id.isIntegralNumber() || !id.canConvertToInt())) {
+			errors.add(name + ".toolCallId must be an integer" + (mode == AgentMode.DOSSIER ? " or \"dossier\"" : ""));
 		}
 		if (item.get("tool") == null || !item.get("tool").isString()) {
 			errors.add(name + ".tool must be a string");
@@ -165,8 +185,11 @@ final class ReportCheck {
 		if (errors.size() > before) {
 			return null;
 		}
-		int stepNo = id.intValue();
 		String tool = item.get("tool").asString();
+		if (citesDossier) {
+			return dossierItem(name, tool, quote.asString(), mode, dossier);
+		}
+		int stepNo = id.intValue();
 		ToolStep step = toolSteps.get(stepNo);
 		if (step == null) {
 			errors.add(name + ".toolCallId " + stepNo + " is not a tool call of this incident");
@@ -180,6 +203,28 @@ final class ReportCheck {
 		}
 		else if (!quoted(quote.asString(), step.output()) && !inSummary(normalized(quote.asString()), step.summary())) {
 			return name + ".quote is not in the output of step " + stepNo;
+		}
+		return null;
+	}
+
+	/**
+	 * Checks an item that cites the dossier, which passes every other rule (T5b). Its quote is matched against the
+	 * rendered dossier as a quote of a tool output is ({@link #quoted}); every failure is droppable, as an unverified
+	 * quote (T5c11) or a wrong tool (T5c14) is.
+	 * @return the item's only error, or null when it is verified
+	 */
+	private static String dossierItem(String name, String tool, String quote, AgentMode mode, String dossier) {
+		if (mode != AgentMode.DOSSIER) {
+			return name + ".toolCallId dossier: this run has no dossier";
+		}
+		if (dossier == null) {
+			return name + ".toolCallId dossier: the dossier was not gathered";
+		}
+		if (!DOSSIER.equals(tool)) {
+			return name + ".tool is " + tool.replace("\"", "") + ", but toolCallId dossier is the dossier";
+		}
+		if (!quoted(quote, dossier)) {
+			return name + ".quote is not in the dossier";
 		}
 		return null;
 	}

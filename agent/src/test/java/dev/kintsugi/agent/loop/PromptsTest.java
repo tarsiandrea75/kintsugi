@@ -131,6 +131,52 @@ class PromptsTest {
 			.containsExactly("hypotheses[0].why must be a string of at most 300 characters");
 	}
 
+	@Test
+	void theDossierIntroductionSaysHowToCiteTheDossier() {
+		// T5b: the dossier has its own citation id; before, the introduction said it had no toolCallId (T5a).
+		assertThat(Prompts.DOSSIER_INTRO).contains("cite it with toolCallId \"dossier\" and tool \"dossier\"")
+			.doesNotContain("has no toolCallId");
+		assertThat(Prompts.dossierNotGathered("the gathering failed")).contains("The dossier was not gathered")
+			.contains("there is no dossier to cite")
+			.doesNotContain("toolCallId \"dossier\"");
+	}
+
+	@Test
+	void withADossierTheReportTaskListsItAmongTheCitableIdsAndSaysHowToCiteIt() {
+		List<ToolStep> steps = List.of(new ToolStep(3, "status_summary", "OK", "{}", null));
+
+		String dossier = Prompts.report(dossierState(Phase.CONCLUDE, true), List.of(), steps);
+		assertThat(dossier).contains("Citable toolCallIds: 3, dossier.")
+			.contains("To cite the dossier, write toolCallId \"dossier\" and tool \"dossier\"");
+		assertThat(Prompts.report(dossierState(Phase.CONCLUDE, true), List.of(), List.of()))
+			.contains("Citable toolCallIds: dossier.");
+
+		// Explorer mode, and a dossier run whose dossier was not gathered, never mention it.
+		assertThat(Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), steps))
+			.doesNotContain("dossier");
+		assertThat(Prompts.report(dossierState(Phase.CONCLUDE, false), List.of(), steps)).doesNotContain("dossier")
+			.contains("Citable toolCallIds: 3.");
+	}
+
+	@Test
+	void withADossierThePlansMayCiteIt() {
+		String first = Prompts.act(dossierState(Phase.INVESTIGATE, true), true);
+		assertThat(first).contains("at least two different services along the call path")
+			.contains("\"toolCallId=dossier: ...\"")
+			.doesNotContain("a fresh plan");
+		String later = Prompts.act(dossierState(Phase.KNOWLEDGE, true), true);
+		assertThat(later).contains("a fresh plan").contains("\"toolCallId=3: ...\" or \"toolCallId=dossier: ...\"");
+
+		assertThat(Prompts.act(dossierState(Phase.INVESTIGATE, false), true)).doesNotContain("dossier");
+		assertThat(Prompts.act(dossierState(Phase.KNOWLEDGE, false), true)).doesNotContain("dossier");
+		assertThat(Prompts.act(new Prompts.State(Phase.TRIAGE, 2, 8, null), true)).doesNotContain("dossier");
+		assertThat(Prompts.act(new Prompts.State(Phase.INVESTIGATE, 4, 6, null), true)).doesNotContain("dossier");
+	}
+
+	private static Prompts.State dossierState(Phase phase, boolean dossier) {
+		return new Prompts.State(phase, 2, 4, null, AgentMode.DOSSIER.phases(), dossier);
+	}
+
 	private static JsonNode plan(String why) {
 		return JsonMapper.shared()
 			.readTree("{\"hypotheses\":[{\"rootCauseService\":\"postgres\",\"rootCauseCategory\":\"CONFIGURATION\","

@@ -196,6 +196,18 @@ final class ScriptedChatModel implements ChatModel {
 				+ ",\"why\":\"it shows the cause\"}";
 	}
 
+	/** An evidence item citing the dossier (T5b): {@code toolCallId} and {@code tool} are both {@code "dossier"}. */
+	static String dossierEvidence(String quote) {
+		return dossierEvidence("dossier", quote);
+	}
+
+	/** An evidence item citing the dossier with {@code tool}. */
+	static String dossierEvidence(String tool, String quote) {
+		return "{\"toolCallId\":\"dossier\",\"tool\":\"" + tool + "\",\"quote\":"
+				+ tools.jackson.databind.json.JsonMapper.shared().writeValueAsString(quote)
+				+ ",\"why\":\"it shows the cause\"}";
+	}
+
 	static String unknownReport() {
 		return "{\"rootCauseService\":\"UNKNOWN\",\"rootCauseCategory\":\"UNKNOWN\",\"summary\":\"no clear cause\","
 				+ "\"confidence\":0.1,\"evidence\":[]}";

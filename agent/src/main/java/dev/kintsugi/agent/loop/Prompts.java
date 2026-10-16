@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -81,6 +82,16 @@ final class Prompts {
 			Write a fresh plan from the results above: start each hypothesis's why with the toolCallId that \
 			supports it, such as "toolCallId=3: ...", and drop a hypothesis no result supports.""";
 
+	/** What the first plan may cite when the run has a dossier (T5b): the dossier, the only evidence so far. */
+	private static final String FIRST_PLAN_DOSSIER = """
+			Start each hypothesis's why with the dossier fact that supports it, such as "toolCallId=dossier: ...".""";
+
+	/** {@link #FRESH_PLAN} when the run has a dossier (T5b): the dossier is cited like a tool call. */
+	private static final String FRESH_PLAN_DOSSIER = """
+			Write a fresh plan from the dossier and the results above: start each hypothesis's why with the \
+			toolCallId that supports it, such as "toolCallId=3: ..." or "toolCallId=dossier: ...", and drop a \
+			hypothesis nothing supports.""";
+
 	private static final String ACT_TASK = """
 			Task: if this phase's tools can still test your hypotheses, call them now; you may request several \
 			calls in one answer. Otherwise answer with no text and no tool call, and the run moves on. Do not \
@@ -101,20 +112,29 @@ final class Prompts {
 			that tool call's result: only its distinctive part, such as an exception name, a status or an error \
 			message, not the whole line.""";
 
+	/** How the report cites the dossier, when the run has one (T5b). */
+	private static final String REPORT_DOSSIER = """
+			 To cite the dossier, write toolCallId "dossier" and tool "dossier", with a quote copied exactly from \
+			the dossier.""";
+
 	/**
 	 * The warm-up's only message. It loads the model before the run; its answer is not read, and it holds nothing
 	 * about the incident.
 	 */
 	static final String WARM_UP = "Reply with the single word OK.";
 
-	/**
-	 * The first line of the dossier message in dossier mode (T5a). It states facts only, like the dossier it
-	 * introduces: who gathered it, when, how, and that it is not a tool call the report could cite.
-	 */
-	static final String DOSSIER_INTRO = """
+	/** What the dossier is: who gathered it, when and how (T5a). Facts only, like the dossier it introduces. */
+	private static final String DOSSIER_FACTS = """
 			Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for \
-			every incident, over the incident window and the window just before it. It is not a tool call result \
-			and has no toolCallId.""";
+			every incident, over the incident window and the window just before it.""";
+
+	/**
+	 * The first line of the dossier message in dossier mode (T5a): what the dossier is, and how a plan or the report
+	 * cites it (T5b; it said "has no toolCallId" before).
+	 */
+	static final String DOSSIER_INTRO = DOSSIER_FACTS + """
+			 It is not a tool call result: cite it with toolCallId "dossier" and tool "dossier", and a quote \
+			copied exactly from it.""";
 
 	private Prompts() {
 	}
@@ -127,9 +147,9 @@ final class Prompts {
 		return DOSSIER_INTRO + "\n\n" + rendered;
 	}
 
-	/** The dossier message when the gathering gave no dossier at all, with why. */
+	/** The dossier message when the gathering gave no dossier at all, with why: there is nothing to cite (T5b). */
 	static String dossierNotGathered(String why) {
-		return DOSSIER_INTRO + "\n\nThe dossier was not gathered: " + why + ".";
+		return DOSSIER_FACTS + "\n\nThe dossier was not gathered: " + why + "; there is no dossier to cite.";
 	}
 
 	/** The system message: the role, the symptom and window, and the rules. */
@@ -154,9 +174,16 @@ final class Prompts {
 	 * asks for the phase's plan, in the text of the same answer as its tool calls.
 	 */
 	static String act(State state, boolean withPlan) {
-		String task = withPlan
-				? PLAN_AND_ACT_TASK.formatted(state.first() ? FIRST_PLAN : FRESH_PLAN) : ACT_TASK;
+		String task = withPlan ? PLAN_AND_ACT_TASK.formatted(plan(state)) : ACT_TASK;
 		return state.text() + "\n\n" + task + " " + callLimit(state);
+	}
+
+	/** What the phase's plan is asked for: the first plan or a fresh one, citing the dossier when there is one. */
+	private static String plan(State state) {
+		if (state.first()) {
+			return state.dossier() ? FIRST_PLAN + " " + FIRST_PLAN_DOSSIER : FIRST_PLAN;
+		}
+		return state.dossier() ? FRESH_PLAN_DOSSIER : FRESH_PLAN;
 	}
 
 	/**
@@ -181,16 +208,21 @@ final class Prompts {
 	/**
 	 * The instruction of a report call; {@code errors} are those of the rejected previous report, if any. It names the
 	 * tool calls a report may cite, and the refused ones it may not (T5c10): the sixth live run's F2 cited a refused call
-	 * in both reports. {@link ReportCheck} still rejects such a citation.
+	 * in both reports. {@link ReportCheck} still rejects such a citation. When the run has a dossier, it says how to
+	 * cite it and lists it last among the citable ids (T5b).
 	 * @param toolSteps this incident's tool steps, refused calls included
 	 */
 	static String report(State state, List<String> errors, Collection<ToolStep> toolSteps) {
 		return state.text() + "\n\n" + REPORT_TASK.formatted(ReportCheck.MIN_QUOTE_LENGTH,
-				ReportCheck.MAX_QUOTE_LENGTH) + citable(toolSteps) + retry("report", errors);
+				ReportCheck.MAX_QUOTE_LENGTH) + (state.dossier() ? REPORT_DOSSIER : "")
+				+ citable(toolSteps, state.dossier()) + retry("report", errors);
 	}
 
-	private static String citable(Collection<ToolStep> toolSteps) {
-		List<String> ran = ids(toolSteps, false);
+	private static String citable(Collection<ToolStep> toolSteps, boolean dossier) {
+		List<String> ran = new ArrayList<>(ids(toolSteps, false));
+		if (dossier) {
+			ran.add(ReportCheck.DOSSIER);
+		}
 		List<String> refused = ids(toolSteps, true);
 		String text = " Citable toolCallIds: " + (ran.isEmpty() ? "none" : String.join(", ", ran)) + ".";
 		return refused.isEmpty() ? text
@@ -222,12 +254,13 @@ final class Prompts {
 	 * @param incidentLeft the tool calls left in the incident
 	 * @param plan this phase's valid plan, as JSON, or null; a phase never sees an earlier phase's plan (T5c8)
 	 * @param phases the run's evidence phases, in order, by its mode; {@code CONCLUDE} follows them (T5a)
+	 * @param dossier whether the run has a dossier the plans and the report may cite: dossier mode, once gathered (T5b)
 	 */
-	record State(Phase phase, int phaseLeft, int incidentLeft, String plan, List<Phase> phases) {
+	record State(Phase phase, int phaseLeft, int incidentLeft, String plan, List<Phase> phases, boolean dossier) {
 
 		/** The state of an explorer-mode run. */
 		State(Phase phase, int phaseLeft, int incidentLeft, String plan) {
-			this(phase, phaseLeft, incidentLeft, plan, AgentMode.EXPLORER.phases());
+			this(phase, phaseLeft, incidentLeft, plan, AgentMode.EXPLORER.phases(), false);
 		}
 
 		/**

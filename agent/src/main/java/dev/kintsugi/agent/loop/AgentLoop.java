@@ -252,7 +252,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/**
 	 * Dossier mode's first step (T5a): code gathers the evidence dossier through {@link LabTools} and renders it, and
 	 * the result becomes the dossier message every later call reads right after the system message. Its 29 calls are
-	 * code's: they pass no check, count against no tool budget and get no {@code toolCallId}; they are stored in the
+	 * code's: they pass no check, count against no tool budget and get no {@code toolCallId} (a report cites the dossier
+	 * as a whole, as {@code "dossier"}, T5b); they are stored in the
 	 * {@code DOSSIER} step's {@code tool_output}, with the message the model sees in its {@code summary}. The gathering
 	 * counts against the incident's time and is bounded by the {@code ACT} call deadline; a failed call is a fact in
 	 * the dossier, and a gathering that throws or runs past its bound gives a message that says so, and the run goes
@@ -270,7 +271,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		String calls = null;
 		try {
 			Dossier dossier = future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
-			message = Prompts.dossier(DossierRenderer.render(dossier));
+			run.dossierText = DossierRenderer.render(dossier);
+			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
 		}
 		catch (TimeoutException slow) {
@@ -507,9 +509,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		for (int attempt = 1; attempt <= 2; attempt++) {
 			List<Message> messages = run.opening(0);
 			messages.add(new UserMessage(Prompts.report(run.state(Phase.CONCLUDE, 0), errors, run.toolSteps.values())));
-			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(), Schemas.REPORT);
+			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(),
+					Schemas.report(run.mode));
 			JsonNode report = Answers.json(answer.text());
-			ReportCheck.Result checked = ReportCheck.check(report, run.toolSteps);
+			ReportCheck.Result checked = ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);
 			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
 				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one.
@@ -743,6 +746,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		/** Dossier mode's dossier message, the same for every call once gathered; null in explorer mode. */
 		String dossier;
 
+		/**
+		 * The rendered dossier, without its introduction: what a report citing {@code "dossier"} is checked against
+		 * (T5b); null in explorer mode and when the gathering gave no dossier.
+		 */
+		String dossierText;
+
 		/** Every tool step, refusals included, by step number: what the evidence check reads. */
 		final Map<Integer, ToolStep> toolSteps = new LinkedHashMap<>();
 
@@ -776,7 +785,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		/** The parts of the state the instruction shows. */
 		Prompts.State state(Phase phase, int phaseLeft) {
-			return new Prompts.State(phase, phaseLeft, this.toolsLeft, this.plan, this.mode.phases());
+			return new Prompts.State(phase, phaseLeft, this.toolsLeft, this.plan, this.mode.phases(),
+					this.dossierText != null);
 		}
 
 		/**

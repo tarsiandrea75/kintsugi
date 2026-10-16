@@ -1,6 +1,7 @@
 package dev.kintsugi.agent.loop;
 
 import static dev.kintsugi.agent.loop.ScriptedChatModel.call;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.StructuredOutputChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -154,6 +156,29 @@ class AgentLoopDossierModeTest {
 			.doesNotContain("a fresh plan");
 		String knowledge = last(this.model.prompts().get(1));
 		assertThat(knowledge).startsWith("Phase: KNOWLEDGE").contains("a fresh plan").contains("toolCallId");
+	}
+
+	@Test
+	void aReportMayCiteTheDossierAndIsCompleted() {
+		// T5b: the dossier is cited as toolCallId "dossier", its quote checked against the rendered dossier.
+		this.model.quiet()
+			.quiet()
+			.text(report("payment-service", "DEPENDENCY_REJECTING",
+					dossierEvidence("CLIENT_ERROR | UNKNOWN | ConnectException"),
+					dossierEvidence("payment-service answered 503 to every call")));
+
+		assertThat(run(AgentMode.DOSSIER)).isEqualTo(IncidentStatus.COMPLETED);
+
+		JsonNode evidence = storedReport().get("evidence");
+		assertThat(evidence).hasSize(1);
+		assertThat(evidence.get(0).get("toolCallId").asString()).isEqualTo("dossier");
+		assertThat(evidence.get(0).get("tool").asString()).isEqualTo("dossier");
+		assertThat((String) step(4).get("summary")).contains("evidence[1].quote is not in the dossier");
+		Prompt reportPrompt = this.model.prompts().get(2);
+		assertThat(last(reportPrompt)).contains("Citable toolCallIds: dossier.")
+			.contains("To cite the dossier, write toolCallId \"dossier\" and tool \"dossier\"");
+		assertThat(JSON.readTree(((StructuredOutputChatOptions) reportPrompt.getOptions()).getOutputSchema()))
+			.isEqualTo(JSON.readTree(Schemas.report(AgentMode.DOSSIER)));
 	}
 
 	@Test
@@ -321,7 +346,7 @@ class AgentLoopDossierModeTest {
 				new ToolStep(3, "count_logs", "OK", "{}", null), new ToolStep(4, "recent_events", "OK", "{}", null),
 				new ToolStep(5, "get_order_trace", "OK", "{}", null), new ToolStep(7, "search_runbooks", "OK", "{}", null),
 				new ToolStep(8, "search_runbooks", "OK", "{}", null));
-		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null, AgentMode.DOSSIER.phases()),
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null, AgentMode.DOSSIER.phases(), true),
 				List.of(), steps);
 		int summaries = AgentMode.DOSSIER.toolBudget() * ToolSummaries.MAX_CHARS
 				+ "Evidence so far, oldest first:\n\n".length();

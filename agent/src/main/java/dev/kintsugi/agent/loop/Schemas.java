@@ -16,14 +16,36 @@ final class Schemas {
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
-	static final String REPORT = JSON.writeValueAsString(report());
+	/** The report schema of explorer mode: a {@code toolCallId} is a step number. */
+	static final String REPORT = JSON.writeValueAsString(report(false));
+
+	/**
+	 * The report schema of dossier mode (T5b): a {@code toolCallId} is a step number or {@code "dossier"}; the rest is
+	 * the same.
+	 */
+	private static final String DOSSIER_REPORT = JSON.writeValueAsString(report(true));
 
 	private Schemas() {
 	}
 
-	private static ObjectNode report() {
+	/** The report schema of {@code mode}. */
+	static String report(AgentMode mode) {
+		return mode == AgentMode.DOSSIER ? DOSSIER_REPORT : REPORT;
+	}
+
+	private static ObjectNode report(boolean dossier) {
 		ObjectNode item = object(List.of("toolCallId", "tool", "quote", "why"));
-		item.withObject("properties").set("toolCallId", JSON.createObjectNode().put("type", "integer").put("minimum", 1));
+		ObjectNode stepNo = JSON.createObjectNode().put("type", "integer").put("minimum", 1);
+		if (dossier) {
+			ObjectNode either = JSON.createObjectNode();
+			ArrayNode anyOf = either.putArray("anyOf");
+			anyOf.add(stepNo);
+			anyOf.addObject().put("type", "string").putArray("enum").add(ReportCheck.DOSSIER);
+			item.withObject("properties").set("toolCallId", either);
+		}
+		else {
+			item.withObject("properties").set("toolCallId", stepNo);
+		}
 		item.withObject("properties").set("tool", JSON.createObjectNode().put("type", "string"));
 		item.withObject("properties").set("quote", string(ReportCheck.MIN_QUOTE_LENGTH, ReportCheck.MAX_QUOTE_LENGTH));
 		item.withObject("properties").set("why", string(0, 200));
