@@ -53,7 +53,7 @@ final class ReportCheck {
 	 * What the check found.
 	 * @param errors every rule the report breaks, each naming its field or evidence item; empty when it is valid
 	 * @param dropped when the report is valid, the evidence items dropped because their quote is not in their step
-	 * (T5c11), each named like an error; empty otherwise
+	 * (T5c11) or their tool is not their step's tool (T5c14), each named like an error; empty otherwise
 	 * @param evidence when the report is valid, its verified evidence items, in order; null otherwise
 	 */
 	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence) {
@@ -67,7 +67,9 @@ final class ReportCheck {
 	/**
 	 * Checks {@code report}. An evidence item whose quote is not in its step's output, nor in the summary lines that
 	 * copy it, is dropped rather than fatal (T5c11): in the seventh live run two reports naming the right cause were
-	 * rejected for one item each whose quote was not verbatim, while their other items were. The report stays valid
+	 * rejected for one item each whose quote was not verbatim, while their other items were. So is an item whose tool
+	 * is not the tool of the step it cites (T5c14): in the twelfth live run both reports of one incident named the
+	 * right cause and lost it to one item citing a recent_events step as search_runbooks. The report stays valid
 	 * while at least one verified item is left, or none is needed because both causes are UNKNOWN. Any other broken
 	 * rule still rejects it, and then the errors name the dropped items too, so that the retry fixes them all.
 	 * @param toolSteps this incident's tool steps by step number, refused calls included
@@ -106,11 +108,11 @@ final class ReportCheck {
 		List<JsonNode> verified = new ArrayList<>();
 		for (int i = 0; i < evidence.size(); i++) {
 			int before = errors.size();
-			String unquoted = item(evidence.get(i), "evidence[" + i + "]", toolSteps, errors);
-			if (unquoted != null) {
+			String droppable = item(evidence.get(i), "evidence[" + i + "]", toolSteps, errors);
+			if (droppable != null) {
 				// Listed with the errors, in item order, for the retry when the report is rejected for another reason.
-				errors.add(unquoted);
-				dropped.add(unquoted);
+				errors.add(droppable);
+				dropped.add(droppable);
 			}
 			else if (errors.size() > before) {
 				fatal = true;
@@ -131,8 +133,8 @@ final class ReportCheck {
 
 	/**
 	 * Checks one evidence item, adding to {@code errors} each rule it breaks.
-	 * @return the item's only error when it breaks no rule but quotes text that is not in its step, so that it can be
-	 * dropped; null otherwise
+	 * @return the item's only error when it breaks no other rule but names another tool than its step's (T5c14) or
+	 * quotes text that is not in its step (T5c11), so that it can be dropped; null otherwise
 	 */
 	private static String item(JsonNode item, String name, Map<Integer, ToolStep> toolSteps, List<String> errors) {
 		if (!item.isObject()) {
@@ -173,8 +175,8 @@ final class ReportCheck {
 			errors.add(name + ".toolCallId " + stepNo + " was refused (" + step.outcome() + ") and did not run");
 		}
 		else if (!step.tool().equals(tool)) {
-			errors.add(name + ".tool is " + Causes.shown(item.get("tool")).replace("\"", "") + ", but step " + stepNo
-					+ " is " + step.tool());
+			return name + ".tool is " + Causes.shown(item.get("tool")).replace("\"", "") + ", but step " + stepNo + " is "
+					+ step.tool();
 		}
 		else if (!quoted(quote.asString(), step.output()) && !inSummary(normalized(quote.asString()), step.summary())) {
 			return name + ".quote is not in the output of step " + stepNo;

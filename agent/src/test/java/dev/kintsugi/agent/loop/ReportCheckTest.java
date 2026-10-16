@@ -129,13 +129,37 @@ class ReportCheckTest {
 
 	@Test
 	void aCitedRefusedCallStillRejectsTheReportAndTheRetryNamesTheBadQuoteToo() {
-		// Only a quote that is not in its step is dropped; a refused, missing or wrong step still rejects the report.
+		// Only a quote that is not in its step, or a wrong tool (T5c14), is dropped; a refused or missing step still
+		// rejects the report.
 		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
 				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(6, "search_logs", "PAYMENT_PENDING"),
 				evidence(4, "search_logs", "Connection refused by peer")));
 
 		assertThat(result.errors()).containsExactly("evidence[1].toolCallId 6 was refused (REFUSED_PHASE) and did not run",
 				"evidence[2].quote is not in the output of step 4");
+		assertThat(result.evidence()).isNull();
+	}
+
+	@Test
+	void anItemCitingTheWrongToolAmongVerifiedItemsIsDroppedAndRecorded() {
+		// The twelfth live run, F2: the report named the true cause but cited a recent_events step as search_runbooks (T5c14).
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(4, "search_logs", "16:32:03.395Z"),
+				evidence(5, "search_runbooks", "HttpTimeoutException calling POST")));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[2].tool is search_runbooks, but step 5 is recent_events");
+		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").intValue()).containsExactly(3, 4);
+	}
+
+	@Test
+	void aReportWhoseEveryItemCitesTheWrongToolIsRejectedNamingEachItem() {
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "search_logs", "PAYMENT_PENDING"), evidence(5, "search_runbooks", "HttpTimeoutException calling POST")));
+
+		assertThat(result.errors()).containsExactly("evidence[0].tool is search_logs, but step 3 is status_summary",
+				"evidence[1].tool is search_runbooks, but step 5 is recent_events");
+		assertThat(result.dropped()).isEmpty();
 		assertThat(result.evidence()).isNull();
 	}
 
@@ -155,7 +179,7 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void aWrongToolAMissingStepOrARefusedCallIsRejected() {
+	void aMissingStepOrARefusedCallIsRejectedAndTheRetryNamesAWrongToolToo() {
 		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "search_logs", "PAYMENT_PENDING"),
 				evidence(9, "search_logs", "PAYMENT_PENDING"), evidence(6, "search_logs", "PAYMENT_PENDING"))))
 			.containsExactly("evidence[0].tool is search_logs, but step 3 is status_summary",
