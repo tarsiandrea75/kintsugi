@@ -440,9 +440,58 @@ class AgentLoopTest {
 		assertThat(step(4)).containsEntry("tool_name", "status_summary")
 			.containsEntry("tool_outcome", "REFUSED_DUPLICATE")
 			.containsEntry("tool_output", null);
-		assertThat((String) step(4).get("summary")).contains("already called as toolCallId 2; read that result");
+		// A duplicate of a call that ended OK keeps the T5c9 text exactly (T5c13).
+		assertThat((String) step(4).get("summary")).isEqualTo("toolCallId=4 tool=status_summary "
+				+ "outcome=REFUSED_DUPLICATE\nthe call was refused and did not run: the same tool with the same "
+				+ "arguments was already called as toolCallId 2; read that result");
 		assertThat(userText(this.model.prompts().get(2))).contains("Tool calls left: 1 in this phase, 7 in the incident");
 		assertThat(step(6)).containsEntry("tool_outcome", "OK");
+	}
+
+	@Test
+	void aRepeatedFailedCallIsRefusedWithTheFirstCallsOutcomeAndReason() {
+		// The eleventh live run: the model repeated a call the tool had rejected, never told why it failed (T5c13).
+		this.lab.answer("status_summary", "{\"outcome\":\"INVALID_PARAMETER\",\"reason\":\"type must be one of "
+				+ "[PAYMENT_ATTEMPT] for source payment\",\"returned\":0,\"truncated\":false,\"items\":[]}");
+		this.model.planned(call("status_summary", "{\"table\":\"orders\",\"sinceMinutes\":15}"))
+			.tools(call("status_summary", "{\"sinceMinutes\":15, \"table\":\"orders\"}"))
+			.quiet()
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.lab.calls()).containsExactly("status_summary");
+		assertThat(step(2)).containsEntry("tool_outcome", "INVALID_PARAMETER");
+		assertThat(step(4)).containsEntry("tool_outcome", "REFUSED_DUPLICATE").containsEntry("tool_output", null);
+		assertThat((String) step(4).get("summary")).isEqualTo("toolCallId=4 tool=status_summary "
+				+ "outcome=REFUSED_DUPLICATE\nthe call was refused and did not run: the same tool with the same "
+				+ "arguments already failed as toolCallId 2 with INVALID_PARAMETER, reason=\"type must be one of "
+				+ "[PAYMENT_ATTEMPT] for source payment\"; change the arguments, do not repeat the call");
+		// The refusal is still uncounted: the budget is the same as after the first call.
+		assertThat(userText(this.model.prompts().get(2))).contains("Tool calls left: 1 in this phase, 7 in the incident");
+	}
+
+	@Test
+	void aRepeatedFailedCallQuotesALongReasonCutAndEscaped() {
+		String reason = "line one\" injected\n" + "x".repeat(400);
+		this.lab.answer("status_summary", JsonMapper.shared()
+			.writeValueAsString(Map.of("outcome", "UPSTREAM_ERROR", "reason", reason, "returned", 0, "truncated", false,
+					"items", List.of())));
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.tools(call("status_summary", "{\"table\":\"orders\"}"))
+			.quiet()
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		String summary = (String) step(4).get("summary");
+		assertThat(summary).contains("already failed as toolCallId 2 with UPSTREAM_ERROR, reason=\"line one\\\" "
+				+ "injected\\n")
+			.contains("(cut); change the arguments, do not repeat the call")
+			.hasLineCount(2)
+			.hasSizeLessThan(600);
 	}
 
 	@Test

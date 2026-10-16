@@ -154,13 +154,15 @@ A phase MUST end when the model answers without a tool call or the phase's cap i
 1. If the phase's allowance or the incident's 8-call tool budget has no unit left, the call MUST NOT run, MUST be recorded with `tool_outcome` `REFUSED_BUDGET`, and consumes nothing, since nothing is left. The phase then ends, and every later call of the same answer is refused the same way.
 2. A call to an offered tool that is not worth running MUST NOT run **(T5c9)**:
    - when a string value of its arguments, anywhere in them, is a placeholder, a whole value (trimmed) of the form `<name>` with word characters, spaces or underscores, such as `<SELECT_A_PENDING_ORDER_ID>`, it is recorded with `tool_outcome` `REFUSED_PLACEHOLDER` and the reason `argument <path> is a placeholder, not a value; use a real value from an earlier tool result, such as an orderId in a recent_events result`;
-   - otherwise, when it names the same tool with the same arguments as a call that already ran in this incident, it is recorded with `tool_outcome` `REFUSED_DUPLICATE` and the reason `the same tool with the same arguments was already called as toolCallId <n>; read that result`. Arguments are the same when they are equal as JSON: an object's fields compare whatever their order or spacing, an array's items in order, blank arguments are `{}`, and arguments that are not JSON compare as written.
+   - otherwise, when it names the same tool with the same arguments as a call that already ran in this incident, it is recorded with `tool_outcome` `REFUSED_DUPLICATE` and the reason `the same tool with the same arguments was already called as toolCallId <n>; read that result`. When that call's `tool_outcome` was not `OK`, the reason instead repeats its outcome and, when its summary has one, its `reason="..."` line as that summary quotes it (escaped, at most 300 characters, then `(cut)`): `the same tool with the same arguments already failed as toolCallId <n> with <outcome>[, reason="<reason>"]; change the arguments, do not repeat the call` **(T5c13)**. Arguments are the same when they are equal as JSON: an object's fields compare whatever their order or spacing, an array's items in order, blank arguments are `{}`, and arguments that are not JSON compare as written.
 
    The first 2 such refusals of an incident consume nothing. Later ones consume one unit of the tool budget and of the phase's allowance, as in 3, and their reason adds `it counts against the budget, since the 2 uncounted refusals of this incident are used up`.
 3. Otherwise the call consumes one unit of the incident's tool budget and one unit of the phase's allowance, whether it then runs or is refused.
 4. A call to a tool not offered in the current phase, including an unknown name, MUST NOT run and MUST be recorded with `tool_outcome` `REFUSED_PHASE`. It has already consumed its units, so a model that keeps asking for the wrong tool cannot loop.
 
 Why (T5c9, the human's decision of 2026-10-14 after the fifth full run): in all three incidents the `INVESTIGATE` plan sent `get_order_trace` with the literal `"<SELECT_A_PENDING_ORDER_ID>"`, and two incidents repeated `recent_events source=payment` with the same arguments; each spent one of the 8 tool calls for nothing, and the budget ran out before the decisive call. Why a cap: a refusal that consumes nothing leaves the phase open, so a model that keeps sending one would only stop at the model-call budget, which ends the run without a report. With at most 2 uncounted refusals, a valid run made at most 8 + 2 `ACT` answers and 2 report attempts, 12, the model-call budget (15 since T5c12, with one retry per phase; see "Budgets").
+
+Why the failed call's reason (T5c13, the human's decision of 2026-10-16 after the eleventh full run): in F3, `recent_events` got `INVALID_PARAMETER` ("type must be one of [PAYMENT_ATTEMPT] for source payment"), and the model sent the same call in two more answers; each refusal said only "read that result", so the model never learned its arguments were wrong, and the repeats spent its uncounted refusals and then the tool budget.
 
 Why the retry (T5c12, the human's decision of 2026-10-15 after the eighth full run): F1's `INVESTIGATE` answer wrote its plan, then described its calls in Markdown, and was cut at its cap with no tool call; the phase ended with its 4 calls unused, and the investigation never ran. In three runs in a row the `KNOWLEDGE` answer also wrote its calls as Markdown, so no runbook was ever searched. Why only an answer with text: an empty answer is what the `ACT` task asks for when the phase's tools cannot help any more, so retrying it would override the model's choice and spend a call.
 
@@ -236,6 +238,12 @@ The definitions of a phase's tools are listed at the start of the phase, before 
 - AND a step is recorded with `tool_outcome` `REFUSED_DUPLICATE`, its summary saying `already called as toolCallId 2; read that result`
 - AND the calls left are unchanged
 - AND a later `status_summary` with `{"table":"payments","sinceMinutes":15}` runs
+
+#### Scenario: A repeated failed call says why it failed (T5c13)
+- GIVEN `status_summary` ran with `{"table":"orders","sinceMinutes":15}` as toolCallId 2 and ended `INVALID_PARAMETER` with the reason `type must be one of [PAYMENT_ATTEMPT] for source payment`
+- WHEN the model requests `status_summary` with the same arguments
+- THEN no call reaches mcp-tools, and the calls left are unchanged
+- AND a step is recorded with `tool_outcome` `REFUSED_DUPLICATE`, its summary saying `already failed as toolCallId 2 with INVALID_PARAMETER, reason="type must be one of [PAYMENT_ATTEMPT] for source payment"; change the arguments, do not repeat the call`
 
 #### Scenario: Uncounted refusals are capped (T5c9)
 - GIVEN the model sends the same placeholder call in four answers in `TRIAGE`

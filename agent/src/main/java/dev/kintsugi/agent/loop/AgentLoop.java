@@ -347,7 +347,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * Why an offered call is not worth running, or null: an argument that is a placeholder, not a value, or the same
-	 * tool and arguments as a call that already ran in this incident, whose result the model already has (T5c9).
+	 * tool and arguments as a call that already ran in this incident, whose result the model already has (T5c9). When
+	 * that call did not end {@code OK}, the refusal repeats its outcome and reason and asks for other arguments, so a
+	 * model that missed why it failed is told again instead of being sent back to it (T5c13).
 	 */
 	private static Waste waste(Run run, ToolCall call) {
 		String placeholder = ToolArgs.placeholder(call.arguments());
@@ -357,6 +359,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 		for (Ran earlier : run.ran) {
 			if (earlier.tool().equals(call.name()) && ToolArgs.same(earlier.arguments(), call.arguments())) {
+				if (!"OK".equals(earlier.outcome())) {
+					return new Waste("REFUSED_DUPLICATE", "the same tool with the same arguments already failed as "
+							+ "toolCallId " + earlier.stepNo() + " with " + earlier.outcome()
+							+ (earlier.reason() == null ? "" : ", " + earlier.reason())
+							+ "; change the arguments, do not repeat the call");
+				}
 				return new Waste("REFUSED_DUPLICATE", "the same tool with the same arguments was already called as "
 						+ "toolCallId " + earlier.stepNo() + "; read that result");
 			}
@@ -369,14 +377,22 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		checkTime(run);
 		ToolResult result = this.labTools.call(call.name(), call.arguments());
 		int stepNo = run.steps + 1;
-		run.ran.add(new Ran(call.name(), call.arguments(), stepNo));
 		String summary = ToolSummaries.summarize(stepNo, result.tool(), result.outcome(), result.rawOutput());
+		run.ran.add(new Ran(call.name(), call.arguments(), stepNo, result.outcome().name(), reasonLine(summary)));
 		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, result.tool(), result.args(),
 				result.rawOutput(), result.outcome().name(), summary, null, (int) result.durationMs(), now()));
 		run.toolSteps.put(stepNo, new ToolStep(stepNo, result.tool(), result.outcome().name(), result.rawOutput(),
 				summary));
 		run.evidence.add(summary);
 		return summary;
+	}
+
+	/**
+	 * The {@code reason="..."} line of a failed call's summary, or null: the tool's reason as the summary already quotes
+	 * it, escaped and cut at its end, so a refusal that repeats it adds no unchecked tool text (T5c13).
+	 */
+	private static String reasonLine(String summary) {
+		return summary.lines().filter(line -> line.startsWith("reason=")).findFirst().orElse(null);
 	}
 
 	/** Records a call that did not run, and the summary that tells the model why. */
@@ -679,8 +695,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	}
 
-	/** A call that ran: its tool, its arguments as the model wrote them, and its step. */
-	private record Ran(String tool, String arguments, int stepNo) {
+	/**
+	 * A call that ran: its tool, its arguments as the model wrote them, its step, its outcome and, when it failed, the
+	 * {@code reason="..."} line of its summary (null when there is none).
+	 */
+	private record Ran(String tool, String arguments, int stepNo, String outcome, String reason) {
 	}
 
 	/** Why a call is refused without running: its {@code tool_outcome} and the reason the model is shown. */
