@@ -77,7 +77,7 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 ## Tasks
 
 - [x] **T1 — ADR-011 and this document.** Written and accepted by the human on 2026-10-16, with the windows "last N minutes" vs "the N minutes just before". Branch `-01`. Route: delegated writer.
-- [ ] **T2 — Lab instrumentation:** build payment-service's gateway client from Spring's auto-configured `RestClient.Builder`, so the payment-service → gateway-mock edge gets `http_client_requests_seconds_count`. Tests first (a metric is recorded for a call to `/authorize`); update `openspec/specs/payment-service/spec.md`. Branch `-02`. Route: delegated writer.
+- [x] **T2 — Lab instrumentation:** build payment-service's gateway client from Spring's auto-configured `RestClient.Builder`, so the payment-service → gateway-mock edge gets `http_client_requests_seconds_count`. Tests first (a metric is recorded for a call to `/authorize`); update `openspec/specs/payment-service/spec.md`. Branch `-02`. Route: delegated writer.
 - [ ] **T3 — MCP read tools or parameters for the dossier:** map each section to existing tools first, then add only what is missing.
   - Known gaps: window counts of events by type and outcome; exact per-edge counter deltas (raw samples, reset handling) with `uri`, `status`, `outcome`, `exception`.
   - Known gap: a bounded previous window `[now-2N, now-N)` for order states and event counts.
@@ -92,7 +92,8 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 - 2026-10-16: dry run of F3 in the live lab, queried by hand. Caller-side `ConnectException` series on order-service → payment-service `/payments` = 6; no client-side series for payment-service → gateway-mock (`HttpPaymentGateway.java:50`); payment-service `POST /payments` flat at 24 during the window; the recreate visible in `process_start_time_seconds`; `increase()` gives non-integers, so exact counts need raw deltas; `lab_orders` is all-time; 6 WARN lines in order-service with `ConnectException` only in the cause text; `PAYMENT_UNAVAILABLE` events with outcome `PAYMENT_PENDING`. Full list: ADR-011, "Feasibility".
 - 2026-10-16: branch `feat/evidence-dossier-01` starts from `feat/agent-loop-04-check` at `7204423`. T1 written by a delegated writer: ADR-011 (Proposed) and this document, committed as `3971024`.
 - 2026-10-16: the human accepted ADR-011, defining the windows as the last N minutes vs the N minutes just before (no fault start given to the agent). T1 done.
+- 2026-10-16: T2 done on `feat/evidence-dossier-02`. Route: delegated writer. `HttpPaymentGateway` now takes the `ObservationRegistry` and observes its calls with a fixed `client.name=gateway-mock` and the I/O exception in `exception`, mirroring order-service's `ServiceRestClients` (order-service injects the registry, not a `RestClient.Builder`, so the same pattern is used here); timeouts, error mapping and URL config unchanged. RED: `HttpPaymentGatewayMetricsTest` did not compile (`constructor HttpPaymentGateway ... cannot be applied to given types; required: GatewayProperties`). GREEN: `HttpPaymentGatewayMetricsTest` 4/4 (success 200, 429, `ConnectException`, `HttpTimeoutException`), `HttpPaymentGatewayTest` 15/15; full `./mvnw test` in `lab/payment-service`: 90 tests, 0 failures, 0 errors, 0 skipped. Files: `HttpPaymentGateway.java`, `HttpPaymentGatewayTest.java` (construction only), new `HttpPaymentGatewayMetricsTest.java`, `openspec/specs/payment-service/spec.md` (requirement "Gateway client metrics"), `docs/runbooks/payment-service.md` (key signals). Not yet checked in the live lab.
 
 ## Next step
 
-T2: instrument payment-service's gateway client.
+T3: MCP read tools or parameters for the dossier.

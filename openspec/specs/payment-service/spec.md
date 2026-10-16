@@ -62,6 +62,36 @@ The read timeout is longer than order-service's 3s wait for payment-service. Wit
 - THEN they are the defaults in the table above
 - AND each one takes the value of its property when the property is set
 
+### Requirement: Gateway client metrics
+
+payment-service MUST record every call to the gateway as the Micrometer observation `http.client.requests`, shown in Prometheus as `http_client_requests_seconds_count`, `_sum` and `_max`, so the payment-service to gateway-mock edge has a caller-side series next to gateway-mock's server-side one. The series MUST carry these tags:
+
+| Tag | Value |
+|-----|-------|
+| `client_name` | always `gateway-mock`, whatever host the base URL names |
+| `method` | `POST` |
+| `uri` | `/authorize` |
+| `status` | the HTTP status code, or `CLIENT_ERROR` when there is no response |
+| `outcome` | `SUCCESS`, `CLIENT_ERROR`, `SERVER_ERROR` and so on, or `UNKNOWN` when there is no response |
+| `exception` | `none`, or the simple class name of the failure; for an I/O failure, the I/O exception inside Spring's `ResourceAccessException` |
+
+The tags follow order-service's client metrics, so a refused connection (`ConnectException`) differs from a read timeout (`HttpTimeoutException`).
+
+#### Scenario: Gateway call recorded as a client metric
+- GIVEN the gateway answers 200 with status `AUTHORIZED`
+- WHEN a payment is requested
+- THEN one call is recorded with `client_name="gateway-mock"`, `method="POST"`, `uri="/authorize"`, `status="200"`, `outcome="SUCCESS"` and `exception="none"`
+
+#### Scenario: Rate-limited call recorded
+- GIVEN the gateway answers 429
+- WHEN a payment is requested
+- THEN one call is recorded with `uri="/authorize"`, `status="429"` and `outcome="CLIENT_ERROR"`
+
+#### Scenario: Gateway unreachable or too slow
+- GIVEN the gateway refuses connections, or answers only after the read timeout
+- WHEN a payment is requested
+- THEN one call is recorded with `status="CLIENT_ERROR"`, `outcome="UNKNOWN"` and `exception="ConnectException"` or `exception="HttpTimeoutException"`
+
 ### Requirement: Gateway unavailable returns 503 and stores no payment
 
 When the gateway call times out (connect or read), cannot connect, gets a non-2xx response other than 429, or gets a body without a known status (including `FAILED`, which the gateway never sends), `POST /payments` MUST return 503 and MUST NOT store a payment. It still records the attempt as a `GATEWAY_UNAVAILABLE` event (see "Every payment attempt is recorded") and logs one `WARN` line with `key=value` pairs:

@@ -43,6 +43,7 @@ Host port 18081 (container port 8081).
 
 - `lab_payments{status}`: stored payments per status (`AUTHORIZED`, `DECLINED`, `FAILED`). Refreshed at most once per second; NaN when the count query fails or the snapshot is older than 10 s.
 - `http_server_requests_seconds_count|_sum|_max` with `uri="/payments"` and `status` (`201`, `400`, `503`, ...).
+- `http_client_requests_seconds_count|_sum|_max` for calls to the gateway, with `client_name="gateway-mock"`, `uri="/authorize"`, `status` (HTTP code or `CLIENT_ERROR`), `outcome` (`SUCCESS`, `CLIENT_ERROR`, `SERVER_ERROR`, `UNKNOWN`), `exception` (`none` or the I/O exception, such as `ConnectException` or `HttpTimeoutException`).
 
 **Grafana panels:** "Payments by status", "payment-service /payments latency and 503 rate", "Gateway rejections".
 

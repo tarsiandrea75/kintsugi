@@ -28,6 +28,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import dev.kintsugi.lab.payment.domain.PaymentStatus;
+import io.micrometer.observation.ObservationRegistry;
 
 /** The HTTP gateway client against a real HTTP server on loopback, with short timeouts so failures stay fast. */
 @ExtendWith(OutputCaptureExtension.class)
@@ -142,7 +143,8 @@ class HttpPaymentGatewayTest {
 		// HttpConnectTimeoutException while connecting, so the elapsed time is what proves the connect timeout applies.
 		try (SaturatedListener listener = SaturatedListener.open()) {
 			HttpPaymentGateway hanging = new HttpPaymentGateway(new GatewayProperties(
-					URI.create("http://127.0.0.1:" + listener.port()), TIMEOUT, Duration.ofSeconds(10)));
+					URI.create("http://127.0.0.1:" + listener.port()), TIMEOUT, Duration.ofSeconds(10)),
+					ObservationRegistry.NOOP);
 
 			long start = System.nanoTime();
 			assertThatExceptionOfType(GatewayUnavailableException.class).isThrownBy(() -> hanging.authorize(ORDER_ID))
@@ -155,7 +157,7 @@ class HttpPaymentGatewayTest {
 	}
 
 	private static HttpPaymentGateway gatewayFor(String baseUrl) {
-		return new HttpPaymentGateway(new GatewayProperties(URI.create(baseUrl), TIMEOUT, TIMEOUT));
+		return new HttpPaymentGateway(new GatewayProperties(URI.create(baseUrl), TIMEOUT, TIMEOUT), ObservationRegistry.NOOP);
 	}
 
 	private static InetAddress ipv4Loopback() {
