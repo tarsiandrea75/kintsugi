@@ -7,8 +7,8 @@ import java.time.Instant;
  * column.
  *
  * @param stepNo the step's number, from 1, without gaps
- * @param kind {@code PLAN}, {@code ACT}, {@code TOOL_CALL}, {@code REPORT} or {@code BUDGET}
- * @param phase the phase the step ran in
+ * @param kind {@code PLAN}, {@code ACT}, {@code TOOL_CALL}, {@code REPORT}, {@code BUDGET} or {@code DOSSIER}
+ * @param phase the phase the step ran in; {@code DOSSIER} for the dossier step, before the first phase
  * @param model the model that answered, or that requested the tool call
  * @param tokens the tokens of a model answer
  * @param toolName the tool a {@code TOOL_CALL} asked for

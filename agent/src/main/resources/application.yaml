@@ -44,6 +44,10 @@ spring:
 
 kintsugi:
   agent:
+    # How the loop gathers its evidence (agent spec, "Dossier mode"; ADR-010, "Amended in T5a"): explorer, the ADR-010
+    # loop where the model picks every call from TRIAGE on, or dossier, where code first gathers the evidence dossier
+    # (ADR-011), the model reads it before INVESTIGATE and KNOWLEDGE, and TRIAGE is skipped. Recorded on every incident.
+    mode: ${KINTSUGI_AGENT_MODE:explorer}
     # ModelRouter's one route in M2 (ADR-010, ADR-003): ACT and REPORT both go to the local Ollama model, with the
     # same settings as spring.ai.ollama.chat.
     model:

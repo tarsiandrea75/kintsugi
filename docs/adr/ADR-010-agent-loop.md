@@ -192,6 +192,16 @@ Runs 11 to 13 timed out F1 every time on a phase's first `ACT` answer, the one t
 - **`ACT` gets the `REPORT` deadline, 420 s.** It gives the slowest first answer measured about two minutes of room. The loop's HTTP read timeout follows the longest deadline and stays 420 s. Rejected: shortening the first answer (its writing is the smaller part of the call, so a lower cap would save little).
 - **The incident budget stays 45 minutes, with a new justification.** It holds every incident measured, the longest 1,915 s (32 minutes), but no longer a run with every model call at its deadline: 6 x 420 + 2 x 420 = 3,360 s, 56 minutes. That gap is a recorded follow-up. `verify-agent.sh`'s waits derive from the budget and the warm-up, so they are unchanged.
 
+### Amended in T5a: a dossier mode beside the explorer loop
+
+ADR-011 adds a deterministic evidence dossier, and the feature `evidence-dossier` measures it against this loop on the same incidents. The human accepted the design on 2026-10-16:
+
+- **A mode switch, `kintsugi.agent.mode`: `explorer` (the default) or `dossier`.** Explorer mode is this ADR's loop, unchanged. The mode is recorded on the incident (`incidents.mode`, migration V4) when its run starts, and in the stored report, so the evals can split the results.
+- **The dossier is the first user message, not part of the system message.** After the warm-up, code gathers the dossier through `LabTools` and renders it; every later call carries it right after the system message, behind one neutral line saying that code gathered it in place of `TRIAGE` and that it has no `toolCallId`. The system message stays byte-identical in both modes, so Ollama keeps reusing the prefix it has read and the two modes differ only by the dossier. Rejected: the dossier inside the system message (one more part to vary between modes, and the system message would no longer be the fixed text every run shares).
+- **Dossier mode skips `TRIAGE`: `INVESTIGATE` 4 calls and `KNOWLEDGE` 2, a tool budget of 6.** The dossier covers `TRIAGE`'s tools. Its 29 calls are code's: no check, no budget, no `toolCallId`, never offered to the model. `INVESTIGATE`'s first plan follows the first-plan rule (hypotheses along the call path, T5c8), since no result has a `toolCallId` yet; asking it to cite one would invite invented ids. The model-call budget stays 15.
+- **The dossier is one step, kind `DOSSIER`, phase `DOSSIER`.** Its `summary` is the message the model saw and its `tool_output` the 29 calls with their full outputs, so a run stays auditable without 29 extra step rows, which would also take `toolCallId`s the model could mistake as citable. Citing the dossier in a report is T5b.
+- **The gathering has its own bound.** It counts against the incident's time and may take at most the `ACT` call deadline (or the time left). A gathering that throws or runs past it gives a dossier message saying it was not gathered, and the run goes on; a failed call is already a fact in the dossier.
+
 ### Plan and report schemas
 
 - **Plan:** `hypotheses` (1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, `why` at most 300 characters since T5c10), `nextTools` (0 to 4 of the phase's tools; since T5c12 an entry outside the phase is dropped). Same enums as the report.

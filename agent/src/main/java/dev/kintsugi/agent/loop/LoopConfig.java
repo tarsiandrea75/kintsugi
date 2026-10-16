@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Duration;
 
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
@@ -30,10 +31,14 @@ class LoopConfig {
 		return new OllamaModelRouter(chatModel, route);
 	}
 
+	/**
+	 * The loop, in the mode of {@code kintsugi.agent.mode} (T5a): {@code explorer}, the default, or {@code dossier}; any
+	 * other value stops the agent's start with the property's name.
+	 */
 	@Bean
 	AgentLoop agentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock) {
-		return new AgentLoop(incidents, router, labTools, settings, clock);
+			Clock clock, @Value("${kintsugi.agent.mode:explorer}") String mode) {
+		return new AgentLoop(incidents, router, labTools, settings, clock, AgentMode.of(mode));
 	}
 
 	/**

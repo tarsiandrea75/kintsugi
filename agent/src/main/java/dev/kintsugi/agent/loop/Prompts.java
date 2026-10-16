@@ -66,11 +66,17 @@ final class Prompts {
 			hypotheses; you may request several calls in one answer. Write nothing else: code reads only the plan \
 			and the tool calls.""";
 
-	/** What a TRIAGE plan's hypotheses cover: more than one place on the call path (T5c8). */
+	/**
+	 * What the run's first plan covers, written before any tool result: more than one place on the call path (T5c8).
+	 * TRIAGE's in explorer mode, INVESTIGATE's in dossier mode (T5a).
+	 */
 	private static final String FIRST_PLAN = """
 			The hypotheses name at least two different services along the call path.""";
 
-	/** What a later phase's plan starts from: the evidence, not the previous plan, which is not shown (T5c8). */
+	/**
+	 * What a later phase's plan starts from: the evidence, not the previous plan, which is not shown (T5c8). The first
+	 * phase of dossier mode does not get it: no tool result has a toolCallId yet (T5a).
+	 */
 	private static final String FRESH_PLAN = """
 			Write a fresh plan from the results above: start each hypothesis's why with the toolCallId that \
 			supports it, such as "toolCallId=3: ...", and drop a hypothesis no result supports.""";
@@ -101,7 +107,29 @@ final class Prompts {
 	 */
 	static final String WARM_UP = "Reply with the single word OK.";
 
+	/**
+	 * The first line of the dossier message in dossier mode (T5a). It states facts only, like the dossier it
+	 * introduces: who gathered it, when, how, and that it is not a tool call the report could cite.
+	 */
+	static final String DOSSIER_INTRO = """
+			Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for \
+			every incident, over the incident window and the window just before it. It is not a tool call result \
+			and has no toolCallId.""";
+
 	private Prompts() {
+	}
+
+	/**
+	 * The dossier message of dossier mode: the introduction, then the rendered dossier. It comes right after the
+	 * system message, which stays the same in both modes, so Ollama keeps reusing the system message it has read.
+	 */
+	static String dossier(String rendered) {
+		return DOSSIER_INTRO + "\n\n" + rendered;
+	}
+
+	/** The dossier message when the gathering gave no dossier at all, with why. */
+	static String dossierNotGathered(String why) {
+		return DOSSIER_INTRO + "\n\nThe dossier was not gathered: " + why + ".";
 	}
 
 	/** The system message: the role, the symptom and window, and the rules. */
@@ -127,7 +155,7 @@ final class Prompts {
 	 */
 	static String act(State state, boolean withPlan) {
 		String task = withPlan
-				? PLAN_AND_ACT_TASK.formatted(state.phase() == Phase.TRIAGE ? FIRST_PLAN : FRESH_PLAN) : ACT_TASK;
+				? PLAN_AND_ACT_TASK.formatted(state.first() ? FIRST_PLAN : FRESH_PLAN) : ACT_TASK;
 		return state.text() + "\n\n" + task + " " + callLimit(state);
 	}
 
@@ -193,13 +221,28 @@ final class Prompts {
 	 * @param phaseLeft the tool calls left in the phase
 	 * @param incidentLeft the tool calls left in the incident
 	 * @param plan this phase's valid plan, as JSON, or null; a phase never sees an earlier phase's plan (T5c8)
+	 * @param phases the run's evidence phases, in order, by its mode; {@code CONCLUDE} follows them (T5a)
 	 */
-	record State(Phase phase, int phaseLeft, int incidentLeft, String plan) {
+	record State(Phase phase, int phaseLeft, int incidentLeft, String plan, List<Phase> phases) {
+
+		/** The state of an explorer-mode run. */
+		State(Phase phase, int phaseLeft, int incidentLeft, String plan) {
+			this(phase, phaseLeft, incidentLeft, plan, AgentMode.EXPLORER.phases());
+		}
+
+		/**
+		 * Whether this is the run's first evidence phase, whose plan is written before any tool result: TRIAGE in
+		 * explorer mode, INVESTIGATE in dossier mode (T5a).
+		 */
+		boolean first() {
+			return this.phase == this.phases.get(0);
+		}
 
 		String text() {
 			StringBuilder text = new StringBuilder();
-			text.append("Phase: ").append(this.phase).append(" (the phases run in order: TRIAGE, INVESTIGATE, ")
-				.append("KNOWLEDGE, CONCLUDE)\n");
+			text.append("Phase: ").append(this.phase).append(" (the phases run in order: ");
+			this.phases.forEach(each -> text.append(each).append(", "));
+			text.append(Phase.CONCLUDE).append(")\n");
 			text.append("Tools in this phase: ")
 				.append(this.phase.tools().isEmpty() ? "none" : String.join(", ", this.phase.tools()))
 				.append('\n');

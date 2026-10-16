@@ -57,7 +57,7 @@ public class IncidentRepository {
 	/** The incident and its steps in step order. */
 	Optional<Incident> find(UUID id) {
 		return jdbc.sql("""
-				SELECT id, signal->>'symptom' AS symptom, (signal->>'sinceMinutes')::int AS since_minutes, status,
+				SELECT id, signal->>'symptom' AS symptom, (signal->>'sinceMinutes')::int AS since_minutes, mode, status,
 				       failure_reason, started_at, ended_at, report::text AS report
 				FROM incidents WHERE id = ?""")
 			.param(id)
@@ -110,6 +110,16 @@ public class IncidentRepository {
 			.optional();
 	}
 
+	/**
+	 * Records the loop's mode, {@code explorer} or {@code dossier}, on the incident {@code id} if it is still
+	 * {@code RUNNING}; returns whether it was.
+	 */
+	public boolean recordMode(UUID id, String mode) {
+		return jdbc.sql("UPDATE incidents SET mode = ? WHERE id = ? AND status = ?")
+			.params(mode, id, IncidentStatus.RUNNING.name())
+			.update() == 1;
+	}
+
 	/** Writes one step of the incident {@code id}; a step is written when it ends, before the next one starts. */
 	public void insertStep(UUID id, StepRow step) {
 		jdbc.sql("""
@@ -134,7 +144,8 @@ public class IncidentRepository {
 
 	private Incident incident(ResultSet rs, int rowNum) throws SQLException {
 		return new Incident(rs.getObject("id", UUID.class), rs.getString("symptom"),
-				rs.getObject("since_minutes", Integer.class), IncidentStatus.valueOf(rs.getString("status")),
+				rs.getObject("since_minutes", Integer.class), rs.getString("mode"),
+				IncidentStatus.valueOf(rs.getString("status")),
 				rs.getString("failure_reason"),
 				instant(rs, "started_at"), instant(rs, "ended_at"), tree(rs.getString("report")), List.of());
 	}

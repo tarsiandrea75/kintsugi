@@ -91,7 +91,7 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 
 ### Requirement: Read an incident
 
-`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
+`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer` or `dossier`, recorded when the run starts; absent when it never started, see "Dossier mode"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
 
 #### Scenario: Completed incident
 - GIVEN an incident whose run completed
@@ -140,7 +140,7 @@ An incident MUST have exactly one of these statuses, and every end MUST record `
 
 ### Requirement: Phases and their tools
 
-The loop MUST run the phases in this order, offering the model only the tools of the current phase:
+The loop MUST run the phases in this order, offering the model only the tools of the current phase (in dossier mode `TRIAGE` is skipped; see "Dossier mode"):
 
 | Phase | Tools | Tool calls **(chosen)** |
 |-------|-------|-------------------------|
@@ -151,7 +151,7 @@ The loop MUST run the phases in this order, offering the model only the tools of
 
 A phase MUST end when the model answers without a tool call or the phase's cap is reached, with one exception **(T5c12)**: an answer with text but no tool call, while the phase and the incident still allow a tool call, MUST get one retry first. The retry is one `ACT` call built like the others, the same messages with its own instruction last: `Your previous answer made no tool call, so nothing ran. Make exactly one tool call now, ...`, with no plan asked for. Its answer is handled like any other, except that a second answer without a tool call ends the phase. A phase gets at most one retry, whether its tool calls come before or after it. An answer with no text and no tool call is the `ACT` task's way to move on and ends the phase at once. The retry goes through the model-call budget, its `ACT` deadline and the incident's time left like any `ACT` call, and consumes no tool unit. The answer before a retry is recorded with `summary` `no tool call; one retry asks for a tool call`, and the retry's own `ACT` step starts its `summary` with `retry: `. Each model answer in a phase is recorded as an `ACT` step (its text and the calls it requested in `model_output`), followed by one `TOOL_CALL` step per requested call. Code MUST check each tool call the model requests, in order, before running it:
 
-1. If the phase's allowance or the incident's 8-call tool budget has no unit left, the call MUST NOT run, MUST be recorded with `tool_outcome` `REFUSED_BUDGET`, and consumes nothing, since nothing is left. The phase then ends, and every later call of the same answer is refused the same way.
+1. If the phase's allowance or the incident's tool budget (8 calls; 6 in dossier mode) has no unit left, the call MUST NOT run, MUST be recorded with `tool_outcome` `REFUSED_BUDGET`, and consumes nothing, since nothing is left. The phase then ends, and every later call of the same answer is refused the same way.
 2. A call to an offered tool that is not worth running MUST NOT run **(T5c9)**:
    - when a string value of its arguments, anywhere in them, is a placeholder, a whole value (trimmed) of the form `<name>` with word characters, spaces or underscores, such as `<SELECT_A_PENDING_ORDER_ID>`, it is recorded with `tool_outcome` `REFUSED_PLACEHOLDER` and the reason `argument <path> is a placeholder, not a value; use a real value from an earlier tool result, such as an orderId in a recent_events result`;
    - otherwise, when it names the same tool with the same arguments as a call that already ran in this incident, it is recorded with `tool_outcome` `REFUSED_DUPLICATE` and the reason `the same tool with the same arguments was already called as toolCallId <n>; read that result`. When that call's `tool_outcome` was not `OK`, the reason instead repeats its outcome and, when its summary has one, its `reason="..."` line as that summary quotes it (escaped, at most 300 characters, then `(cut)`): `the same tool with the same arguments already failed as toolCallId <n> with <outcome>[, reason="<reason>"]; change the arguments, do not repeat the call` **(T5c13)**. Arguments are the same when they are equal as JSON: an object's fields compare whatever their order or spacing, an array's items in order, blank arguments are `{}`, and arguments that are not JSON compare as written.
@@ -262,7 +262,7 @@ The first model call of `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE` MUST ask for the
 
 No other field is allowed, and both fields are required. Ollama cannot constrain an answer by a JSON schema and offer tools in the same call, so no schema is sent and code checks the plan alone. Code reads it from the text: the whole text when it is a JSON object, else the first Markdown code fence that holds one, else the text from the first `{` to the last `}`; nothing else is repaired. The verdict is added to the `ACT` step's `summary`: `plan valid`, `plan missing` (no JSON object in the text) or `plan invalid: <errors>`. A `nextTools` entry that is a string naming a tool outside the phase is dropped and the plan stays valid when its other fields are: the verdict reads `plan valid; dropped: nextTools[<i>] "<name>" is not a tool of <phase>, which offers <tools>`, one item per entry, joined by `; `, and the plan kept, and shown later, is the one without the dropped entries; an entry that is not a string, or more than 4 entries, still makes it invalid **(T5c12)**. A valid plan is shown, as `Your plan for this phase:`, in the phase's later prompts only: a new phase and the report start without it **(T5c8)**. Why 300 characters (T5c10): in the sixth full run plans were rejected in every incident for a `why` just over 200, often because it starts with the `toolCallId` it cites; a rejected plan has no retry, so its phase ran without one.
 
-The plan's task MUST say, in `TRIAGE`, that the hypotheses name at least two different services along the call path; in a later phase, that the plan is a fresh one written from the results so far, whose hypotheses each start their `why` with the `toolCallId` that supports them (`toolCallId=3: ...`), and that a hypothesis no result supports is dropped **(T5c8)**. These are asked, not checked: code still checks only the shape above. Why (T5c7): in the fourth full run the `TRIAGE` plan, written before any tool call, named payment-service, inventory-service and postgres in all three incidents; it was then shown verbatim as "Latest plan" in every later prompt, the tool arguments followed it, and the services it left out were never queried. A check would only turn a plan `invalid` without a retry, and so hide it from the phase's later prompts, which buys nothing; the wording is cheaper and the verdicts stay comparable across runs.
+The plan's task MUST say, in the run's first evidence phase (`TRIAGE`; `INVESTIGATE` in dossier mode, **T5a**), that the hypotheses name at least two different services along the call path; in a later phase, that the plan is a fresh one written from the results so far, whose hypotheses each start their `why` with the `toolCallId` that supports them (`toolCallId=3: ...`), and that a hypothesis no result supports is dropped **(T5c8)**. These are asked, not checked: code still checks only the shape above. Why (T5c7): in the fourth full run the `TRIAGE` plan, written before any tool call, named payment-service, inventory-service and postgres in all three incidents; it was then shown verbatim as "Latest plan" in every later prompt, the tool arguments followed it, and the services it left out were never queried. A check would only turn a plan `invalid` without a retry, and so hide it from the phase's later prompts, which buys nothing; the wording is cheaper and the verdicts stay comparable across runs.
 
 A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked for again; the answer's tool calls are checked and run as usual. A plan cut by the answer's cap ("Answer caps") is no exception: it is recorded `plan missing` or `plan invalid`, like any other. Why: the plan steers the model and is recorded for the evals, but it authorizes nothing, since code checks every tool call against the phase and the budgets whatever the plan says; a retry would cost a model call, the cost this design removes; and a small model that answers with tool calls may leave the text empty, which must not cost a diagnosis. The `PLAN` step kind stays allowed by the table's `CHECK` but is no longer written.
 
@@ -300,7 +300,7 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 
 | Budget | Value | On hitting it |
 |--------|-------|---------------|
-| Tool calls | 8 per incident, the sum of the phase caps | further requests are refused (`REFUSED_BUDGET`) and the loop moves on to the next phase |
+| Tool calls | 8 per incident in explorer mode, 6 in dossier mode **(T5a)**: the sum of the caps of the mode's phases | further requests are refused (`REFUSED_BUDGET`) and the loop moves on to the next phase |
 | Model calls **(chosen)** | 15 per incident (12 before T5c12); the warm-up is not one | the run ends `BUDGET_EXCEEDED`, reason `the model-call budget of 15 calls is used up`. A valid run makes at most 15 (each phase's answers are at most its allowance, 8 in all, plus one per uncounted refusal, at most 2 **(T5c9)**, plus one retry per phase, 3 **(T5c12)**, plus 2 report attempts), so this is a guard against a loop bug |
 | One model call **(T5c4, T5c5, T5c15)** | per task, `kintsugi.agent.model.call-timeout`: 420 s for an `ACT` call (`act`; 300 s before T5c15), 420 s for a `REPORT` call (`report`); never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call and its task's deadline (`model call ACT in <phase> took longer than 420 s`, `model call REPORT in CONCLUDE took longer than 420 s`), or the incident when its time ran out first |
 | One incident **(T5c5)** | 45 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 45 min, ...` |
@@ -460,7 +460,7 @@ The dossier is an immutable model of facts in ADR-011's five sections, each list
 - log signatures per service and level: the exact count from `count_logs`, and the lines `search_logs` returned (how many, and whether the tool cut them) grouped by signature, the message after the logger with ids and numbers replaced, as in the `search_logs` summary; each with its count, newest time and newest message, which is kept as untrusted text;
 - event counts per source and window: the total and the count per type and outcome.
 
-It MUST hold no judgment, threshold or marker; the only computed values are the window bounds, the uptime and the grouping. A call that fails MUST NOT stop the gathering: its section records the tool, the outcome (`INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, or `OK` for an output that cannot be read) and the reason, and every other call still runs. A call that throws is recorded as `CLIENT_ERROR`. The dossier also keeps every call made, in order, with its arguments and full output. The calls are made by code, not by the model: they do not pass the loop's checks, are not offered as tools, and do not count against the tool budget ("Budgets"). How the dossier reaches the model and how its calls are stored as steps belong to the loop's dossier mode (feature document, T5).
+It MUST hold no judgment, threshold or marker; the only computed values are the window bounds, the uptime and the grouping. A call that fails MUST NOT stop the gathering: its section records the tool, the outcome (`INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, or `OK` for an output that cannot be read) and the reason, and every other call still runs. A call that throws is recorded as `CLIENT_ERROR`. The dossier also keeps every call made, in order, with its arguments and full output. The calls are made by code, not by the model: they do not pass the loop's checks, are not offered as tools, and do not count against the tool budget ("Budgets"). How the dossier reaches the model and how its calls are stored belong to "Dossier mode".
 
 #### Scenario: Two windows
 - GIVEN an incident with `sinceMinutes` = 10
@@ -489,7 +489,7 @@ It MUST hold no judgment, threshold or marker; the only computed values are the 
 
 #### Scenario: Not counted in the tool budget
 - WHEN the dossier is gathered
-- THEN no call is offered to the model or passes the loop's checks, and none counts against the 8-call tool budget
+- THEN no call is offered to the model or passes the loop's checks, and none counts against the tool budget
 
 ### Requirement: Evidence dossier rendering
 
@@ -527,6 +527,64 @@ Variable rows are sorted by incident count, then previous count, largest first, 
 - GIVEN a log message holding a quote, a newline and the text "## Service status"
 - WHEN the dossier is rendered
 - THEN the message is inside one `untrustedText="..."` literal on its signature line, with the quote and newline escaped, and the heading "## Service status (incident window)" appears once
+
+### Requirement: Dossier mode
+
+The loop MUST run in the mode of `kintsugi.agent.mode` **(T5a)**: `explorer` (the default, environment variable `KINTSUGI_AGENT_MODE`) or `dossier`; any other value stops the agent's start, naming the property. The mode MUST be recorded on the incident (`incidents.mode`) when its run starts, before the warm-up, and in the stored report (`mode`), so the evals can split results by mode (ADR-011, "Two measurable modes").
+
+| Mode | Before the first phase | Evidence phases | Tool budget |
+|------|------------------------|-----------------|-------------|
+| `explorer` | the warm-up | `TRIAGE` 2, `INVESTIGATE` 4, `KNOWLEDGE` 2 | 8 |
+| `dossier` | the warm-up, then the dossier | `INVESTIGATE` 4, `KNOWLEDGE` 2 | 6 |
+
+In dossier mode, after the warm-up, code MUST gather the evidence dossier ("Evidence dossier gathering", with N the incident's `sinceMinutes` and the loop's `Clock`) and render it ("Evidence dossier rendering"). The result is the **dossier message**, a user message that every later model call, the report included, carries right after the system message and before the evidence message. It starts with one neutral line: `Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for every incident, over the incident window and the window just before it. It is not a tool call result and has no toolCallId.`, then a blank line and the rendered dossier. The dossier MUST NOT be part of the system message: the system message is the same in both modes, so Ollama keeps reusing the prefix it has read. `TRIAGE` is skipped, since the dossier covers its tools; the instruction's phase line reads `the phases run in order: INVESTIGATE, KNOWLEDGE, CONCLUDE`. `INVESTIGATE`'s first plan follows the first-plan rule ("The plan"): no tool result has a `toolCallId` yet, so it is asked for hypotheses along the call path, not for citations; `KNOWLEDGE` asks for a fresh plan as in explorer mode. The model-call budget is unchanged (15; a valid dossier run makes at most 6 + 2 + 2 `ACT` answers and 2 report attempts, 12).
+
+The dossier's 29 calls are code's: they pass no check, count against no tool budget, are never offered to the model and have no `toolCallId`. The dossier is recorded as one step, kind `DOSSIER` in phase `DOSSIER`, before the first `ACT` step: `summary` holds the dossier message the model saw, `tool_output` the 29 calls as a JSON array of `{tool, args, outcome, durationMs, output}` in call order (shown only with `?full=true`), `latency_ms` the gathering's time, and no model, tool name or outcome. Until the report may cite the dossier (feature document, T5b), a report citing the `DOSSIER` step is rejected like a citation of any step that is not a tool call.
+
+The gathering counts against the incident's time budget and is bounded by the `ACT` call deadline (`kintsugi.agent.model.call-timeout.act`, 420 s), or the incident's time left when that is shorter. A call that fails is a fact in the dossier ("Evidence dossier gathering"). A gathering that throws, or runs past its deadline, gives no dossier: the dossier message is the introduction and `The dossier was not gathered: the gathering took longer than <deadline>.` (or `the gathering failed: <exception>`), recorded the same way with no `tool_output`, and the run goes on. Only when the incident's own time runs out does the run end `TIMED_OUT`. Why the ACT deadline: each of the 29 calls is already bounded by the MCP request timeout (20 s), and a live gathering takes seconds; the bound keeps a hung mcp-tools from holding the run longer than one model call would.
+
+Size: the largest call of a dossier run is the report call. With the longest symptom, the F3 dossier with its introduction (4,298 characters), the 6 summaries at their cap of 1,500 characters and the report task, it is about 17.4k characters, at most 6,300 tokens with its 512-token answer by a conservative estimate of one token per 3 characters, within `num-ctx` 8192 (a test checks it). The stress dossier (about 13.4k characters) would reach about 9,400 by that estimate and about 7,200 at 4 characters per token: a known edge, recorded for T6's live runs.
+
+#### Scenario: Explorer mode is the default
+- GIVEN `kintsugi.agent.mode` is not set
+- WHEN an incident runs
+- THEN it runs `TRIAGE`, `INVESTIGATE` and `KNOWLEDGE` with 8 tool calls, shows no dossier, and the incident and its report record `mode` `explorer`
+
+#### Scenario: The dossier comes first and TRIAGE is skipped
+- GIVEN `kintsugi.agent.mode` = `dossier`
+- WHEN an incident runs
+- THEN step 1 is a `DOSSIER` step, and the first model call is `INVESTIGATE`'s, offered `INVESTIGATE`'s tools, with the messages system, dossier, instruction
+- AND every later call, the report included, has the same dossier message right after the system message
+- AND the instruction says `Tool calls left: 4 in this phase, 6 in the incident`
+
+#### Scenario: The same system message in both modes
+- WHEN the same incident runs in explorer mode and in dossier mode
+- THEN the system message of their calls is identical
+
+#### Scenario: The first plan of dossier mode
+- WHEN dossier mode builds `INVESTIGATE`'s first call
+- THEN its task asks for hypotheses naming at least two services along the call path, and not for a fresh plan citing `toolCallId`s
+- AND `KNOWLEDGE`'s first call asks for a fresh plan citing them
+
+#### Scenario: Six tool calls
+- GIVEN dossier mode
+- WHEN the model asks for 5 `INVESTIGATE` calls in one answer and 2 `KNOWLEDGE` calls
+- THEN 4 `INVESTIGATE` calls run and the fifth is refused `REFUSED_BUDGET`, both `KNOWLEDGE` calls run, and a `BUDGET` step says `the incident's tool budget of 6 calls is used up; ...`
+
+#### Scenario: The dossier recorded
+- WHEN a dossier run completes
+- THEN its `DOSSIER` step's `summary` is the dossier message the model saw and its `tool_output` lists the 29 calls with their full outputs
+- AND the incident and its report record `mode` `dossier`, and the API shows both
+
+#### Scenario: Failed dossier calls
+- GIVEN `traffic_counts` and `event_counts` fail
+- WHEN a dossier run starts
+- THEN the dossier message states those failures in their sections and the run completes
+
+#### Scenario: A gathering past its deadline
+- GIVEN the gathering takes longer than the `ACT` deadline
+- WHEN a dossier run starts
+- THEN the dossier message says `The dossier was not gathered: the gathering took longer than <deadline>.`, the `DOSSIER` step records it, and the run goes on to `INVESTIGATE`
 
 ### Requirement: Summaries built in code
 
@@ -598,7 +656,7 @@ Each model call MUST be built from the incident state (symptom, window, phase, b
 
 The messages of every model call MUST come in this order, what changes least first **(T5c)**:
 
-1. the system message (role, the components and the call path between them, symptom, window, rules, the two enums), the same for the whole incident;
+1. the system message (role, the components and the call path between them, symptom, window, rules, the two enums), the same for the whole incident and the same in both modes, followed in dossier mode only by the dossier message (see "Dossier mode"), the same for every call of the incident **(T5a)**;
 2. the evidence message, a user message `Evidence so far, oldest first:` followed by the summaries of the tool steps before the previous answer, refusals included, in step order; absent while there are none;
 3. within a phase after its first call, the previous answer with its tool calls, then one tool-response message with their summaries;
 4. last, the instruction, a user message: the phase, its tools, the tool calls left in the phase and the incident, this phase's plan once it has a valid one, and the task.
@@ -647,7 +705,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `evidence[].quote` | 8 to 160 characters (300 before T5c5): a short verbatim fragment, not a whole line |
 | `evidence[].why` | at most 200 characters **(chosen)** |
 
-No other field is allowed, and all five are required. Code then adds `incidentId` and `stepsUsed` (the number of step rows, the accepted `REPORT` step included) and stores the report in `incidents.report`, in the order `incidentId`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
+No other field is allowed, and all five are required. Code then adds `incidentId`, `mode` (`explorer` or `dossier`, **T5a**) and `stepsUsed` (the number of step rows, the `DOSSIER` and accepted `REPORT` steps included) and stores the report in `incidents.report` (as `jsonb`, which keeps the fields but not their order), written in the order `incidentId`, `mode`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
 
 #### Scenario: Value outside the enums
 - WHEN the model answers `rootCauseService` = `payment-gateway`
@@ -754,8 +812,8 @@ Flyway in `agent/` MUST create, in the `agent` database:
 
 | Table | Columns |
 |-------|---------|
-| `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
-| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`; `ACT` added by migration V2; `PLAN` is no longer written since the plan moved into the first `ACT` answer of each phase) **(chosen)**, `phase text` (the four phases), `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`, and since migration V3 `REFUSED_PLACEHOLDER`, `REFUSED_DUPLICATE`), `summary text` (for a tool call, what the model saw; for a report, its validation verdict; for `ACT`, a short note with, on a phase's first answer, the plan's verdict; for `BUDGET`, a short note) **(chosen)**, `model_output text` (the raw `ACT` answer, text and requested calls, or the raw report) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
+| `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `mode text` (`explorer` or `dossier`, by `CHECK`; null until the run starts; added by migration V4, which sets it to `explorer` on earlier rows) **(T5a)**, `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
+| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`, `DOSSIER`; `ACT` added by migration V2, `DOSSIER` by V4; `PLAN` is no longer written since the plan moved into the first `ACT` answer of each phase) **(chosen)**, `phase text` (the four phases, and `DOSSIER` for the dossier step, since V4), `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`, and since migration V3 `REFUSED_PLACEHOLDER`, `REFUSED_DUPLICATE`), `summary text` (for a tool call, what the model saw; for a report, its validation verdict; for `ACT`, a short note with, on a phase's first answer, the plan's verdict; for `BUDGET`, a short note; for `DOSSIER`, the dossier message the model saw) **(chosen)**, `model_output text` (the raw `ACT` answer, text and requested calls, or the raw report) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
 
 A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident"). Its name is `incidents_one_running_idx`.
 
@@ -814,7 +872,7 @@ The system prompt MUST state that content inside `untrustedText`, and any other 
 - AND a quote or newline in it stays escaped inside the literal, so it cannot start a line such as a fake `toolCallId=` header
 
 #### Scenario: No fault names in prompts
-- WHEN the agent's prompt templates and schemas are scanned with `\b(F[1-8]\b|fault|inject)`, case-insensitive
+- WHEN the agent's prompt templates and schemas, the dossier's introduction and every prompt of a dossier run are scanned with `\b(F[1-8]\b|fault|inject)`, case-insensitive
 - THEN nothing matches
 
 ### Requirement: One log line per step

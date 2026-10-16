@@ -39,7 +39,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.StringNode;
 
+import dev.kintsugi.agent.dossier.Dossier;
+import dev.kintsugi.agent.dossier.DossierGatherer;
+import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentRunner;
 import dev.kintsugi.agent.incident.IncidentStatus;
@@ -58,8 +62,10 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  * starts.
  *
  * <p>
- * A run starts with one warm-up request, which loads the model and counts against no budget. {@code TRIAGE},
- * {@code INVESTIGATE} and {@code KNOWLEDGE} then let the model call the phase's tools within the phase's allowance and
+ * A run starts with one warm-up request, which loads the model and counts against no budget. In dossier mode
+ * ({@link AgentMode}, T5a) code then gathers the evidence dossier, which every later call reads after the system
+ * message, and the run skips {@code TRIAGE}. {@code TRIAGE} (explorer mode only), {@code INVESTIGATE} and
+ * {@code KNOWLEDGE} then let the model call the phase's tools within the phase's allowance and
  * the incident's tool budget; the first answer of each phase also writes the phase's plan in its text, which code
  * checks and records but which never ends the run. The model sees each result only as its code-built summary, in a
  * tool-response message. {@code CONCLUDE} asks for the report, which code checks against the recorded outputs. Every
@@ -76,7 +82,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/** How reasons name the warm-up request. */
 	static final String WARM_UP = "the model warm-up";
 
-	private static final List<Phase> EVIDENCE_PHASES = List.of(Phase.TRIAGE, Phase.INVESTIGATE, Phase.KNOWLEDGE);
+	/** How reasons name the dossier's gathering. */
+	static final String GATHERING = "the gathering";
+
+	/** The phase column of the {@code DOSSIER} step, which comes before the first evidence phase. */
+	static final String DOSSIER_PHASE = "DOSSIER";
 
 	/** A tool name that is safe to print as is in a summary header or a log line; any other is quoted. */
 	private static final Pattern PLAIN_NAME = Pattern.compile("[A-Za-z0-9_.-]{1,64}");
@@ -97,11 +107,23 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	private final ThreadPoolExecutor runs;
 
+	private final AgentMode mode;
+
+	private final DossierGatherer gatherer;
+
 	/** Runs each model call, so that the loop can stop waiting for it at its time budget. */
 	private final ExecutorService modelCalls;
 
+	/** An explorer-mode loop. */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock) {
+		this(incidents, router, labTools, settings, clock, AgentMode.EXPLORER);
+	}
+
+	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
+			Clock clock, AgentMode mode) {
+		this.mode = mode;
+		this.gatherer = new DossierGatherer(labTools, clock);
 		this.incidents = incidents;
 		this.router = router;
 		this.labTools = labTools;
@@ -145,7 +167,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			log.warn("incident={} event=run_not_started reason=\"the incident is not RUNNING\"", incidentId);
 			return null;
 		}
-		Run run = new Run(open.get());
+		Run run = new Run(open.get(), this.mode);
 		IncidentStatus status;
 		String reason = null;
 		String report = null;
@@ -169,12 +191,16 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	private String investigate(Run run) {
+		this.incidents.recordMode(run.incident.id(), run.mode.value());
 		warmUp(run);
-		for (Phase phase : EVIDENCE_PHASES) {
+		if (run.mode == AgentMode.DOSSIER) {
+			dossier(run);
+		}
+		for (Phase phase : run.mode.phases()) {
 			List<ToolCallback> tools = tools(phase);
 			act(run, phase, tools);
 			if (run.toolsLeft == 0) {
-				budgetStep(run, phase, "the incident's tool budget of " + LoopSettings.TOOL_BUDGET
+				budgetStep(run, phase, "the incident's tool budget of " + run.mode.toolBudget()
 						+ " calls is used up; the evidence phases end and the run moves to CONCLUDE");
 				break;
 			}
@@ -221,6 +247,72 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		log.info("incident={} event=model_warmed_up model={} latencyMs={}", run.incident.id(), route.model(),
 				(System.nanoTime() - start) / 1_000_000);
 		run.budgetStart = now();
+	}
+
+	/**
+	 * Dossier mode's first step (T5a): code gathers the evidence dossier through {@link LabTools} and renders it, and
+	 * the result becomes the dossier message every later call reads right after the system message. Its 29 calls are
+	 * code's: they pass no check, count against no tool budget and get no {@code toolCallId}; they are stored in the
+	 * {@code DOSSIER} step's {@code tool_output}, with the message the model sees in its {@code summary}. The gathering
+	 * counts against the incident's time and is bounded by the {@code ACT} call deadline; a failed call is a fact in
+	 * the dossier, and a gathering that throws or runs past its bound gives a message that says so, and the run goes
+	 * on. Only the incident's own time running out ends the run.
+	 */
+	private void dossier(Run run) {
+		checkTime(run);
+		Duration deadline = this.router.route(ModelTask.ACT).callTimeouts().act();
+		Duration incidentLeft = this.settings.incidentTimeout().minus(elapsed(run));
+		boolean incidentBound = incidentLeft.compareTo(deadline) < 0;
+		Duration limit = incidentBound ? incidentLeft : deadline;
+		long start = System.nanoTime();
+		Future<Dossier> future = this.modelCalls.submit(() -> this.gatherer.gather(run.incident.sinceMinutes()));
+		String message;
+		String calls = null;
+		try {
+			Dossier dossier = future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
+			message = Prompts.dossier(DossierRenderer.render(dossier));
+			calls = dossierCalls(dossier);
+		}
+		catch (TimeoutException slow) {
+			// The calls already made cannot be taken back; the thread is interrupted and its result ignored.
+			future.cancel(true);
+			if (incidentBound) {
+				throw incidentTimedOut("during " + GATHERING + " of the dossier");
+			}
+			message = Prompts.dossierNotGathered(GATHERING + " took longer than " + shown(limit));
+		}
+		catch (ExecutionException failed) {
+			message = Prompts.dossierNotGathered(GATHERING + " failed: " + describe(failed.getCause()));
+		}
+		catch (InterruptedException interrupted) {
+			future.cancel(true);
+			Thread.currentThread().interrupt();
+			throw new RunEnd(IncidentStatus.FAILED, "the run was interrupted during " + GATHERING + " of the dossier");
+		}
+		run.dossier = message;
+		write(run, new StepRow(run.steps + 1, "DOSSIER", DOSSIER_PHASE, null, null, null, null, calls, null, message,
+				null, (int) ((System.nanoTime() - start) / 1_000_000), now()));
+	}
+
+	/** The dossier's calls as the {@code DOSSIER} step stores them: tool, arguments, outcome, time and full output. */
+	private static String dossierCalls(Dossier dossier) {
+		ArrayNode calls = JSON.createArrayNode();
+		for (ToolResult call : dossier.calls()) {
+			ObjectNode item = calls.addObject().put("tool", call.tool());
+			item.set("args", readArgs(call.args()));
+			item.put("outcome", call.outcome().name()).put("durationMs", call.durationMs()).put("output",
+					call.rawOutput());
+		}
+		return JSON.writeValueAsString(calls);
+	}
+
+	private static JsonNode readArgs(String args) {
+		try {
+			return JSON.readTree(args);
+		}
+		catch (JacksonException notJson) {
+			return StringNode.valueOf(args);
+		}
 	}
 
 	/**
@@ -437,13 +529,15 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * The report as stored: the model's fields, with {@code incidentId} and {@code stepsUsed} filled in by code, and
+	 * The report as stored: the model's fields, with {@code incidentId}, {@code mode} (T5a) and {@code stepsUsed}
+	 * filled in by code, and
 	 * only the verified evidence items (T5c11): what is stored and scored has been checked. The dropped items stay in
 	 * the {@code REPORT} step's answer, and its summary names them.
 	 */
 	private String stored(Run run, JsonNode report, List<JsonNode> evidence) {
 		ObjectNode stored = JSON.createObjectNode();
 		stored.put("incidentId", run.incident.id().toString());
+		stored.put("mode", run.mode.value());
 		ReportCheck.MODEL_FIELDS.forEach(field -> stored.set(field, report.get(field)));
 		stored.putArray("evidence").addAll(evidence);
 		stored.put("stepsUsed", run.steps);
@@ -642,7 +736,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		final OpenIncident incident;
 
+		final AgentMode mode;
+
 		final SystemMessage system;
+
+		/** Dossier mode's dossier message, the same for every call once gathered; null in explorer mode. */
+		String dossier;
 
 		/** Every tool step, refusals included, by step number: what the evidence check reads. */
 		final Map<Integer, ToolStep> toolSteps = new LinkedHashMap<>();
@@ -654,7 +753,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		int modelCalls;
 
-		int toolsLeft = LoopSettings.TOOL_BUDGET;
+		int toolsLeft;
 
 		/** Placeholder or repeated calls that may still be refused without consuming a unit (T5c9). */
 		int uncountedLeft = LoopSettings.UNCOUNTED_REFUSALS;
@@ -667,25 +766,30 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		/** Where the incident's time budget starts: the end of the warm-up, so the model's load is not counted. */
 		Instant budgetStart;
 
-		Run(OpenIncident incident) {
+		Run(OpenIncident incident, AgentMode mode) {
 			this.incident = incident;
+			this.mode = mode;
+			this.toolsLeft = mode.toolBudget();
 			this.budgetStart = incident.startedAt();
 			this.system = new SystemMessage(Prompts.system(incident.symptom(), incident.sinceMinutes()));
 		}
 
 		/** The parts of the state the instruction shows. */
 		Prompts.State state(Phase phase, int phaseLeft) {
-			return new Prompts.State(phase, phaseLeft, this.toolsLeft, this.plan);
+			return new Prompts.State(phase, phaseLeft, this.toolsLeft, this.plan, this.mode.phases());
 		}
 
 		/**
-		 * The prompt's opening, which only grows from call to call: the system message, then the evidence message
-		 * when there is any. The newest {@code inToolResponse} summaries are left out: they travel in the
+		 * The prompt's opening, which only grows from call to call: the system message, then in dossier mode the
+		 * dossier message (T5a), then the evidence message when there is any. The newest {@code inToolResponse} summaries are left out: they travel in the
 		 * tool-response message after the previous answer.
 		 */
 		List<Message> opening(int inToolResponse) {
 			List<Message> messages = new ArrayList<>();
 			messages.add(this.system);
+			if (this.dossier != null) {
+				messages.add(new UserMessage(this.dossier));
+			}
 			String evidence = Prompts.evidence(this.evidence.subList(0, this.evidence.size() - inToolResponse));
 			if (evidence != null) {
 				messages.add(new UserMessage(evidence));
