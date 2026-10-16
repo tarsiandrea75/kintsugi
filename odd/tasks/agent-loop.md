@@ -448,6 +448,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - 2026-10-15: tenth full `verify-agent.sh` run on `b75379f` (`infra/scripts/out/verify-agent-20261015T173441Z/`): **1/3**, F2 MATCH (19 steps). F1 and F3 ended `TIMED_OUT` on the first INVESTIGATE answer, over the 300 s `ACT` deadline. The host is still slower than in run 8: prompt eval about 9 tokens/s (13-14 in run 8), generation about 3 tokens/s (about 4). A first INVESTIGATE answer cut at 384 tokens costs about 128 s of generation plus about 160 s of prompt at this speed, so it sits on the deadline: F2's took 266 s, F1's and F3's did not finish.
   - T5c12 worked in F2: INVESTIGATE and KNOWLEDGE each answered with no tool call, and each retry made one (38 s and 45 s). KNOWLEDGE's plan stayed valid with an out-of-phase `nextTools` entry dropped, and for the first time in four runs it searched the runbooks.
 
+- 2026-10-15: after a host restart, an Ollama probe (922-token prompt) read prompts at 10.6-11.1 tokens/s and generated at 4.1-4.2 tokens/s; generation is back to run 8, prompt eval is about 20% under it.
+- 2026-10-15: eleventh full `verify-agent.sh` run on `8d664fc` (`infra/scripts/out/verify-agent-20261015T192159Z/`, 111 min): **2/3**, the best so far, and no fault timed out. F1 MATCH (22 steps, 1915 s), F2 MATCH (21 steps, 1643 s), F3 MISS (19 steps, 1492 s): reported `gateway-mock|DEPENDENCY_REJECTING`, truth `order-service|CONFIGURATION`. INVESTIGATE `ACT` calls took 107-125 s, well under the 300 s deadline, so the deadline stays.
+  - F3's miss is reasoning, not speed. TRIAGE's `status_summary` returned only `AUTHORIZED count=3`, and the plan held only gateway-mock and payment-service hypotheses; no call ever looked at order-service.
+  - In INVESTIGATE, `recent_events` with `type=PAYMENT_UNAVAILABLE` got `INVALID_PARAMETER` ("type must be one of [PAYMENT_ATTEMPT] for source payment"). The model then repeated that call and the same `search_logs` for two more turns; all four were `REFUSED_DUPLICATE` and used half of the 8-call tool budget. KNOWLEDGE used the rest, and the report cites a gateway-mock `answered=200` log line as evidence of rejection.
+  - Candidate fix, not approved: a duplicate refusal of a call that failed with `INVALID_PARAMETER` repeats the original reason, so the model can correct its arguments instead of looping.
+
 ## Next step
 
-Decide how to handle the slower host (the human's choice), then the eleventh full run (T5c3).
+The human decides whether F3's duplicate loop becomes a task (T5c13) before the twelfth full run (T5c3).
