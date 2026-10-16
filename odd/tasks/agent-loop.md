@@ -461,6 +461,8 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - Candidate fix, not approved: a duplicate refusal of a call that failed with `INVALID_PARAMETER` repeats the original reason, so the model can correct its arguments instead of looping.
 - 2026-10-16: T5c13 done by a delegated writer in one unit, committed as `f29401f`. The refusal reuses the `reason="..."` line of the earlier call's summary (escaped, cut at 300 characters by `ToolSummaries`). RED: the two new `AgentLoopTest` cases failed on the old "read that result" text; GREEN: `AgentLoopTest` 47 tests, full `agent` suite 297 tests (surefire XML), 0 failures, 0 errors. Spec: "Phases and their tools" rule 2 and the scenario "A repeated failed call says why it failed". ADR-010 has "Amended in T5c13".
 
+- 2026-10-16: T5c13 spot check: `AgentLoopTest` 47 tests green. Assess from `3e6edc2` (committed only): medium, `under_budget`, so no review yet; the range stays pending until a later commit reaches the budget.
+
 ## Next step
 
 T5c13, then the twelfth full run (T5c3).
