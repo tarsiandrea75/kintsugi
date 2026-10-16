@@ -478,6 +478,15 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - 2026-10-16: T5c14 done by a delegated writer in one unit, committed as `fc3a00c`. `ReportCheck` returns the wrong-tool error as droppable, like an unverified quote; a missing or refused step stays fatal. RED: the new `ReportCheckTest` case for a wrong-tool item among verified ones failed (the report was invalid); GREEN: `ReportCheckTest` 30 tests, full `agent` suite 299 tests (surefire XML), 0 failures, 0 errors. Spec: the evidence rule and the scenario "An item citing the wrong tool is dropped". ADR-010 has "Amended in T5c14".
 - 2026-10-16: T5c14 spot check: `ReportCheckTest` 30 tests green. Reviewed from `13c783b` to `4801fb7` (committed only, one reliability lens, consent granted): approved and acknowledged (`review-99ff09d8fa4f8d71`). Non-blocking follow-up (SUGGESTION): no test for an item with both a wrong tool and a bad quote. The next review base is `4801fb7`. The thirteenth full run starts on the next commit.
 
+- 2026-10-16: thirteenth full `verify-agent.sh` run on `ebb2797` (`infra/scripts/out/verify-agent-20261016T042636Z/`, 86 min): **1/3**. Latencies as in runs 11 and 12.
+  - F1 `TIMED_OUT` (3 steps): INVESTIGATE's first answer took over the 300 s `ACT` deadline.
+  - F2 MATCH (19 steps); its report was valid with nothing dropped.
+  - F3 `INVALID_REPORT` (21 steps): both report attempts were cut at 512 tokens and were not JSON. Their heads named `gateway-mock|DEPENDENCY_LATENCY`, so F3 would have missed anyway. In INVESTIGATE the model again filtered `recent_events` by `source=payment`, never by `source=order`, and never called `get_order_trace`.
+  - Runs 11-13 together: F1 1 MATCH out of 3 (2 runs lost to timeouts), F2 2 of 3 (1 lost to the wrong-tool rule fixed in T5c14), F3 0 of 3 (always blames gateway-mock). Every lost F1/F2 run hit the 300 s `ACT` deadline on a phase's first answer, which carries the plan and takes 215-300 s on this host, or a check that no longer rejects.
+
 ## Next step
 
-T5c14, then the thirteenth full run (T5c3).
+The M2 check (T5c3) is not met: the best run is 2/3 (run 11). The human decides, with runs 11-13 as evidence:
+1. the 300 s `ACT` deadline, which every phase's first answer (the plan) reaches on this host: raise it, or shorten that answer (a smaller plan or `num_predict` for it);
+2. F3, which the model misses in every run: accept a prompt or tool change aimed at order-side evidence (for example, `recent_events` with `source=order` in INVESTIGATE), knowing it is close to teaching the test, or record F3 as a known limit of the local model;
+3. the replay harness proposed earlier, to measure several samples per fault without the lab.
