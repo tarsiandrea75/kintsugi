@@ -212,36 +212,129 @@ class EvidenceToolsTest {
 
 	@Test
 	void statusSummaryCountsOrdersPerStatusInTheWindow() {
-		insertOrder(UUID.randomUUID(), "PAID", NOW.minusSeconds(60));
-		insertOrder(UUID.randomUUID(), "PAID", NOW.minusSeconds(30));
-		insertOrder(UUID.randomUUID(), "PAYMENT_PENDING", NOW.minusSeconds(10));
+		UUID paidOld = UUID.randomUUID();
+		UUID paidNew = UUID.randomUUID();
+		UUID pending = UUID.randomUUID();
+		insertOrder(paidOld, "PAID", NOW.minusSeconds(60));
+		insertOrder(paidNew, "PAID", NOW.minusSeconds(30));
+		insertOrder(pending, "PAYMENT_PENDING", NOW.minusSeconds(10));
 		insertOrder(UUID.randomUUID(), "PAYMENT_FAILED", NOW.minusSeconds(2 * 3600));
 
-		JsonNode recent = body(this.tools.statusSummary("orders", 15)).path("items");
-		JsonNode all = body(this.tools.statusSummary("orders", null)).path("items");
+		JsonNode recent = body(this.tools.statusSummary("orders", 15, null)).path("items");
+		JsonNode all = body(this.tools.statusSummary("orders", null, null)).path("items");
 
-		assertThat(recent.toString()).isEqualTo(
-				"[{\"status\":\"PAID\",\"count\":2},{\"status\":\"PAYMENT_PENDING\",\"count\":1}]");
+		assertThat(recent.toString()).isEqualTo("[{\"status\":\"PAID\",\"count\":2,\"sampleOrderIds\":[\"" + paidNew
+				+ "\",\"" + paidOld + "\"]},{\"status\":\"PAYMENT_PENDING\",\"count\":1,\"sampleOrderIds\":[\"" + pending
+				+ "\"]}]");
 		assertThat(all.valueStream().map(item -> item.path("status").asString()).toList())
 			.containsExactly("PAID", "PAYMENT_FAILED", "PAYMENT_PENDING");
 	}
 
 	@Test
-	void statusSummaryCountsPaymentsPerStatus() {
+	void statusSummaryCountsABoundedWindowExcludingRowsOnBothSides() {
+		UUID inside = UUID.randomUUID();
+		insertOrder(UUID.randomUUID(), "PAYMENT_FAILED", NOW.minusSeconds(25 * 60));
+		insertOrder(inside, "PAID", NOW.minusSeconds(15 * 60));
+		insertOrder(UUID.randomUUID(), "PAID", NOW.minusSeconds(12 * 60));
+		insertOrder(UUID.randomUUID(), "PAYMENT_PENDING", NOW.minusSeconds(5 * 60));
+
+		JsonNode body = body(this.tools.statusSummary("orders", 20, 10));
+
+		assertThat(body.path("outcome").asString()).isEqualTo("OK");
+		JsonNode items = body.path("items");
+		assertThat(items.size()).isEqualTo(1);
+		assertThat(items.get(0).path("status").asString()).isEqualTo("PAID");
+		assertThat(items.get(0).path("count").asLong()).isEqualTo(2);
+		assertThat(items.get(0).path("sampleOrderIds").get(1).asString()).isEqualTo(inside.toString());
+	}
+
+	@Test
+	void statusSummaryKeepsAtMostThreeSampleIdsNewestFirst() {
+		List<UUID> orders = Stream.generate(UUID::randomUUID).limit(5).toList();
+		for (int i = 0; i < orders.size(); i++) {
+			insertOrder(orders.get(i), "PAYMENT_PENDING", NOW.minusSeconds(100 - i));
+		}
+
+		JsonNode item = body(this.tools.statusSummary("orders", 15, null)).path("items").get(0);
+
+		assertThat(item.path("count").asLong()).isEqualTo(5);
+		assertThat(item.path("sampleOrderIds").valueStream().map(JsonNode::asString).toList())
+			.containsExactly(orders.get(4).toString(), orders.get(3).toString(), orders.get(2).toString());
+	}
+
+	@Test
+	void statusSummaryCountsPaymentsPerStatusWithTheirOrderIds() {
+		UUID order = UUID.randomUUID();
 		LabDatabase.execute("payments", "INSERT INTO payments VALUES (gen_random_uuid(), gen_random_uuid(), 'FAILED',"
-				+ " 0, now()), (gen_random_uuid(), gen_random_uuid(), 'FAILED', 0, now())");
+				+ " 0, now() - interval '1 second'), (gen_random_uuid(), '" + order + "', 'FAILED', 0, now())");
 
-		JsonNode items = body(this.tools.statusSummary("payments", 5)).path("items");
+		JsonNode items = body(this.tools.statusSummary("payments", 5, null)).path("items");
 
-		assertThat(items.toString()).isEqualTo("[{\"status\":\"FAILED\",\"count\":2}]");
+		assertThat(items.size()).isEqualTo(1);
+		assertThat(items.get(0).path("status").asString()).isEqualTo("FAILED");
+		assertThat(items.get(0).path("count").asLong()).isEqualTo(2);
+		assertThat(items.get(0).path("sampleOrderIds").get(0).asString()).isEqualTo(order.toString());
+		assertThat(items.get(0).path("sampleOrderIds").size()).isEqualTo(2);
 	}
 
 	@Test
 	void statusSummaryOfStockListsTheAvailableUnitsPerSku() {
-		JsonNode items = body(this.tools.statusSummary("stock", null)).path("items");
+		JsonNode items = body(this.tools.statusSummary("stock", null, null)).path("items");
 
 		assertThat(items.get(0).toString()).isEqualTo("{\"sku\":\"SKU-1\",\"available\":1000000}");
 		assertThat(items.size()).isEqualTo(5);
+	}
+
+	// event_counts
+
+	@Test
+	void eventCountsGroupByTypeAndOutcomeMostFrequentFirst(CapturedOutput output) {
+		for (int i = 0; i < 3; i++) {
+			insertEvent("order", UUID.randomUUID(), NOW.minusSeconds(60 + i), "PAYMENT_UNAVAILABLE", "PAYMENT_PENDING",
+					3000L, null);
+		}
+		insertEvent("order", UUID.randomUUID(), NOW.minusSeconds(50), "PAYMENT_AUTHORIZED", "PAID", 20L, null);
+		insertEvent("order", UUID.randomUUID(), NOW.minusSeconds(40), "ORDER_RECEIVED", "CREATED", null, null);
+		insertEvent("order", UUID.randomUUID(), NOW.minusSeconds(30), "ORDER_RECEIVED", "CREATED", null, null);
+		insertEvent("order", UUID.randomUUID(), NOW.minusSeconds(20), "INVENTORY_RESERVED", "PAYMENT_PENDING", 5L, null);
+		insertEvent("payment", UUID.randomUUID(), NOW.minusSeconds(20), "PAYMENT_ATTEMPT", "FAILED", 5L, null);
+
+		JsonNode body = body(this.tools.eventCounts("order", 15, null));
+
+		assertThat(body.path("outcome").asString()).isEqualTo("OK");
+		assertThat(body.path("truncated").asBoolean()).isFalse();
+		JsonNode summary = body.path("items").get(0);
+		assertThat(summary.path("total").asLong()).isEqualTo(7);
+		assertThat(summary.path("groups").toString()).isEqualTo("[{\"type\":\"PAYMENT_UNAVAILABLE\","
+				+ "\"outcome\":\"PAYMENT_PENDING\",\"count\":3},{\"type\":\"ORDER_RECEIVED\",\"outcome\":\"CREATED\","
+				+ "\"count\":2},{\"type\":\"INVENTORY_RESERVED\",\"outcome\":\"PAYMENT_PENDING\",\"count\":1},"
+				+ "{\"type\":\"PAYMENT_AUTHORIZED\",\"outcome\":\"PAID\",\"count\":1}]");
+		assertThat(callLines(output, "event_counts")).singleElement()
+			.satisfies(line -> assertThat(line).contains("source=order").contains("count=7"));
+	}
+
+	@Test
+	void eventCountsOfABoundedWindowExcludeEventsOnBothSides() {
+		insertEvent("payment", UUID.randomUUID(), NOW.minusSeconds(25 * 60), "PAYMENT_ATTEMPT", "DECLINED", 5L, null);
+		insertEvent("payment", UUID.randomUUID(), NOW.minusSeconds(15 * 60), "PAYMENT_ATTEMPT", "AUTHORIZED", 5L, null);
+		insertEvent("payment", UUID.randomUUID(), NOW.minusSeconds(5 * 60), "PAYMENT_ATTEMPT", "FAILED", 5L, null);
+
+		JsonNode summary = body(this.tools.eventCounts("payment", 20, 10)).path("items").get(0);
+
+		assertThat(summary.path("total").asLong()).isEqualTo(1);
+		assertThat(summary.path("groups").toString())
+			.isEqualTo("[{\"type\":\"PAYMENT_ATTEMPT\",\"outcome\":\"AUTHORIZED\",\"count\":1}]");
+	}
+
+	@Test
+	void eventCountsOfAnEmptyWindowAreZero() {
+		insertEvent("reservation", UUID.randomUUID(), NOW.minusSeconds(3 * 3600), "RESERVATION_ATTEMPT", "RESERVED", 5L,
+				null);
+
+		JsonNode body = body(this.tools.eventCounts("reservation", 15, null));
+
+		assertThat(body.path("outcome").asString()).isEqualTo("OK");
+		assertThat(body.path("items").get(0).toString()).isEqualTo("{\"total\":0,\"groups\":[]}");
 	}
 
 	// validation
@@ -262,11 +355,22 @@ class EvidenceToolsTest {
 				invalid("sinceMinutes", t -> t.recentEvents("order", null, null, null, null, null)),
 				invalid("limit", t -> t.recentEvents("order", null, null, null, 15, 500)),
 				invalid("limit", t -> t.recentEvents("order", null, null, null, 15, 0)),
-				invalid("table", t -> t.statusSummary("order_items", null)),
-				invalid("table", t -> t.statusSummary("injections", null)),
-				invalid("table", t -> t.statusSummary(null, null)),
-				invalid("sinceMinutes", t -> t.statusSummary("orders", 0)),
-				invalid("sinceMinutes", t -> t.statusSummary("stock", 15)));
+				invalid("table", t -> t.statusSummary("order_items", null, null)),
+				invalid("table", t -> t.statusSummary("injections", null, null)),
+				invalid("table", t -> t.statusSummary(null, null, null)),
+				invalid("sinceMinutes", t -> t.statusSummary("orders", 0, null)),
+				invalid("sinceMinutes", t -> t.statusSummary("stock", 15, null)),
+				invalid("untilMinutesAgo", t -> t.statusSummary("orders", 15, 15)),
+				invalid("untilMinutesAgo", t -> t.statusSummary("orders", 15, 20)),
+				invalid("untilMinutesAgo", t -> t.statusSummary("orders", 15, -1)),
+				invalid("untilMinutesAgo", t -> t.statusSummary("orders", null, 5)),
+				invalid("untilMinutesAgo", t -> t.statusSummary("stock", null, 5)),
+				invalid("source", t -> t.eventCounts("faults", 15, null)),
+				invalid("source", t -> t.eventCounts(null, 15, null)),
+				invalid("sinceMinutes", t -> t.eventCounts("order", null, null)),
+				invalid("sinceMinutes", t -> t.eventCounts("order", 361, null)),
+				invalid("untilMinutesAgo", t -> t.eventCounts("order", 15, 15)),
+				invalid("untilMinutesAgo", t -> t.eventCounts("order", 15, -1)));
 	}
 
 	private static Arguments invalid(String parameter, Function<EvidenceTools, CallToolResult> call) {
@@ -299,8 +403,10 @@ class EvidenceToolsTest {
 			.contains("order", "payment", "reservation");
 		assertThat(body(this.tools.recentEvents("order", null, null, null, 15, 500)).path("reason").asString())
 			.contains("maximum 100");
-		assertThat(body(this.tools.statusSummary("faults", null)).path("reason").asString())
+		assertThat(body(this.tools.statusSummary("faults", null, null)).path("reason").asString())
 			.contains("orders", "payments", "stock");
+		assertThat(body(this.tools.statusSummary("orders", 15, 15)).path("reason").asString())
+			.isEqualTo("untilMinutesAgo must be less than sinceMinutes (15)");
 	}
 
 	// database failures
@@ -311,7 +417,7 @@ class EvidenceToolsTest {
 			locker.setAutoCommit(false);
 			sql.execute("LOCK TABLE orders IN ACCESS EXCLUSIVE MODE");
 
-			CallToolResult result = this.tools.statusSummary("orders", null);
+			CallToolResult result = this.tools.statusSummary("orders", null, null);
 
 			locker.rollback();
 			assertThat(result.isError()).isTrue();
@@ -366,7 +472,7 @@ class EvidenceToolsTest {
 			EvidenceTools tools = new EvidenceTools(new LabDatabases(Map.copyOf(wrong)), new ToolCallRunner(),
 					Clock.systemUTC());
 
-			JsonNode body = body(tools.statusSummary("orders", null));
+			JsonNode body = body(tools.statusSummary("orders", null, null));
 
 			assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
 			assertThat(body.path("reason").asString()).isEqualTo("PostgreSQL orders authentication failed");
@@ -391,7 +497,7 @@ class EvidenceToolsTest {
 			EvidenceTools tools = new EvidenceTools(new LabDatabases(missing), new ToolCallRunner(),
 					Clock.systemUTC());
 
-			JsonNode body = body(tools.statusSummary("stock", null));
+			JsonNode body = body(tools.statusSummary("stock", null, null));
 
 			assertThat(body.path("outcome").asString()).isEqualTo("UPSTREAM_ERROR");
 			assertThat(body.path("reason").asString()).isEqualTo("PostgreSQL inventory is unreachable");

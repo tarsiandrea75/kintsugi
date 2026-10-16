@@ -35,7 +35,8 @@ These apply to every tool.
 | `query_metric` | `metric`, `service?`, `sinceMinutes` | Prometheus `query_range`, step `max(5 s, ceil(window / 59))` | at most 10 series, each with its `labels` and at most 60 compact `points`, oldest first: `[unixSeconds, value]`, the time an integer and the value as Prometheus writes it (such as `"0.5"` or `"NaN"`). When the series exceed the output cap, whole series are dropped from the end; if the first series alone exceeds it, its oldest points are dropped and it carries `truncated`: `"[truncated] oldest <n> points dropped"`. Either way the result reports `truncated: true` |
 | `get_order_trace` | `orderId` | the order row, plus `order_events`, `payment_events` and `reservation_events` for that order (the oldest 50 per table, by `occurred_at`) | first the order, `kind` `order` with `id`, `status`, `createdAt`, `updatedAt` (absent when no row exists); then the events of the three tables in one time-ordered list, each `kind` `event` with `source` (`order`, `payment`, `reservation`), `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` (the `detail`, cut at 1000 characters with `[truncated]`). Null fields are left out. More than 50 events in a table sets `truncated` |
 | `recent_events` | `source`, `type?`, `outcome?`, `minDurationMs?`, `sinceMinutes`, `limit?` | `order_events`, `payment_events` or `reservation_events`, rows with `occurred_at` in the window and `duration_ms >= minDurationMs` | events, newest first: `orderId`, `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` |
-| `status_summary` | `table`, `sinceMinutes?` | `orders`, `payments` or `stock` | aggregates only: `status` and `count` per status (`orders`, `payments`; `sinceMinutes` counts only rows with `created_at` in the window), or `sku` and `available` per SKU (`stock`, at most 100 SKUs; `sinceMinutes` is rejected, since stock has no times) |
+| `status_summary` | `table`, `sinceMinutes?`, `untilMinutesAgo?` | `orders`, `payments` or `stock` | aggregates: `status`, `count` and `sampleOrderIds` per status (`orders`, `payments`; `sinceMinutes` counts only rows with `created_at` in the window `[now - sinceMinutes, now - untilMinutesAgo)`). `sampleOrderIds` holds the order ids of up to 3 of the status's newest rows by `created_at`, newest first, the row id breaking ties: the order's `id` for `orders`, the payment's `order_id` for `payments`, so each one can be passed to `get_order_trace`. For `stock`: `sku` and `available` per SKU, at most 100 SKUs, no sample ids (a SKU is not a row of a status); `sinceMinutes` and `untilMinutesAgo` are rejected, since stock has no times |
+| `event_counts` | `source`, `sinceMinutes`, `untilMinutesAgo?` | `order_events`, `payment_events` or `reservation_events`, rows with `occurred_at` in the window `[now - sinceMinutes, now - untilMinutesAgo)` | one item: `total`, the number of events in the window, and `groups`, one per (`type`, `outcome`) with its `count`, sorted by `count` descending, then `type`, then `outcome` (an absent outcome is left out and sorts last). No individual events, so nothing is cut; an empty window gives `total` 0 and no groups |
 | `search_runbooks` | `query`, `service?`, `limit?` | the `knowledge` database on the knowledge store: the query, with the query prefix, is embedded by the configured model, then the nearest chunks by cosine distance are read, filtered on `service` when given | chunks, nearest first: `service` (absent for README chunks), `section` (the heading, untrusted: control characters, the line and paragraph separators U+2028 and U+2029, and format characters such as the bidi controls become spaces, and past 100 characters it is cut and ends with `[truncated]`), `score` (1 minus the cosine distance, rounded to 3 decimals), `untrustedText` (the chunk text). Whole chunks are dropped from the end to fit the output cap; when the nearest chunk alone exceeds it, its text is cut and ends with `[truncated]` |
 | `service_restarts` | `sinceMinutes` | Prometheus `max by (service) (process_start_time_seconds{service=~"<allowed services>"})`, same step as `query_metric` | per service: `startTimes` seen in the window, oldest first, and `restartsInWindow`, the start times inside the window (each a restart or deploy). Two restarts within one step show as one |
 
@@ -52,6 +53,7 @@ Parameter domains:
 | `type` | the values of the source table's `CHECK` constraint: `order` `ORDER_RECEIVED`, `INVENTORY_RESERVED`, `INVENTORY_REJECTED`, `INVENTORY_UNAVAILABLE`, `PAYMENT_AUTHORIZED`, `PAYMENT_DECLINED`, `PAYMENT_FAILED`, `PAYMENT_UNAVAILABLE`; `payment` `PAYMENT_ATTEMPT`; `reservation` `RESERVATION_ATTEMPT` |
 | `outcome` | the values the source's service writes (the column has no constraint): `order` the order statuses `CREATED`, `PAYMENT_PENDING`, `PAID`, `PAYMENT_FAILED`, `REJECTED_OUT_OF_STOCK`, `REJECTED_INVENTORY_UNAVAILABLE`; `payment` `AUTHORIZED`, `DECLINED`, `FAILED`, `GATEWAY_UNAVAILABLE`, `ERROR`, `COMMIT_UNKNOWN`; `reservation` `RESERVED`, `INSUFFICIENT_STOCK` |
 | `minDurationMs` | integer, 0 to 600000 |
+| `untilMinutesAgo` | integer, 0 to 359, default 0, and less than `sinceMinutes`; it requires `sinceMinutes`. The window is `[now - sinceMinutes, now - untilMinutesAgo)`; 0 leaves it open at now, as without the parameter |
 | `table` | `orders`, `payments`, `stock` |
 | `query` | plain text, 3 to 300 characters after trimming, no control characters; embedded as the query prefix (default `search_query: `) followed by the text |
 | `limit` (`search_runbooks`) | integer, 1 to 10, default 5 |
@@ -81,7 +83,7 @@ There is no latency p95: the lab services publish no `http_server_requests_secon
 
 ### Requirement: Tools are listed and callable over MCP
 
-mcp-tools MUST serve the 8 tools above over MCP Streamable HTTP. `initialize`, `tools/list` and `tools/call` MUST work on `POST /mcp` without a session.
+mcp-tools MUST serve the 9 tools above over MCP Streamable HTTP. `initialize`, `tools/list` and `tools/call` MUST work on `POST /mcp` without a session.
 
 #### Scenario: Initialize
 - WHEN a client posts an `initialize` request to `/mcp` with `Accept: application/json, text/event-stream`
@@ -89,7 +91,7 @@ mcp-tools MUST serve the 8 tools above over MCP Streamable HTTP. `initialize`, `
 
 #### Scenario: List tools
 - WHEN a client posts `tools/list`
-- THEN the result lists `search_logs`, `count_logs`, `query_metric`, `get_order_trace`, `recent_events`, `status_summary`, `service_restarts` and `search_runbooks`, each with its input schema
+- THEN the result lists `search_logs`, `count_logs`, `query_metric`, `get_order_trace`, `recent_events`, `status_summary`, `event_counts`, `service_restarts` and `search_runbooks`, each with its input schema
 
 ### Requirement: No free query language
 
@@ -224,6 +226,49 @@ mcp-tools MUST write one structured INFO log line per tool call, valid or not, w
 #### Scenario: Rejected call
 - WHEN `query_metric` is called with an unknown metric
 - THEN exactly one INFO line is logged with `outcome=INVALID_PARAMETER`
+
+### Requirement: Order states and event counts over a bounded window
+
+`status_summary` (for `orders` and `payments`) and `event_counts` MUST count exactly the rows whose time column lies in `[now - sinceMinutes, now - untilMinutesAgo)`, so a caller can compare the last N minutes with the N minutes just before them (ADR-011, "Windows"). They MUST return counts and order ids only, with no wording that interprets them.
+
+#### Scenario: Previous window
+- GIVEN orders created 25, 15, 12 and 5 minutes ago
+- WHEN `status_summary` is called with `table` = `orders`, `sinceMinutes` = 20 and `untilMinutesAgo` = 10
+- THEN only the orders created 15 and 12 minutes ago are counted
+
+#### Scenario: Sample order ids
+- GIVEN 5 `PAYMENT_PENDING` orders created in the last 15 minutes
+- WHEN `status_summary` is called with `table` = `orders` and `sinceMinutes` = 15
+- THEN the `PAYMENT_PENDING` item has `count` 5 and `sampleOrderIds` with the ids of the 3 newest of them, newest first
+
+#### Scenario: Payment samples name the order
+- GIVEN payments created in the last 5 minutes
+- WHEN `status_summary` is called with `table` = `payments` and `sinceMinutes` = 5
+- THEN each item's `sampleOrderIds` holds the payments' `order_id` values
+
+#### Scenario: Window end not before its start
+- WHEN `status_summary` or `event_counts` is called with `sinceMinutes` = 15 and `untilMinutesAgo` = 15
+- THEN the result is an `INVALID_PARAMETER` error stating that `untilMinutesAgo` must be less than `sinceMinutes`
+- AND no query runs
+
+#### Scenario: Window end without a start
+- WHEN `status_summary` is called with `table` = `orders`, no `sinceMinutes` and `untilMinutesAgo` = 5
+- THEN the result is an `INVALID_PARAMETER` error stating that `untilMinutesAgo` requires `sinceMinutes`
+
+#### Scenario: Event counts by type and outcome
+- GIVEN in the last 15 minutes 3 order events `PAYMENT_UNAVAILABLE` with outcome `PAYMENT_PENDING`, 2 `ORDER_RECEIVED` with `CREATED`, 1 `INVENTORY_RESERVED` with `PAYMENT_PENDING` and 1 `PAYMENT_AUTHORIZED` with `PAID`
+- WHEN `event_counts` is called with `source` = `order` and `sinceMinutes` = 15
+- THEN the item has `total` 7 and the groups in this order: `PAYMENT_UNAVAILABLE`/`PAYMENT_PENDING` 3, `ORDER_RECEIVED`/`CREATED` 2, `INVENTORY_RESERVED`/`PAYMENT_PENDING` 1, `PAYMENT_AUTHORIZED`/`PAID` 1
+
+#### Scenario: Empty window
+- GIVEN no reservation event in the last 15 minutes
+- WHEN `event_counts` is called with `source` = `reservation` and `sinceMinutes` = 15
+- THEN the result is `OK` with one item, `total` 0 and no groups
+
+#### Scenario: Unknown event source
+- WHEN `event_counts` is called with `source` = `faults`
+- THEN the result is an `INVALID_PARAMETER` error listing `order`, `payment` and `reservation`
+- AND no query runs
 
 ### Requirement: Database access runs as kintsugi_agent
 

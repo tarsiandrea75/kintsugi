@@ -51,6 +51,12 @@ public class EvidenceTools {
 
 	private static final String SINCE = "Look back this many minutes, 1 to 360.";
 
+	private static final String UNTIL = "Optional end of the window, this many minutes ago, 0 to 359 and less than"
+			+ " sinceMinutes; the window is [now - sinceMinutes, now - untilMinutesAgo). Default 0, up to now.";
+
+	/** At most this many order ids per status in {@code status_summary}. */
+	static final int MAX_SAMPLE_IDS = 3;
+
 	/** Built from {@link EventSource.Values}, the same constants the validation reads. */
 	static final String TYPE_DESCRIPTION = "Optional event type. order: " + EventSource.Values.ORDER_TYPES
 			+ "; payment: " + EventSource.Values.PAYMENT_TYPES + "; reservation: " + EventSource.Values.RESERVATION_TYPES
@@ -152,34 +158,94 @@ public class EvidenceTools {
 	}
 
 	@McpTool(name = "status_summary", description = "Aggregates of the lab's current state: orders or payments"
-			+ " counted per status (optionally only those created in the last minutes), or the available units per SKU"
-			+ " in stock. Returns no individual rows.")
+			+ " counted per status (optionally only those created in a window of minutes), each status with up to 3"
+			+ " order ids of its newest rows, or the available units per SKU in stock.")
 	public CallToolResult statusSummary(@McpToolParam(description = "One of orders, payments, stock.") String table,
 			@McpToolParam(description = "Optional, orders and payments only: count only rows created in the last"
-					+ " this many minutes, 1 to 360. Omit to count all.", required = false) Integer sinceMinutes) {
-		return this.runner.run("status_summary", params("table", table, "sinceMinutes", sinceMinutes), () -> {
-			SummaryTable summary = SummaryTable.byId(table);
-			if (summary == SummaryTable.STOCK) {
-				if (sinceMinutes != null) {
-					throw new InvalidParameterException("sinceMinutes", "does not apply to stock, which has no times");
-				}
-				List<StockLevel> levels = this.databases.query(Database.INVENTORY,
-						"SELECT sku, available FROM stock ORDER BY sku LIMIT " + (ToolInputs.MAX_LIMIT + 1), Map.of(),
-						(rs, n) -> new StockLevel(rs.getString("sku"), rs.getLong("available")));
-				boolean truncated = levels.size() > ToolInputs.MAX_LIMIT;
-				return ToolResult.of(truncated ? levels.subList(0, ToolInputs.MAX_LIMIT) : levels, truncated);
-			}
-			Map<String, Object> bind = new LinkedHashMap<>();
-			String where = "";
-			if (sinceMinutes != null) {
-				where = " WHERE created_at >= :since";
-				bind.put("since", since(ToolInputs.sinceMinutes(sinceMinutes)));
-			}
-			List<StatusCount> counts = this.databases.query(summary.database(), "SELECT status, count(*) AS count FROM "
-					+ summary.id() + where + " GROUP BY status ORDER BY status", bind,
-					(rs, n) -> new StatusCount(rs.getString("status"), rs.getLong("count")));
-			return ToolResult.of(counts, false);
-		});
+					+ " this many minutes, 1 to 360. Omit to count all.", required = false) Integer sinceMinutes,
+			@McpToolParam(description = UNTIL, required = false) Integer untilMinutesAgo) {
+		return this.runner.run("status_summary",
+				params("table", table, "sinceMinutes", sinceMinutes, "untilMinutesAgo", untilMinutesAgo), () -> {
+					SummaryTable summary = SummaryTable.byId(table);
+					if (summary == SummaryTable.STOCK) {
+						if (sinceMinutes != null) {
+							throw new InvalidParameterException("sinceMinutes",
+									"does not apply to stock, which has no times");
+						}
+						if (untilMinutesAgo != null) {
+							throw new InvalidParameterException("untilMinutesAgo",
+									"does not apply to stock, which has no times");
+						}
+						List<StockLevel> levels = this.databases.query(Database.INVENTORY,
+								"SELECT sku, available FROM stock ORDER BY sku LIMIT " + (ToolInputs.MAX_LIMIT + 1),
+								Map.of(), (rs, n) -> new StockLevel(rs.getString("sku"), rs.getLong("available")));
+						boolean truncated = levels.size() > ToolInputs.MAX_LIMIT;
+						return ToolResult.of(truncated ? levels.subList(0, ToolInputs.MAX_LIMIT) : levels, truncated);
+					}
+					Map<String, Object> bind = new LinkedHashMap<>();
+					String where = "";
+					if (sinceMinutes != null) {
+						where = " WHERE " + window("created_at", ToolInputs.sinceMinutes(sinceMinutes), untilMinutesAgo,
+								bind);
+					}
+					else if (untilMinutesAgo != null) {
+						throw new InvalidParameterException("untilMinutesAgo", "requires sinceMinutes");
+					}
+					// Samples: the newest rows of each status, the id breaking ties so they are stable. No array
+					// slice: its colon would read as a named parameter.
+					List<StatusCount> counts = this.databases.query(summary.database(),
+							"SELECT status, count(*) AS count, array_agg(order_id ORDER BY rn) FILTER (WHERE rn <= "
+									+ MAX_SAMPLE_IDS + ") AS samples FROM (SELECT status, " + summary.orderIdColumn()
+									+ " AS order_id, row_number() OVER (PARTITION BY status ORDER BY created_at DESC, id)"
+									+ " AS rn FROM " + summary.id() + where + ") w GROUP BY status ORDER BY status",
+							bind, (rs, n) -> new StatusCount(rs.getString("status"), rs.getLong("count"),
+									Arrays.stream((Object[]) rs.getArray("samples").getArray())
+										.map(Object::toString)
+										.toList()));
+					return ToolResult.of(counts, false);
+				});
+	}
+
+	@McpTool(name = "event_counts", description = "Counts of the recorded events of one source in a window of"
+			+ " minutes, per event type and outcome, most frequent first, with their total: order (order steps),"
+			+ " payment (payment attempts) or reservation (stock reservation attempts). Returns no individual events.")
+	public CallToolResult eventCounts(@McpToolParam(description = "One of order, payment, reservation.") String source,
+			@McpToolParam(description = SINCE) Integer sinceMinutes,
+			@McpToolParam(description = UNTIL, required = false) Integer untilMinutesAgo) {
+		return this.runner.run("event_counts",
+				params("source", source, "sinceMinutes", sinceMinutes, "untilMinutesAgo", untilMinutesAgo), () -> {
+					EventSource src = EventSource.byId(source);
+					Map<String, Object> bind = new LinkedHashMap<>();
+					String where = window("occurred_at", ToolInputs.sinceMinutes(sinceMinutes), untilMinutesAgo, bind);
+					List<EventCount> groups = this.databases.query(src.database(),
+							"SELECT type, outcome, count(*) AS count FROM " + src.table() + " WHERE " + where
+									+ " GROUP BY type, outcome ORDER BY count DESC, type, outcome NULLS LAST",
+							bind, (rs, n) -> new EventCount(rs.getString("type"), rs.getString("outcome"),
+									rs.getLong("count")));
+					long total = groups.stream().mapToLong(EventCount::count).sum();
+					return new ToolResult(List.of(new EventCounts(total, groups)), false, total);
+				});
+	}
+
+	/**
+	 * The bounded window {@code [now - sinceMinutes, now - untilMinutesAgo)} on a time column, as a SQL condition whose
+	 * values are bind parameters. An {@code untilMinutesAgo} of 0 or none leaves the window open at now.
+	 */
+	private String window(String column, int sinceMinutes, Integer untilMinutesAgo, Map<String, Object> bind) {
+		if (untilMinutesAgo != null && (untilMinutesAgo < 0 || untilMinutesAgo >= ToolInputs.MAX_SINCE_MINUTES)) {
+			throw new InvalidParameterException("untilMinutesAgo",
+					"must be an integer from 0 to " + (ToolInputs.MAX_SINCE_MINUTES - 1));
+		}
+		if (untilMinutesAgo != null && untilMinutesAgo >= sinceMinutes) {
+			throw new InvalidParameterException("untilMinutesAgo",
+					"must be less than sinceMinutes (" + sinceMinutes + ")");
+		}
+		bind.put("since", since(sinceMinutes));
+		if (untilMinutesAgo == null || untilMinutesAgo == 0) {
+			return column + " >= :since";
+		}
+		bind.put("until", since(untilMinutesAgo));
+		return column + " >= :since AND " + column + " < :until";
 	}
 
 	private static UUID orderId(String value) {
@@ -221,15 +287,24 @@ public class EvidenceTools {
 	/** The tables {@code status_summary} aggregates. Their names are SQL constants. */
 	enum SummaryTable {
 
-		ORDERS("orders", Database.ORDERS), PAYMENTS("payments", Database.PAYMENTS), STOCK("stock", Database.INVENTORY);
+		ORDERS("orders", Database.ORDERS, "id"), PAYMENTS("payments", Database.PAYMENTS, "order_id"),
+		STOCK("stock", Database.INVENTORY, null);
 
 		private final String id;
 
 		private final Database database;
 
-		SummaryTable(String id, Database database) {
+		private final String orderIdColumn;
+
+		SummaryTable(String id, Database database, String orderIdColumn) {
 			this.id = id;
 			this.database = database;
+			this.orderIdColumn = orderIdColumn;
+		}
+
+		/** The column holding the order id of a row, a constant; none for stock. */
+		String orderIdColumn() {
+			return this.orderIdColumn;
 		}
 
 		String id() {
@@ -292,7 +367,17 @@ public class EvidenceTools {
 
 	}
 
-	record StatusCount(String status, long count) {
+	/** A status, its count, and the order ids of up to 3 of its newest rows, newest first. */
+	record StatusCount(String status, long count, List<String> sampleOrderIds) {
+	}
+
+	/** The single item of {@code event_counts}: the total and the groups, most frequent first. */
+	record EventCounts(long total, List<EventCount> groups) {
+	}
+
+	/** One (type, outcome) group. An absent outcome is left out. */
+	@JsonInclude(JsonInclude.Include.NON_NULL)
+	record EventCount(String type, String outcome, long count) {
 	}
 
 	record StockLevel(String sku, long available) {

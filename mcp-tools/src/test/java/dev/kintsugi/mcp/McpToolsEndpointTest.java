@@ -65,13 +65,13 @@ class McpToolsEndpointTest {
 	}
 
 	@Test
-	void toolsListShowsAllEightToolsAndTheObservabilitySchemas() throws Exception {
+	void toolsListShowsAllNineToolsAndTheObservabilitySchemas() throws Exception {
 		JsonNode tools = rpc("""
 				{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""").path("result").path("tools");
 
 		assertThat(tools).extracting(tool -> tool.path("name").asString())
 			.containsExactlyInAnyOrder("search_logs", "count_logs", "query_metric", "get_order_trace", "recent_events",
-					"status_summary", "service_restarts", "search_runbooks");
+					"status_summary", "event_counts", "service_restarts", "search_runbooks");
 		JsonNode searchLogs = tools.valueStream()
 			.filter(tool -> tool.path("name").asString().equals("search_logs"))
 			.findFirst()
