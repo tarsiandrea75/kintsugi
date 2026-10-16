@@ -154,6 +154,13 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
     Tests first; spec, ADR-010 "Amended in T5c14". Route: delegated writer (2+ non-trivial files: `ReportCheck`, its test, spec, ADR).
 
+  - [ ] **T5c15 — a 420 s `ACT` deadline (the human's decision of 2026-10-16, after runs 11-13):**
+    - `kintsugi.agent.model.call-timeout.act` goes from 300 s to 420 s, like `REPORT`. A phase's first answer, which carries the plan, took 213-300 s in runs 11-13 and caused every F1 timeout; the other `ACT` answers stayed under 175 s.
+    - `incident-timeout` stays at 45 min (the human's decision). Its justification changes: 45 min holds every measured run (the longest took 1915 s), but no longer a run with every model call at its deadline (about 56 min).
+    - `verify-agent.sh`'s waits still fit; the loop's read timeout follows the longest deadline.
+
+    Tests first where a test pins the default; spec, ADR-010 "Amended in T5c15". Route: delegated writer (2+ files: config, spec, ADR, tests).
+
 ## Progress
 
 - 2026-10-08: read-only research done.
@@ -486,7 +493,4 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 ## Next step
 
-The M2 check (T5c3) is not met: the best run is 2/3 (run 11). The human decides, with runs 11-13 as evidence:
-1. the 300 s `ACT` deadline, which every phase's first answer (the plan) reaches on this host: raise it, or shorten that answer (a smaller plan or `num_predict` for it);
-2. F3, which the model misses in every run: accept a prompt or tool change aimed at order-side evidence (for example, `recent_events` with `source=order` in INVESTIGATE), knowing it is close to teaching the test, or record F3 as a known limit of the local model;
-3. the replay harness proposed earlier, to measure several samples per fault without the lab.
+T5c15, then the fourteenth full run (T5c3). Still open for the human: F3, and the replay harness.
