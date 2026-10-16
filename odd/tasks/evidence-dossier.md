@@ -78,14 +78,16 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 
 - [x] **T1 — ADR-011 and this document.** Written and accepted by the human on 2026-10-16, with the windows "last N minutes" vs "the N minutes just before". Branch `-01`. Route: delegated writer.
 - [x] **T2 — Lab instrumentation:** build payment-service's gateway client from Spring's auto-configured `RestClient.Builder`, so the payment-service → gateway-mock edge gets `http_client_requests_seconds_count`. Tests first (a metric is recorded for a call to `/authorize`); update `openspec/specs/payment-service/spec.md`. Branch `-02`. Route: delegated writer.
-- [ ] **T3 — MCP read tools or parameters for the dossier:** map each section to existing tools first, then add only what is missing.
+- [x] **T3 — MCP read tools or parameters for the dossier:** map each section to existing tools first, then add only what is missing.
   - [x] **T3a — windowed counts for orders and events:** `status_summary` takes `untilMinutesAgo` (bounded window `[now-sinceMinutes, now-untilMinutesAgo)`) and returns `sampleOrderIds` per status; new tool `event_counts` (counts per type and outcome, with a total). Branch `-03`. Route: delegated writer.
   - [x] **T3b — exact per-edge traffic counts:** new tool `traffic_counts`, counter deltas from raw samples with reset handling, labelled `uri`, `status`, `outcome`, `exception`. Branch `-03b`. Route: delegated writer.
   - [x] **T3c — first-sample fix (R3-001) and the lab's control plane hidden from the agent:** a series missing the window-start sample counts its first value only when it was born inside the window (by the service's start times); `/admin` URIs left out of `traffic_counts` and every HTTP request metric of `query_metric`; gateway-mock's `BehaviorStore` lines left out of `search_logs` and `count_logs`. Branch `-03c`. Route: delegated writer.
   - [x] **T3d — gateway-mock's authorize log lines without the configured latency:** `latency_ms` is a fault parameter (F1's 10000 ms); the lines keep `answered` and the observed `duration_ms`. Decided by the human. Branch `-03d`. Route: inline (one mechanical change, its test, spec and runbook).
-  - To check: log signatures beyond 100 lines; uptime from `service_restarts`.
+  - Closed without new tools (decided with the human): log signatures stay on `search_logs`' grouping, a known limit above 100 lines (incidents so far have 6-10 WARN lines); uptime is computed in T4 from the newest start time `service_restarts` returns.
   - Tests first; living spec `openspec/specs/mcp-tools/spec.md`. Branch `-03`. Route: delegated writer.
-- [ ] **T4 — The dossier builder in `agent/`:** deterministic, facts only, same shape for every fault. Golden-file tests on recorded tool outputs (F1-F3 and a healthy window); a test that no interpretive vocabulary appears; a token-size test. Living spec `openspec/specs/agent/spec.md`. Branch `-04`. Route: delegated writer.
+- [ ] **T4 — The dossier builder in `agent/`:** deterministic, facts only, same shape for every fault. Golden-file tests on recorded tool outputs (F1-F3 and a healthy window); a test that no interpretive vocabulary appears; a token-size test. Living spec `openspec/specs/agent/spec.md`. Route: delegated writer. Sliced:
+  - [ ] **T4a — gathering and model:** the deterministic calls to the MCP tools for the incident and previous windows, and an immutable dossier model of facts (no rendering). Branch `-04a`.
+  - [ ] **T4b — Markdown rendering:** golden files, the vocabulary test and the token-size test. Branch `-04b`.
 - [ ] **T5 — Wire the dossier into the loop behind a mode switch** (explorer vs dossier): adjust phases and budgets for dossier mode, record the mode on the incident and report. Tests first with the scripted fake chat model; spec; ADR-010 "Amended in T5" (or the next free label). Branch `-05`. Route: delegated writer.
 - [ ] **T6 — Verify:** `verify-agent.sh` runs in dossier mode on F1-F3, and in explorer mode for comparison, the same number of runs each; results recorded here and in the agent-loop document (T5c3). Branch `-06`. Route: parent (runs), delegated writer (script changes, if any).
 
@@ -113,4 +115,4 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
 
 ## Next step
 
-The two to-check items of T3 (log signatures beyond 100 lines; uptime from `service_restarts`), then T4.
+T4a: gathering and model.
