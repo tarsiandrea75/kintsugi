@@ -1,0 +1,1 @@
+{"outcome":"OK","returned":1,"truncated":false,"items":[{"total":15,"groups":[{"type":"INVENTORY_RESERVED","outcome":"CREATED","count":5},{"type":"ORDER_RECEIVED","outcome":"CREATED","count":5},{"type":"PAYMENT_AUTHORIZED","outcome":"PAID","count":5}]}]}

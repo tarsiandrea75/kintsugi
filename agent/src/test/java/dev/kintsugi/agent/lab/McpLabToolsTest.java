@@ -233,6 +233,20 @@ class McpLabToolsTest {
 		assertThat(this.server.calls()).isEmpty();
 	}
 
+	@Test
+	void theDossierToolsAreCallableButNeverOfferedToTheModel() throws IOException {
+		LabTools tools = connected();
+
+		tools.call("event_counts", "{\"source\":\"order\",\"sinceMinutes\":10}");
+		tools.call("traffic_counts", "{\"sinceMinutes\":10}");
+
+		assertThat(this.server.calls()).extracting(call -> call.path("name").asString())
+			.containsExactly("event_counts", "traffic_counts");
+		for (Phase phase : Phase.values()) {
+			assertThat(names(tools.toolsFor(phase))).doesNotContain("event_counts", "traffic_counts");
+		}
+	}
+
 	private LabTools connected() throws IOException {
 		this.server = FakeMcpServer.start();
 		this.client = client(this.server.url());

@@ -443,6 +443,54 @@ The agent MUST start while mcp-tools is down: the MCP client connects on its fir
 - THEN it starts, and a tool call records `tool_outcome` `CLIENT_ERROR` with an output starting `mcp-tools call failed:`
 - AND once mcp-tools is up, the next call answers `OK` without restarting the agent
 
+### Requirement: Evidence dossier gathering
+
+`DossierGatherer` MUST build the evidence dossier of an incident (ADR-011, [feature document](../../../odd/tasks/evidence-dossier.md)) through the `LabTools` port, the same path to mcp-tools as the loop's calls. For an incident window of N minutes (the incident's `sinceMinutes`) it uses two windows: the **incident window**, `sinceMinutes` N, and the **previous window**, the N minutes just before it, `sinceMinutes` 2N with `untilMinutesAgo` N. It MUST make the same calls, with the same arguments, in this order, for every incident, whatever the symptom or any output says:
+
+1. `service_restarts` over the incident window;
+2. `status_summary` for `orders`, then `payments`, each for the previous then the incident window;
+3. `traffic_counts` for the previous then the incident window;
+4. per service, in the order `order-service`, `payment-service`, `inventory-service`, `gateway-mock`, and per level, `WARN` then `ERROR`: `count_logs`, then `search_logs` with `limit` 20, over the incident window;
+5. `event_counts` for `order`, `payment`, then `reservation`, each for the previous then the incident window.
+
+The dossier is an immutable model of facts in ADR-011's five sections, each list in a fixed order so its shape is the same for every incident:
+- service status per lab service: the start times seen, the start times inside the window (the newest `restartsInWindow` of them) and the uptime, the gathering time by the agent's `Clock` minus the newest start time; a service missing from the output keeps its place with no start times and no uptime;
+- order and payment states per window: each status with its count and `sampleOrderIds`, as `status_summary` gives them;
+- traffic per window: the `traffic_counts` rows, every label as the tool gives it;
+- log signatures per service and level: the exact count from `count_logs`, and the lines `search_logs` returned (how many, and whether the tool cut them) grouped by signature, the message after the logger with ids and numbers replaced, as in the `search_logs` summary; each with its count, newest time and newest message, which is kept as untrusted text;
+- event counts per source and window: the total and the count per type and outcome.
+
+It MUST hold no judgment, threshold or marker; the only computed values are the window bounds, the uptime and the grouping. A call that fails MUST NOT stop the gathering: its section records the tool, the outcome (`INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, or `OK` for an output that cannot be read) and the reason, and every other call still runs. A call that throws is recorded as `CLIENT_ERROR`. The dossier also keeps every call made, in order, with its arguments and full output. The calls are made by code, not by the model: they do not pass the loop's checks, are not offered as tools, and do not count against the tool budget ("Budgets"). How the dossier reaches the model and how its calls are stored as steps belong to the loop's dossier mode (feature document, T5).
+
+#### Scenario: Two windows
+- GIVEN an incident with `sinceMinutes` = 10
+- WHEN the dossier is gathered
+- THEN `status_summary`, `traffic_counts` and `event_counts` are each called with `sinceMinutes` = 20 and `untilMinutesAgo` = 10, then with `sinceMinutes` = 10 alone
+- AND `service_restarts`, `count_logs` and `search_logs` are called with `sinceMinutes` = 10 only
+
+#### Scenario: Same calls for every incident
+- WHEN the dossier is gathered twice over the same outputs
+- THEN the same 29 calls are made in the same order and the two dossiers are equal
+
+#### Scenario: Calls through MCP
+- WHEN the dossier is gathered
+- THEN every call goes through `LabTools`, and the dossier lists each one with its arguments, outcome and full output
+
+#### Scenario: Uptime from the newest start
+- GIVEN order-service started at 08:00:20.300 and again at 09:53:12.400, inside the window, and the gathering starts at 10:00:00
+- WHEN the dossier is gathered
+- THEN order-service's restarts in the window are [09:53:12.400] and its uptime is 6 min 47.6 s
+
+#### Scenario: Failure recorded, not thrown
+- GIVEN `traffic_counts` answers `UPSTREAM_ERROR` for the incident window
+- WHEN the dossier is gathered
+- THEN its incident traffic records `traffic_counts`, `UPSTREAM_ERROR` and the tool's reason
+- AND the previous window's traffic and every other section are gathered, and all 29 calls are made
+
+#### Scenario: Not counted in the tool budget
+- WHEN the dossier is gathered
+- THEN no call is offered to the model or passes the loop's checks, and none counts against the 8-call tool budget
+
 ### Requirement: Summaries built in code
 
 The model MUST never receive a raw tool output. For each recorded call, code MUST build a summary that is deterministic (the same output always gives the same summary), at most 1,500 characters, and starts with the header `toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n> truncated=<bool>` (`returned` is 0 and `truncated` false when the output is not a readable result, as for `CLIENT_ERROR`; `truncated` is also true when the output ends with mcp-tools' `[truncated]` marker). Text copied from the output MUST be copied verbatim (cut only at its end), so that a quote of a copied string is a quote of the output; the lines around it reshape the output (`status="PAID" count=3`), which is why the evidence check also reads the summary **(T5c6)**. Text from `untrustedText` fields MUST stay labelled as `untrustedText` in the summary.

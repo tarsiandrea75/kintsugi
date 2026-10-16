@@ -14,7 +14,7 @@ public interface LabTools {
 	 * Calls one tool, once. The {@code limit} argument is capped first (20 for {@code search_logs} and
 	 * {@code recent_events}, 3 for {@code search_runbooks}, set when missing). Never throws for a failed call: a
 	 * transport failure is a {@link ToolOutcome#CLIENT_ERROR} result, since an unavailable source is evidence too.
-	 * @param tool one of the 8 mcp-tools tools; any other name is a bug of the caller
+	 * @param tool one of the 10 mcp-tools tools (a phase's tool or a dossier tool); any other name is a bug of the caller
 	 * @param jsonArgs the arguments the model wrote, a JSON object; blank stands for {@code {}}
 	 * @throws IllegalArgumentException if {@code tool} is not an mcp-tools tool
 	 */

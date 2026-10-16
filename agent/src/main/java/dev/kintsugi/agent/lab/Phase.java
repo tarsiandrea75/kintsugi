@@ -16,6 +16,12 @@ public enum Phase {
 
 	CONCLUDE(List.of());
 
+	/**
+	 * The tools the evidence dossier calls (ADR-011) and no phase offers the model: they are called by deterministic
+	 * code only.
+	 */
+	public static final List<String> DOSSIER_TOOLS = List.of("event_counts", "traffic_counts");
+
 	private final List<String> tools;
 
 	Phase(List<String> tools) {
@@ -27,8 +33,11 @@ public enum Phase {
 		return this.tools;
 	}
 
-	/** Whether {@code tool} is one of the 8 mcp-tools tools, whatever the phase. */
+	/** Whether {@code tool} is one of the 10 mcp-tools tools: a phase's tool or a dossier tool. */
 	public static boolean isLabTool(String tool) {
+		if (DOSSIER_TOOLS.contains(tool)) {
+			return true;
+		}
 		for (Phase phase : values()) {
 			if (phase.tools.contains(tool)) {
 				return true;
