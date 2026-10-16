@@ -149,6 +149,11 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
     Tests first; spec, ADR-010 "Amended in T5c13". Route: delegated writer (2+ non-trivial files: `AgentLoop`, its test, spec, ADR).
 
+  - [ ] **T5c14 — an evidence item that cites the wrong tool is dropped, not fatal (decided by the agent on 2026-10-16 under the human's overnight go-ahead, after the twelfth run; extends the human's T5c11 decision):**
+    - an evidence item whose `tool` is not the tool of its cited step is dropped and recorded as dropped, like an item whose quote is not in its step (T5c11); the report stays valid while at least one verified evidence item remains, and every other report check still invalidates it.
+
+    Tests first; spec, ADR-010 "Amended in T5c14". Route: delegated writer (2+ non-trivial files: `ReportCheck`, its test, spec, ADR).
+
 ## Progress
 
 - 2026-10-08: read-only research done.
@@ -464,6 +469,12 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 - 2026-10-16: T5c13 spot check: `AgentLoopTest` 47 tests green. Assess from `3e6edc2` (committed only): medium, `under_budget`, so no review yet; the range stays pending until a later commit reaches the budget.
 - 2026-10-16: T5c13 reviewed from `3e6edc2` to `13c783b` (committed only, one reliability lens, consent granted): approved and acknowledged (`review-efacbbcc7cb9cbb2`). Non-blocking findings, follow-ups: (WARNING) the branch for an earlier failure with no `reason` is untested; (SUGGESTION) the reason is read from the first `reason=` line of the summary; (SUGGESTION) "change the arguments" is the wrong advice after a transient failure such as `UPSTREAM_ERROR`, related to the follow-up on transient failures refused as duplicates. The next review base is `13c783b`.
 
+- 2026-10-16: twelfth full `verify-agent.sh` run on `67d733c` (`infra/scripts/out/verify-agent-20261016T024609Z/`, 96 min): **0/3**. Model-call latencies match run 11 (TRIAGE first answer 216-225 s, INVESTIGATE first answer 265-300 s), so the host is not slower; this is the spread of the model's answers.
+  - F1 `TIMED_OUT` (12 steps): KNOWLEDGE's first answer, which carries the plan, took over the 300 s `ACT` deadline. Every phase's first answer runs 215-300 s in runs 11 and 12, so it sits on the deadline; the deadline is the human's decision.
+  - F2 `INVALID_REPORT` (20 steps): both report attempts named the truth, `gateway-mock|DEPENDENCY_REJECTING`, but cited `toolCallId` 12 (a `recent_events` step) with `tool` `search_runbooks`. A wrong tool invalidates the whole report, while a wrong quote only drops the item since T5c11. This becomes T5c14.
+  - F3 MISS again (20 steps), `gateway-mock|DEPENDENCY_REJECTING`. The evidence pointed elsewhere: 6 orders `PAYMENT_PENDING` and no payment events at all, so payment-service never received the calls. The model filtered `recent_events` by `source=payment` instead of `source=order`, never called `get_order_trace` or searched order-service's logs, and its KNOWLEDGE plan was cut at 384 tokens with `why` over 300 characters. A prompt hint aimed at F3 would teach the test; that is the human's decision, not a T5c task.
+  - T5c13 had no repeat of an `INVALID_PARAMETER` call to act on: F3's step 5 failed, and its later calls used different arguments (one was then a plain duplicate of an `OK` call).
+
 ## Next step
 
-T5c13, then the twelfth full run (T5c3).
+T5c14, then the thirteenth full run (T5c3).
