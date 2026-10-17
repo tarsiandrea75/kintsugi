@@ -12,6 +12,7 @@ root-cause service and category of F1, F2 and F3 with the local model.
   infra/scripts/verify-agent.sh                # F1, F2 and F3 in turn, leave the lab running
   infra/scripts/verify-agent.sh --only F2      # one fault (or a list: --only F1,F3)
   infra/scripts/verify-agent.sh --down         # same, then tear the lab down (containers and volumes)
+  infra/scripts/verify-agent.sh --mode dossier # the agent in dossier mode (ADR-011); the default is explorer
 
 For each fault it injects it through the fault injector, places a few orders as neutral customers, waits for the
 metrics and logs to land, then opens an incident (POST /incidents on 127.0.0.1:18086) with the same neutral symptom
@@ -23,7 +24,8 @@ older than the next window (11 min after its restore). Nothing it writes into th
 names a fault.
 Every run, pass or fail, is logged under infra/scripts/out/verify-agent-<UTC time>/: run.log, and per fault the
 incident with its steps and full tool outputs (<fault>-incident.json), and the score (<fault>-score.txt); summary.tsv
-has one line per fault.
+has one line per fault. --mode sets KINTSUGI_AGENT_MODE for the agent container, recreated when it changes; an
+incident whose recorded mode is not the requested one is a miss.
 Exits 0 when every selected fault is diagnosed correctly, non-zero otherwise. The injection is restored on every exit.
 Needs docker (with compose), curl and python3 on the host, and the local Ollama on 127.0.0.1:11434 with
 granite4.1:8b. Expect up to about 55 minutes per fault on a CPU.
@@ -43,12 +45,16 @@ OLLAMA=http://127.0.0.1:11434
 MODEL=granite4.1:8b
 
 selected=()
+mode=explorer
 args=()
 while (( $# )); do
   case "$1" in
     --only) [[ $# -ge 2 ]] || { echo "--only needs a fault list, e.g. --only F1,F3" >&2; exit 2; }
       IFS=, read -r -a selected <<<"$2"; shift 2 ;;
     --only=*) IFS=, read -r -a selected <<<"${1#--only=}"; shift ;;
+    --mode) [[ $# -ge 2 ]] || { echo "--mode needs explorer or dossier" >&2; exit 2; }
+      mode=$2; shift 2 ;;
+    --mode=*) mode=${1#--mode=}; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -57,13 +63,16 @@ parse_args "${args[@]+"${args[@]}"}"
 for fault in "${selected[@]}"; do
   [[ " ${ALL_FAULTS[*]} " == *" $fault "* ]] || { echo "Unknown fault '$fault'; choose from ${ALL_FAULTS[*]}" >&2; exit 2; }
 done
+[[ "$mode" == explorer || "$mode" == dossier ]] || { echo "Unknown mode '$mode'; choose explorer or dossier" >&2; exit 2; }
+# compose passes it to the agent container (infra/compose.yaml); start_agent recreates the container when it changes.
+export KINTSUGI_AGENT_MODE=$mode
 
 # Every run is logged, pass or fail: the whole output goes to run.log too. tee ignores INT and TERM, so a Ctrl-C (sent
 # to the whole process group) still lets it record what the exit trap prints.
 RUN_DIR="$REPO_DIR/infra/scripts/out/verify-agent-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$RUN_DIR"
 exec > >(trap '' INT TERM; exec tee -a "$RUN_DIR/run.log") 2>&1
-printf 'fault\tinjection\tincident\tstatus\ttruth\treported\tsteps\twindow\tseconds\tverdict\n' >"$RUN_DIR/summary.tsv"
+printf 'fault\tmode\tinjection\tincident\tstatus\ttruth\treported\tsteps\twindow\tseconds\tverdict\n' >"$RUN_DIR/summary.tsv"
 
 # The fault being diagnosed and its incident, until its score is written; the exit trap records an interrupted one.
 current_fault=""
@@ -74,7 +83,7 @@ cleanup() {
   local status=$?
   if [[ -n "$current_fault" ]]; then
     fail "$current_fault: not scored, the run stopped before its score"
-    printf '%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\n' "$current_fault" "${injection_id:--}" \
+    printf '%s\t%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\n' "$current_fault" "$mode" "${injection_id:--}" \
       "${current_incident:--}" >>"$RUN_DIR/summary.tsv"
   fi
   # The API has no cancel: an incident left RUNNING would make the next run wait up to 52 min for it.
@@ -85,7 +94,7 @@ cleanup() {
   on_exit
 }
 trap cleanup EXIT
-info "logging to $RUN_DIR; faults: ${selected[*]}"
+info "logging to $RUN_DIR; faults: ${selected[*]}; mode: $mode"
 
 # 1. python3 reads the incidents' JSON; the local model must be served, or every incident ends FAILED at its warm-up.
 if command -v python3 >/dev/null; then
@@ -126,7 +135,7 @@ place_orders() {
 # Runs one fault: space out from the previous one, traffic, inject, traffic, incident, restore, score.
 diagnose() {
   local fault=$1 incident window opened traffic_start started_at seconds body status reason reported truth steps
-  local verdict injection why
+  local verdict injection why incident_mode
   info "--- $fault"
   current_fault=$fault current_incident=""
   space_out "$previous_fault_end"
@@ -160,13 +169,17 @@ diagnose() {
     echo "WARN  could not save incident $incident" >&2
   read -r _ body <<<"$(agent_call GET "/incidents/$incident")" || true
   IFS=$'\t' read -r status reason reported steps <<<"$(incident_fields "$body")"
+  incident_mode=$(json_field mode "$body")
 
   expect_restored
   injection_id=""
   previous_fault_end=$(date +%s)
   truth=$(truth_cause "$injection")
 
-  if [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
+  if [[ "$incident_mode" != "$mode" ]]; then
+    verdict=MISS
+    fail "$fault: incident $incident ran in mode '${incident_mode:-unreadable}', not the requested '$mode'"
+  elif [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
     verdict=MATCH
     pass "$fault: the report names $reported, the truth"
   else
@@ -176,6 +189,7 @@ diagnose() {
   fi
   {
     echo "fault: $fault"
+    echo "mode (requested, recorded): $mode, ${incident_mode:-unreadable}"
     echo "injection: $injection"
     echo "incident: $incident"
     echo "status: $status"
@@ -187,7 +201,7 @@ diagnose() {
     echo "seconds (incident opened to ended): $seconds"
     echo "verdict: $verdict"
   } >"$RUN_DIR/$fault-score.txt"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$fault" "$injection" "$incident" "$status" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$fault" "$mode" "$injection" "$incident" "$status" \
     "${truth:-unreadable}" "$reported" "$steps" "$window" "$seconds" "$verdict" >>"$RUN_DIR/summary.tsv"
   current_fault="" current_incident=""
 }

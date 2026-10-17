@@ -266,6 +266,8 @@ services:
       AGENT_DB_PORT: "5432"
       AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:-agent_app}
       SPRING_AI_OLLAMA_BASEURL: http://host.docker.internal:11434
+      # explorer (the default) or dossier (ADR-011); verify-agent.sh --mode sets it.
+      KINTSUGI_AGENT_MODE: ${KINTSUGI_AGENT_MODE:-explorer}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

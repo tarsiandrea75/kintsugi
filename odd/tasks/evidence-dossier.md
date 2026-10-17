@@ -97,6 +97,8 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
   - [x] **T5a — mode switch, dossier message and phases:** branch `-05a`. Route: delegated writer.
   - [x] **T5b — citing the dossier in the report:** branch `-05b`. Route: delegated writer.
 - [ ] **T6 — Verify:** `verify-agent.sh` runs in dossier mode on F1-F3, and in explorer mode for comparison, the same number of runs each; results recorded here and in the agent-loop document (T5c3). Branch `-06`. Route: parent (runs), delegated writer (script changes, if any).
+  - [x] **T6a — select the mode in the verify scripts:** compose passes `KINTSUGI_AGENT_MODE` (default `explorer`) to the agent; `verify-agent.sh --mode explorer|dossier` exports it, records the mode in `summary.tsv` and each score, and scores a miss when the incident's recorded `mode` differs; `compare-agent-modes.sh --runs N` alternates the two modes N rounds. Branch `-06`. Route: inline (shell and compose only, already understood; no runnable test harness for the scripts, so structural checks).
+  - [ ] **T6b — the runs:** 3 per mode (decided by the human on 2026-10-17), alternating, then the results recorded here and in `odd/tasks/agent-loop.md`.
 
 ## Progress
 
@@ -176,6 +178,8 @@ See ADR-011 for the decision, the facts-only principle, the sections and the fea
   - Open for T6: compose and `verify-agent.sh` must pass `KINTSUGI_AGENT_MODE` to the agent container to run dossier mode (outside this task's surface); the gateway-mock, mcp-tools and agent images must be rebuilt before the runs; Ollama's grammar for the dossier schema's `anyOf` (integer or `"dossier"`) has not run live yet; count how many dossier-mode reports cite `dossier`, how many such items are dropped and why, and whether quotes lean on the dossier's own headings or column names, which pass the check like a tool output's field names; the stress-dossier context edge (about 9,470 tokens by the conservative estimate) against Ollama's real prompt token counts.
 - 2026-10-16: the T5a test fix committed as `5e1da9d`, T5b as `89b6bac`. Spot check by the parent: `ReportCheckTest` green. Reviewed from `b6792c3` to `89b6bac` (one reliability lens, consent granted): approved and acknowledged (`review-0c2c09c084bf5da5`). Non-blocking follow-ups (SUGGESTION): no end-to-end test of a dossier-mode run whose gathering failed (prompt flag and check both read `dossierText`, `AgentLoop.java:788-789`); in that case the report schema still allows `"dossier"` while the prompts do not mention it, safe because the check drops such items (`AgentLoop.java:512-513`). The next review base is `89b6bac`.
 
+- 2026-10-17: T6a done on `feat/evidence-dossier-06`. Route: inline. Checks (structural; the scripts have no test harness): `bash -n` on both scripts; `--mode bogus` and a bare `--mode` exit 2 with their message; `--runs 0` exits 2; `docker compose config agent` resolves `KINTSUGI_AGENT_MODE: explorer` when unset and `dossier` when set. The mode check against the incident's `mode` runs only in the live runs (T6b).
+
 ## Next step
 
-T6: verify dossier mode against explorer mode on F1-F3, the same number of runs each.
+T6b: `infra/scripts/compare-agent-modes.sh --runs 3` (`start_lab` and `start_agent` rebuild every image with `--build`), then record the six runs.
