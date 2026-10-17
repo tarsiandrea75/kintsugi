@@ -135,7 +135,7 @@ place_orders() {
 # Runs one fault: space out from the previous one, traffic, inject, traffic, incident, restore, score.
 diagnose() {
   local fault=$1 incident window opened traffic_start started_at seconds body status reason reported truth steps
-  local verdict injection why incident_mode
+  local verdict injection why incident_mode outcome
   info "--- $fault"
   current_fault=$fault current_incident=""
   space_out "$previous_fault_end"
@@ -169,23 +169,32 @@ diagnose() {
     echo "WARN  could not save incident $incident" >&2
   read -r _ body <<<"$(agent_call GET "/incidents/$incident")" || true
   IFS=$'\t' read -r status reason reported steps <<<"$(incident_fields "$body")"
-  incident_mode=$(json_field mode "$body")
+  # The incident's own top-level mode (the stored report carries one too); empty when the body is unreadable.
+  incident_mode=$(python3 -I -c '
+import json, sys
+try:
+    incident = json.load(sys.stdin)
+except ValueError:
+    incident = None
+print(incident.get("mode") or "" if isinstance(incident, dict) else "")' <<<"$body")
 
   expect_restored
   injection_id=""
   previous_fault_end=$(date +%s)
   truth=$(truth_cause "$injection")
 
-  if [[ "$incident_mode" != "$mode" ]]; then
+  if [[ "$reason" == - ]]; then why=""; else why=" ($reason)"; fi
+  outcome="status $status$why, reported '$reported', truth '${truth:-unreadable}'"
+  # An unreadable incident fails on its status below; a readable one must have run in the requested mode.
+  if [[ "$status" != unreadable && "$incident_mode" != "$mode" ]]; then
     verdict=MISS
-    fail "$fault: incident $incident ran in mode '${incident_mode:-unreadable}', not the requested '$mode'"
+    fail "$fault: incident $incident ran in mode '${incident_mode:-none}', not the requested '$mode'; $outcome"
   elif [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
     verdict=MATCH
     pass "$fault: the report names $reported, the truth"
   else
     verdict=MISS
-    if [[ "$reason" == - ]]; then why=""; else why=" ($reason)"; fi
-    fail "$fault: status $status$why, reported '$reported', truth '${truth:-unreadable}'"
+    fail "$fault: $outcome"
   fi
   {
     echo "fault: $fault"
