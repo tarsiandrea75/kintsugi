@@ -10,9 +10,10 @@ Compares the agent's explorer and dossier modes on F1, F2 and F3 (ADR-011).
   infra/scripts/compare-agent-modes.sh          # 3 rounds: explorer, dossier, explorer, dossier, explorer, dossier
   infra/scripts/compare-agent-modes.sh --runs 1 # one round
 
-Each run is a full infra/scripts/verify-agent.sh --mode <mode>, logged under its own
-infra/scripts/out/verify-agent-<UTC time>/ as usual; a failed run (a miss) does not stop the next one. At the end it
-prints every run's directory and its summary.tsv lines, which carry the mode. Expect up to about 3 hours per run on a
+Each run is a full infra/scripts/verify-agent.sh --mode <mode>, logged under
+infra/scripts/out/verify-agent-<UTC time>-<mode>/ (passed as VERIFY_AGENT_RUN_DIR); a failed run (a miss) does not
+stop the next one. At the end it prints every run's directory and its summary.tsv lines, which carry the mode, or
+that a run left no summary. Expect up to about 3 hours per run on a
 CPU. Exits 0 when every run exits 0.
 EOF
 }
@@ -34,16 +35,19 @@ dirs=()
 for (( round = 1; round <= runs; round++ )); do
   for mode in explorer dossier; do
     echo "=== round $round/$runs, mode $mode, started $(date -u +%FT%TZ)"
-    before=$(ls -1d "$OUT_DIR"/verify-agent-* 2>/dev/null | tail -n1)
-    "$SCRIPTS_DIR/verify-agent.sh" --mode "$mode" || failed=$((failed + 1))
-    after=$(ls -1d "$OUT_DIR"/verify-agent-* 2>/dev/null | tail -n1)
-    [[ -n "$after" && "$after" != "$before" ]] && dirs+=("$after")
+    dir="$OUT_DIR/verify-agent-$(date -u +%Y%m%dT%H%M%SZ)-$mode"
+    dirs+=("$dir")
+    VERIFY_AGENT_RUN_DIR=$dir "$SCRIPTS_DIR/verify-agent.sh" --mode "$mode" || failed=$((failed + 1))
   done
 done
 
 echo "=== summary of $((runs * 2)) runs ($failed exited non-zero)"
 for dir in "${dirs[@]+"${dirs[@]}"}"; do
   echo "$dir"
-  tail -n +2 "$dir/summary.tsv"
+  if [[ -f "$dir/summary.tsv" ]]; then
+    tail -n +2 "$dir/summary.tsv"
+  else
+    echo "  no summary.tsv: the run stopped before its first line"
+  fi
 done
 (( failed == 0 ))

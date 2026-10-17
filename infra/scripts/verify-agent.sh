@@ -24,7 +24,7 @@ older than the next window (11 min after its restore). Nothing it writes into th
 names a fault.
 Every run, pass or fail, is logged under infra/scripts/out/verify-agent-<UTC time>/: run.log, and per fault the
 incident with its steps and full tool outputs (<fault>-incident.json), and the score (<fault>-score.txt); summary.tsv
-has one line per fault. --mode sets KINTSUGI_AGENT_MODE for the agent container, recreated when it changes; an
+has one line per fault (VERIFY_AGENT_RUN_DIR, when set, names the directory instead). --mode sets KINTSUGI_AGENT_MODE for the agent container, recreated when it changes; an
 incident whose recorded mode is not the requested one is a miss.
 Exits 0 when every selected fault is diagnosed correctly, non-zero otherwise. The injection is restored on every exit.
 Needs docker (with compose), curl and python3 on the host, and the local Ollama on 127.0.0.1:11434 with
@@ -69,7 +69,7 @@ export KINTSUGI_AGENT_MODE=$mode
 
 # Every run is logged, pass or fail: the whole output goes to run.log too. tee ignores INT and TERM, so a Ctrl-C (sent
 # to the whole process group) still lets it record what the exit trap prints.
-RUN_DIR="$REPO_DIR/infra/scripts/out/verify-agent-$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_DIR="${VERIFY_AGENT_RUN_DIR:-$REPO_DIR/infra/scripts/out/verify-agent-$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$RUN_DIR"
 exec > >(trap '' INT TERM; exec tee -a "$RUN_DIR/run.log") 2>&1
 printf 'fault\tmode\tinjection\tincident\tstatus\ttruth\treported\tsteps\twindow\tseconds\tverdict\n' >"$RUN_DIR/summary.tsv"
@@ -135,7 +135,7 @@ place_orders() {
 # Runs one fault: space out from the previous one, traffic, inject, traffic, incident, restore, score.
 diagnose() {
   local fault=$1 incident window opened traffic_start started_at seconds body status reason reported truth steps
-  local verdict injection why incident_mode outcome
+  local verdict injection incident_mode message
   info "--- $fault"
   current_fault=$fault current_incident=""
   space_out "$previous_fault_end"
@@ -168,37 +168,19 @@ diagnose() {
   curl -sS --max-time 30 -o "$RUN_DIR/$fault-incident.json" "$AGENT/incidents/$incident?full=true" ||
     echo "WARN  could not save incident $incident" >&2
   read -r _ body <<<"$(agent_call GET "/incidents/$incident")" || true
-  IFS=$'\t' read -r status reason reported steps <<<"$(incident_fields "$body")"
-  # The incident's own top-level mode (the stored report carries one too); empty when the body is unreadable.
-  incident_mode=$(python3 -I -c '
-import json, sys
-try:
-    incident = json.load(sys.stdin)
-except ValueError:
-    incident = None
-print(incident.get("mode") or "" if isinstance(incident, dict) else "")' <<<"$body")
+  IFS=$'\t' read -r status reason reported steps incident_mode <<<"$(incident_fields "$body")"
 
   expect_restored
   injection_id=""
   previous_fault_end=$(date +%s)
   truth=$(truth_cause "$injection")
 
-  if [[ "$reason" == - ]]; then why=""; else why=" ($reason)"; fi
-  outcome="status $status$why, reported '$reported', truth '${truth:-unreadable}'"
-  # An unreadable incident fails on its status below; a readable one must have run in the requested mode.
-  if [[ "$status" != unreadable && "$incident_mode" != "$mode" ]]; then
-    verdict=MISS
-    fail "$fault: incident $incident ran in mode '${incident_mode:-none}', not the requested '$mode'; $outcome"
-  elif [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
-    verdict=MATCH
-    pass "$fault: the report names $reported, the truth"
-  else
-    verdict=MISS
-    fail "$fault: $outcome"
-  fi
+  IFS=$'\t' read -r verdict message <<<"$(agent_verdict "$mode" "$incident_mode" "$status" "$reason" "$reported" \
+    "$truth")"
+  if [[ "$verdict" == MATCH ]]; then pass "$fault: $message"; else fail "$fault: $message"; fi
   {
     echo "fault: $fault"
-    echo "mode (requested, recorded): $mode, ${incident_mode:-unreadable}"
+    echo "mode (requested, recorded): $mode, $incident_mode"
     echo "injection: $injection"
     echo "incident: $incident"
     echo "status: $status"

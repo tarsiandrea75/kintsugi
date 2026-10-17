@@ -617,8 +617,9 @@ end_running_incident() {
 
 # Reads incident JSON $1 (the body of GET /incidents/{id}) with python3 and prints one tab-separated line: the status,
 # the failure reason (- when none), the reported "<rootCauseService>|<rootCauseCategory>" read from .report alone
-# (none when there is no report: a hypothesis in a plan or in tool arguments is never a report), and the number of
-# steps. Prints "unreadable	-	none	0" when $1 is not an incident.
+# (none when there is no report: a hypothesis in a plan or in tool arguments is never a report), the number of
+# steps, and the incident's own top-level mode (none when it has none; the report's copy is not read). Prints
+# "unreadable	-	none	0	-" when $1 is not an incident. Tested by test-lib.sh.
 incident_fields() {
   python3 -I -c '
 import json, sys
@@ -627,7 +628,7 @@ try:
 except ValueError:
     incident = None
 if not isinstance(incident, dict):
-    print("unreadable\t-\tnone\t0")
+    print("unreadable\t-\tnone\t0\t-")
     sys.exit(0)
 report = incident.get("report")
 cause = "none"
@@ -636,8 +637,25 @@ if isinstance(report, dict) and report.get("rootCauseService") and report.get("r
 steps = incident.get("steps")
 clean = lambda text: " ".join(str(text).split())
 print("\t".join([clean(incident.get("status") or "unreadable"), clean(incident.get("failureReason") or "-"), cause,
-                 str(len(steps) if isinstance(steps, list) else 0)]))
-' <<<"$1" 2>/dev/null || printf 'unreadable\t-\tnone\t0\n'
+                 str(len(steps) if isinstance(steps, list) else 0), clean(incident.get("mode") or "none")]))
+' <<<"$1" 2>/dev/null || printf 'unreadable\t-\tnone\t0\t-\n'
+}
+
+# Scores one agent incident and prints "<MATCH|MISS><tab><message>". Arguments: $1 the requested mode, $2 the
+# incident's mode as incident_fields prints it (- when the incident was unreadable), $3 the status, $4 the failure
+# reason (- when none), $5 the reported cause, $6 the truth (empty when unreadable). A readable incident must have run
+# in the requested mode; an unreadable one fails on its status. Tested by test-lib.sh.
+agent_verdict() {
+  local requested=$1 recorded=$2 status=$3 reason=$4 reported=$5 truth=$6 why="" outcome
+  [[ "$reason" == - ]] || why=" ($reason)"
+  outcome="status $status$why, reported '$reported', truth '${truth:-unreadable}'"
+  if [[ "$recorded" != - && "$recorded" != "$requested" ]]; then
+    printf 'MISS\tran in mode %s, not the requested %s; %s\n' "'$recorded'" "'$requested'" "$outcome"
+  elif [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
+    printf 'MATCH\tthe report names %s, the truth\n' "$reported"
+  else
+    printf 'MISS\t%s\n' "$outcome"
+  fi
 }
 
 # Places an order and requires 201 PAID; exits otherwise. $1 names the order in the messages ("healthy", ...).
