@@ -431,6 +431,8 @@ The start MUST stop, before any bean, on a route other than `local` or `cloud`, 
 
 The run MUST record its route and the route's model on the incident when it starts, with the mode (`incidents.route`, `incidents.model`, migration V6), and in the stored report, as `route` and `model` beside `mode`. Earlier incidents whose run wrote a step are `local`, with the model their steps name; an earlier incident with no step has neither, although V4 gave it a mode. The checks (`PlanCheck`, `ReportCheck`) are the same on both routes.
 
+The cloud route MUST send the report schema without the keywords Anthropic's structured outputs reject (`AnthropicSchema`): `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `maxItems`, and a `minItems` above 1, dropped wherever they appear, and with `additionalProperties: false` on every object; types, `enum`, `anyOf`, `properties` and `required` are kept. Why (cloud-route T5): in the first live cloud run every report call failed with HTTP 400, `For 'number' type, properties maximum, minimum are not supported`. Nothing is lost: `ReportCheck` already enforces each dropped constraint on both routes (`confidence` 0 to 1, `summary` 1 to 500 characters, at most 5 evidence items, `quote` 8 to 160 characters, `why` at most 200 characters, and a `toolCallId` that must be a recorded step of the incident, which no number below 1 is). The local route's schema stays byte-identical.
+
 #### Scenario: No route set
 - GIVEN no `kintsugi.agent.route`
 - WHEN the agent starts and an incident runs
@@ -441,6 +443,13 @@ The run MUST record its route and the route's model on the incident when it star
 - WHEN an incident runs
 - THEN every call carries `claude-haiku-5-5`, no temperature, thinking disabled and `maxTokens` equal to its answer cap (384, 160, 512 with the defaults), and only the report call carries the schema
 - AND no warm-up request is sent; the log says `event=warm_up_skipped route=cloud`
+
+#### Scenario: Cloud report schema
+- GIVEN `kintsugi.agent.route=cloud`, in either mode
+- WHEN the report call is sent
+- THEN its schema has no `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength` or `maxItems`, and no `minItems` above 1, anywhere
+- AND every object in it has `additionalProperties: false`, and its types, enums, properties and required fields are those of the local route's schema
+- AND the local route's report call still carries the schema unchanged
 
 #### Scenario: Unknown route
 - GIVEN `kintsugi.agent.route=gpu`

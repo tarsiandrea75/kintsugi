@@ -18,6 +18,8 @@ import org.springframework.ai.tool.ToolCallback;
  * <li>No temperature: the model rejects a sampling value other than its default.</li>
  * <li>Thinking disabled: thinking tokens count against {@code max_tokens}, so with it the answer caps would no longer
  * mean what they mean on the local route.</li>
+ * <li>The report's schema without the keywords Anthropic's structured outputs reject ({@link AnthropicSchema});
+ * {@link ReportCheck} enforces their constraints on both routes.</li>
  * <li>{@code max_tokens} is the local route's {@code num_predict} cap for the same call.</li>
  * <li>A per-call timeout, the loop's wait plus {@link #ABORT_GRACE}. The SDK's OkHttp call blocks in a socket read
  * that ignores the interruption the loop sends when it stops waiting, so without it an abandoned call would hold its
@@ -51,9 +53,17 @@ public record AnthropicRoute(String model, ChatModel chatModel, CallTimeouts cal
 			.timeout(wait.plus(ABORT_GRACE))
 			.toolCallbacks(tools);
 		if (outputSchema != null) {
-			options.outputSchema(outputSchema);
+			options.outputSchema(cloudSchema(outputSchema));
 		}
 		return options.build();
+	}
+
+	/**
+	 * The report schema as this route sends it: without the keywords Anthropic's structured outputs reject, every
+	 * object closed ({@link AnthropicSchema}). {@link ReportCheck} enforces the dropped constraints.
+	 */
+	static String cloudSchema(String schema) {
+		return AnthropicSchema.of(schema);
 	}
 
 	/** None: there is no model to load, and a request would only cost a call. */

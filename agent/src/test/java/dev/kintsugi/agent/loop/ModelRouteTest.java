@@ -3,13 +3,20 @@ package dev.kintsugi.agent.loop;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.tool.ToolCallback;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.lab.Phase;
@@ -103,8 +110,86 @@ class ModelRouteTest {
 		// The loop's wait, here the incident's time left, plus the grace: the client cancels the call just after the
 		// loop stops waiting for it.
 		assertThat(options.getTimeout()).isEqualTo(Duration.ofMillis(43_500));
-		JsonMapper json = JsonMapper.shared();
-		assertThat(json.readTree(options.getOutputSchema())).isEqualTo(json.readTree(SCHEMA));
+		JsonNode sent = JsonMapper.shared().readTree(options.getOutputSchema());
+		assertThat(sent).isEqualTo(JsonMapper.shared().readTree(AnthropicRoute.cloudSchema(SCHEMA)));
+	}
+
+	/**
+	 * The schema the cloud route sends has none of the keywords Anthropic's structured outputs reject (the first live
+	 * cloud run: HTTP 400 on every report), keeps the rest, and closes every object; ReportCheck enforces the dropped
+	 * constraints on both routes.
+	 */
+	@ParameterizedTest
+	@EnumSource(AgentMode.class)
+	void theCloudRoutesSchemaHasOnlyWhatAnthropicAccepts(AgentMode mode) {
+		String schema = Schemas.report(mode);
+		AnthropicChatOptions options = (AnthropicChatOptions) this.cloud.options(512, Duration.ofSeconds(90),
+				List.of(), schema);
+		JsonNode sent = JsonMapper.shared().readTree(options.getOutputSchema());
+		JsonNode original = JsonMapper.shared().readTree(schema);
+
+		assertThat(keywords(original)).contains("minimum", "maximum", "minLength", "maxLength", "maxItems");
+		assertThat(keywords(sent)).doesNotContain("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+				"multipleOf", "minLength", "maxLength", "maxItems");
+		assertThat(minItems(sent)).allMatch(value -> value <= 1);
+		assertThat(objects(sent)).isNotEmpty()
+			.allMatch(object -> object.path("additionalProperties").isBoolean()
+					&& !object.path("additionalProperties").booleanValue());
+		assertThat(sent.path("required")).isEqualTo(original.path("required"));
+		assertThat(sent.path("properties").path("rootCauseService").path("enum"))
+			.isEqualTo(original.path("properties").path("rootCauseService").path("enum"));
+		assertThat(sent.path("properties").path("rootCauseCategory").path("enum"))
+			.isEqualTo(original.path("properties").path("rootCauseCategory").path("enum"));
+		assertThat(sent.path("properties").path("confidence").path("type").asString()).isEqualTo("number");
+		JsonNode item = sent.path("properties").path("evidence").path("items");
+		assertThat(sent.path("properties").path("evidence").path("type").asString()).isEqualTo("array");
+		assertThat(item.path("required")).isEqualTo(
+				original.path("properties").path("evidence").path("items").path("required"));
+		assertThat(item.path("properties").path("quote").path("type").asString()).isEqualTo("string");
+		if (mode == AgentMode.DOSSIER) {
+			assertThat(item.path("properties").path("toolCallId").path("anyOf").get(1))
+				.isEqualTo(original.path("properties").path("evidence").path("items").path("properties")
+					.path("toolCallId").path("anyOf").get(1));
+		}
+		// The local route still sends the schema as it is.
+		assertThat(((OllamaChatOptions) this.local.options(512, Duration.ofSeconds(420), List.of(), schema))
+			.getOutputSchema()).isEqualTo(schema);
+	}
+
+	private static Set<String> keywords(JsonNode node) {
+		Set<String> found = new HashSet<>();
+		walk(node, child -> child.propertyNames().forEach(found::add));
+		return found;
+	}
+
+	private static List<Integer> minItems(JsonNode node) {
+		List<Integer> found = new ArrayList<>();
+		walk(node, child -> {
+			if (child.has("minItems")) {
+				found.add(child.get("minItems").intValue());
+			}
+		});
+		return found;
+	}
+
+	private static List<JsonNode> objects(JsonNode node) {
+		List<JsonNode> found = new ArrayList<>();
+		walk(node, child -> {
+			if ("object".equals(child.path("type").asString(""))) {
+				found.add(child);
+			}
+		});
+		return found;
+	}
+
+	/** Visits every object node of a schema, its property maps included. */
+	private static void walk(JsonNode node, Consumer<JsonNode> visit) {
+		if (node.isObject()) {
+			visit.accept(node);
+		}
+		for (JsonNode child : node) {
+			walk(child, visit);
+		}
 	}
 
 	@Test
