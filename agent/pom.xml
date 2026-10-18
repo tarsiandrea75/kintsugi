@@ -36,6 +36,11 @@
 			<artifactId>spring-ai-starter-model-ollama</artifactId>
 		</dependency>
 		<dependency>
+			<!-- The cloud route of ADR-012, claude-haiku-5-5, selected by kintsugi.agent.route (agent spec, "Routes"). -->
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-anthropic</artifactId>
+		</dependency>
+		<dependency>
 			<!-- The lab's tools over MCP Streamable HTTP, SYNC (agent spec, "Tool calls run small and recorded"). -->
 			<groupId>org.springframework.ai</groupId>
 			<artifactId>spring-ai-starter-mcp-client</artifactId>

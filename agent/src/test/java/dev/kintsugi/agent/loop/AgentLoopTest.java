@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage.ToolCall;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
@@ -1032,6 +1033,49 @@ class AgentLoopTest {
 		assertThat(storedReport().get("rootCauseService").asString()).isEqualTo("order-service");
 	}
 
+	@Test
+	void aRunRecordsItsRouteAndModelOnTheIncidentAndTheReport() {
+		this.model.quietPhases().text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(incidentColumn("route")).isEqualTo("local");
+		assertThat(incidentColumn("model")).isEqualTo("granite4.1:8b");
+		assertThat(storedReport().get("route").asString()).isEqualTo("local");
+		assertThat(storedReport().get("model").asString()).isEqualTo("granite4.1:8b");
+	}
+
+	@Test
+	void aCloudRunHasNoWarmUpCapsEachAnswerWithMaxTokensAndRecordsItsRoute(CapturedOutput output) {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}")).text("").quietPhasesAfterTriage()
+			.text(unknownReport());
+		CallTimeouts deadlines = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		this.loop = new AgentLoop(this.incidents, task -> new AnthropicRoute("claude-haiku-5-5", this.model,
+				deadlines, CAPS), this.lab, settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				Clock.systemUTC());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.model.warmUps()).isEmpty();
+		List<Prompt> prompts = this.model.prompts();
+		assertThat(prompts).extracting(prompt -> ((AnthropicChatOptions) prompt.getOptions()).getMaxTokens())
+			.containsExactly(384, 160, 384, 384, 512);
+		assertThat(prompts).allSatisfy(prompt -> {
+			AnthropicChatOptions options = (AnthropicChatOptions) prompt.getOptions();
+			assertThat(options.getModel()).isEqualTo("claude-haiku-5-5");
+			assertThat(options.getTemperature()).isNull();
+			assertThat(options.getThinking().isDisabled()).isTrue();
+		});
+		assertThat(prompts.subList(0, 4)).allSatisfy(prompt -> assertThat(schema(prompt)).isNull());
+		assertThat(schema(prompts.get(4))).isNotNull();
+		assertThat(step(1)).containsEntry("model", "claude-haiku-5-5");
+		assertThat(incidentColumn("route")).isEqualTo("cloud");
+		assertThat(incidentColumn("model")).isEqualTo("claude-haiku-5-5");
+		assertThat(storedReport().get("route").asString()).isEqualTo("cloud");
+		assertThat(storedReport().get("model").asString()).isEqualTo("claude-haiku-5-5");
+		assertThat(output.getOut()).contains("incident=" + this.id + " event=warm_up_skipped route=cloud");
+	}
+
 	private IncidentStatus run() {
 		if (this.loop == null) {
 			this.loop = loop(settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), Duration.ofSeconds(5));
@@ -1056,7 +1100,7 @@ class AgentLoopTest {
 	}
 
 	private AgentLoop loop(LoopSettings settings, CallTimeouts callTimeouts) {
-		ModelRouter router = task -> new ModelRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeouts, CAPS);
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeouts, CAPS);
 		return new AgentLoop(this.incidents, router, this.lab, settings, Clock.systemUTC());
 	}
 
@@ -1097,6 +1141,15 @@ class AgentLoopTest {
 			.optional()
 			.orElse(null);
 		return text == null ? null : JSON.readTree(text);
+	}
+
+	/** One column of the incident's row: {@code route} or {@code model}. */
+	private String incidentColumn(String column) {
+		return AgentDatabase.admin()
+			.sql("SELECT " + column + " FROM incidents WHERE id = ?")
+			.param(this.id)
+			.query(String.class)
+			.single();
 	}
 
 	private String failureReason() {

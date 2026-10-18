@@ -12,11 +12,23 @@ spring:
       maximum-pool-size: 4
       connection-timeout: 2000
   ai:
+    # spring.ai.model.chat, which picks the one ChatModel, is not set here: RouteEnvironmentPostProcessor derives it
+    # from kintsugi.agent.route (ollama for local, anthropic for cloud), so the route is one input.
     ollama:
       chat:
         model: granite4.1:8b
         temperature: 0
         num-ctx: 8192
+    # The cloud route's client (ADR-012), off on the local route. The key comes from the environment only, never from
+    # the repository; an empty key on the cloud route stops the start. Its timeout is the cloud route's longest call
+    # deadline, call-timeout.report, so the loop's deadline and not the HTTP client ends a call; no retries, since the
+    # loop owns retries and their budget.
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      timeout: ${kintsugi.agent.cloud.call-timeout.report}
+      max-retries: 0
+      chat:
+        model: ${kintsugi.agent.cloud.name}
     mcp:
       client:
         # The agent's only way into the lab: one SYNC Streamable HTTP connection to mcp-tools (ADR-010, agent spec).
@@ -48,6 +60,10 @@ kintsugi:
     # loop where the model picks every call from TRIAGE on, or dossier, where code first gathers the evidence dossier
     # (ADR-011), the model reads it before INVESTIGATE and KNOWLEDGE, and TRIAGE is skipped. Recorded on every incident.
     mode: ${KINTSUGI_AGENT_MODE:explorer}
+    # Where the model runs (agent spec, "Routes"; ADR-012; ADR-010, "Amended in cloud-route T3"): local, the default,
+    # on Ollama with kintsugi.agent.model, or cloud, on Anthropic with kintsugi.agent.cloud. Any other value stops the
+    # start. Recorded on every incident with the model.
+    route: ${KINTSUGI_AGENT_ROUTE:local}
     # ModelRouter's one route in M2 (ADR-010, ADR-003): ACT and REPORT both go to the local Ollama model, with the
     # same settings as spring.ai.ollama.chat.
     model:
@@ -69,6 +85,14 @@ kintsugi:
         first-act: 384
         act: 160
         report: 512
+    # The cloud route (ADR-012): claude-haiku-5-5, with the answer caps of kintsugi.agent.model.num-predict and its own
+    # call deadlines, a first guess to be measured in cloud-route T5. The report is the longer one, and
+    # spring.ai.anthropic.timeout follows it.
+    cloud:
+      name: claude-haiku-5-5
+      call-timeout:
+        act: 60s
+        report: 90s
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
     # run makes at most 15 model calls (8 ACT answers, 2 for uncounted refusals, 3 phase retries and 2 report
     # attempts), so 15 is a guard against a loop bug; the warm-up, which loads the

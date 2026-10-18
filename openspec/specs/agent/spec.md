@@ -10,11 +10,11 @@ Values marked **(chosen)** were left open by the feature document and fixed in t
 
 | Rule | Value |
 |------|-------|
-| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, `OllamaModelRouter`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task: `act` 420 s (300 s before T5c15) and `report` 420 s, see "Budgets"; `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its task's deadline itself, and aborts it ("An abandoned call is aborted") |
+| Model | through `ModelRouter`, keyed by task (`ACT`, `REPORT`); in M2 one route for both, picked at start by `kintsugi.agent.route` (see "Routes"). The local route, the default, is `OllamaRoute`: the auto-configured Ollama `ChatModel` with `kintsugi.agent.model` (`name` `granite4.1:8b`, `temperature` 0, `num-ctx` 8192, `call-timeout` per task: `act` 420 s (300 s before T5c15) and `report` 420 s, see "Budgets"; `num-predict` per call kind: see "Answer caps"), every call carrying these options. The loop stops waiting for a call at its task's deadline itself, and aborts it ("An abandoned call is aborted") |
 | HTTP read timeout | the loop's own: in the web profile a `RestClientCustomizer` gives the `RestClient` that Ollama's client is built from a read timeout equal to the longest of `call-timeout.act`, `call-timeout.report` and `warm-up-timeout` (420 s with the defaults), so the HTTP client never cuts a request before the loop's own deadline does. The same customizer buffers the request body, so every request to Ollama carries a `Content-Length` ("An abandoned call is aborted"). The `demo` profile has no loop and keeps `spring.http.clients.read-timeout`, 5 minutes |
 | Tool execution | the loop calls `ChatModel` directly (in Spring AI 2.0.1 it never executes tools) and runs each checked tool call itself through the `LabTools` port: the model is offered the MCP `ToolCallback`s' definitions, wrapped so that they cannot be executed, and each call goes to the `McpSyncClient` directly, because the MCP `ToolCallback` throws on a tool error (`isError`) and re-serializes the content, which would lose the `INVALID_PARAMETER` or `UPSTREAM_ERROR` output |
 | MCP client | `spring-ai-starter-mcp-client`, `SYNC`, one Streamable HTTP connection `kintsugi` (`spring.ai.mcp.client.streamable-http.connections.kintsugi`) to `${KINTSUGI_MCP_URL:http://127.0.0.1:18085}`, endpoint `/mcp`, request timeout 20 s (the default). `spring.ai.mcp.client.initialized=false`: the starter would otherwise send `initialize` while the context starts and fail the start when mcp-tools is down; uninitialized, the client initializes on its first request and tries again on the next one after a failure. Tool names keep no prefix |
-| Structured output | the report call carries its JSON schema through `OllamaChatOptions.outputSchema`; code validates every answer against the same schema, whatever the model returned. The plan travels in the text of a call that offers tools, which Ollama cannot also constrain by a schema, so code alone checks it ("The plan") |
+| Structured output | the report call carries its JSON schema through `OllamaChatOptions.outputSchema` (`AnthropicChatOptions.outputSchema` on the cloud route); code validates every answer against the same schema, whatever the model returned. The plan travels in the text of a call that offers tools, which Ollama cannot also constrain by a schema, so code alone checks it ("The plan") |
 | State store | database `agent` on the `knowledge-db` instance, owned by the bootstrap superuser; the agent connects as `agent_app` (password `AGENT_DB_PASSWORD`), which has `USAGE, CREATE` on its schema `public` and owns the tables its Flyway creates there |
 | HTTP port **(chosen)** | 8086, next to mcp-tools' 8085 |
 | `demo` profile | the one-shot question of the hello-tool demo: no web server, no database, no incident API |
@@ -91,7 +91,7 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 
 ### Requirement: Read an incident
 
-`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer` or `dossier`, recorded when the run starts; absent when it never started, see "Dossier mode"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `promptTokens`, `completionTokens` (see "Token usage"), `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
+`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer` or `dossier`, recorded when the run starts; absent when it never started, see "Dossier mode"), `route` (`local` or `cloud`) and `model` (recorded with the mode, see "Routes"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `promptTokens`, `completionTokens` (see "Token usage"), `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
 
 #### Scenario: Completed incident
 - GIVEN an incident whose run completed
@@ -397,7 +397,7 @@ When the loop stops waiting for a model call at its deadline, the call MUST stop
 
 ### Requirement: The warm-up
 
-Before its first phase, each run MUST send one warm-up request on the route of its first call (`ACT`): one user message, `Reply with the single word OK.`, no tools and no schema, with the route's model, temperature and `num-ctx` (a different `num_ctx` would make Ollama load the model again) and `num_predict` 1. Its answer is not read. It loads the model, which on the laptop's CPU took longer than a whole 90 s call in T4's cold run, so the first real call does not pay for it.
+Before its first phase, each run on the local route MUST send one warm-up request on the route of its first call (`ACT`); the cloud route has no model to load and sends none (see "Routes"). The warm-up is one user message, `Reply with the single word OK.`, no tools and no schema, with the route's model, temperature and `num-ctx` (a different `num_ctx` would make Ollama load the model again) and `num_predict` 1. Its answer is not read. It loads the model, which on the laptop's CPU took longer than a whole 90 s call in T4's cold run, so the first real call does not pay for it.
 
 The warm-up MUST count against no budget: it is not a model call of the budget, it writes no step, and the incident's time budget starts when it ends. It MUST be logged, `incident=<id> event=model_warmed_up model=<model> latencyMs=<n>`, and bounded by `warm-up-timeout` (300 s). When it fails or runs past its bound, the run MUST end `FAILED`, with `failure_reason` `the model warm-up failed: <why>` or `the model warm-up took longer than 300 s`, before any step.
 
@@ -415,6 +415,46 @@ The warm-up MUST count against no budget: it is not a model call of the budget, 
 - GIVEN a warm-up that takes longer than the incident's time budget, within its own bound
 - WHEN the run then answers quickly
 - THEN it ends `COMPLETED`
+
+### Requirement: Routes
+
+The model MUST run on the route of `kintsugi.agent.route` (`${KINTSUGI_AGENT_ROUTE:local}`; ADR-012, ADR-010 "Amended in cloud-route T3"), the only input that selects it:
+
+| Route | `spring.ai.model.chat` | Model | Call options | Deadlines | Warm-up |
+|-------|------------------------|-------|--------------|-----------|---------|
+| `local` (default) | `ollama` | `kintsugi.agent.model.name`, `granite4.1:8b` | `OllamaChatOptions`: `temperature` 0, `num-ctx` 8192, `num_predict` the answer cap; byte-identical to every run before the cloud route | `kintsugi.agent.model.call-timeout` | yes ("The warm-up") |
+| `cloud` | `anthropic` | `kintsugi.agent.cloud.name`, `claude-haiku-5-5` | `AnthropicChatOptions`: no `temperature` (the model rejects a non-default one), thinking disabled (thinking tokens would count against `max_tokens`), `maxTokens` the same answer cap as the local route's `num_predict`, the report's `outputSchema`, the phase's tool definitions | `kintsugi.agent.cloud.call-timeout`: `act` 60 s, `report` 90 s (a first guess, measured in cloud-route T5) | none |
+
+`RouteEnvironmentPostProcessor` MUST derive `spring.ai.model.chat` from the route, because Spring AI 2.0.1 turns on both chat auto-configurations when it is missing; so exactly one `ChatModel` exists, and on the local route Anthropic's auto-configuration is off. The cloud client's `spring.ai.anthropic.timeout` MUST be the cloud route's longest call deadline (90 s), so that the loop's deadline, not the HTTP client, ends a call, and `spring.ai.anthropic.max-retries` MUST be 0, since the loop owns retries and their budget. The key comes only from `ANTHROPIC_API_KEY` (`spring.ai.anthropic.api-key: ${ANTHROPIC_API_KEY:}`); no key is in the repository.
+
+The start MUST stop, before any bean, on a route other than `local` or `cloud`, with `kintsugi.agent.route must be local or cloud, got "<value>"`, and on the cloud route with an empty or blank key, with a message naming `ANTHROPIC_API_KEY`.
+
+The run MUST record its route and the route's model on the incident when it starts, with the mode (`incidents.route`, `incidents.model`, migration V6), and in the stored report, as `route` and `model` beside `mode`. Earlier incidents are `local`, with the model their steps name. The checks (`PlanCheck`, `ReportCheck`) are the same on both routes.
+
+#### Scenario: No route set
+- GIVEN no `kintsugi.agent.route`
+- WHEN the agent starts and an incident runs
+- THEN the route is `local`, the only chat model is Ollama's, and every call and the warm-up carry the same options as before the cloud route
+
+#### Scenario: Cloud options
+- GIVEN `kintsugi.agent.route=cloud` and a key
+- WHEN an incident runs
+- THEN every call carries `claude-haiku-5-5`, no temperature, thinking disabled and `maxTokens` equal to its answer cap (384, 160, 512 with the defaults), and only the report call carries the schema
+- AND no warm-up request is sent; the log says `event=warm_up_skipped route=cloud`
+
+#### Scenario: Unknown route
+- GIVEN `kintsugi.agent.route=gpu`
+- WHEN the agent starts
+- THEN the start fails with `kintsugi.agent.route must be local or cloud, got "gpu"`
+
+#### Scenario: Cloud route without a key
+- GIVEN `kintsugi.agent.route=cloud` and an empty `ANTHROPIC_API_KEY`
+- WHEN the agent starts
+- THEN the start fails with a message naming `ANTHROPIC_API_KEY`
+
+#### Scenario: Route and model recorded
+- WHEN an incident runs on a route
+- THEN `GET /incidents/{id}` shows its `route` and `model`, and the stored report carries the same `route` and `model`
 
 ### Requirement: Tool calls run small and recorded
 
@@ -706,7 +746,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `evidence[].quote` | 8 to 160 characters (300 before T5c5): a short verbatim fragment, not a whole line |
 | `evidence[].why` | at most 200 characters **(chosen)** |
 
-No other field is allowed, and all five are required. Code then adds `incidentId`, `mode` (`explorer` or `dossier`, **T5a**) and `stepsUsed` (the number of step rows, the `DOSSIER` and accepted `REPORT` steps included) and stores the report in `incidents.report` (as `jsonb`, which keeps the fields but not their order), written in the order `incidentId`, `mode`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
+No other field is allowed, and all five are required. Code then adds `incidentId`, `mode` (`explorer` or `dossier`, **T5a**), `route` and `model` (see "Routes", **cloud-route T3**) and `stepsUsed` (the number of step rows, the `DOSSIER` and accepted `REPORT` steps included) and stores the report in `incidents.report` (as `jsonb`, which keeps the fields but not their order), written in the order `incidentId`, `mode`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
 
 #### Scenario: Value outside the enums
 - WHEN the model answers `rootCauseService` = `payment-gateway`
@@ -832,7 +872,7 @@ Flyway in `agent/` MUST create, in the `agent` database:
 
 | Table | Columns |
 |-------|---------|
-| `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `mode text` (`explorer` or `dossier`, by `CHECK`; null until the run starts; added by migration V4, which sets it to `explorer` on earlier rows) **(T5a)**, `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
+| `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `mode text` (`explorer` or `dossier`, by `CHECK`; null until the run starts; added by migration V4, which sets it to `explorer` on earlier rows) **(T5a)**, `route text` (`local` or `cloud`, by `CHECK`) and `model text`, both null until the run starts (migration V6, which sets earlier started rows to `local` and the model of their first step) **(cloud-route T3)**, `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
 | `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`, `DOSSIER`; `ACT` added by migration V2, `DOSSIER` by V4; `PLAN` is no longer written since the plan moved into the first `ACT` answer of each phase) **(chosen)**, `phase text` (the four phases, and `DOSSIER` for the dossier step, since V4), `model text`, `tokens int`, `prompt_tokens int` and `completion_tokens int` (added by migration V5, see "Token usage"), `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`, and since migration V3 `REFUSED_PLACEHOLDER`, `REFUSED_DUPLICATE`), `summary text` (for a tool call, what the model saw; for a report, its validation verdict; for `ACT`, a short note with, on a phase's first answer, the plan's verdict; for `BUDGET`, a short note; for `DOSSIER`, the dossier message the model saw) **(chosen)**, `model_output text` (the raw `ACT` answer, text and requested calls, or the raw report) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
 
 A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident"). Its name is `incidents_one_running_idx`.

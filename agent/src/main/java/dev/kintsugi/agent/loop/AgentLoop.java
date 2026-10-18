@@ -32,6 +32,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
 import tools.jackson.core.JacksonException;
@@ -191,7 +192,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	private String investigate(Run run) {
-		this.incidents.recordMode(run.incident.id(), run.mode.value());
+		ModelRoute first = this.router.route(ModelTask.ACT);
+		run.route = first.route();
+		run.model = first.model();
+		this.incidents.recordStart(run.incident.id(), run.mode.value(), run.route.value(), run.model);
 		warmUp(run);
 		if (run.mode == AgentMode.DOSSIER) {
 			dossier(run);
@@ -220,11 +224,19 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/**
 	 * Loads the model with one tiny request before the run, on the route of its first call and with the same options,
 	 * so that the first real call does not pay the load. It counts against no budget: the incident's time budget starts
-	 * when it ends. It is bounded by its own timeout, and a failure ends the run {@code FAILED} with the reason.
+	 * when it ends. It is bounded by its own timeout, and a failure ends the run {@code FAILED} with the reason. A route
+	 * with no model to load, the cloud route, has no warm-up: the time budget starts here.
 	 */
 	private void warmUp(Run run) {
 		ModelRoute route = this.router.route(ModelTask.ACT);
-		Prompt prompt = new Prompt(List.of(new UserMessage(Prompts.WARM_UP)), route.warmUpOptions());
+		Optional<ChatOptions> options = route.warmUpOptions();
+		if (options.isEmpty()) {
+			log.info("incident={} event=warm_up_skipped route={} model={}", run.incident.id(), route.route().value(),
+					route.model());
+			run.budgetStart = now();
+			return;
+		}
+		Prompt prompt = new Prompt(List.of(new UserMessage(Prompts.WARM_UP)), options.get());
 		Duration limit = this.settings.warmUpTimeout();
 		long start = System.nanoTime();
 		Future<ChatResponse> future = this.modelCalls.submit(() -> route.chatModel().call(prompt));
@@ -534,8 +546,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * The report as stored: the model's fields, with {@code incidentId}, {@code mode} (T5a) and {@code stepsUsed}
-	 * filled in by code, and
+	 * The report as stored: the model's fields, with {@code incidentId}, {@code mode} (T5a), {@code route} and
+	 * {@code model} (cloud-route T3) and {@code stepsUsed} filled in by code, and
 	 * only the verified evidence items (T5c11): what is stored and scored has been checked. The dropped items stay in
 	 * the {@code REPORT} step's answer, and its summary names them.
 	 */
@@ -543,6 +555,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		ObjectNode stored = JSON.createObjectNode();
 		stored.put("incidentId", run.incident.id().toString());
 		stored.put("mode", run.mode.value());
+		stored.put("route", run.route.value());
+		stored.put("model", run.model);
 		ReportCheck.MODEL_FIELDS.forEach(field -> stored.set(field, report.get(field)));
 		stored.putArray("evidence").addAll(evidence);
 		stored.put("stepsUsed", run.steps);
@@ -789,6 +803,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		final List<Ran> ran = new ArrayList<>();
 
 		String plan;
+
+		/** The route and model of the run's first call, recorded on the incident and its report (cloud-route T3). */
+		AgentRoute route;
+
+		String model;
 
 		/** Where the incident's time budget starts: the end of the warm-up, so the model's load is not counted. */
 		Instant budgetStart;

@@ -243,7 +243,7 @@ class AgentLoopDossierModeTest {
 		assertThat(storedReport().get("mode").asString()).isEqualTo("explorer");
 		// jsonb keeps the fields, not their order.
 		List<String> fields = storedReport().propertyNames().stream().toList();
-		assertThat(fields).containsExactlyInAnyOrder("incidentId", "mode", "rootCauseService", "rootCauseCategory", "summary",
+		assertThat(fields).containsExactlyInAnyOrder("incidentId", "mode", "route", "model", "rootCauseService", "rootCauseCategory", "summary",
 				"confidence", "evidence", "stepsUsed");
 	}
 
@@ -370,7 +370,7 @@ class AgentLoopDossierModeTest {
 
 	private ModelRouter router(Duration callTimeout) {
 		CallTimeouts timeouts = new CallTimeouts(callTimeout, callTimeout);
-		return task -> new ModelRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		return task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
 	}
 
 	private static LoopSettings settings() {

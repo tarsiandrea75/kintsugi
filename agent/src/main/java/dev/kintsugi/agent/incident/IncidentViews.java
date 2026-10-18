@@ -19,12 +19,13 @@ final class IncidentViews {
 
 	/** 200 of {@code GET /incidents/{id}}. */
 	@JsonInclude(JsonInclude.Include.NON_NULL)
-	record Incident(UUID id, String symptom, Integer sinceMinutes, String mode, IncidentStatus status,
-			String failureReason, Instant startedAt, Instant endedAt, JsonNode report, List<Step> steps) {
+	record Incident(UUID id, String symptom, Integer sinceMinutes, String mode, String route, String model,
+			IncidentStatus status, String failureReason, Instant startedAt, Instant endedAt, JsonNode report,
+			List<Step> steps) {
 
 		Incident withSteps(List<Step> steps) {
-			return new Incident(id, symptom, sinceMinutes, mode, status, failureReason, startedAt, endedAt, report,
-					steps);
+			return new Incident(id, symptom, sinceMinutes, mode, route, model, status, failureReason, startedAt, endedAt,
+					report, steps);
 		}
 
 	}

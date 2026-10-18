@@ -94,6 +94,10 @@ class AgentLoopApiTest {
 		assertThat(incident.has("failureReason")).isFalse();
 		assertThat(incident.get("report").get("incidentId").asString()).isEqualTo(id);
 		assertThat(incident.get("report").get("stepsUsed").asInt()).isEqualTo(6);
+		assertThat(incident.get("route").asString()).isEqualTo("local");
+		assertThat(incident.get("model").asString()).isEqualTo("granite4.1:8b");
+		assertThat(incident.get("report").get("route").asString()).isEqualTo("local");
+		assertThat(incident.get("report").get("model").asString()).isEqualTo("granite4.1:8b");
 		JsonNode steps = incident.get("steps");
 		assertThat(steps).hasSize(6);
 		assertThat(steps.get(1).get("kind").asString()).isEqualTo("TOOL_CALL");

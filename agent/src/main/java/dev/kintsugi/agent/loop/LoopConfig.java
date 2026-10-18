@@ -20,15 +20,25 @@ import dev.kintsugi.agent.lab.LabTools;
 /** The loop is the web profile's {@code IncidentRunner}; the {@code demo} profile has neither. */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication
-@EnableConfigurationProperties({ ModelRouteProperties.class, LoopSettings.class })
+@EnableConfigurationProperties({ ModelRouteProperties.class, CloudRouteProperties.class, LoopSettings.class })
 class LoopConfig {
 
 	/** The connect timeout of the loop's HTTP client, as {@code spring.http.clients.connect-timeout}. */
 	static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
 
+	/**
+	 * The router's one route, from {@code kintsugi.agent.route} (cloud-route T3): {@code local}, the default, on Ollama,
+	 * or {@code cloud} on Anthropic. {@link RouteEnvironmentPostProcessor} has already checked the value and made the
+	 * matching provider the only {@code ChatModel}.
+	 */
 	@Bean
-	ModelRouter modelRouter(ChatModel chatModel, ModelRouteProperties route) {
-		return new OllamaModelRouter(chatModel, route);
+	ModelRouter modelRouter(ChatModel chatModel, ModelRouteProperties local, CloudRouteProperties cloud,
+			@Value("${kintsugi.agent.route:local}") String route) {
+		return new OneRouteModelRouter(switch (AgentRoute.of(route)) {
+			case LOCAL -> new OllamaRoute(local.name(), chatModel, local.temperature(), local.numCtx(),
+					local.callTimeout(), local.numPredict());
+			case CLOUD -> new AnthropicRoute(cloud.name(), chatModel, cloud.callTimeout(), local.numPredict());
+		});
 	}
 
 	/**
@@ -46,7 +56,8 @@ class LoopConfig {
 	 * built from, in the web profile only; the {@code demo} profile keeps {@code spring.http.clients.read-timeout}. It
 	 * is the longest wait the loop allows a request, the longer call deadline ({@code ACT} or {@code REPORT}) or the
 	 * warm-up, so that none is cut
-	 * by the HTTP client before the loop's own deadline ends it (agent spec, "Shared rules").
+	 * by the HTTP client before the loop's own deadline ends it (agent spec, "Shared rules"). The cloud route's client
+	 * is Anthropic's SDK, not a {@code RestClient}: its timeout is {@code spring.ai.anthropic.timeout}.
 	 *
 	 * <p>
 	 * The request body is buffered, so every request carries a {@code Content-Length} instead of a chunked body. When
