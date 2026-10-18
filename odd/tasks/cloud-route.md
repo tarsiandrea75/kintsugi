@@ -74,7 +74,7 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
 ## Tasks
 
 - [x] **T1 — This document**, after ADR-012 was accepted. Branch `feat/cloud-route`. Route: inline (one document; the code read was within the inline budget).
-- [ ] **T2 — Token usage on every model step** (both routes): `promptTokens` and `completionTokens` on `ACT` and `REPORT` steps from Spring AI's `Usage`, migration `V5` (step columns), shown by the read API. Tests first with the scripted fake chat model (usage present and absent). Also verify `spring.ai.model.chat` in Spring AI 2.0.1 for T3. Living spec. Branch `-02`. Route: delegated writer.
+- [x] **T2 — Token usage on every model step** (both routes): `promptTokens` and `completionTokens` on `ACT` and `REPORT` steps from Spring AI's `Usage`, migration `V5` (step columns), shown by the read API. Tests first with the scripted fake chat model (usage present and absent). Also verify `spring.ai.model.chat` in Spring AI 2.0.1 for T3. Living spec. Branch `-02`. Route: delegated writer.
 - [ ] **T3 — The cloud route:**
   - `spring-ai-starter-model-anthropic` (the Spring AI BOM's version, 2.0.1);
   - `ModelRoute` as an interface with `OllamaRoute` and `AnthropicRoute`;
@@ -95,6 +95,9 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
 
 - 2026-10-18: T1 done. Route: inline. Read for the design: `ModelRoute`, `OllamaModelRouter`, `ModelRouter`, `ModelRouteProperties`, `LoopConfig`, the agent's `application.yaml` (`spring.ai.ollama.chat`: `temperature: 0`, `num-ctx: 8192`), and Spring AI's Anthropic documentation (context7: `AnthropicChatOptions.outputSchema`, `effort`, `thinkingDisabled`, `spring.ai.anthropic.timeout` default 60 s, `max-retries` default 2). Spring AI 2.0.1 is the latest GA (Maven Central, 2026-10-18).
 
+- 2026-10-18: T2 done in `daa531f` on `feat/cloud-route-02`. Route: delegated writer (5 non-trivial files). ACT and REPORT steps store `promptTokens` and `completionTokens` (migration `V5`), shown by `GET /incidents/{id}` with or without `?full=true`; other step kinds store null. Absent rule: null when the response has no usage metadata or reports 0 and 0, because Spring AI 2.0.1's `EmptyUsage` and Ollama's `DefaultUsage` turn a missing count into 0, and 0 would read as a free call. RED: 25 errors in `AgentLoopTest` (column missing) and an NPE in `AgentLoopApiTest`; GREEN: `./mvnw test` 352 run, 0 failures, 0 errors (parent spot check: `AgentLoopTest` 49/0, `AgentLoopApiTest` 1/0). Review: assessed medium, `under_budget`, pending in the slice with base `3756540`.
+- 2026-10-18: `spring.ai.model.chat` check for T3, read in the 2.0.1 sources: `OllamaChatAutoConfiguration` and `AnthropicChatAutoConfiguration` both carry `@ConditionalOnProperty(name = "spring.ai.model.chat", havingValue = "ollama" | "anthropic", matchIfMissing = true)`. So the property selects one provider, but with it unset and both starters present both turn on: `application.yaml` must always set it, `ollama` by default.
+
 ## Next step
 
-T2: token usage on every model step, with the `spring.ai.model.chat` check for T3.
+T3: the cloud route.
