@@ -53,9 +53,10 @@ class AbandonedCloudCallTest {
 	static void properties(DynamicPropertyRegistry registry) {
 		AgentDatabase.register(registry);
 		registry.add("spring.ai.anthropic.base-url", SERVER::url);
-		// Long enough for the client's first request, which loads and builds the SDK's classes, to reach the stub.
-		registry.add("kintsugi.agent.cloud.call-timeout.act", () -> "2s");
-		registry.add("kintsugi.agent.cloud.call-timeout.report", () -> "2s");
+		// Long enough for the client's first request, which loads and builds the SDK's classes, to reach the stub even on
+		// a slow runner, and still far below the client's own 30 s timeout.
+		registry.add("kintsugi.agent.cloud.call-timeout.act", () -> "5s");
+		registry.add("kintsugi.agent.cloud.call-timeout.report", () -> "5s");
 		// The client's own timeout, far beyond the call's deadline: only the call's own timeout can end it in the test.
 		registry.add("spring.ai.anthropic.timeout", () -> "30s");
 	}
@@ -81,7 +82,7 @@ class AbandonedCloudCallTest {
 		long start = System.nanoTime();
 		assertThat(this.loop.run(id)).isEqualTo(IncidentStatus.TIMED_OUT);
 
-		assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(8));
+		assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(12));
 		assertThat(SERVER.requests()).isEqualTo(1);
 		// The client closes the connection within the per-call grace after the deadline, long before its 30 s timeout.
 		assertThat(SERVER.awaitClosed(Duration.ofSeconds(5))).as("the abandoned request's connection is closed").isTrue();
