@@ -161,7 +161,7 @@ place_orders() {
 # Runs one fault: space out from the previous one, traffic, inject, traffic, incident, restore, score.
 diagnose() {
   local fault=$1 incident window opened traffic_start started_at seconds body status reason reported truth steps
-  local verdict injection incident_mode incident_route prompt_tokens completion_tokens model message
+  local verdict injection incident_mode incident_route prompt_tokens completion_tokens incident_model message
   info "--- $fault"
   current_fault=$fault current_incident=""
   space_out "$previous_fault_end"
@@ -194,7 +194,7 @@ diagnose() {
   curl -sS --max-time 30 -o "$RUN_DIR/$fault-incident.json" "$AGENT/incidents/$incident?full=true" ||
     echo "WARN  could not save incident $incident" >&2
   read -r _ body <<<"$(agent_call GET "/incidents/$incident")" || true
-  IFS=$'\t' read -r status reason reported steps incident_mode incident_route prompt_tokens completion_tokens model \
+  IFS=$'\t' read -r status reason reported steps incident_mode incident_route prompt_tokens completion_tokens incident_model \
     <<<"$(incident_fields "$body")"
 
   expect_restored
@@ -209,7 +209,7 @@ diagnose() {
     echo "fault: $fault"
     echo "mode (requested, recorded): $mode, $incident_mode"
     echo "route (requested, recorded): $route, $incident_route"
-    echo "model: $model"
+    echo "model: $incident_model"
     echo "tokens (prompt, completion): $prompt_tokens, $completion_tokens"
     echo "injection: $injection"
     echo "incident: $incident"

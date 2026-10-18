@@ -82,6 +82,7 @@ class AbandonedCloudCallTest {
 		long start = System.nanoTime();
 		assertThat(this.loop.run(id)).isEqualTo(IncidentStatus.TIMED_OUT);
 
+		// The 5 s ACT deadline, the 1 s per-call grace and a margin for the context's first request: moves with the deadline.
 		assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(12));
 		assertThat(SERVER.requests()).isEqualTo(1);
 		// The client closes the connection within the per-call grace after the deadline, long before its 30 s timeout.
