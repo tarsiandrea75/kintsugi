@@ -38,12 +38,8 @@ done
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPTS_DIR/lib.sh"
-# The key too, the same check as verify-agent.sh's: with none, every run would exit at once.
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] || unset ANTHROPIC_API_KEY
-if [[ "$route" == cloud && -z "${ANTHROPIC_API_KEY:-}" ]] && ! env_file_has_value ANTHROPIC_API_KEY; then
-  echo "The cloud route needs ANTHROPIC_API_KEY: set it in infra/.env (git-ignored), or export it in the shell" >&2
-  exit 2
-fi
+# The key too, verify-agent.sh's check (cloud_key_available): with none, every run would exit at once.
+if [[ "$route" == cloud ]] && ! cloud_key_available; then echo "$CLOUD_KEY_MISSING" >&2; exit 2; fi
 # The directory names keep today's form on the local route, so earlier comparisons read the same.
 suffix=""
 [[ "$route" == local ]] || suffix="-$route"

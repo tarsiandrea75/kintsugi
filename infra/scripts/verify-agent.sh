@@ -76,13 +76,8 @@ for fault in "${selected[@]}"; do
 done
 [[ "$mode" == explorer || "$mode" == dossier ]] || { echo "Unknown mode '$mode'; choose explorer or dossier" >&2; exit 2; }
 [[ "$route" == local || "$route" == cloud ]] || { echo "Unknown route '$route'; choose local or cloud" >&2; exit 2; }
-# The cloud route's key: compose takes it from the shell when it is set there, even empty, and else from infra/.env.
-# An empty shell value is dropped, so it cannot hide the file's. The value is never printed.
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] || unset ANTHROPIC_API_KEY
-if [[ "$route" == cloud && -z "${ANTHROPIC_API_KEY:-}" ]] && ! env_file_has_value ANTHROPIC_API_KEY; then
-  echo "The cloud route needs ANTHROPIC_API_KEY: set it in infra/.env (git-ignored), or export it in the shell" >&2
-  exit 2
-fi
+# The cloud route's key, from the shell or infra/.env (cloud_key_available); its value is never printed.
+if [[ "$route" == cloud ]] && ! cloud_key_available; then echo "$CLOUD_KEY_MISSING" >&2; exit 2; fi
 # compose passes them to the agent container (infra/compose.yaml); start_agent recreates the container when one changes.
 export KINTSUGI_AGENT_MODE=$mode KINTSUGI_AGENT_ROUTE=$route
 
