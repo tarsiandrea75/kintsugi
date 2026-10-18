@@ -38,7 +38,7 @@ No prompt threw. Each max latency is P1, the first prompt, which includes loadin
 - Local models are the default. `granite4.1:8b` is the local default model.
 - `qwen3:8b` is the documented alternative. It is practically tied with `granite4.1:8b` and needs `spring.ai.ollama.chat.think=false`.
 - `qwen3.5:9b` is not chosen: it is more than twice as slow, with no gain in validity.
-- The API baseline is deferred until a second provider exists (M2, with the `ModelRouter`). No API provider or model is chosen here.
+- The API baseline is deferred until a second provider exists (M2, with the `ModelRouter`). No API provider or model is chosen here. ADR-012 (2026-10-18) chose Anthropic's `claude-haiku-5-5` as the development route; the local model stays the verification route.
 - Revisit the choice when the M1/M2 evals can discriminate between models.
 
 Scope of the evidence: this is a smoke test of the Spring AI tool-calling path, not a system evaluation. It checks that a model calls tools reliably enough to build on.

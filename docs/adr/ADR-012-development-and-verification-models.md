@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (draft, 2026-10-18). Waiting for the human's decision on the provider, the model and the budget.
+Accepted by the human on 2026-10-18, with `claude-haiku-5-5` as the development model. No standing budget: each batch of cloud runs still needs the human's go-ahead.
 
 ## Date
 
@@ -21,14 +21,12 @@ The vision already plans for this. Its risks table has "Hardware too slow for lo
 
 ## Decision
 
-Proposed:
-
 - **Two routes, two jobs.**
   - The *development route* is a cloud model. It is used to iterate on the agent's design: modes, prompts, checks, schema.
   - The *verification route* is the local model (`granite4.1:8b` on Ollama, ADR-003). It is the only route that can pass M2's check or any benchmark claim about local models.
   - A design change is accepted only after it is confirmed on the verification route.
 - **Provider:** Anthropic, through Spring AI's Anthropic module (`spring-ai-starter-model-anthropic`). Spring AI 2.0.1 is the latest GA release (checked on Maven Central, 2026-10-18; `2.1.0-M1` is a milestone) and is already the project's BOM. Its `AnthropicChatOptions` supports a JSON output schema (`outputSchema`), `effort` and tool calling, so `ModelRoute` gets a second implementation and the loop stays the same.
-- **Model (the human chooses):** `claude-haiku-5-5` is proposed. It is the cheapest current model, at $0.10 input and $0.50 output per million tokens for prompts up to 100K (prices from Anthropic's model table, cached 2026-10-06). The alternatives in the same family are `claude-sonnet-5-5` ($2 / $10) and `claude-opus-5-5` ($4 / $20).
+- **Model:** `claude-haiku-5-5`, chosen by the human. It is the cheapest current model, at $0.10 input and $0.50 output per million tokens for prompts up to 100K (prices from Anthropic's model table, cached 2026-10-06). The alternatives in the same family are `claude-sonnet-5-5` ($2 / $10) and `claude-opus-5-5` ($4 / $20).
 - **The selection is configuration, like the mode.** A property such as `kintsugi.agent.route` (`local` or `cloud`) is read at startup. It is recorded on the incident and the report next to `mode`, so a score always says which model produced it.
 - **The verification route stays the default.** `verify-agent.sh` runs it unless told otherwise. The cloud route needs an explicit flag and an API key in `infra/.env`, never in the repository.
 
@@ -36,7 +34,7 @@ Proposed:
 
 - **Keep iterating on the local model only.** This is honest about M2 but costs 2 to 3 hours per sample. The T6 results show it measures latency first. Rejected as the *development* loop; kept as the *verification* loop.
 - **Raise the call deadlines and the report cap until dossier mode fits.** This is cheap to try. But the 45 min incident budget already does not hold the worst case (agent-loop follow-ups), and it still leaves one sample every few hours. It stays a possible tuning step on the verification route, not a way to iterate.
-- **A replay harness** (an open decision since runs 11-13): record the tool outputs of an incident once, then replay only the model calls, with no lab and no 11 minute spacing between faults. It is complementary, not an alternative: it removes the lab's wall-clock, and the cloud route removes the model's. Together they make one sample take minutes. Proposed as the next feature after this ADR, with its own design section.
+- **A replay harness** (an open decision since runs 11-13): record the tool outputs of an incident once, then replay only the model calls, with no lab and no 11 minute spacing between faults. It is complementary, not an alternative: it removes the lab's wall-clock, and the cloud route removes the model's. Together they make one sample take minutes. A candidate next feature after this ADR, with its own design section.
 - **An hourly cloud GPU running the same open-weight model** (the vision's other plan B). It keeps the exact model, so results transfer fully. But it adds infrastructure, a provider account and per-hour cost for a project that stays local. Not chosen now; it becomes the better option if cloud-model results turn out not to transfer.
 - **A bigger local model (vision configuration B, ~14B).** It would be slower on this CPU, not faster.
 
