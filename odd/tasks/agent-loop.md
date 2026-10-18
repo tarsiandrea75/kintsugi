@@ -498,6 +498,8 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
   - F3 called `get_order_trace` for the first time, but with `orderId` `<SELECT_A_RECENT_ORDER_ID>` (step 7, `REFUSED_PLACEHOLDER`) and never retried with a real id. Every other INVESTIGATE call looked at gateway-mock or payment-service and returned nothing (0 log lines, 0 events), and step 9 was a true duplicate of step 5: the model sent `limit` 50 both times (`modelOutput` of steps 4 and 8). The step rows show `limit` 20 for step 5 only because they record the arguments after `McpLabTools` caps them, while the duplicate check compares the raw ones. The report blames gateway-mock with no evidence for it. TRIAGE again saw only `AUTHORIZED count=3` and filtered by payment-service.
   - Runs 11-14 together: F1 2 MATCH of 4, F2 3 of 4, F3 0 of 4. With the 420 s deadline the remaining misses are F3's reasoning, not latency.
 
+- 2026-10-18: runs 14-19 (T5c3), from `evidence-dossier` T6b, three per mode: explorer 3/9 (F2 3/3, F1 0/3 with the right service and the wrong category every time, F3 0/3), dossier 0/9 (timeouts on the first plan and the report, reports cut at 512 tokens). Details and latencies in `odd/tasks/evidence-dossier.md`. The M2 check stays open.
+
 ## Next step
 
 T5c3 stays open on F3 only. For the human: whether to change prompt or tools toward order-side evidence (close to teaching the test), or record F3 as a known limit of `granite4.1:8b` on CPU and close the check at 2/3; and the replay harness.
