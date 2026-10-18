@@ -54,6 +54,27 @@ info() { echo "....  $*"; }
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
+# The file compose reads its variables from: .env in the compose file's directory (compose's project directory). A
+# variable set in the shell, even to an empty value, wins over it.
+ENV_FILE="$REPO_DIR/infra/.env"
+
+# True when ENV_FILE gives variable $1 a non-empty value (the last definition wins, as in compose; "export " and quotes
+# around the value are allowed). Prints nothing, so it never shows a value.
+env_file_has_value() {
+  local line value="" name=$1
+  [[ -r "$ENV_FILE" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    line=${line#export }
+    [[ "$line" == "$name="* ]] || continue
+    value=${line#"$name="}
+    value=${value%%[[:space:]]#*}
+    value=${value%"${value##*[![:space:]]}"}
+    [[ "$value" == \"*\" || "$value" == \'*\' ]] && value=${value:1:${#value}-2}
+  done <"$ENV_FILE"
+  [[ -n "$value" ]]
+}
+
 # "docker compose up" "$@", quiet, without the fault variables (FAULT_VARIABLES): a value left in this shell cannot
 # start a service with a fault already applied, and a service left faulted by an earlier run is put back on its defaults.
 compose_up() {
@@ -618,8 +639,11 @@ end_running_incident() {
 # Reads incident JSON $1 (the body of GET /incidents/{id}) with python3 and prints one tab-separated line: the status,
 # the failure reason (- when none), the reported "<rootCauseService>|<rootCauseCategory>" read from .report alone
 # (none when there is no report: a hypothesis in a plan or in tool arguments is never a report), the number of
-# steps, and the incident's own top-level mode (none when it has none; the report's copy is not read). Prints
-# "unreadable	-	none	0	-" when $1 is not an incident. Tested by test-lib.sh.
+# steps, the incident's own top-level mode and route (none when it has none; the report's copies are not read), and
+# the totals of promptTokens and completionTokens over the steps, each counted on its own (none when no step has that
+# count, so a 0 means the model reported 0), and the incident's model (none when it has none); every field is
+# non-empty, so "IFS=$'\t' read" keeps them apart. Prints "unreadable - none 0 - - - - -", tab-separated, when $1 is
+# not an incident. Tested by test-lib.sh.
 incident_fields() {
   python3 -I -c '
 import json, sys
@@ -628,29 +652,44 @@ try:
 except ValueError:
     incident = None
 if not isinstance(incident, dict):
-    print("unreadable\t-\tnone\t0\t-")
+    print("unreadable\t-\tnone\t0\t-\t-\t-\t-\t-")
     sys.exit(0)
 report = incident.get("report")
 cause = "none"
 if isinstance(report, dict) and report.get("rootCauseService") and report.get("rootCauseCategory"):
     cause = "%s|%s" % (report["rootCauseService"], report["rootCauseCategory"])
 steps = incident.get("steps")
+steps = steps if isinstance(steps, list) else []
+def total(name):
+    counts = [step[name] for step in steps if isinstance(step, dict)
+              and isinstance(step.get(name), int) and not isinstance(step.get(name), bool)]
+    return str(sum(counts)) if counts else "none"
 clean = lambda text: " ".join(str(text).split())
 print("\t".join([clean(incident.get("status") or "unreadable"), clean(incident.get("failureReason") or "-"), cause,
-                 str(len(steps) if isinstance(steps, list) else 0), clean(incident.get("mode") or "none")]))
-' <<<"$1" 2>/dev/null || printf 'unreadable\t-\tnone\t0\t-\n'
+                 str(len(steps)), clean(incident.get("mode") or "none"), clean(incident.get("route") or "none"),
+                 total("promptTokens"), total("completionTokens"), clean(incident.get("model") or "none")]))
+' <<<"$1" 2>/dev/null || printf 'unreadable\t-\tnone\t0\t-\t-\t-\t-\t-\n'
 }
 
 # Scores one agent incident and prints "<MATCH|MISS><tab><message>". Arguments: $1 the requested mode, $2 the
-# incident's mode as incident_fields prints it (- when the incident was unreadable), $3 the status, $4 the failure
-# reason (- when none), $5 the reported cause, $6 the truth (empty when unreadable). A readable incident must have run
-# in the requested mode; an unreadable one fails on its status. Tested by test-lib.sh.
+# incident's mode as incident_fields prints it (- when the incident was unreadable), $3 the requested route, $4 the
+# incident's route (- when unreadable), $5 the status, $6 the failure reason (- when none), $7 the reported cause, $8
+# the truth (empty when unreadable). A readable incident must have run in the requested mode and on the requested
+# route; a mismatch is a miss that still shows the outcome. An unreadable one fails on its status. Tested by
+# test-lib.sh.
 agent_verdict() {
-  local requested=$1 recorded=$2 status=$3 reason=$4 reported=$5 truth=$6 why="" outcome
+  local requested_mode=$1 recorded_mode=$2 requested_route=$3 recorded_route=$4 status=$5 reason=$6 reported=$7
+  local truth=$8 why="" outcome mismatch=""
   [[ "$reason" == - ]] || why=" ($reason)"
   outcome="status $status$why, reported '$reported', truth '${truth:-unreadable}'"
-  if [[ "$recorded" != - && "$recorded" != "$requested" ]]; then
-    printf 'MISS\tran in mode %s, not the requested %s; %s\n' "'$recorded'" "'$requested'" "$outcome"
+  if [[ "$recorded_mode" != - && "$recorded_mode" != "$requested_mode" ]]; then
+    mismatch="ran in mode '$recorded_mode', not the requested '$requested_mode'; "
+  fi
+  if [[ "$recorded_route" != - && "$recorded_route" != "$requested_route" ]]; then
+    mismatch+="ran on route '$recorded_route', not the requested '$requested_route'; "
+  fi
+  if [[ -n "$mismatch" ]]; then
+    printf 'MISS\t%s%s\n' "$mismatch" "$outcome"
   elif [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
     printf 'MATCH\tthe report names %s, the truth\n' "$reported"
   else

@@ -27,6 +27,8 @@
 #   agent's agent_app role). Applied only when the knowledge-data volume is empty, like the lab's.
 # - OLLAMA_PROXY_BIND_IP: the address ollama-proxy listens on, the default bridge's gateway (docker0), which is what
 #   "host-gateway" resolves to. Change it only if the Docker daemon uses another bridge address.
+# - ANTHROPIC_API_KEY: the agent's key for the cloud route (ADR-012). Empty by default and never committed: set it in
+#   infra/.env only to run the cloud route.
 name: kintsugi-lab
 
 services:
@@ -268,6 +270,10 @@ services:
       SPRING_AI_OLLAMA_BASEURL: http://host.docker.internal:11434
       # explorer (the default) or dossier (ADR-011); verify-agent.sh --mode sets it.
       KINTSUGI_AGENT_MODE: ${KINTSUGI_AGENT_MODE:-explorer}
+      # local (the default, the local model) or cloud (claude-haiku-5-5, ADR-012); verify-agent.sh --route sets it. The
+      # cloud route needs the key, which comes from infra/.env (git-ignored); empty on the local route.
+      KINTSUGI_AGENT_ROUTE: ${KINTSUGI_AGENT_ROUTE:-local}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
