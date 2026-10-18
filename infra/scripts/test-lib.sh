@@ -97,15 +97,18 @@ expect "the output is empty" "$(env_file_has_value KEY)" ""
 rm -f "$ENV_FILE"
 expect "a missing file" "$(has KEY)" no
 
-# cloud_key_available: the shell's key, else ENV_FILE's; an empty shell value is dropped so it cannot hide the file's.
-key() { if cloud_key_available; then echo "yes ${ANTHROPIC_API_KEY-unset}"; else echo "no ${ANTHROPIC_API_KEY-unset}"; fi; }
+# drop_empty_cloud_key, then cloud_key_available: the shell's key, else ENV_FILE's; an empty shell value is dropped so
+# it cannot hide the file's.
+key() { drop_empty_cloud_key; if cloud_key_available; then echo "yes ${ANTHROPIC_API_KEY-unset}"; else echo "no ${ANTHROPIC_API_KEY-unset}"; fi; }
 printf 'ANTHROPIC_API_KEY=from-file\n' >"$ENV_FILE"
 expect "a key in the shell" "$(ANTHROPIC_API_KEY=k; key)" "yes k"
 expect "an empty shell key is dropped for the file's" "$(ANTHROPIC_API_KEY=; key)" "yes unset"
 expect "no shell key, a key in the file" "$(unset ANTHROPIC_API_KEY; key)" "yes unset"
 printf 'ANTHROPIC_API_KEY=\n' >"$ENV_FILE"
 expect "an empty shell key and an empty file key" "$(ANTHROPIC_API_KEY=; key)" "no unset"
+expect "a key in the shell alone is enough" "$(ANTHROPIC_API_KEY=k; key)" "yes k"
 rm -f "$ENV_FILE"
 expect "no key and no file" "$(unset ANTHROPIC_API_KEY; key)" "no unset"
+expect "the check alone changes nothing" "$(ANTHROPIC_API_KEY=; cloud_key_available; echo "${ANTHROPIC_API_KEY-unset}")" ""
 
 echo "PASS  $cases cases"

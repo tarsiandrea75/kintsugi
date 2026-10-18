@@ -77,6 +77,7 @@ done
 [[ "$mode" == explorer || "$mode" == dossier ]] || { echo "Unknown mode '$mode'; choose explorer or dossier" >&2; exit 2; }
 [[ "$route" == local || "$route" == cloud ]] || { echo "Unknown route '$route'; choose local or cloud" >&2; exit 2; }
 # The cloud route's key, from the shell or infra/.env (cloud_key_available); its value is never printed.
+drop_empty_cloud_key
 if [[ "$route" == cloud ]] && ! cloud_key_available; then echo "$CLOUD_KEY_MISSING" >&2; exit 2; fi
 # compose passes them to the agent container (infra/compose.yaml); start_agent recreates the container when one changes.
 export KINTSUGI_AGENT_MODE=$mode KINTSUGI_AGENT_ROUTE=$route

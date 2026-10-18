@@ -75,13 +75,13 @@ env_file_has_value() {
   [[ -n "$value" ]]
 }
 
-# True when the cloud route has its key (ADR-012), in the shell or else in ENV_FILE. An empty shell value is unset
-# first: compose lets a variable set in the shell, even to an empty value, win over ENV_FILE, so an empty one would hide
-# the file's key. Call it directly, not in $(...), so the unset reaches the caller. Prints nothing.
-cloud_key_available() {
-  [[ -n "${ANTHROPIC_API_KEY:-}" ]] || unset ANTHROPIC_API_KEY
-  [[ -n "${ANTHROPIC_API_KEY:-}" ]] || env_file_has_value ANTHROPIC_API_KEY
-}
+# Unsets an empty ANTHROPIC_API_KEY in the calling shell: compose lets a variable set in the shell, even to an empty
+# value, win over ENV_FILE, so an empty one would hide the file's key. Call it directly, not in $(...), on every route,
+# so the agent's environment does not depend on whether the shell had an empty value or none.
+drop_empty_cloud_key() { [[ -n "${ANTHROPIC_API_KEY:-}" ]] || unset ANTHROPIC_API_KEY; }
+
+# True when the cloud route has its key (ADR-012), in the shell or else in ENV_FILE. Changes nothing, prints nothing.
+cloud_key_available() { [[ -n "${ANTHROPIC_API_KEY:-}" ]] || env_file_has_value ANTHROPIC_API_KEY; }
 CLOUD_KEY_MISSING="The cloud route needs ANTHROPIC_API_KEY: set it in infra/.env (git-ignored), or export it in the shell"
 
 # "docker compose up" "$@", quiet, without the fault variables (FAULT_VARIABLES): a value left in this shell cannot
