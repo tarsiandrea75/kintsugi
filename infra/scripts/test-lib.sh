@@ -109,6 +109,8 @@ expect "an empty shell key and an empty file key" "$(ANTHROPIC_API_KEY=; key)" "
 expect "a key in the shell alone is enough" "$(ANTHROPIC_API_KEY=k; key)" "yes k"
 rm -f "$ENV_FILE"
 expect "no key and no file" "$(unset ANTHROPIC_API_KEY; key)" "no unset"
-expect "the check alone changes nothing" "$(ANTHROPIC_API_KEY=; cloud_key_available; echo "${ANTHROPIC_API_KEY-unset}")" ""
+# The check fails here (no key, no file); "|| true" keeps the echo, and the brackets tell "set, empty" from no output.
+expect "the check alone changes nothing" \
+  "$(ANTHROPIC_API_KEY=; cloud_key_available || true; echo "[${ANTHROPIC_API_KEY-unset}]")" "[]"
 
 echo "PASS  $cases cases"
