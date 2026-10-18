@@ -500,6 +500,8 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 - 2026-10-18: runs 14-19 (T5c3), from `evidence-dossier` T6b, three per mode: explorer 3/9 (F2 3/3, F1 0/3 with the right service and the wrong category every time, F3 0/3), dossier 0/9 (timeouts on the first plan and the report, reports cut at 512 tokens). Details and latencies in `odd/tasks/evidence-dossier.md`. The M2 check stays open.
 
+- 2026-10-18: first runs on the cloud development route (ADR-012, `odd/tasks/cloud-route.md` T5), explorer on `claude-haiku-5-5`: 2/3 (F1 and F2 MATCH, F3 MISS as `payment-service|DEPENDENCY_REJECTING`), each incident in about 30 s for about $0.005. They do not count for M2, which stays on the local route; the M2 check stays open.
+
 ## Next step
 
 T5c3 stays open on F3 only. For the human: whether to change prompt or tools toward order-side evidence (close to teaching the test), or record F3 as a known limit of `granite4.1:8b` on CPU and close the check at 2/3; and the replay harness.
