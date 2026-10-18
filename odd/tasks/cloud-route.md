@@ -38,7 +38,7 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
 - **The cloud route's options (`AnthropicChatOptions`).**
   - `model` `claude-haiku-5-5`;
   - no `temperature`: Haiku 5.5 rejects a non-default sampling value with HTTP 400;
-  - thinking disabled, allowed at `effort` `high` or below. Thinking tokens count against `max_tokens`, so with thinking on, the answer caps (`num-predict`: 384 first `ACT`, 256 `ACT`, 512 `REPORT`) would be consumed by reasoning, and the caps would no longer mean the same thing on both routes;
+  - thinking disabled, allowed at `effort` `high` or below. Thinking tokens count against `max_tokens`, so with thinking on, the answer caps (`num-predict`: 384 first `ACT`, 160 `ACT`, 512 `REPORT`) would be consumed by reasoning, and the caps would no longer mean the same thing on both routes;
   - `maxTokens` = the same answer caps (`num-predict` in `application.yaml`: 384 first `ACT`, 160 `ACT`, 512 `REPORT`; the 256 written here before T3 was wrong);
   - `outputSchema` for the report;
   - the tool callbacks as today.
@@ -84,7 +84,7 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
   - `route` and `model` on the incident and the report (migration `V6`).
 
   Tests first: the local options unchanged, the cloud options, the start failures. Living spec; ADR-010 "Amended in cloud-route T3". Branch `-03`. Route: delegated writer.
-- [ ] **T4 — Scripts and compose:** `KINTSUGI_AGENT_ROUTE` and `ANTHROPIC_API_KEY` in compose; `verify-agent.sh --route`, the key check, the route in score and summary, `agent_verdict` extended and `test-lib.sh` cases; `compare-agent-modes.sh --route`; `docs/setup.md`. Branch `-04`. Route: inline or delegated writer, by size.
+- [x] **T4 — Scripts and compose:** `KINTSUGI_AGENT_ROUTE` and `ANTHROPIC_API_KEY` in compose; `verify-agent.sh --route`, the key check, the route in score and summary, `agent_verdict` extended and `test-lib.sh` cases; `compare-agent-modes.sh --route`; `docs/setup.md`. Branch `-04`. Route: inline or delegated writer, by size.
 - [ ] **T5 — Live runs on the cloud route,** each batch with the human's go-ahead:
   - a smoke run, explorer, F1-F3, recording latencies, tokens and cost;
   - then `compare-agent-modes.sh --route cloud` with the number of rounds the human decides.
@@ -104,6 +104,11 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
 - 2026-10-18: fix review (base `0c2832c`, 1 lens): approved, acknowledged. WARNING: V6 edited in place breaks Flyway's checksum where it was applied. Checked: the lab's `agent` database (in `knowledge-db`) is at V4, so V5 and V6 were never applied outside test databases; no V7 needed. SUGGESTION: the abandoned-call test's 2 s deadline could be flaky on a slow runner; widened to 5 s in `b15bd8b`.
 - Follow-ups, not fixed: `KINTSUGI_AGENT_MODE` can leak from the shell into the Spring Boot tests the same way the route did (predates this feature). The test classes build the Anthropic client offline with the literal `test-only-not-a-key`, a string that names itself as not a key; the human may judge it against the "no placeholder key" rule. An older incident that failed at warm-up wrote no step, so V6 leaves its route null.
 
+- 2026-10-18: T4 done in `6f8cdb8` on `feat/cloud-route-04`. Route: delegated writer (6 files). compose passes `KINTSUGI_AGENT_ROUTE` (default `local`) and `ANTHROPIC_API_KEY` (default empty). `verify-agent.sh --route local|cloud`: the cloud route is refused before the lab is touched when neither the shell nor `infra/.env` has a key (an empty shell value is unset first, because compose lets a set-but-empty shell variable override `.env`); the Ollama and `ollama-proxy` checks are skipped on it; summary.tsv gets a `route` column, score.txt route (requested, recorded), model and token totals; `agent_verdict` makes a route mismatch a miss. `start_agent` (`up -d --build`) rebuilds the image and recreates the container when the route or key changes. `compare-agent-modes.sh --route`, run directories suffixed `-cloud` on the cloud route. RED: `test-lib.sh` failed on the 5-field output; GREEN: `PASS  27 cases`; `bash -n` clean (shellcheck not installed); `--route bogus` exits 2; cloud with no key exits 2 naming `ANTHROPIC_API_KEY`; compose config renders the two variables.
+- 2026-10-18: T4 review (base `c68a476`, so it also covered `b15bd8b`; 4 lenses): approved, acknowledged. WARNING: this document still gave 256 for the `ACT` cap in the thinking bullet. SUGGESTIONs: no T4 entry here; the abandoned-call test's 12 s bound unexplained; a local `model` next to the global `MODEL` in `verify-agent.sh`; `compare-agent-modes.sh --route cloud` with no key failed every run instead of stopping once. All fixed inline in the next commit (route: inline, small mechanical edits): `incident_model`, a comment on the bound, the key checked once before the first run (`env_file_has_value` from `lib.sh`); `test-lib.sh` `PASS  27 cases`, the compare key refusal exits 2.
+- Open risks for T5, from T4: a manual `restart_agent` without the exported route recreates the agent on `local` (as the mode already does); keep the key in `infra/.env`. The help text's 52 min wait includes the warm-up the cloud route skips (still an upper bound).
+- Human action before T5: add to `infra/.env.example` (protected) the line `ANTHROPIC_API_KEY=` with the comment `# The agent's cloud route key (ADR-012). Set the real value in infra/.env only; never commit it.`, and put the real key in `infra/.env`.
+
 ## Next step
 
-T4: scripts and compose.
+T5: live runs on the cloud route. Waiting for the human: the key in `infra/.env`, and the go-ahead for the smoke run (explorer, F1-F3, estimated about $0.03).
