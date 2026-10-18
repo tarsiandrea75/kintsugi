@@ -99,11 +99,19 @@ class AgentLoopApiTest {
 		assertThat(steps.get(1).get("kind").asString()).isEqualTo("TOOL_CALL");
 		assertThat(steps.get(1).get("summary").asString()).startsWith("toolCallId=2 tool=status_summary");
 		assertThat(steps.get(1).has("toolOutput")).isFalse();
+		assertThat(steps.get(0).get("promptTokens").asInt()).isEqualTo(10);
+		assertThat(steps.get(0).get("completionTokens").asInt()).isEqualTo(5);
+		assertThat(steps.get(1).has("promptTokens")).isFalse();
+		assertThat(steps.get(5).get("kind").asString()).isEqualTo("REPORT");
+		assertThat(steps.get(5).get("promptTokens").asInt()).isEqualTo(10);
+		assertThat(steps.get(5).get("completionTokens").asInt()).isEqualTo(5);
 		assertThat(MODEL.left()).isZero();
 		assertThat(MODEL.warmUps()).hasSize(1);
 
 		JsonNode full = JSON.readTree(send(HttpRequest.newBuilder(uri("/incidents/" + id + "?full=true")).build()).body());
 		assertThat(full.get("steps").get(1).get("toolOutput").asString()).contains("PAYMENT_PENDING");
+		assertThat(full.get("steps").get(5).get("promptTokens").asInt()).isEqualTo(10);
+		assertThat(full.get("steps").get(5).get("completionTokens").asInt()).isEqualTo(5);
 	}
 
 	private JsonNode pollUntilEnded(String id, Duration within) throws Exception {

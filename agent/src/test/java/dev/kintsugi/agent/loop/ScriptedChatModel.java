@@ -15,6 +15,7 @@ import org.springframework.ai.chat.messages.AssistantMessage.ToolCall;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -100,6 +101,20 @@ final class ScriptedChatModel implements ChatModel {
 		this.script.add(prompt -> new ChatResponse(
 				List.of(new Generation(message, ChatGenerationMetadata.builder().finishReason("length").build())),
 				ChatResponseMetadata.builder().usage(new DefaultUsage(10, 5)).build()));
+		return this;
+	}
+
+	/**
+	 * Answers {@code text} with this usage instead of the usual 10 and 5 tokens; with null, the response carries no
+	 * usage, so its metadata reports Spring AI's {@code EmptyUsage}, as a provider that counts nothing does.
+	 */
+	ScriptedChatModel metered(Usage usage, String text) {
+		ChatResponseMetadata.Builder metadata = ChatResponseMetadata.builder();
+		if (usage != null) {
+			metadata.usage(usage);
+		}
+		this.script.add(prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage(text))),
+				metadata.build()));
 		return this;
 	}
 

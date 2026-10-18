@@ -91,7 +91,7 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 
 ### Requirement: Read an incident
 
-`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer` or `dossier`, recorded when the run starts; absent when it never started, see "Dossier mode"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
+`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer` or `dossier`, recorded when the run starts; absent when it never started, see "Dossier mode"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `promptTokens`, `completionTokens` (see "Token usage"), `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
 
 #### Scenario: Completed incident
 - GIVEN an incident whose run completed
@@ -833,7 +833,7 @@ Flyway in `agent/` MUST create, in the `agent` database:
 | Table | Columns |
 |-------|---------|
 | `incidents` | `id uuid` (primary key), `signal jsonb` (`symptom`, `sinceMinutes`), `mode text` (`explorer` or `dossier`, by `CHECK`; null until the run starts; added by migration V4, which sets it to `explorer` on earlier rows) **(T5a)**, `status text` (the six statuses, by `CHECK`), `report jsonb`, `failure_reason text` **(chosen)**, `started_at timestamptz`, `ended_at timestamptz` |
-| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`, `DOSSIER`; `ACT` added by migration V2, `DOSSIER` by V4; `PLAN` is no longer written since the plan moved into the first `ACT` answer of each phase) **(chosen)**, `phase text` (the four phases, and `DOSSIER` for the dossier step, since V4), `model text`, `tokens int`, `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`, and since migration V3 `REFUSED_PLACEHOLDER`, `REFUSED_DUPLICATE`), `summary text` (for a tool call, what the model saw; for a report, its validation verdict; for `ACT`, a short note with, on a phase's first answer, the plan's verdict; for `BUDGET`, a short note; for `DOSSIER`, the dossier message the model saw) **(chosen)**, `model_output text` (the raw `ACT` answer, text and requested calls, or the raw report) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
+| `incident_steps` | `incident_id uuid` (references `incidents`), `step_no int` (from 1, unique per incident: the primary key is `(incident_id, step_no)`), `kind text` (`PLAN`, `ACT`, `TOOL_CALL`, `REPORT`, `BUDGET`, `DOSSIER`; `ACT` added by migration V2, `DOSSIER` by V4; `PLAN` is no longer written since the plan moved into the first `ACT` answer of each phase) **(chosen)**, `phase text` (the four phases, and `DOSSIER` for the dossier step, since V4), `model text`, `tokens int`, `prompt_tokens int` and `completion_tokens int` (added by migration V5, see "Token usage"), `tool_name text`, `tool_args jsonb`, `tool_output text`, `tool_outcome text` (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, `REFUSED_PHASE`, `REFUSED_BUDGET`, and since migration V3 `REFUSED_PLACEHOLDER`, `REFUSED_DUPLICATE`), `summary text` (for a tool call, what the model saw; for a report, its validation verdict; for `ACT`, a short note with, on a phase's first answer, the plan's verdict; for `BUDGET`, a short note; for `DOSSIER`, the dossier message the model saw) **(chosen)**, `model_output text` (the raw `ACT` answer, text and requested calls, or the raw report) **(chosen)**, `latency_ms int`, `created_at timestamptz` |
 
 A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits at most one `RUNNING` row; it is what enforces "one incident at a time" (see "Open an incident"). Its name is `incidents_one_running_idx`.
 
@@ -856,6 +856,22 @@ A step is written when it ends, before the next one starts, so a crash loses at 
 - GIVEN a run with 3 phases, 6 tool calls and 1 report
 - WHEN it completes
 - THEN `incident_steps` holds at least 10 rows for it (one `ACT` per model answer in the phases, one `TOOL_CALL` per call and the `REPORT`), numbered without gaps, each tool call that ran with its full `tool_output`
+
+### Requirement: Token usage
+
+Every `ACT` and `REPORT` step MUST record `prompt_tokens` and `completion_tokens`, the counts its provider reported for that step's one model call through Spring AI's `ChatResponse.getMetadata().getUsage()`, on either route; Ollama fills them from `prompt_eval_count` and `eval_count`. A step's retry is its own model call and its own step, so each call's counts are on the step that stores its answer. Both columns MUST be null on every other kind of step, and on a model step whose provider counted nothing: a usage that is missing, or whose prompt and completion counts are both null or 0, is not a measurement, since a real call always reads some prompt. That covers Spring AI's `EmptyUsage` (0 and 0) for a response without usage, and the 0 that Spring AI's `DefaultUsage` puts in place of a missing Ollama count. `tokens` keeps its meaning, the total that usage reports. `GET /incidents/{id}` shows both as `promptTokens` and `completionTokens`, absent when null, with or without `?full=true`. The warm-up stores no step, so its usage is not recorded.
+
+Why (cloud-route, T2): T6 could only infer from the latencies that reading the prompt was what made a call slow, because a step stored one total; the two counts measure it on the local route, and give the cloud route its cost. A 0 stored for "not reported" would read as a free call in the evals, so it is null.
+
+#### Scenario: Counts reported
+- GIVEN a provider that reports 1234 prompt and 56 completion tokens for an `ACT` call, and 2345 and 67 for the `REPORT` call
+- WHEN the run completes
+- THEN the `ACT` step stores 1234 and 56 with `tokens` 1290, the `REPORT` step 2345 and 67, every `TOOL_CALL` step null for both, and `GET /incidents/{id}` shows them as `promptTokens` and `completionTokens` on those steps
+
+#### Scenario: No usage reported
+- GIVEN a provider whose answer carries no usage, or a usage whose counts are both 0
+- WHEN the step is stored
+- THEN its `prompt_tokens` and `completion_tokens` are null, not 0, and the API leaves both fields out
 
 ### Requirement: Isolation
 

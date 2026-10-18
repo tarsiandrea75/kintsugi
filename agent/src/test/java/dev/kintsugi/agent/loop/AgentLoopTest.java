@@ -28,6 +28,7 @@ import org.springframework.ai.chat.messages.AssistantMessage.ToolCall;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.StructuredOutputChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
@@ -132,6 +133,44 @@ class AgentLoopTest {
 		assertThat(output.getOut()).contains("incident=" + this.id + " event=model_warmed_up model=granite4.1:8b");
 		assertThat(output.getOut()).contains("incident=" + this.id + " event=run_ended status=COMPLETED");
 		assertThat(output.getOut()).doesNotContain("PAYMENT_PENDING");
+	}
+
+	@Test
+	void everyModelStepRecordsThePromptAndCompletionTokensTheProviderReported() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.metered(new DefaultUsage(1234, 56), "")
+			.quietPhasesAfterTriage()
+			.metered(new DefaultUsage(2345, 67), unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(kinds()).containsExactly("ACT:TRIAGE", "TOOL_CALL:TRIAGE", "ACT:TRIAGE", "ACT:INVESTIGATE",
+				"ACT:KNOWLEDGE", "REPORT:CONCLUDE");
+		assertThat(step(1)).containsEntry("prompt_tokens", 10).containsEntry("completion_tokens", 5);
+		assertThat(step(2)).containsEntry("prompt_tokens", null).containsEntry("completion_tokens", null);
+		assertThat(step(3)).containsEntry("prompt_tokens", 1234)
+			.containsEntry("completion_tokens", 56)
+			.containsEntry("tokens", 1290);
+		assertThat(step(6)).containsEntry("prompt_tokens", 2345).containsEntry("completion_tokens", 67);
+	}
+
+	@Test
+	void aModelStepWhoseProviderReportsNoUsageRecordsNoTokens() {
+		// No usage at all (Spring AI's EmptyUsage), then a usage that counts nothing, as Ollama's is when its answer
+		// lacks prompt_eval_count and eval_count: neither is a measurement, so neither is stored as 0.
+		this.model.metered(null, "")
+			.metered(new DefaultUsage(null, null), "")
+			.quiet()
+			.metered(null, unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		for (int stepNo : new int[] { 1, 2, 4 }) {
+			assertThat(step(stepNo)).as("step " + stepNo)
+				.containsEntry("prompt_tokens", null)
+				.containsEntry("completion_tokens", null);
+		}
+		assertThat(step(3)).containsEntry("prompt_tokens", 10).containsEntry("completion_tokens", 5);
 	}
 
 	@Test
@@ -1042,8 +1081,9 @@ class AgentLoopTest {
 
 	private Map<String, Object> step(int stepNo) {
 		return AgentDatabase.admin()
-			.sql("SELECT kind, phase, model, tokens, tool_name, tool_args::text AS tool_args, tool_output, tool_outcome,"
-					+ " summary, model_output FROM incident_steps WHERE incident_id = ? AND step_no = ?")
+			.sql("SELECT kind, phase, model, tokens, prompt_tokens, completion_tokens, tool_name,"
+					+ " tool_args::text AS tool_args, tool_output, tool_outcome, summary, model_output FROM incident_steps"
+					+ " WHERE incident_id = ? AND step_no = ?")
 			.params(this.id, stepNo)
 			.query()
 			.singleRow();

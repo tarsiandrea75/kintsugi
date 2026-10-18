@@ -292,8 +292,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			throw new RunEnd(IncidentStatus.FAILED, "the run was interrupted during " + GATHERING + " of the dossier");
 		}
 		run.dossier = message;
-		write(run, new StepRow(run.steps + 1, "DOSSIER", DOSSIER_PHASE, null, null, null, null, calls, null, message,
-				null, (int) ((System.nanoTime() - start) / 1_000_000), now()));
+		write(run, new StepRow(run.steps + 1, "DOSSIER", DOSSIER_PHASE, null, null, null, null, null, null, calls,
+				null, message, null, (int) ((System.nanoTime() - start) / 1_000_000), now()));
 	}
 
 	/** The dossier's calls as the {@code DOSSIER} step stores them: tool, arguments, outcome, time and full output. */
@@ -363,8 +363,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			if (withPlan) {
 				note += "; " + plan(run, phase, answer.text());
 			}
-			write(run, new StepRow(run.steps + 1, "ACT", phase.name(), answer.model(), answer.tokens(), null, null,
-					null, null, note, actOutput(answer), answer.latencyMs(), now()));
+			write(run, new StepRow(run.steps + 1, "ACT", phase.name(), answer.model(), answer.tokens(),
+					answer.promptTokens(), answer.completionTokens(), null, null, null, null, note, actOutput(answer),
+					answer.latencyMs(), now()));
 			if (calls.isEmpty()) {
 				if (!retryNext) {
 					return;
@@ -473,8 +474,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		int stepNo = run.steps + 1;
 		String summary = ToolSummaries.summarize(stepNo, result.tool(), result.outcome(), result.rawOutput());
 		run.ran.add(new Ran(call.name(), call.arguments(), stepNo, result.outcome().name(), reasonLine(summary)));
-		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, result.tool(), result.args(),
-				result.rawOutput(), result.outcome().name(), summary, null, (int) result.durationMs(), now()));
+		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, null, null, result.tool(),
+				result.args(), result.rawOutput(), result.outcome().name(), summary, null, (int) result.durationMs(),
+				now()));
 		run.toolSteps.put(stepNo, new ToolStep(stepNo, result.tool(), result.outcome().name(), result.rawOutput(),
 				summary));
 		run.evidence.add(summary);
@@ -494,8 +496,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		int stepNo = run.steps + 1;
 		String summary = "toolCallId=" + stepNo + " tool=" + label(call.name()) + " outcome=" + outcome
 				+ "\nthe call was refused and did not run: " + why;
-		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, call.name(), jsonArgs(call.arguments()),
-				null, outcome, summary, null, 0, now()));
+		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, null, null, call.name(),
+				jsonArgs(call.arguments()), null, outcome, summary, null, 0, now()));
 		run.toolSteps.put(stepNo, new ToolStep(stepNo, String.valueOf(call.name()), outcome, null, summary));
 		run.evidence.add(summary);
 		return summary;
@@ -522,8 +524,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 						+ "evidence items");
 			}
 			write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), answer.model(), answer.tokens(),
-					null, null, null, null, verdict(errors, checked.dropped()), answer.text(), answer.latencyMs(),
-					now()));
+					answer.promptTokens(), answer.completionTokens(), null, null, null, null,
+					verdict(errors, checked.dropped()), answer.text(), answer.latencyMs(), now()));
 			if (errors.isEmpty()) {
 				return stored(run, report, checked.evidence());
 			}
@@ -595,12 +597,28 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 		AssistantMessage message = response.getResult().getOutput();
 		Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
+		boolean counted = counted(usage);
 		// Ollama's done_reason "length": the answer reached its cap and was cut.
 		boolean cut = response.getResult().getMetadata() != null
 				&& "length".equalsIgnoreCase(response.getResult().getMetadata().getFinishReason());
 		return new Answer(message, message.getText() == null ? "" : message.getText(),
-				usage == null ? null : usage.getTotalTokens(), route.model(),
+				usage == null ? null : usage.getTotalTokens(), counted ? usage.getPromptTokens() : null,
+				counted ? usage.getCompletionTokens() : null, route.model(),
 				(int) ((System.nanoTime() - start) / 1_000_000), cut, cap);
+	}
+
+	/**
+	 * Whether the provider counted the call's tokens. A usage that counts none is not a measurement: Spring AI reports
+	 * {@code EmptyUsage}, with 0 and 0, when a response carries no usage, and Ollama's {@code DefaultUsage} turns a
+	 * missing {@code prompt_eval_count} or {@code eval_count} into 0. A real call always reads some prompt, so the step
+	 * then stores both counts as null rather than as 0.
+	 */
+	private static boolean counted(Usage usage) {
+		return usage != null && (positive(usage.getPromptTokens()) || positive(usage.getCompletionTokens()));
+	}
+
+	private static boolean positive(Integer count) {
+		return count != null && count > 0;
 	}
 
 	/** Ends the run {@code TIMED_OUT} once the incident has used up its time budget. */
@@ -620,8 +638,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	private void budgetStep(Run run, Phase phase, String summary) {
-		write(run, new StepRow(run.steps + 1, "BUDGET", phase.name(), null, null, null, null, null, null, summary,
-				null, null, now()));
+		write(run, new StepRow(run.steps + 1, "BUDGET", phase.name(), null, null, null, null, null, null, null,
+				null, summary, null, null, now()));
 	}
 
 	/** Writes the step, then logs its one line: tool outputs, summaries and model answers stay in the table. */
@@ -820,9 +838,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	private record Waste(String outcome, String why) {
 	}
 
-	/** A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. */
-	private record Answer(AssistantMessage message, String text, Integer tokens, String model, int latencyMs,
-			boolean cut, int cap) {
+	/**
+	 * A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. {@code promptTokens} and
+	 * {@code completionTokens} are the provider's counts, null when it counted none.
+	 */
+	private record Answer(AssistantMessage message, String text, Integer tokens, Integer promptTokens,
+			Integer completionTokens, String model, int latencyMs, boolean cut, int cap) {
 	}
 
 	/** Ends the run with a status other than {@code COMPLETED}, and its reason. */

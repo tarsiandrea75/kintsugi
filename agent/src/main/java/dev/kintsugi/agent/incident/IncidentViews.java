@@ -34,13 +34,13 @@ final class IncidentViews {
 	 * by default a reader gets the summaries, which are what the model saw.
 	 */
 	@JsonInclude(JsonInclude.Include.NON_NULL)
-	record Step(int stepNo, String kind, String phase, String model, Integer tokens, String toolName,
-			JsonNode toolArgs, String toolOutcome, String summary, String toolOutput, String modelOutput,
-			Integer latencyMs, Instant createdAt) {
+	record Step(int stepNo, String kind, String phase, String model, Integer tokens, Integer promptTokens,
+			Integer completionTokens, String toolName, JsonNode toolArgs, String toolOutcome, String summary,
+			String toolOutput, String modelOutput, Integer latencyMs, Instant createdAt) {
 
 		Step withoutFullTexts() {
-			return new Step(stepNo, kind, phase, model, tokens, toolName, toolArgs, toolOutcome, summary, null, null,
-					latencyMs, createdAt);
+			return new Step(stepNo, kind, phase, model, tokens, promptTokens, completionTokens, toolName, toolArgs,
+					toolOutcome, summary, null, null, latencyMs, createdAt);
 		}
 
 	}

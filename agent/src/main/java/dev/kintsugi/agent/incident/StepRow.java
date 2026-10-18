@@ -11,6 +11,9 @@ import java.time.Instant;
  * @param phase the phase the step ran in; {@code DOSSIER} for the dossier step, before the first phase
  * @param model the model that answered, or that requested the tool call
  * @param tokens the tokens of a model answer
+ * @param promptTokens the prompt tokens the provider reported for an {@code ACT} or {@code REPORT} call, or null
+ * @param completionTokens the completion tokens the provider reported for an {@code ACT} or {@code REPORT} call, or
+ *     null
  * @param toolName the tool a {@code TOOL_CALL} asked for
  * @param toolArgs the arguments actually sent, or the model's arguments for a refused call, as JSON
  * @param toolOutput the full output of a call that ran
@@ -20,7 +23,7 @@ import java.time.Instant;
  * @param latencyMs the model call's or the tool call's wall-clock time
  * @param createdAt when the step ended
  */
-public record StepRow(int stepNo, String kind, String phase, String model, Integer tokens, String toolName,
-		String toolArgs, String toolOutput, String toolOutcome, String summary, String modelOutput, Integer latencyMs,
-		Instant createdAt) {
+public record StepRow(int stepNo, String kind, String phase, String model, Integer tokens, Integer promptTokens,
+		Integer completionTokens, String toolName, String toolArgs, String toolOutput, String toolOutcome,
+		String summary, String modelOutput, Integer latencyMs, Instant createdAt) {
 }

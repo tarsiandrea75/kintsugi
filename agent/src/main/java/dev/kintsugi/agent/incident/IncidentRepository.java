@@ -123,19 +123,21 @@ public class IncidentRepository {
 	/** Writes one step of the incident {@code id}; a step is written when it ends, before the next one starts. */
 	public void insertStep(UUID id, StepRow step) {
 		jdbc.sql("""
-				INSERT INTO incident_steps (incident_id, step_no, kind, phase, model, tokens, tool_name, tool_args,
-				                            tool_output, tool_outcome, summary, model_output, latency_ms, created_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?)""")
-			.params(id, step.stepNo(), step.kind(), step.phase(), step.model(), step.tokens(), step.toolName(),
-					step.toolArgs(), step.toolOutput(), step.toolOutcome(), step.summary(), step.modelOutput(),
-					step.latencyMs(), Timestamp.from(step.createdAt()))
+				INSERT INTO incident_steps (incident_id, step_no, kind, phase, model, tokens, prompt_tokens,
+				                            completion_tokens, tool_name, tool_args, tool_output, tool_outcome, summary,
+				                            model_output, latency_ms, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?)""")
+			.params(id, step.stepNo(), step.kind(), step.phase(), step.model(), step.tokens(), step.promptTokens(),
+					step.completionTokens(), step.toolName(), step.toolArgs(), step.toolOutput(), step.toolOutcome(),
+					step.summary(), step.modelOutput(), step.latencyMs(), Timestamp.from(step.createdAt()))
 			.update();
 	}
 
 	private List<Step> steps(UUID id) {
 		return jdbc.sql("""
-				SELECT step_no, kind, phase, model, tokens, tool_name, tool_args::text AS tool_args, tool_outcome,
-				       summary, tool_output, model_output, latency_ms, created_at
+				SELECT step_no, kind, phase, model, tokens, prompt_tokens, completion_tokens, tool_name,
+				       tool_args::text AS tool_args, tool_outcome, summary, tool_output, model_output, latency_ms,
+				       created_at
 				FROM incident_steps WHERE incident_id = ? ORDER BY step_no""")
 			.param(id)
 			.query(this::step)
@@ -152,9 +154,11 @@ public class IncidentRepository {
 
 	private Step step(ResultSet rs, int rowNum) throws SQLException {
 		return new Step(rs.getInt("step_no"), rs.getString("kind"), rs.getString("phase"), rs.getString("model"),
-				rs.getObject("tokens", Integer.class), rs.getString("tool_name"), tree(rs.getString("tool_args")),
-				rs.getString("tool_outcome"), rs.getString("summary"), rs.getString("tool_output"),
-				rs.getString("model_output"), rs.getObject("latency_ms", Integer.class), instant(rs, "created_at"));
+				rs.getObject("tokens", Integer.class), rs.getObject("prompt_tokens", Integer.class),
+				rs.getObject("completion_tokens", Integer.class), rs.getString("tool_name"),
+				tree(rs.getString("tool_args")), rs.getString("tool_outcome"), rs.getString("summary"),
+				rs.getString("tool_output"), rs.getString("model_output"), rs.getObject("latency_ms", Integer.class),
+				instant(rs, "created_at"));
 	}
 
 	private JsonNode tree(String text) {
