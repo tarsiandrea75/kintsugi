@@ -425,11 +425,11 @@ The model MUST run on the route of `kintsugi.agent.route` (`${KINTSUGI_AGENT_ROU
 | `local` (default) | `ollama` | `kintsugi.agent.model.name`, `granite4.1:8b` | `OllamaChatOptions`: `temperature` 0, `num-ctx` 8192, `num_predict` the answer cap; byte-identical to every run before the cloud route | `kintsugi.agent.model.call-timeout` | yes ("The warm-up") |
 | `cloud` | `anthropic` | `kintsugi.agent.cloud.name`, `claude-haiku-5-5` | `AnthropicChatOptions`: no `temperature` (the model rejects a non-default one), thinking disabled (thinking tokens would count against `max_tokens`), `maxTokens` the same answer cap as the local route's `num_predict`, the report's `outputSchema`, the phase's tool definitions | `kintsugi.agent.cloud.call-timeout`: `act` 60 s, `report` 90 s (a first guess, measured in cloud-route T5) | none |
 
-`RouteEnvironmentPostProcessor` MUST derive `spring.ai.model.chat` from the route, because Spring AI 2.0.1 turns on both chat auto-configurations when it is missing; so exactly one `ChatModel` exists, and on the local route Anthropic's auto-configuration is off. The cloud client's `spring.ai.anthropic.timeout` MUST be the cloud route's longest call deadline (90 s), so that the loop's deadline, not the HTTP client, ends a call, and `spring.ai.anthropic.max-retries` MUST be 0, since the loop owns retries and their budget. The key comes only from `ANTHROPIC_API_KEY` (`spring.ai.anthropic.api-key: ${ANTHROPIC_API_KEY:}`); no key is in the repository.
+`RouteEnvironmentPostProcessor` MUST derive `spring.ai.model.chat` from the route, because Spring AI 2.0.1 turns on both chat auto-configurations when it is missing; so exactly one `ChatModel` exists, and on the local route Anthropic's auto-configuration is off. The cloud client's `spring.ai.anthropic.timeout` MUST be the cloud route's longest call deadline (90 s), and `spring.ai.anthropic.max-retries` MUST be 0, since the loop owns retries and their budget. Every cloud call MUST also carry its own timeout, `AnthropicChatOptions.timeout`: the loop's wait for that call (its deadline, or the incident's time left when that is shorter) plus 1 s, so that a call the loop abandons is cancelled at most 1 s later and the provider stops writing its answer. Why (the review of cloud-route T3): the loop interrupts a call it stops waiting for, which closes Ollama's connection ("Budgets"), but Spring AI 2.0.1's `AnthropicChatModel` calls the Anthropic SDK (anthropic-java-core 2.52.0) through Spring AI's `SpringAiAnthropicHttpClient`, whose OkHttp `Call.execute()` blocks in a socket read that ignores the interruption; with the client's timeout alone an abandoned 60 s `ACT` call held its connection, and the provider kept writing, up to 90 s. Spring AI passes the per-call timeout to the SDK as the call's `RequestOptions`, and OkHttp's call timeout cancels the call. The 1 s keeps the loop's deadline, not the client, the one that ends a call, so a timed-out call still ends the run `TIMED_OUT`. The loop's model-call workers are a cached pool, so a call still ending never delays the next one; and a run whose call timed out has ended, so no retry of it can overlap. The key comes only from `ANTHROPIC_API_KEY` (`spring.ai.anthropic.api-key: ${ANTHROPIC_API_KEY:}`); no key is in the repository.
 
 The start MUST stop, before any bean, on a route other than `local` or `cloud`, with `kintsugi.agent.route must be local or cloud, got "<value>"`, and on the cloud route with an empty or blank key, with a message naming `ANTHROPIC_API_KEY`.
 
-The run MUST record its route and the route's model on the incident when it starts, with the mode (`incidents.route`, `incidents.model`, migration V6), and in the stored report, as `route` and `model` beside `mode`. Earlier incidents are `local`, with the model their steps name. The checks (`PlanCheck`, `ReportCheck`) are the same on both routes.
+The run MUST record its route and the route's model on the incident when it starts, with the mode (`incidents.route`, `incidents.model`, migration V6), and in the stored report, as `route` and `model` beside `mode`. Earlier incidents whose run wrote a step are `local`, with the model their steps name; an earlier incident with no step has neither, although V4 gave it a mode. The checks (`PlanCheck`, `ReportCheck`) are the same on both routes.
 
 #### Scenario: No route set
 - GIVEN no `kintsugi.agent.route`
@@ -451,6 +451,11 @@ The run MUST record its route and the route's model on the incident when it star
 - GIVEN `kintsugi.agent.route=cloud` and an empty `ANTHROPIC_API_KEY`
 - WHEN the agent starts
 - THEN the start fails with a message naming `ANTHROPIC_API_KEY`
+
+#### Scenario: An abandoned cloud call is cancelled
+- GIVEN the cloud route and a provider that never answers, with a client timeout far beyond the call's deadline
+- WHEN an `ACT` call passes its deadline
+- THEN the run ends `TIMED_OUT` and the client closes the call's connection within a few seconds of the deadline
 
 #### Scenario: Route and model recorded
 - WHEN an incident runs on a route
@@ -899,9 +904,9 @@ A step is written when it ends, before the next one starts, so a crash loses at 
 
 ### Requirement: Token usage
 
-Every `ACT` and `REPORT` step MUST record `prompt_tokens` and `completion_tokens`, the counts its provider reported for that step's one model call through Spring AI's `ChatResponse.getMetadata().getUsage()`, on either route; Ollama fills them from `prompt_eval_count` and `eval_count`. A step's retry is its own model call and its own step, so each call's counts are on the step that stores its answer. Both columns MUST be null on every other kind of step, and on a model step whose provider counted nothing: a usage that is missing, or whose prompt and completion counts are both null or 0, is not a measurement, since a real call always reads some prompt. That covers Spring AI's `EmptyUsage` (0 and 0) for a response without usage, and the 0 that Spring AI's `DefaultUsage` puts in place of a missing Ollama count. `tokens` keeps its meaning, the total that usage reports. `GET /incidents/{id}` shows both as `promptTokens` and `completionTokens`, absent when null, with or without `?full=true`. The warm-up stores no step, so its usage is not recorded.
+Every `ACT` and `REPORT` step MUST record `prompt_tokens` and `completion_tokens`, the counts its provider reported for that step's one model call through Spring AI's `ChatResponse.getMetadata().getUsage()`, on either route; Ollama fills them from `prompt_eval_count` and `eval_count`. A step's retry is its own model call and its own step, so each call's counts are on the step that stores its answer. Both columns, and `tokens`, MUST be null on every other kind of step (`TOOL_CALL`, `BUDGET`, `DOSSIER`), and on a model step whose provider counted nothing: a usage that is missing, or whose prompt and completion counts are both null or 0, is not a measurement, since a real call always reads some prompt. That covers Spring AI's `EmptyUsage` (0 and 0) for a response without usage, and the 0 that Spring AI's `DefaultUsage` puts in place of a missing Ollama count. A partly counted usage, one count positive and the other null or 0, MUST store the positive count and null for the other: `DefaultUsage` turns a missing count into 0, and a real call reads some prompt and writes at least one token, so that 0 is a count the provider did not make. `tokens` keeps its meaning, the total that usage reports, whenever at least one count is positive. `GET /incidents/{id}` shows both as `promptTokens` and `completionTokens`, absent when null, with or without `?full=true`. The warm-up stores no step, so its usage is not recorded.
 
-Why (cloud-route, T2): T6 could only infer from the latencies that reading the prompt was what made a call slow, because a step stored one total; the two counts measure it on the local route, and give the cloud route its cost. A 0 stored for "not reported" would read as a free call in the evals, so it is null.
+Why (cloud-route, T2): T6 could only infer from the latencies that reading the prompt was what made a call slow, because a step stored one total; the two counts measure it on the local route, and give the cloud route its cost. A 0 stored for "not reported" would read as a free call in the evals, so it is null; the review of T2 extended the rule to `tokens` and to each count of a partly counted usage.
 
 #### Scenario: Counts reported
 - GIVEN a provider that reports 1234 prompt and 56 completion tokens for an `ACT` call, and 2345 and 67 for the `REPORT` call
@@ -911,7 +916,16 @@ Why (cloud-route, T2): T6 could only infer from the latencies that reading the p
 #### Scenario: No usage reported
 - GIVEN a provider whose answer carries no usage, or a usage whose counts are both 0
 - WHEN the step is stored
-- THEN its `prompt_tokens` and `completion_tokens` are null, not 0, and the API leaves both fields out
+- THEN its `prompt_tokens`, `completion_tokens` and `tokens` are null, not 0, and the API leaves the fields out
+
+#### Scenario: Partly counted usage
+- GIVEN a provider that reports 1234 prompt tokens and no completion count (0 in Spring AI's `DefaultUsage`) for one `ACT` call, and 0 prompt and 56 completion tokens for the next
+- WHEN the steps are stored
+- THEN the first stores 1234, null and `tokens` 1234, the second null, 56 and `tokens` 56
+
+#### Scenario: Steps without a model call
+- WHEN a run stores `TOOL_CALL`, `BUDGET` and `DOSSIER` steps
+- THEN none of them stores `tokens`, `prompt_tokens` or `completion_tokens`
 
 ### Requirement: Isolation
 

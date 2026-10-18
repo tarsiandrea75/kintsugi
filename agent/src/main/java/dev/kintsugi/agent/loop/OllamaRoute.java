@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,9 +27,13 @@ public record OllamaRoute(String model, ChatModel chatModel, double temperature,
 		return AgentRoute.LOCAL;
 	}
 
-	/** The route's settings with the answer's cap as {@code num_predict}. */
+	/**
+	 * The route's settings with the answer's cap as {@code num_predict}. {@code wait} is not sent: the loop's interruption
+	 * closes the RestClient's connection, which stops Ollama (agent spec, "Budgets"), so the options stay those of every
+	 * run before the cloud route.
+	 */
 	@Override
-	public ChatOptions options(int answerCap, List<ToolCallback> tools, String outputSchema) {
+	public ChatOptions options(int answerCap, Duration wait, List<ToolCallback> tools, String outputSchema) {
 		OllamaChatOptions.Builder options = OllamaChatOptions.builder()
 			.model(this.model)
 			.temperature(this.temperature)

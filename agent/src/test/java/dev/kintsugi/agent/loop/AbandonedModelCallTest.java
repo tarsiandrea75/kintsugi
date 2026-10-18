@@ -40,7 +40,7 @@ import dev.kintsugi.agent.lab.LabTools;
  * the auto-configured Ollama client, against a stub server that answers the warm-up and then never answers; the stub
  * records when the client closes the hanging connection.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "kintsugi.agent.route=local")
 class AbandonedModelCallTest {
 
 	private static final HangingOllama OLLAMA = HangingOllama.start();

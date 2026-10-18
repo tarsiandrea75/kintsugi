@@ -21,8 +21,8 @@ spring:
         num-ctx: 8192
     # The cloud route's client (ADR-012), off on the local route. The key comes from the environment only, never from
     # the repository; an empty key on the cloud route stops the start. Its timeout is the cloud route's longest call
-    # deadline, call-timeout.report, so the loop's deadline and not the HTTP client ends a call; no retries, since the
-    # loop owns retries and their budget.
+    # deadline, call-timeout.report; each call also carries its own, the loop's wait plus 1 s (AnthropicRoute), since
+    # the SDK's HTTP call ignores the loop's interruption. No retries, since the loop owns retries and their budget.
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
       timeout: ${kintsugi.agent.cloud.call-timeout.report}

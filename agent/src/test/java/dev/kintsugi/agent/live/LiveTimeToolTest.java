@@ -15,7 +15,7 @@ import org.springframework.test.context.bean.override.convention.TestBean;
 
 /** Needs a local Ollama with granite4.1:8b. Run with {@code ./mvnw test -Plive}. */
 @Tag("live")
-@SpringBootTest
+@SpringBootTest(properties = "kintsugi.agent.route=local")
 class LiveTimeToolTest {
 
 	@TestBean

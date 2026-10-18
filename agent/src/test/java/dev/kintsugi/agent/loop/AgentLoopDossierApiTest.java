@@ -30,7 +30,8 @@ import dev.kintsugi.agent.lab.LabTools;
  * {@code DOSSIER} step shows the rendered dossier, with its calls only with {@code ?full=true} (agent spec, "Dossier
  * mode", "Read an incident").
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "kintsugi.agent.mode=dossier")
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT,
+		properties = { "kintsugi.agent.mode=dossier", "kintsugi.agent.route=local" })
 class AgentLoopDossierApiTest {
 
 	private static final JsonMapper JSON = JsonMapper.shared();

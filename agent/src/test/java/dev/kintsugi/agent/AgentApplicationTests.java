@@ -16,7 +16,12 @@ import dev.kintsugi.agent.loop.AgentRoute;
 import dev.kintsugi.agent.loop.ModelRouter;
 import dev.kintsugi.agent.loop.ModelTask;
 
-@SpringBootTest
+/**
+ * The application as it starts on the local route. The route is set here, above the shell's variables, so a developer's
+ * {@code KINTSUGI_AGENT_ROUTE=cloud} cannot change it; {@code RouteSelectionTest} shows that the packaged default is
+ * the local route.
+ */
+@SpringBootTest(properties = "kintsugi.agent.route=local")
 class AgentApplicationTests {
 
 	@Autowired
@@ -46,9 +51,9 @@ class AgentApplicationTests {
 		assertThat(options.getNumCtx()).isEqualTo(8192);
 	}
 
-	/** With no route set, the route is local: Ollama's model, and Anthropic's auto-configuration stays off. */
+	/** The local route is Ollama's model, and Anthropic's auto-configuration stays off. */
 	@Test
-	void theDefaultRouteIsTheLocalOne() {
+	void theLocalRouteIsOllamasAndAnthropicStaysOff() {
 		assertThat(router.route(ModelTask.ACT).route()).isEqualTo(AgentRoute.LOCAL);
 		assertThat(router.route(ModelTask.REPORT).chatModel()).isSameAs(chatModel);
 		assertThat(context.getBeanNamesForType(AnthropicChatModel.class)).isEmpty();

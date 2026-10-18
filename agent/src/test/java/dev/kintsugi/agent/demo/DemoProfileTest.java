@@ -28,7 +28,7 @@ import dev.kintsugi.agent.incident.IncidentController;
  * The {@code demo} profile stays what it was before the incident API: a one-shot question, with no web server and no
  * database, so it runs with Ollama alone.
  */
-@SpringBootTest
+@SpringBootTest(properties = "kintsugi.agent.route=local")
 @ActiveProfiles("demo")
 @ExtendWith(OutputCaptureExtension.class)
 class DemoProfileTest {

@@ -203,6 +203,13 @@ class AgentLoopDossierModeTest {
 				+ "phases end and the run moves to CONCLUDE");
 		assertThat(last(this.model.prompts().get(1))).contains("Tool calls left: 2 in this phase, 2 in the incident");
 		assertThat(this.lab.calls()).hasSize(29 + 6);
+		// Only the model's steps count tokens: the dossier, the tool calls and the budget's step made no model call.
+		assertThat(AgentDatabase.admin()
+			.sql("SELECT kind FROM incident_steps WHERE incident_id = ? AND (tokens IS NOT NULL"
+					+ " OR prompt_tokens IS NOT NULL OR completion_tokens IS NOT NULL) ORDER BY step_no")
+			.param(this.id)
+			.query(String.class)
+			.list()).containsExactly("ACT", "ACT", "REPORT");
 	}
 
 	@Test

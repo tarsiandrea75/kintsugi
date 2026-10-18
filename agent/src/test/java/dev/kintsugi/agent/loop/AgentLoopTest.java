@@ -169,9 +169,31 @@ class AgentLoopTest {
 		for (int stepNo : new int[] { 1, 2, 4 }) {
 			assertThat(step(stepNo)).as("step " + stepNo)
 				.containsEntry("prompt_tokens", null)
-				.containsEntry("completion_tokens", null);
+				.containsEntry("completion_tokens", null)
+				.containsEntry("tokens", null);
 		}
-		assertThat(step(3)).containsEntry("prompt_tokens", 10).containsEntry("completion_tokens", 5);
+		assertThat(step(3)).containsEntry("prompt_tokens", 10)
+			.containsEntry("completion_tokens", 5)
+			.containsEntry("tokens", 15);
+	}
+
+	@Test
+	void aPartlyCountedCallStoresOnlyTheCountsTheProviderMade() {
+		// Spring AI's DefaultUsage turns a missing count into 0, so a 0 beside a positive count is a count the provider
+		// did not make: it is stored as null, and the total is the one count made.
+		this.model.metered(new DefaultUsage(1234, null), "")
+			.metered(new DefaultUsage(0, 56), "")
+			.quiet()
+			.metered(null, unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(step(1)).containsEntry("prompt_tokens", 1234)
+			.containsEntry("completion_tokens", null)
+			.containsEntry("tokens", 1234);
+		assertThat(step(2)).containsEntry("prompt_tokens", null)
+			.containsEntry("completion_tokens", 56)
+			.containsEntry("tokens", 56);
 	}
 
 	@Test
@@ -441,6 +463,9 @@ class AgentLoopTest {
 			.contains("Tool calls left: 4 in this phase, 6 in the incident");
 		assertThat(kinds()).contains("BUDGET:KNOWLEDGE").endsWith("BUDGET:KNOWLEDGE", "REPORT:CONCLUDE");
 		assertThat(this.model.calls()).isEqualTo(4);
+		// A refused call and the budget's step made no model call, so they count no tokens.
+		assertThat(stepsWithTokens("TOOL_CALL")).isZero();
+		assertThat(stepsWithTokens("BUDGET")).isZero();
 	}
 
 	@Test
@@ -1121,6 +1146,17 @@ class AgentLoopTest {
 			.param(this.id)
 			.query(String.class)
 			.list();
+	}
+
+	/** How many of this incident's steps of this kind store a token count; at least one such step must exist. */
+	private int stepsWithTokens(String kind) {
+		assertThat(kinds()).anyMatch(step -> step.startsWith(kind + ":"));
+		return AgentDatabase.admin()
+			.sql("SELECT count(*) FROM incident_steps WHERE incident_id = ? AND kind = ? AND (tokens IS NOT NULL"
+					+ " OR prompt_tokens IS NOT NULL OR completion_tokens IS NOT NULL)")
+			.params(this.id, kind)
+			.query(Integer.class)
+			.single();
 	}
 
 	private Map<String, Object> step(int stepNo) {

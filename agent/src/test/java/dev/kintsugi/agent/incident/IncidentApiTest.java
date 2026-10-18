@@ -35,7 +35,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /** {@code POST /incidents} and {@code GET /incidents/{id}} over HTTP (agent spec, "Open an incident", "Read an incident"). */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "kintsugi.agent.route=local")
 class IncidentApiTest {
 
 	private static final String VALID = "{\"symptom\": \"Checkout orders stay pending for a long time\", \"sinceMinutes\": 15}";

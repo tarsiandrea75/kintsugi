@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,9 +31,11 @@ public sealed interface ModelRoute permits OllamaRoute, AnthropicRoute {
 
 	/**
 	 * The options of one call: the route's settings, the answer's cap, the tool definitions offered (none for the
-	 * report) and, for the report, the JSON schema the answer is constrained by.
+	 * report) and, for the report, the JSON schema the answer is constrained by. {@code wait} is how long the loop
+	 * waits for this call, its deadline or the incident's time left, whichever ends first; a route whose client does
+	 * not stop when the loop interrupts the call bounds the call by it.
 	 */
-	ChatOptions options(int answerCap, List<ToolCallback> tools, String outputSchema);
+	ChatOptions options(int answerCap, Duration wait, List<ToolCallback> tools, String outputSchema);
 
 	/** The options of the warm-up request, or none when the route has no model to load. */
 	Optional<ChatOptions> warmUpOptions();

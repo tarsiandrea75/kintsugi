@@ -19,7 +19,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * restarted during a run"). The row is seeded before this class's context starts; the property below gives the class
  * a context of its own, so the start under test is really this one.
  */
-@SpringBootTest(properties = "kintsugi.test.context=restart-recovery")
+@SpringBootTest(properties = { "kintsugi.test.context=restart-recovery", "kintsugi.agent.route=local" })
 @DirtiesContext
 class RestartRecoveryTest {
 

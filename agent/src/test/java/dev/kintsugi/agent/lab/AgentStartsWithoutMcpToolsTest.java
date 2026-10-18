@@ -19,7 +19,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * The agent starts while mcp-tools is down: the MCP client is created uninitialized, and a call while mcp-tools is
  * unreachable is a {@code CLIENT_ERROR}, not a failed start (agent spec, "MCP client").
  */
-@SpringBootTest
+@SpringBootTest(properties = "kintsugi.agent.route=local")
 class AgentStartsWithoutMcpToolsTest {
 
 	@Autowired

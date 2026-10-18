@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,6 +19,11 @@ import org.springframework.ai.tool.ToolCallback;
  * <li>Thinking disabled: thinking tokens count against {@code max_tokens}, so with it the answer caps would no longer
  * mean what they mean on the local route.</li>
  * <li>{@code max_tokens} is the local route's {@code num_predict} cap for the same call.</li>
+ * <li>A per-call timeout, the loop's wait plus {@link #ABORT_GRACE}. The SDK's OkHttp call blocks in a socket read
+ * that ignores the interruption the loop sends when it stops waiting, so without it an abandoned call would hold its
+ * connection, and the provider would go on writing, until the client's timeout ({@code spring.ai.anthropic.timeout},
+ * the longest deadline). Spring AI passes the option to the SDK as the call's {@code RequestOptions}, and OkHttp's
+ * call timeout cancels the call. The grace keeps the loop's deadline, not the client, the one that ends a call.</li>
  * </ul>
  *
  * @param model the model's name, {@code kintsugi.agent.cloud.name}
@@ -28,17 +34,21 @@ import org.springframework.ai.tool.ToolCallback;
 public record AnthropicRoute(String model, ChatModel chatModel, CallTimeouts callTimeouts,
 		NumPredict numPredict) implements ModelRoute {
 
+	/** How long after the loop stops waiting the client cancels the call. */
+	static final Duration ABORT_GRACE = Duration.ofSeconds(1);
+
 	@Override
 	public AgentRoute route() {
 		return AgentRoute.CLOUD;
 	}
 
 	@Override
-	public ChatOptions options(int answerCap, List<ToolCallback> tools, String outputSchema) {
+	public ChatOptions options(int answerCap, Duration wait, List<ToolCallback> tools, String outputSchema) {
 		AnthropicChatOptions.Builder options = AnthropicChatOptions.builder()
 			.model(this.model)
 			.maxTokens(answerCap)
 			.thinkingDisabled()
+			.timeout(wait.plus(ABORT_GRACE))
 			.toolCallbacks(tools);
 		if (outputSchema != null) {
 			options.outputSchema(outputSchema);

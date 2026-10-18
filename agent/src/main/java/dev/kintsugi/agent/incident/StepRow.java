@@ -10,7 +10,7 @@ import java.time.Instant;
  * @param kind {@code PLAN}, {@code ACT}, {@code TOOL_CALL}, {@code REPORT}, {@code BUDGET} or {@code DOSSIER}
  * @param phase the phase the step ran in; {@code DOSSIER} for the dossier step, before the first phase
  * @param model the model that answered, or that requested the tool call
- * @param tokens the tokens of a model answer
+ * @param tokens the total tokens the provider reported for an {@code ACT} or {@code REPORT} call, or null
  * @param promptTokens the prompt tokens the provider reported for an {@code ACT} or {@code REPORT} call, or null
  * @param completionTokens the completion tokens the provider reported for an {@code ACT} or {@code REPORT} call, or
  *     null

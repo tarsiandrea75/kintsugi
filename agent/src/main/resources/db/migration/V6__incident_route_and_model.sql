@@ -4,9 +4,11 @@
 ALTER TABLE incidents ADD COLUMN route TEXT CHECK (route IN ('local', 'cloud'));
 ALTER TABLE incidents ADD COLUMN model TEXT;
 
--- Every earlier run was local; its model is the one its steps name.
-UPDATE incidents SET route = 'local' WHERE mode IS NOT NULL;
+-- Every earlier run was local; its model is the one its steps name. A run started when it wrote a step: V4 set the
+-- mode on every earlier incident, the never-started ones included, so the mode cannot tell.
+UPDATE incidents SET route = 'local'
+WHERE EXISTS (SELECT 1 FROM incident_steps s WHERE s.incident_id = incidents.id);
 UPDATE incidents SET model = (SELECT s.model FROM incident_steps s
                               WHERE s.incident_id = incidents.id AND s.model IS NOT NULL
                               ORDER BY s.step_no LIMIT 1)
-WHERE mode IS NOT NULL;
+WHERE EXISTS (SELECT 1 FROM incident_steps s WHERE s.incident_id = incidents.id);

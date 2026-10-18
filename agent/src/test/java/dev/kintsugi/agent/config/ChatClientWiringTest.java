@@ -30,7 +30,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-@SpringBootTest
+@SpringBootTest(properties = "kintsugi.agent.route=local")
 class ChatClientWiringTest {
 
 	@MockitoBean

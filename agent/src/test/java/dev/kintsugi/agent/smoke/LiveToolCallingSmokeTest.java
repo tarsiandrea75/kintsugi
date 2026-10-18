@@ -41,7 +41,7 @@ import org.springframework.test.context.bean.override.convention.TestBean;
  * If Ollama is down, every prompt fails and so does the adoption bar; nothing is skipped.
  */
 @Tag("live")
-@SpringBootTest
+@SpringBootTest(properties = "kintsugi.agent.route=local")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class LiveToolCallingSmokeTest {
 

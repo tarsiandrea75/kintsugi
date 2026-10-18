@@ -567,7 +567,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * One model call, within the model-call budget and the time budgets, its answer capped by the route's
 	 * {@code num_predict} for the task (the larger cap when the answer carries a plan). A call never waits past its task's
 	 * deadline ({@link CallTimeouts}) or the incident's time left, whichever ends first; one it stops waiting for is
-	 * interrupted, which closes its HTTP connection, so that Ollama stops working on it.
+	 * interrupted, which closes its HTTP connection, so that Ollama stops working on it. The cloud client ignores the
+	 * interruption, so the route bounds the call by the same wait ({@link AnthropicRoute}). The workers are a cached
+	 * pool, so a call still ending never delays the next one.
 	 */
 	private Answer call(Run run, ModelTask task, Phase phase, boolean withPlan, List<Message> messages,
 			List<ToolCallback> tools, String outputSchema) {
@@ -579,11 +581,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		run.modelCalls++;
 		ModelRoute route = this.router.route(task);
 		int cap = route.numPredict().of(task, withPlan);
-		Prompt prompt = new Prompt(messages, route.options(cap, tools, outputSchema));
 		Duration deadline = route.callTimeouts().of(task);
 		Duration incidentLeft = this.settings.incidentTimeout().minus(elapsed(run));
 		boolean incidentBound = incidentLeft.compareTo(deadline) < 0;
 		Duration limit = incidentBound ? incidentLeft : deadline;
+		Prompt prompt = new Prompt(messages, route.options(cap, limit, tools, outputSchema));
 		String what = "model call " + task + " in " + phase;
 		long start = System.nanoTime();
 		Future<ChatResponse> future = this.modelCalls.submit(() -> route.chatModel().call(prompt));
@@ -616,8 +618,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		boolean cut = response.getResult().getMetadata() != null
 				&& "length".equalsIgnoreCase(response.getResult().getMetadata().getFinishReason());
 		return new Answer(message, message.getText() == null ? "" : message.getText(),
-				usage == null ? null : usage.getTotalTokens(), counted ? usage.getPromptTokens() : null,
-				counted ? usage.getCompletionTokens() : null, route.model(),
+				counted ? usage.getTotalTokens() : null, counted ? countOrNull(usage.getPromptTokens()) : null,
+				counted ? countOrNull(usage.getCompletionTokens()) : null, route.model(),
 				(int) ((System.nanoTime() - start) / 1_000_000), cut, cap);
 	}
 
@@ -625,10 +627,18 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * Whether the provider counted the call's tokens. A usage that counts none is not a measurement: Spring AI reports
 	 * {@code EmptyUsage}, with 0 and 0, when a response carries no usage, and Ollama's {@code DefaultUsage} turns a
 	 * missing {@code prompt_eval_count} or {@code eval_count} into 0. A real call always reads some prompt, so the step
-	 * then stores both counts as null rather than as 0.
+	 * then stores both counts and the total as null rather than as 0, which would read as a free call.
 	 */
 	private static boolean counted(Usage usage) {
 		return usage != null && (positive(usage.getPromptTokens()) || positive(usage.getCompletionTokens()));
+	}
+
+	/**
+	 * One count of a counted usage: null unless positive. Beside a positive count a 0 is one that {@code DefaultUsage}
+	 * put in place of a missing count, since a real call reads some prompt and writes at least one token.
+	 */
+	private static Integer countOrNull(Integer count) {
+		return positive(count) ? count : null;
 	}
 
 	private static boolean positive(Integer count) {
@@ -858,8 +868,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. {@code promptTokens} and
-	 * {@code completionTokens} are the provider's counts, null when it counted none.
+	 * A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. {@code tokens},
+	 * {@code promptTokens} and {@code completionTokens} are the provider's total and counts, each null when it was not
+	 * counted.
 	 */
 	private record Answer(AssistantMessage message, String text, Integer tokens, Integer promptTokens,
 			Integer completionTokens, String model, int latencyMs, boolean cut, int cap) {

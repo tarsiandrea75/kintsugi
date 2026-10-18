@@ -33,7 +33,7 @@ import dev.kintsugi.agent.lab.LabTools;
  * The web profile runs the loop behind the incident API: {@code POST /incidents}, then {@code GET} until the run
  * ends, with a scripted model and a fake lab (agent spec, "Open an incident", "Read an incident").
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "kintsugi.agent.route=local")
 class AgentLoopApiTest {
 
 	private static final JsonMapper JSON = JsonMapper.shared();

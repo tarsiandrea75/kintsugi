@@ -37,8 +37,8 @@ class ModelRouteTest {
 
 	@Test
 	void theLocalRoutesCallOptionsAreThoseOfToday() {
-		ChatOptions act = this.local.options(384, TOOLS, null);
-		ChatOptions report = this.local.options(512, List.of(), SCHEMA);
+		ChatOptions act = this.local.options(384, Duration.ofSeconds(420), TOOLS, null);
+		ChatOptions report = this.local.options(512, Duration.ofSeconds(420), List.of(), SCHEMA);
 
 		assertThat(act).isEqualTo(OllamaChatOptions.builder()
 			.model("granite4.1:8b")
@@ -77,7 +77,8 @@ class ModelRouteTest {
 	@Test
 	void theCloudRoutesOptionsHaveNoTemperatureNoThinkingAndTheSameCaps() {
 		for (int cap : List.of(CAPS.firstAct(), CAPS.act(), CAPS.report())) {
-			AnthropicChatOptions options = (AnthropicChatOptions) this.cloud.options(cap, TOOLS, null);
+			AnthropicChatOptions options = (AnthropicChatOptions) this.cloud.options(cap, Duration.ofSeconds(60), TOOLS,
+					null);
 
 			assertThat(options.getModel()).isEqualTo("claude-haiku-5-5");
 			assertThat(options.getTemperature()).isNull();
@@ -86,17 +87,22 @@ class ModelRouteTest {
 			assertThat(options.getMaxTokens()).isEqualTo(cap);
 			assertThat(options.getToolCallbacks()).isEqualTo(TOOLS);
 			assertThat(options.getOutputSchema()).isNull();
+			assertThat(options.getTimeout()).isEqualTo(Duration.ofSeconds(61));
 		}
 	}
 
 	@Test
 	void theCloudRoutesReportCarriesTheSchema() {
-		AnthropicChatOptions options = (AnthropicChatOptions) this.cloud.options(512, List.of(), SCHEMA);
+		AnthropicChatOptions options = (AnthropicChatOptions) this.cloud.options(512, Duration.ofMillis(42_500),
+				List.of(), SCHEMA);
 
 		assertThat(options.getMaxTokens()).isEqualTo(512);
 		assertThat(options.getThinking().isDisabled()).isTrue();
 		assertThat(options.getTemperature()).isNull();
 		assertThat(options.getToolCallbacks()).isEmpty();
+		// The loop's wait, here the incident's time left, plus the grace: the client cancels the call just after the
+		// loop stops waiting for it.
+		assertThat(options.getTimeout()).isEqualTo(Duration.ofMillis(43_500));
 		JsonMapper json = JsonMapper.shared();
 		assertThat(json.readTree(options.getOutputSchema())).isEqualTo(json.readTree(SCHEMA));
 	}
