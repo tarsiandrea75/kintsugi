@@ -502,6 +502,8 @@ The human decided the taxonomy, the context strategy and the trigger on 2026-10-
 
 - 2026-10-18: first runs on the cloud development route (ADR-012, `odd/tasks/cloud-route.md` T5), explorer on `claude-haiku-5-5`: 2/3 (F1 and F2 MATCH, F3 MISS as `payment-service|DEPENDENCY_REJECTING`), each incident in about 30 s for about $0.005. They do not count for M2, which stays on the local route; the M2 check stays open.
 
+- 2026-10-18: the cloud comparison (`odd/tasks/cloud-route.md` T5, 3 rounds on `claude-haiku-5-5`): explorer 5/9, dossier 3/9, F3 0/6, every incident in 15-31 s, $0.0957 for the batch. They do not count for M2; the M2 check stays open.
+
 ## Next step
 
 T5c3 stays open on F3 only. For the human: whether to change prompt or tools toward order-side evidence (close to teaching the test), or record F3 as a known limit of `granite4.1:8b` on CPU and close the check at 2/3; and the replay harness.

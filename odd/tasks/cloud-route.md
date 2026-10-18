@@ -85,7 +85,7 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
 
   Tests first: the local options unchanged, the cloud options, the start failures. Living spec; ADR-010 "Amended in cloud-route T3". Branch `-03`. Route: delegated writer.
 - [x] **T4 — Scripts and compose:** `KINTSUGI_AGENT_ROUTE` and `ANTHROPIC_API_KEY` in compose; `verify-agent.sh --route`, the key check, the route in score and summary, `agent_verdict` extended and `test-lib.sh` cases; `compare-agent-modes.sh --route`; `docs/setup.md`. Branch `-04`. Route: inline or delegated writer, by size.
-- [ ] **T5 — Live runs on the cloud route,** each batch with the human's go-ahead:
+- [x] **T5 — Live runs on the cloud route,** each batch with the human's go-ahead:
   - a smoke run, explorer, F1-F3, recording latencies, tokens and cost;
   - then `compare-agent-modes.sh --route cloud` with the number of rounds the human decides.
 
@@ -118,6 +118,14 @@ Add the development route of ADR-012 (Accepted 2026-10-18): the agent's loop can
   - Tool calls with a missing required argument (5 in the run, e.g. `status_summary` without `table`, `search_logs` without `service`): mcp-tools' input validator answers with a plain-text error, which `McpLabTools.outcome` reads as `CLIENT_ERROR` "the result is not JSON", so the model is not told which argument was missing. Haiku retried with the arguments each time. Follow-up for both routes: map a validation failure to `INVALID_PARAMETER` with mcp-tools' message.
   - Total spend so far on the cloud route: about $0.02 of the human's $5.
 
+- 2026-10-18: T5 second batch, with the human's go-ahead for 3 rounds: `compare-agent-modes.sh --route cloud --runs 3`, explorer and dossier alternating (`infra/scripts/out/verify-agent-20261018T203408Z-explorer-cloud`, `-210054Z-dossier-cloud`, `-212739Z-explorer-cloud`, `-215430Z-dossier-cloud`, `-222116Z-explorer-cloud`, `-224841Z-dossier-cloud`). Every run exited non-zero (at least one miss each), as expected.
+  - **Explorer 5/9:** F1 2/3 (one miss as `payment-service|DEPENDENCY_LATENCY`), F2 3/3, F3 0/3 (`gateway-mock|DEPENDENCY_LATENCY` twice, `payment-service|DEPENDENCY_REJECTING` once).
+  - **Dossier 3/9:** F1 1/3 (two misses as `payment-service|DEPENDENCY_LATENCY`: the right category, the wrong service), F2 2/3 (one `INVALID_REPORT`, report invalid twice), F3 0/3 (`payment-service|DEPENDENCY_REJECTING` every time).
+  - Every incident ended in 15-31 s; 11-21 steps per incident. No timeout on either mode: on this route the dossier's latency problem of `evidence-dossier` T6b is gone, and the dossier still scores lower than explorer.
+  - **F3 is 0/6 here and 0/1 in the smoke run** (0/7 on the cloud route), as on the local route. The agent never names `order-service|CONFIGURATION`: it blames the callee or the gateway. A design question for the agent (the caller's own configuration as a candidate cause), not a route or mode problem.
+  - Tokens: 754,155 prompt and 40,631 completion; **$0.0957** for the batch (explorer runs $0.0132-$0.0158, dossier runs $0.0160-$0.0185: the dossier reads more prompt tokens and writes fewer). Within the $0.10-$0.15 estimate.
+  - Total spend so far on the cloud route: about $0.115 of the human's $5.
+
 ## Next step
 
-T5, second batch: `compare-agent-modes.sh --route cloud`, explorer and dossier alternating. Waiting for the human's go-ahead and the number of rounds (3 rounds: 6 runs, about 3 hours of wall clock for the 11-minute spacing, about $0.10 to $0.15).
+The human decides what follows T5: the F3 design question (0/7 on the cloud route, 0/3 per mode on the local route), the dossier mode (3/9 against explorer's 5/9 on the cloud route, with no latency limit), and the follow-ups above (validation errors mapped to `INVALID_PARAMETER`, `AnthropicSchema` edge cases, `KINTSUGI_AGENT_MODE` leaking into tests). The `infra/.env.example` line stays a human action.
