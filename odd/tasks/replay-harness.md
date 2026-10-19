@@ -1,0 +1,65 @@
+# Feature: replay harness
+
+## Objective
+
+Score a prompt or loop change on many samples per fault in minutes, without the lab: record each fault's tool outputs once from a real run, then run the real agent loop against them N times and score every sample against the recorded truth.
+
+## Problem
+
+One lab round takes about 27 minutes per run on the cloud route (11 minutes of spacing between faults) and hours on the local route, so every comparison so far rests on one to three samples per fault and mode. Rates swing between rounds of the same code (`f3-caller-config` T5 explorer 5/6, `evidence-settling` T3 explorer 1/3), so a change cannot be told from noise. ADR-012 (line 37) names the replay harness as the complement of the cloud route: the cloud route removes the model's wall-clock, the replay removes the lab's.
+
+## Why
+
+The project rule is "the LLM proposes, deterministic code verifies": a prompt change is accepted on a measured rate, and a rate needs samples. Replaying only the model calls over fixed evidence also removes the lab's variance (timing, leftovers), so what remains is the model's.
+
+## Design
+
+- **Seam: `LabTools`** (`agent/.../lab/LabTools.java`). A new `ReplayLabTools implements LabTools` serves recorded outputs; `AgentLoop`, `DossierGatherer`, `Prompts`, `ReportCheck` and the routes run unchanged, so the replay measures the real agent.
+- **Recording:** a fault's recording is one or more incident JSON files saved by `verify-agent.sh` (`GET /incidents/{id}?full=true`), which hold every `TOOL_CALL` step's post-cap args and full output and the `DOSSIER` step's array of calls, plus the truth (`service|category`, from `F?-score.txt`) and the tool definitions (`tools-list.json`). A script copies them into `agent/src/test/resources/replay/<recording>/`.
+- **Keying:** exact match on (tool, canonical JSON of the post-cap args), with the same caps `McpLabTools` applies. The dossier's calls are deterministic given `sinceMinutes`, so dossier gathering replays fully. Calls the model chooses (explorer mode, dossier `INVESTIGATE`/`KNOWLEDGE`) may be unrecorded.
+- **Unrecorded call:** answered as a `CLIENT_ERROR` "not recorded in this replay" and counted. Each sample reports its coverage (recorded calls / calls); a low-coverage sample is flagged, never silently scored. No nearest-match guessing.
+- **Clock:** a `Clock.offset` so that "now" is the recorded incident's start: windows and restart times computed from it stay consistent with the recorded timestamps, and the loop's time budget still runs.
+- **Driver:** a JUnit test tagged `replay`, excluded from the default build, run on demand with the route, mode, recordings and N as system properties; it uses the existing Testcontainers Postgres (`AgentDatabase`) and the real `ChatModel` for the route. It writes per-sample JSON and a `summary.tsv` (fault, mode, route, sample, verdict, coverage, tokens) under `infra/scripts/out/replay-<UTC time>/`.
+- **Truth and verdict:** the same rule as `agent_verdict` in `lib.sh`: the reported `service|category` equals the truth, else MISS.
+
+Out of scope: Python aggregation in `evals/` (the TSV is enough at first); matching free-text `search_runbooks` queries by similarity; replaying model calls (only tools are replayed).
+
+## Constraints
+
+- No API key read, printed or committed; every cloud batch needs the human's go-ahead and a recorded cost.
+- The default `./mvnw test` stays lab-free and model-free: the replay test runs only when asked.
+- Recordings are lab output, not secrets; check them for keys before committing.
+- Tests first; living spec in the agent spec.
+
+## Tasks
+
+- [x] **T1 — This document** and its Engram mirror; route: inline.
+- [ ] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
+- [ ] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth and the tool listing into `agent/src/test/resources/replay/`, refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
+- [ ] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
+- [ ] **T5 — First measurement.** With the human's go-ahead: N=5 per fault per mode on the cloud route on the current prompt (about 30 samples, an estimated $0.10–0.15); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
+
+## Acceptance criteria
+
+- T2: a recorded call returns its recorded output and outcome; an unrecorded one returns `CLIENT_ERROR` and raises the miss count; caps match `McpLabTools`; `./mvnw test` passes.
+- T3: the script copies a run's three faults with their truth and refuses a key-like string.
+- T4: `./mvnw test` without the tag runs no replay; with it, one sample per fault produces a scored line with coverage; dossier gathering has full coverage.
+- T5: rates per fault and mode with N=5, coverage per mode, cost recorded.
+
+## Checks
+
+- `cd agent && ./mvnw test` (Testcontainers needs Docker).
+- `bash infra/scripts/test-lib.sh`.
+- Per-commit native review assessment.
+
+## Delivery
+
+Forecast about 700 authored lines (Java, tests, script, spec, recordings excluded as data): over the 400-line budget, strategy `feature-branch-chain` (standing choice). Slices: T2 (with its spec), T3, T4+T5. Branch `feat/replay-harness`, from `feat/evidence-settling` (`2a57ac5`).
+
+## Progress
+
+- 2026-10-19: T1, after a read-only mapping: no earlier replay design exists beyond ADR-012:37; `LabTools` is the seam; recorded incidents hold post-cap args and full outputs; truth lives only in `F?-score.txt`; the cloud route sets no temperature, so samples measure its sampling variance.
+
+## Next step
+
+T2, after the human's go-ahead on this plan.
