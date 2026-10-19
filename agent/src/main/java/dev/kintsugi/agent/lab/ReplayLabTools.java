@@ -67,7 +67,15 @@ public class ReplayLabTools implements LabTools {
 							step.get("toolOutput"));
 				}
 				else if (kind.equals("DOSSIER")) {
-					for (JsonNode call : dossierCalls(step.get("toolOutput"))) {
+					JsonNode calls;
+					try {
+						calls = dossierCalls(step.get("toolOutput"));
+					}
+					catch (JacksonException unreadable) {
+						throw new IllegalArgumentException("incident " + incident.path("id").asString("(no id)")
+								+ ": its dossier step holds no readable JSON array of calls", unreadable);
+					}
+					for (JsonNode call : calls) {
 						record(call.path("tool").asString(""), call.get("args"), call.get("outcome"), call.get("output"));
 					}
 				}
@@ -154,7 +162,8 @@ public class ReplayLabTools implements LabTools {
 			return;
 		}
 		Recorded recorded = new Recorded(output.asString(), replayed);
-		Recorded first = this.recordings.putIfAbsent(key(tool, object), recorded);
+		// Capped like a call, so both sides of the lookup hold the arguments as mcp-tools receives them.
+		Recorded first = this.recordings.putIfAbsent(key(tool, McpLabTools.capped(tool, object)), recorded);
 		if (first != null && !first.equals(recorded)) {
 			this.conflicts++;
 		}

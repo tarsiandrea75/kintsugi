@@ -110,6 +110,40 @@ class ReplayLabToolsTest {
 	}
 
 	@Test
+	void aRecordingIsCappedLikeTheCallsThatMeetIt() {
+		// A recorded call without the cap (or above it) is keyed as mcp-tools received it, so a capped call finds it.
+		ReplayLabTools tools = new ReplayLabTools(toolsList(), List.of(incident(toolCall("search_logs",
+				"{\"service\":\"payment-service\",\"sinceMinutes\":12,\"limit\":50}", "OK", "{\"outcome\":\"OK\"}"))));
+
+		ToolResult result = tools.call("search_logs", SEARCH_LOGS_ARGS);
+
+		assertThat(result.outcome()).isEqualTo(ToolOutcome.OK);
+		assertThat(tools.coverage()).isEqualTo(1.0);
+	}
+
+	@Test
+	void aRecordedClientErrorIsNotReplayed() {
+		// A CLIENT_ERROR is the transport failing, not the lab's answer, so the call counts as unrecorded.
+		ReplayLabTools tools = new ReplayLabTools(toolsList(), List.of(incident(toolCall("service_restarts",
+				"{\"sinceMinutes\":12}", "CLIENT_ERROR", "mcp-tools call failed: timeout"))));
+
+		ToolResult result = tools.call("service_restarts", "{\"sinceMinutes\":12}");
+
+		assertThat(result.outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
+		assertThat(tools.unrecordedCalls()).isEqualTo(1);
+	}
+
+	@Test
+	void anUnreadableDossierStepNamesTheIncident() {
+		ObjectNode dossier = JSON.createObjectNode().put("kind", "DOSSIER").put("toolOutput", "[{not json");
+		ObjectNode incident = incident(dossier).put("id", "8c1e");
+
+		assertThatIllegalArgumentException().isThrownBy(() -> new ReplayLabTools(toolsList(), List.of(incident)))
+			.withMessageContaining("8c1e")
+			.withMessageContaining("dossier");
+	}
+
+	@Test
 	void aStepWithoutOutputIsNotRecorded() throws Exception {
 		// Step 5 of incident-a is a refused count_logs: it never reached mcp-tools, so it has no output to replay.
 		ReplayLabTools tools = replay("incident-a.json");
@@ -201,6 +235,30 @@ class ReplayLabToolsTest {
 		assertThatExceptionOfType(LabToolsUnavailableException.class).isThrownBy(() -> tools.toolsFor(Phase.KNOWLEDGE))
 			.withMessageContaining("search_runbooks");
 		assertThat(names(tools.toolsFor(Phase.TRIAGE))).hasSize(3);
+	}
+
+	private static JsonNode toolsList() {
+		try {
+			return JSON.readTree(path("/mcp-outputs/tools-list.json").toFile());
+		}
+		catch (URISyntaxException missing) {
+			throw new IllegalStateException(missing);
+		}
+	}
+
+	private static ObjectNode toolCall(String tool, String args, String outcome, String output) {
+		return JSON.createObjectNode()
+			.put("kind", "TOOL_CALL")
+			.put("toolName", tool)
+			.put("toolOutcome", outcome)
+			.put("toolOutput", output)
+			.set("toolArgs", JSON.readTree(args));
+	}
+
+	private static ObjectNode incident(ObjectNode step) {
+		ObjectNode incident = JSON.createObjectNode();
+		incident.putArray("steps").add(step);
+		return incident;
 	}
 
 	private static ReplayLabTools replay(String... incidents) throws URISyntaxException {
