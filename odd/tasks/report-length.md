@@ -27,8 +27,8 @@ A cut report is a lost diagnosis even when the cause is right. The 512 cap is ju
 
 - [x] **T1 — This document** and its Engram mirror; route: inline.
 - [x] **T2 — Cloud caps plumbing (C).** `CloudRouteProperties` gains `numPredict`, `LoopConfig` passes it to `AnthropicRoute`, `application.yaml` sets it equal to the local caps; tests first; spec "Answer caps". Route: delegated writer.
-- [ ] **T3 — Measure C:** the replay with the cloud report cap at 768. Route: parent (runs).
-- [ ] **T4 — At most 3 evidence items (B):** `Prompts` report instruction; tests first in `PromptsTest`; spec. Route: inline or delegated by size.
+- [x] **T3 — Measure C:** the replay with the cloud report cap at 768. Route: parent (runs).
+- [x] **T4 — At most 3 evidence items (B):** `Prompts` report instruction; tests first in `PromptsTest`; spec. Route: inline or delegated by size.
 - [ ] **T5 — Measure B:** the replay with the default cap. Then the human decides what to keep. Route: parent (runs).
 
 ## Acceptance criteria
@@ -51,6 +51,9 @@ Forecast about 120 authored lines, one slice. Branch `feat/report-length`, from 
 
 - 2026-10-19: T2 done in `c1fcb9b`; review (standing consent granted) approved and acknowledged. Its WARNING (the yaml defaults were not asserted) fixed with `CloudRouteDefaultCapsTest`: no override gives 384, 160, 512 (a regression guard: green from the start, as the yaml already held them).
 
+- 2026-10-19: T3, with the human's go-ahead: `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT=768 replay-agent.sh --samples 5` on `49f32d7` (`infra/scripts/out/replay-20261019T225038Z-cloud`). The override took effect (a report used 586 tokens). **F1 5/5, F2 5/5, F3 4/5** (one `payment-service|DEPENDENCY_REJECTING`); 0 invalid runs, 0 cuts; report tokens median 393, max 586, 2 of 15 at 485+; evidence items 2:4, 3:9, 4:2. Baseline (`221420Z`, cap 512): F1 4/5, F2 5/5, F3 5/5; 1 invalid run; median 447.5, max 512, 6 of 16 at 485+. Cost **$0.0905**.
+- 2026-10-19: T4 (route: inline, one prompt line, its test and the spec row): the report task asks for 1 to 3 evidence items; `ReportCheck` still takes 5. RED: `theReportAsksForAtMostThreeEvidenceItems` failed (20 tests, 1 failure); GREEN: full suite 422/0/0.
+
 ## Next step
 
-T3: the replay with `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT=768`.
+T5: the replay with the default cap (512).

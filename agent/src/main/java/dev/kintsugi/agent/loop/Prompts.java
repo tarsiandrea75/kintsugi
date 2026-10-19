@@ -113,7 +113,7 @@ final class Prompts {
 	private static final String REPORT_TASK = """
 			Task: write the final report as a JSON object with these fields. rootCauseService and \
 			rootCauseCategory, from the values listed in the system message. summary: 1 to 500 characters. \
-			confidence: a number from 0 to 1. evidence: 1 to 5 items {toolCallId, tool, quote, why}, or none \
+			confidence: a number from 0 to 1. evidence: 1 to 3 items {toolCallId, tool, quote, why}, or none \
 			when both causes are UNKNOWN; toolCallId and tool come from a summary's header, and why is at most 200 \
 			characters. quote is a short fragment, at least %d and at most %d characters, copied exactly from \
 			that tool call's result: only its distinctive part, such as an exception name, a status or an error \

@@ -861,7 +861,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN` |
 | `summary` | 1 to 500 characters |
 | `confidence` | number, 0 to 1 |
-| `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
+| `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN`. The report task asks for 1 to 3 (report-length B): cloud reports with a fourth item ran into their 512-token cap, and the check still accepts up to 5 |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step; in dossier mode also `"dossier"` **(T5b)** |
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |
 | `evidence[].quote` | 8 to 160 characters (300 before T5c5): a short verbatim fragment, not a whole line |
