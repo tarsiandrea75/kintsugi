@@ -49,6 +49,8 @@ Forecast about 120 authored lines, one slice. Branch `feat/report-length`, from 
 - 2026-10-19: T1.
 - 2026-10-19: T2, route delegated writer (the change spans properties, config, yaml, tests and spec). `CloudRouteProperties` gains a required `numPredict` (fails fast when missing, like `call-timeout`; no fallback to the local caps), bound from `kintsugi.agent.cloud.num-predict` (384, 160, 512); `LoopConfig` passes it to `AnthropicRoute`. Tests first: `CloudRouteCapsTest` RED (`report=512`, expected 768), then GREEN with `CloudRoutePropertiesTest` (the env var `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT` binds through a `systemEnvironment` source; a missing cap is rejected). `./mvnw test`: 419 tests, 0 failures, 0 errors, 0 skipped; `test-compile -Preplay` passes. Spec: "Answer caps" and "Routes".
 
+- 2026-10-19: T2 done in `c1fcb9b`; review (standing consent granted) approved and acknowledged. Its WARNING (the yaml defaults were not asserted) fixed with `CloudRouteDefaultCapsTest`: no override gives 384, 160, 512 (a regression guard: green from the start, as the yaml already held them).
+
 ## Next step
 
 T3: the replay with `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT=768`.
