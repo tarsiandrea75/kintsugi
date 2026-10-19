@@ -36,7 +36,7 @@ Out of scope: Python aggregation in `evals/` (the TSV is enough at first); match
 - [x] **T1 — This document** and its Engram mirror; route: inline.
 - [x] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
 - [x] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth into `agent/src/test/resources/replay/` (the tool listing is the recorded `mcp-outputs/tools-list.json`, which holds the 8 tools mcp-tools serves), refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
-- [ ] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
+- [x] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
 - [ ] **T5 — First measurement.** With the human's go-ahead: N=5 per fault per mode on the cloud route on the current prompt (about 30 samples, an estimated $0.10–0.15); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
 
 ## Acceptance criteria
@@ -71,6 +71,11 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
 
 - 2026-10-19: T4 code committed as `33dbf9d` (driver, tests, surefire `replay` profile, spec) and `b16034a` (`replay-agent.sh`, `export_cloud_key`, docs), split so each fits a review. Both high; reviews (standing consent granted) approved and acknowledged. WARNINGs fixed inline: `ReplayRunTest` writes `aggregate.tsv` in a `finally`, so a paid partial run keeps its totals; `replay-agent.sh` refuses more than 60 cloud samples in one run (`MAX_CLOUD_SAMPLES`); its options are assigned explicitly instead of through `declare`, and a fault listed twice is refused (the third WARNING's text was not retrievable, so these are the parsing faults found on reading lines 43-62). Checked: each bad option exits 2 with its message, 66 samples exit 2 before Maven; `ReplayDriverTest` green; `test-lib.sh` PASS. SUGGESTIONs left (summary append on a reused out dir, second-resolution out dir, cost constants, doc wording).
 
+- 2026-10-19: T4 smoke check, with the human's go-ahead: `replay-agent.sh --samples 1` on `718986f` (`infra/scripts/out/replay-20261019T190356Z-cloud`), 6 samples, about 16 s each, exit 0.
+  - **Dossier mode replays:** every sample's `DOSSIER` step served all 29 calls from the recording (acceptance met); coverage 0.91 overall, the misses being model-chosen calls (mostly free-text `search_runbooks`). Scores: F1 MISS (`payment-service|DEPENDENCY_LATENCY`), F2 MATCH, F3 MATCH.
+  - **Explorer mode does not replay with exact matching:** coverage 0.38, 0.00 and 0.25; every sample ended `UNKNOWN|UNKNOWN`, the model having been told most of its calls were not recorded. Checked on F2: no systematic key bug, the model chose different arguments (no `sinceMinutes` on `status_summary`, other `recent_events` filters, other queries). Explorer replay scores measure the replay's gaps, not the agent: they are not valid measurements under this design.
+  - Tokens: 246,064 prompt and 12,055 completion, **$0.0306**. Total cloud spend about $0.34 of the human's $5.
+
 ## Next step
 
-T4 smoke check by the parent: `infra/scripts/replay-agent.sh --samples 1` (cloud, both modes, F1-F3), with the human's go-ahead.
+T5, after the human decides how to treat explorer mode (measure dossier mode only, or change the design for explorer).
