@@ -138,7 +138,8 @@ restore_injection || true
 expect "a refused restore records nothing" "$(last_fault_end)" ""
 injector_call() { echo '200 {"status":"RESTORED"}'; }
 restore_injection
-expect "a confirmed restore records its time" "$(( $(last_fault_end) >= $(date +%s) - 5 ))" 1
+recorded=$(last_fault_end)
+expect "a confirmed restore records its time" "$(( ${recorded:-0} >= $(date +%s) - 5 ))" 1
 unset -f injector_call
 
 # space_out, with sleep stubbed so no case waits: no wait without a restore time or once the margin has passed.
