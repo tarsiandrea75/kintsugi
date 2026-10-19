@@ -22,15 +22,19 @@ import org.junit.jupiter.api.Test;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.EventGroup;
+import dev.kintsugi.agent.dossier.Dossier.LatencyPoints;
+import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.LogSignature;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
+import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 import dev.kintsugi.agent.dossier.Dossier.SourceEvents;
 import dev.kintsugi.agent.dossier.Dossier.StatusCount;
 import dev.kintsugi.agent.dossier.Dossier.TableStates;
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
+import dev.kintsugi.agent.dossier.Dossier.UriLatency;
 /**
  * The dossier's Markdown (agent spec, "Evidence dossier rendering"; ADR-011 "Facts only", "Budgets"): golden files of
  * the recorded F3 and healthy outputs, the same shape for both, no interpretive vocabulary, a failed section as one
@@ -47,10 +51,10 @@ class DossierRendererTest {
 
 	/**
 	 * The ceiling for the stress dossier: every list far above its cap and every value at its length limit, the worst
-	 * case the caps allow (about 13.4k characters, near 3.4k tokens at 4 characters per token), so a dossier never
-	 * takes more than about half of {@code num-ctx} 8192.
+	 * case the caps allow (about 15.8k characters with the latency table, near 4k tokens at 4 characters per token;
+	 * 13.4k and 4,500 before it), so a dossier never takes more than about half of {@code num-ctx} 8192.
 	 */
-	private static final int STRESS_TOKEN_CEILING = 4_500;
+	private static final int STRESS_TOKEN_CEILING = 5_500;
 
 	/**
 	 * Words and marks that would interpret a fact (ADR-011, "Facts only"); matched as whole words, ignoring case.
@@ -83,7 +87,10 @@ class DossierRendererTest {
 				"## Event counts", "### external client -> order-service POST /orders (server side only)",
 				"### order-service -> inventory-service POST /reservations",
 				"### order-service -> payment-service POST /payments",
-				"### payment-service -> gateway-mock POST /authorize", "### Other rows", "| order-service |",
+				"### payment-service -> gateway-mock POST /authorize", "### Other rows", "## Latency (server side)",
+				"| service | uri | previous mean | incident mean | previous max | incident max | previous points "
+						+ "| incident points |",
+				"| order-service |",
 				"| payment-service |", "| inventory-service |", "| gateway-mock |", "- WARN:", "- ERROR:");
 	}
 
@@ -130,6 +137,39 @@ class DossierRendererTest {
 	}
 
 	@Test
+	void aSlowAnswerThatEndsInSuccessShowsItsLatency() {
+		// F1: gateway-mock answers /authorize with 200 in about 10 s; traffic shows only successes.
+		String markdown = DossierRenderer.render(new DossierGatherer(new RecordedLab("f1", "healthy"), CLOCK).gather(10));
+
+		String latency = markdown.substring(markdown.indexOf("## Latency (server side)"),
+				markdown.indexOf("## Log signatures"));
+		assertThat(latency).contains(
+				"| payment-service | /payments | 0.045 | 8.917 | 0.045 | 10.033 | 10/10 | 9/11 |\n"
+						+ "| payment-service | /actuator/prometheus | 0.003 | 0.003 | 0.003 | 0.003 | 10/10 | 11/11 |\n",
+				"| gateway-mock | /authorize | 0.012 | 8.898 | 0.012 | 10.015 | 10/10 | 9/11 |\n",
+				"| order-service | /orders | 0.080 | 0.080 | 0.083 | 0.083 | 10/10 | 11/11 |\n");
+		assertThat(markdown.indexOf("## Latency")).isGreaterThan(markdown.indexOf("### Other rows"));
+	}
+
+	@Test
+	void aFailedLatencyCallRendersAsOneFactLineAndKeepsItsServiceRow() {
+		RecordedLab lab = new RecordedLab("f3")
+			.answer("query_metric-latency_avg-payment-service",
+					"{\"outcome\":\"INVALID_PARAMETER\",\"reason\":\"sinceMinutes must be 1 to 360\"}")
+			.answer("query_metric-latency_avg-gateway-mock",
+					"{\"outcome\":\"OK\",\"returned\":0,\"truncated\":true,\"items\":[]}");
+
+		String markdown = DossierRenderer.render(new DossierGatherer(lab, CLOCK).gather(10));
+
+		assertThat(markdown).contains(
+				"query_metric failed for payment-service: outcome=INVALID_PARAMETER "
+						+ "reason=\"sinceMinutes must be 1 to 360\"\n",
+				"| payment-service | - | - | - | - | - | - | - |\n", "| gateway-mock | no rows | - | - | - | - | - | - |\n",
+				"query_metric for gateway-mock: truncated=true\n");
+		assertThat(shape(markdown)).isEqualTo(shape(DossierRenderer.render(gather("f3"))));
+	}
+
+	@Test
 	void logTextStaysInsideAnEscapedUntrustedTextLiteral() {
 		RecordedLab lab = new RecordedLab("healthy").answer("search_logs-gateway-mock-WARN-incident",
 				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"timestamp\":"
@@ -172,7 +212,7 @@ class DossierRendererTest {
 		String markdown = DossierRenderer.render(stress());
 
 		assertThat(tokens(markdown)).isLessThanOrEqualTo(STRESS_TOKEN_CEILING);
-		assertThat(markdown).contains("  - not shown: signatures=29 lines=",
+		assertThat(markdown).contains("  - not shown: signatures=29 lines=", "not shown for gateway-mock: rows=27\n",
 				"not shown: rows=25, previous=", "| order-service | 30 | 2026-10-16T09:59:30Z, 2026-10-16T09:59:20Z, "
 						+ "2026-10-16T09:59:10Z, 27 earlier |");
 		assertThat(markdown.lines().filter(line -> line.startsWith("  - count="))).hasSize(8);
@@ -185,7 +225,8 @@ class DossierRendererTest {
 	}
 
 	/**
-	 * The lines that make the dossier's shape: headings, table headers, the service rows and the log level lines.
+	 * The lines that make the dossier's shape: headings, table headers, the service rows and the log level lines. A
+	 * service's consecutive rows count once: the latency table has one row per uri the metric returned.
 	 */
 	private static List<String> shape(String markdown) {
 		List<String> shape = new ArrayList<>();
@@ -195,7 +236,10 @@ class DossierRendererTest {
 				shape.add(line);
 			}
 			else if (line.startsWith("| ") && DossierGatherer.SERVICES.contains(line.split(" \\| ")[0].substring(2))) {
-				shape.add(line.substring(0, line.indexOf(" |") + 2));
+				String row = line.substring(0, line.indexOf(" |") + 2);
+				if (shape.isEmpty() || !shape.get(shape.size() - 1).equals(row)) {
+					shape.add(row);
+				}
 			}
 			else if (line.startsWith("- WARN:") || line.startsWith("- ERROR:")) {
 				shape.add(line.substring(0, line.indexOf(':') + 1));
@@ -212,7 +256,8 @@ class DossierRendererTest {
 		RecordedLab lab = new RecordedLab("f3").answer("traffic_counts-previous",
 				"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\"}")
 			.answer("service_restarts", "mcp-tools call failed: ResourceAccessException: Connection refused")
-			.answer("event_counts-order-incident", "not json");
+			.answer("event_counts-order-incident", "not json")
+			.answer("query_metric-latency_avg-order-service", "{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"no\"}");
 		return new DossierGatherer(lab, CLOCK).gather(10);
 	}
 
@@ -274,12 +319,20 @@ class DossierRendererTest {
 		for (int i = 0; i < 30; i++) {
 			groups.add(new EventGroup("TYPE_" + i + longText, "OUTCOME_" + i + longText, i));
 		}
+		List<UriLatency> uris = new ArrayList<>();
+		for (int i = 0; i < 30; i++) {
+			LatencyPoints points = new LatencyPoints(60, 60, 99_999.999 - i, 99_999.999);
+			uris.add(new UriLatency("/uri/" + i + longText, points, points));
+		}
+		List<ServiceLatency> latency = DossierGatherer.SERVICES.stream()
+			.map(service -> new ServiceLatency(service, new Gathered.Ok<>(new LatencySeries(true, uris))))
+			.toList();
 		List<SourceEvents> events = DossierGatherer.EVENT_SOURCES.stream()
 			.map(source -> new SourceEvents(source, both(new EventCounts(1_000, groups))))
 			.toList();
 		Dossier healthy = gather("healthy");
 		return new Dossier(NOW, healthy.incidentWindow(), healthy.previousWindow(), new Gathered.Ok<>(services),
-				states, both(rows), logs, events, List.of());
+				states, both(rows), latency, logs, events, List.of());
 	}
 
 	private static <T> Compared<T> both(T value) {
@@ -303,6 +356,14 @@ class DossierRendererTest {
 			.map(r -> new TrafficRow(r.side(), m.apply(r.service()), m.apply(r.clientName()), m.apply(r.method()),
 					m.apply(r.uri()), m.apply(r.status()), m.apply(r.outcome()), m.apply(r.exception()), r.count()))
 			.toList());
+		List<ServiceLatency> latency = d.latency()
+			.stream()
+			.map(s -> new ServiceLatency(m.apply(s.service()), map(s.latency(), series -> new LatencySeries(
+					series.truncated(), series.uris()
+						.stream()
+						.map(u -> new UriLatency(m.apply(u.uri()), u.previous(), u.incident()))
+						.toList()))))
+			.toList();
 		List<ServiceLogs> logs = d.logs()
 			.stream()
 			.map(s -> new ServiceLogs(m.apply(s.service()), s.levels()
@@ -322,8 +383,8 @@ class DossierRendererTest {
 						.map(g -> new EventGroup(m.apply(g.type()), m.apply(g.outcome()), g.count()))
 						.toList()))))
 			.toList();
-		return new Dossier(d.gatheredAt(), d.incidentWindow(), d.previousWindow(), services, states, traffic, logs,
-				events, d.calls());
+		return new Dossier(d.gatheredAt(), d.incidentWindow(), d.previousWindow(), services, states, traffic, latency,
+				logs, events, d.calls());
 	}
 
 	private static <T> Compared<T> compared(Compared<T> windows, Function<T, T> f) {

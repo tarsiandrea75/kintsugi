@@ -87,12 +87,13 @@ class ReplayDriverTest {
 		assertThat(sample.truth()).isEqualTo("gateway-mock|DEPENDENCY_LATENCY");
 		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
 		assertThat(sample.verdict()).isEqualTo("MISS");
-		// Dossier gathering replays fully: every one of its calls is in the recordings.
-		assertThat(sample.dossierCalls()).isEqualTo(29);
-		assertThat(sample.dossierUnrecorded()).isZero();
+		// The recordings predate the dossier's 4 query_metric latency calls (dossier-latency T2), so those 4 are
+		// unrecorded; dossier-latency T3 replaces the recordings and restores full coverage.
+		assertThat(sample.dossierCalls()).isEqualTo(33);
+		assertThat(sample.dossierUnrecorded()).isEqualTo(4);
 		assertThat(sample.recorded()).isEqualTo(29);
-		assertThat(sample.unrecorded()).isZero();
-		assertThat(sample.coverage()).isEqualTo(1.0);
+		assertThat(sample.unrecorded()).isEqualTo(4);
+		assertThat(sample.coverage()).isEqualTo(29.0 / 33);
 
 		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
 		assertThat(summary).hasSize(2);
@@ -100,7 +101,7 @@ class ReplayDriverTest {
 		String[] line = summary.get(1).split("\t", -1);
 		assertThat(line).hasSize(15);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
-				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "29", "0", "1.00");
+				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "29", "4", "0.88");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
 		assertThat(line[12]).isEqualTo(String.valueOf(sample.promptTokens()));
 		assertThat(line[14]).matches("\\d+\\.\\d");

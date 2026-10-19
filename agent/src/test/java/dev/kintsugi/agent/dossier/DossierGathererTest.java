@@ -3,6 +3,7 @@ package dev.kintsugi.agent.dossier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.assertj.core.api.Assertions.within;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -16,12 +17,16 @@ import org.junit.jupiter.api.Test;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.EventGroup;
+import dev.kintsugi.agent.dossier.Dossier.LatencyPoints;
+import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.LogSignature;
+import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 import dev.kintsugi.agent.dossier.Dossier.StatusCount;
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
+import dev.kintsugi.agent.dossier.Dossier.UriLatency;
 import dev.kintsugi.agent.lab.ToolOutcome;
 
 /**
@@ -51,6 +56,10 @@ class DossierGathererTest {
 				"status_summary {\"table\":\"payments\",\"sinceMinutes\":20,\"untilMinutesAgo\":10}",
 				"status_summary {\"table\":\"payments\",\"sinceMinutes\":10}",
 				"traffic_counts {\"sinceMinutes\":20,\"untilMinutesAgo\":10}", "traffic_counts {\"sinceMinutes\":10}"));
+		// query_metric takes no untilMinutesAgo: one call per service, over both windows, covers them.
+		for (String service : SERVICES) {
+			expected.add("query_metric {\"metric\":\"latency_avg\",\"service\":\"" + service + "\",\"sinceMinutes\":20}");
+		}
 		for (String service : SERVICES) {
 			for (String level : List.of("WARN", "ERROR")) {
 				String subject = "\"service\":\"" + service + "\",\"level\":\"" + level + "\",\"sinceMinutes\":10";
@@ -75,7 +84,7 @@ class DossierGathererTest {
 
 		assertThat(second.calls()).isEqualTo(first.calls());
 		assertThat(two).isEqualTo(one);
-		assertThat(one.calls()).hasSize(29);
+		assertThat(one.calls()).hasSize(33);
 	}
 
 	@Test
@@ -166,6 +175,69 @@ class DossierGathererTest {
 	}
 
 	@Test
+	void latencyPerServiceAndUriWithItsPointsSplitAtTheIncidentWindowsStart() {
+		// F1: gateway-mock answers /authorize in about 10 s with 200 from 09:53; payment-service waits on it.
+		Dossier dossier = new DossierGatherer(new RecordedLab("f1", "healthy"), CLOCK).gather(10);
+
+		assertThat(dossier.latency()).extracting(ServiceLatency::service).containsExactlyElementsOf(SERVICES);
+		LatencySeries gateway = ok(dossier.latency().get(3).latency());
+		assertThat(gateway.truncated()).isFalse();
+		assertThat(gateway.uris()).extracting(UriLatency::uri).containsExactly("/actuator/prometheus", "/authorize");
+		UriLatency authorize = gateway.uris().get(1);
+		assertThat(authorize.previous().points()).isEqualTo(10);
+		assertThat(authorize.previous().values()).isEqualTo(10);
+		assertThat(authorize.previous().mean()).isCloseTo(0.012, within(1e-9));
+		assertThat(authorize.previous().max()).isEqualTo(0.012);
+		assertThat(authorize.incident().points()).isEqualTo(11);
+		assertThat(authorize.incident().values()).isEqualTo(9);
+		assertThat(authorize.incident().mean()).isCloseTo(80.081 / 9, within(1e-9));
+		assertThat(authorize.incident().max()).isEqualTo(10.015);
+		UriLatency payments = ok(dossier.latency().get(1).latency()).uris().get(1);
+		assertThat(payments.uri()).isEqualTo("/payments");
+		assertThat(payments.incident().max()).isEqualTo(10.033);
+		assertThat(ok(dossier.latency().get(0).latency()).uris()).extracting(UriLatency::uri)
+			.containsExactly("/actuator/prometheus", "/orders");
+	}
+
+	@Test
+	void aWindowWithoutAValueHasNoMeanAndNoMax() {
+		String output = "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":true,\"items\":[{\"labels\":{\"service\":"
+				+ "\"gateway-mock\",\"uri\":\"/authorize\"},\"points\":[[1792143600,\"NaN\"],[1792144200,\"+Inf\"]]}]}";
+		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-latency_avg-gateway-mock", output);
+
+		LatencySeries gateway = ok(new DossierGatherer(lab, CLOCK).gather(10).latency().get(3).latency());
+
+		assertThat(gateway.truncated()).isTrue();
+		assertThat(gateway.uris()).containsExactly(new UriLatency("/authorize", new LatencyPoints(1, 0, null, null),
+				new LatencyPoints(1, 0, null, null)));
+	}
+
+	@Test
+	void anUnreadablePointMakesTheLatencyOutputUnreadable() {
+		String output = "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"labels\":{\"service\":"
+				+ "\"gateway-mock\",\"uri\":\"/authorize\"},\"points\":[[1792143600,\"slow\"]]}]}";
+		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-latency_avg-gateway-mock", output);
+
+		Gathered<LatencySeries> gateway = new DossierGatherer(lab, CLOCK).gather(10).latency().get(3).latency();
+
+		assertThat(gateway).isInstanceOfSatisfying(Gathered.Failed.class,
+				failed -> assertThat(failed.reason()).startsWith("the output could not be read"));
+	}
+
+	@Test
+	void aRejectedLatencyCallIsRecordedAsAFact() {
+		RecordedLab lab = new RecordedLab("f3").answer("query_metric-latency_avg-payment-service",
+				"{\"outcome\":\"INVALID_PARAMETER\",\"reason\":\"sinceMinutes must be 1 to 360\"}");
+
+		Dossier dossier = new DossierGatherer(lab, CLOCK).gather(10);
+
+		assertThat(dossier.latency().get(1).latency()).isEqualTo(
+				new Gathered.Failed<>("query_metric", ToolOutcome.INVALID_PARAMETER, "sinceMinutes must be 1 to 360"));
+		assertThat(ok(dossier.latency().get(3).latency()).uris()).hasSize(2);
+		assertThat(dossier.calls()).hasSize(33);
+	}
+
+	@Test
 	void logSignaturesPerServiceAndLevelWithCountsAndUntrustedText() {
 		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK).gather(10);
 
@@ -235,7 +307,7 @@ class DossierGathererTest {
 				new Gathered.Failed<>("traffic_counts", ToolOutcome.UPSTREAM_ERROR, "Prometheus did not answer"));
 		assertThat(ok(dossier.traffic().previous())).hasSize(7);
 		assertThat(ok(dossier.events().get(0).windows().incident()).total()).isEqualTo(18);
-		assertThat(dossier.calls()).hasSize(29);
+		assertThat(dossier.calls()).hasSize(33);
 		assertThat(dossier.calls().get(6).outcome()).isEqualTo(ToolOutcome.UPSTREAM_ERROR);
 	}
 
@@ -253,7 +325,7 @@ class DossierGathererTest {
 				ToolOutcome.CLIENT_ERROR, "the call failed: IllegalStateException: no MCP session"));
 		assertThat(dossier.calls().get(2).outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
 		assertThat(ok(dossier.states().get(0).windows().previous())).hasSize(1);
-		assertThat(dossier.calls()).hasSize(29);
+		assertThat(dossier.calls()).hasSize(33);
 	}
 
 	@Test

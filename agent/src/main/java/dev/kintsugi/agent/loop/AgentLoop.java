@@ -263,7 +263,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * Dossier mode's first step (T5a): code gathers the evidence dossier through {@link LabTools} and renders it, and
-	 * the result becomes the dossier message every later call reads right after the system message. Its 29 calls are
+	 * the result becomes the dossier message every later call reads right after the system message. Its 33 calls are
 	 * code's: they pass no check, count against no tool budget and get no {@code toolCallId} (a report cites the dossier
 	 * as a whole, as {@code "dossier"}, T5b); they are stored in the
 	 * {@code DOSSIER} step's {@code tool_output}, with the message the model sees in its {@code summary}. The gathering

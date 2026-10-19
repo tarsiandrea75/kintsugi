@@ -1,5 +1,7 @@
 package dev.kintsugi.agent.dossier;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,15 +20,19 @@ import tools.jackson.databind.json.JsonMapper;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.EventGroup;
+import dev.kintsugi.agent.dossier.Dossier.LatencyPoints;
+import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.LogSignature;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
+import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 import dev.kintsugi.agent.dossier.Dossier.SourceEvents;
 import dev.kintsugi.agent.dossier.Dossier.StatusCount;
 import dev.kintsugi.agent.dossier.Dossier.TableStates;
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
+import dev.kintsugi.agent.dossier.Dossier.UriLatency;
 
 /**
  * Writes a {@link Dossier} as the compact Markdown the model reads (agent spec, "Evidence dossier rendering";
@@ -61,6 +67,15 @@ public final class DossierRenderer {
 
 	/** The start times in the window written per service, newest first. */
 	static final int START_TIMES = 3;
+
+	/**
+	 * The rows written per service in the latency table: the lab's services answer on one or two uris besides
+	 * {@code /actuator/prometheus}, so 3 keeps them all and bounds the table at 12 rows.
+	 */
+	static final int LATENCY_ROWS = 3;
+
+	/** The decimals of a latency in seconds: milliseconds. */
+	static final int LATENCY_DECIMALS = 3;
 
 	/** The characters of a log message kept in its literal. */
 	static final int MESSAGE_CHARS = 300;
@@ -138,6 +153,7 @@ public final class DossierRenderer {
 			states(out, table);
 		}
 		traffic(out, dossier.traffic());
+		latency(out, dossier.latency());
 		logs(out, dossier.logs());
 		events(out, dossier.events());
 		return out.text();
@@ -251,6 +267,74 @@ public final class DossierRenderer {
 					zeroOrNull(traffic.incident())));
 		}
 		return rows;
+	}
+
+	/**
+	 * One row per service and uri, a service's rows sorted by incident mean, then previous mean, largest first, then
+	 * by uri; every service keeps at least one row, {@code -} when its call failed and {@code no rows} when the tool
+	 * returned no series.
+	 */
+	private static void latency(Out out, List<ServiceLatency> latency) {
+		out.section("## Latency (server side)");
+		for (ServiceLatency service : latency) {
+			if (service.latency() instanceof Gathered.Failed<LatencySeries> failed) {
+				out.line(failed.tool() + " failed for " + cell(service.service()) + ": " + outcome(failed));
+				out.blank();
+			}
+		}
+		out.line("Seconds per request by service and uri, from query_metric " + DossierGatherer.LATENCY_METRIC
+				+ ": one call per service over both windows, its points split at the incident window's start. \"mean\""
+				+ " and \"max\" are of the points with a value; \"points\" counts those with a value and all points in"
+				+ " the window. A point has no value when no request ended in its rate window.");
+		out.blank();
+		List<List<String>> rows = new ArrayList<>();
+		List<String> notes = new ArrayList<>();
+		for (ServiceLatency service : latency) {
+			String name = cell(service.service());
+			switch (service.latency()) {
+				case Gathered.Failed<LatencySeries> failed -> rows.add(List.of(name, NO_VALUE, NO_VALUE, NO_VALUE,
+						NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE));
+				case Gathered.Ok<LatencySeries> ok -> {
+					List<UriLatency> uris = ok.value().uris().stream().sorted(URI_ORDER).toList();
+					if (uris.isEmpty()) {
+						rows.add(List.of(name, NO_ROWS, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE));
+					}
+					for (UriLatency uri : uris.subList(0, Math.min(LATENCY_ROWS, uris.size()))) {
+						rows.add(List.of(name, cell(uri.uri()), seconds(uri.previous().mean()),
+								seconds(uri.incident().mean()), seconds(uri.previous().max()),
+								seconds(uri.incident().max()), points(uri.previous()), points(uri.incident())));
+					}
+					if (uris.size() > LATENCY_ROWS) {
+						notes.add("not shown for " + name + ": rows=" + (uris.size() - LATENCY_ROWS));
+					}
+					if (ok.value().truncated()) {
+						notes.add("query_metric for " + name + ": truncated=true");
+					}
+				}
+			}
+		}
+		out.table(List.of("service", "uri", "previous mean", "incident mean", "previous max", "incident max",
+				"previous points", "incident points"), rows);
+		if (!notes.isEmpty()) {
+			out.blank();
+			notes.forEach(out::line);
+		}
+	}
+
+	/** Incident mean, then previous mean, largest first, a missing mean last, then the uri. */
+	private static final Comparator<UriLatency> URI_ORDER = Comparator
+		.comparing((UriLatency u) -> u.incident().mean(), Comparator.nullsLast(Comparator.<Double>reverseOrder()))
+		.thenComparing(u -> u.previous().mean(), Comparator.nullsLast(Comparator.<Double>reverseOrder()))
+		.thenComparing(UriLatency::uri, Comparator.nullsFirst(Comparator.<String>naturalOrder()));
+
+	/** Seconds with {@link #LATENCY_DECIMALS} decimals, half up, whatever the locale; {@code -} when absent. */
+	static String seconds(Double seconds) {
+		return seconds == null ? NO_VALUE
+				: BigDecimal.valueOf(seconds).setScale(LATENCY_DECIMALS, RoundingMode.HALF_UP).toPlainString();
+	}
+
+	private static String points(LatencyPoints points) {
+		return points.values() + "/" + points.points();
 	}
 
 	private static void logs(Out out, List<ServiceLogs> logs) {

@@ -25,7 +25,7 @@ The prompt rule (`Prompts.java`, F3 T5) needs per-hop latency; the gap is in the
 ## Tasks
 
 - [x] **T1 — This document** and its Engram mirror; route: inline.
-- [ ] **T2 — Latency in the dossier.** Gather and render it; tests first (`DossierGatherer`/renderer tests, recorded-lab fixtures); spec updated. Route: delegated writer (2+ files).
+- [x] **T2 — Latency in the dossier.** Gather and render it; tests first (`DossierGatherer`/renderer tests, recorded-lab fixtures); spec updated. Route: delegated writer (2+ files).
 - [ ] **T3 — Record a fresh dossier round** on the cloud route (`verify-agent.sh --mode dossier --route cloud`, F1-F3, about 27 minutes and $0.02) and replace the old dossier recordings in `agent/src/test/resources/replay/` with it (the old ones lack the latency calls, and the driver serves the first same-mode recording). Route: parent (runs).
 - [ ] **T4 — Measure on the replay:** `replay-agent.sh --samples 5` (dossier), about $0.08; compare with F1 0/5, F2 5/5, F3 4/5. Route: parent (runs).
 
@@ -47,7 +47,8 @@ Forecast about 250 authored lines, one slice. Branch `feat/dossier-latency`, fro
 ## Progress
 
 - 2026-10-19: T1, after the read-only analysis of the five replay samples.
+- 2026-10-19: T2, route delegated writer (2+ non-trivial files: gatherer, renderer, model, tests, spec). Arguments: `query_metric` `{"metric":"latency_avg","service":<s>,"sinceMinutes":2N}`, one call per service (4 calls, 29 → 33 dossier calls). Why: the tool takes no `untilMinutesAgo`, so one 2N call per service covers both windows and its points are split at the incident window's start; an all-services call would exceed the tool's 10-series / 8 KB cap (about 1.8 KB per 60-point series, 2-3 series per service), cutting series. `latency_max` left out: it needs 4 more calls. Rendered as "## Latency (server side)" after Traffic: per service and uri, previous/incident mean and max (seconds, 3 decimals) and points with a value / all; at most 3 rows per service. RED observed (8 gatherer and 4 renderer failures with a stub), then GREEN (`Dossier*Test` 30/30). Full suite `./mvnw test`: 414 run, 0 failures, 0 errors, 0 skipped. Stress ceiling raised 4,500 → 5,500 tokens (the table adds about 2.4k characters at its caps). `ReplayDriverTest` now expects 33 dossier calls, 4 unrecorded (coverage 0.88) on the old recording until T3. Fixtures: new `dossier/f1` set (latency only, falls back to `healthy`), latency fixtures added to `f3` and `healthy` (synthetic, real tool shape, one point per minute); no real all-window latency_avg recording existed.
 
 ## Next step
 
-T2.
+T3.

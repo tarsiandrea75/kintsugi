@@ -117,10 +117,10 @@ class AgentLoopDossierModeTest {
 		}
 		assertThat(last(first)).contains("the phases run in order: INVESTIGATE, KNOWLEDGE, CONCLUDE")
 			.contains("Tool calls left: 4 in this phase, 6 in the incident");
-		// The dossier's own calls are code's: the model's two calls come after the 29 of the dossier.
-		assertThat(this.lab.calls()).hasSize(31).endsWith("search_logs", "search_runbooks");
-		assertThat(this.lab.calls().subList(0, 29)).doesNotContain("search_runbooks", "recent_events",
-				"get_order_trace", "query_metric");
+		// The dossier's own calls are code's: the model's two calls come after the 33 of the dossier.
+		assertThat(this.lab.calls()).hasSize(35).endsWith("search_logs", "search_runbooks");
+		assertThat(this.lab.calls().subList(0, 33)).doesNotContain("search_runbooks", "recent_events",
+				"get_order_trace");
 	}
 
 	@Test
@@ -202,7 +202,7 @@ class AgentLoopDossierModeTest {
 		assertThat(step(11).get("summary")).isEqualTo("the incident's tool budget of 6 calls is used up; the evidence "
 				+ "phases end and the run moves to CONCLUDE");
 		assertThat(last(this.model.prompts().get(1))).contains("Tool calls left: 2 in this phase, 2 in the incident");
-		assertThat(this.lab.calls()).hasSize(29 + 6);
+		assertThat(this.lab.calls()).hasSize(33 + 6);
 		// Only the model's steps count tokens: the dossier, the tool calls and the budget's step made no model call.
 		assertThat(AgentDatabase.admin()
 			.sql("SELECT kind FROM incident_steps WHERE incident_id = ? AND (tokens IS NOT NULL"
@@ -226,7 +226,7 @@ class AgentLoopDossierModeTest {
 			.containsEntry("tool_outcome", null);
 		assertThat(dossier.get("summary")).isEqualTo(this.model.prompts().get(0).getInstructions().get(1).getText());
 		JsonNode calls = JSON.readTree((String) dossier.get("tool_output"));
-		assertThat(calls).hasSize(29);
+		assertThat(calls).hasSize(33);
 		assertThat(calls.get(0).get("tool").asString()).isEqualTo("service_restarts");
 		assertThat(calls.get(0).get("args").get("sinceMinutes").asInt()).isEqualTo(15);
 		assertThat(calls.get(0).get("outcome").asString()).isEqualTo("OK");

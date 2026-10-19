@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -17,14 +18,18 @@ import tools.jackson.databind.node.ObjectNode;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.EventGroup;
+import dev.kintsugi.agent.dossier.Dossier.LatencyPoints;
+import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
+import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 import dev.kintsugi.agent.dossier.Dossier.SourceEvents;
 import dev.kintsugi.agent.dossier.Dossier.StatusCount;
 import dev.kintsugi.agent.dossier.Dossier.TableStates;
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
+import dev.kintsugi.agent.dossier.Dossier.UriLatency;
 import dev.kintsugi.agent.dossier.Dossier.Window;
 import dev.kintsugi.agent.lab.LabTools;
 import dev.kintsugi.agent.lab.ToolOutcome;
@@ -51,6 +56,9 @@ public final class DossierGatherer {
 
 	/** The log levels read: the lab services log failures at WARN; ERROR is read too, as ADR-011 names both. */
 	public static final List<String> LOG_LEVELS = List.of("WARN", "ERROR");
+
+	/** The {@code query_metric} metric of the latency section: server-side seconds per request, by service and uri. */
+	public static final String LATENCY_METRIC = "latency_avg";
 
 	/** The lines {@code search_logs} is asked for: the cap {@code LabTools} applies to the tool. */
 	static final int LOG_LINES = 20;
@@ -95,6 +103,16 @@ public final class DossierGatherer {
 		}
 		Compared<List<TrafficRow>> traffic = calls.compared("traffic_counts", null, null, previous, incident,
 				DossierGatherer::trafficRows);
+		// query_metric takes no untilMinutesAgo: one call per service over both windows, its points split by time.
+		List<ServiceLatency> latency = new ArrayList<>();
+		for (String service : SERVICES) {
+			ObjectNode args = JSON.createObjectNode()
+				.put("metric", LATENCY_METRIC)
+				.put("service", service)
+				.put("sinceMinutes", previous.sinceMinutes());
+			latency.add(new ServiceLatency(service,
+					calls.read("query_metric", args, result -> latency(result, incident.from()))));
+		}
 		List<ServiceLogs> logs = new ArrayList<>();
 		for (String service : SERVICES) {
 			List<LevelLogs> levels = new ArrayList<>();
@@ -113,7 +131,7 @@ public final class DossierGatherer {
 			events.add(new SourceEvents(source, calls.compared("event_counts", "source", source, previous, incident,
 					DossierGatherer::eventCounts)));
 		}
-		return new Dossier(at, incident, previous, services, states, traffic, logs, events, calls.made);
+		return new Dossier(at, incident, previous, services, states, traffic, latency, logs, events, calls.made);
 	}
 
 	/** {@code sinceMinutes}, and {@code untilMinutesAgo} when the window does not end now. */
@@ -173,6 +191,48 @@ public final class DossierGatherer {
 		return rows;
 	}
 
+	/** The series, each point before {@code incidentFrom} in the previous window and the others in the incident one. */
+	private static LatencySeries latency(JsonNode result, Instant incidentFrom) {
+		List<UriLatency> uris = new ArrayList<>();
+		for (JsonNode item : result.path("items")) {
+			List<Double> previous = new ArrayList<>();
+			List<Double> incident = new ArrayList<>();
+			for (JsonNode point : item.path("points")) {
+				Instant time = Instant.ofEpochSecond(number(point, 0));
+				(time.isBefore(incidentFrom) ? previous : incident).add(seconds(point.path(1)));
+			}
+			uris.add(new UriLatency(text(item.path("labels"), "uri"), points(previous), points(incident)));
+		}
+		return new LatencySeries(result.path("truncated").asBoolean(false), uris);
+	}
+
+	/** A point's value as Prometheus writes it; {@code null} for {@code NaN} and the infinities, which are no value. */
+	private static Double seconds(JsonNode value) {
+		if (!value.isString()) {
+			throw new IllegalArgumentException("a point's value is not a string");
+		}
+		String text = value.asString();
+		if (text.equals("NaN") || text.equals("+Inf") || text.equals("-Inf")) {
+			return null;
+		}
+		double seconds = Double.parseDouble(text);
+		return Double.isFinite(seconds) ? seconds : null;
+	}
+
+	private static LatencyPoints points(List<Double> points) {
+		List<Double> values = points.stream().filter(Objects::nonNull).toList();
+		if (values.isEmpty()) {
+			return new LatencyPoints(points.size(), 0, null, null);
+		}
+		double sum = 0;
+		double max = values.get(0);
+		for (double value : values) {
+			sum += value;
+			max = Math.max(max, value);
+		}
+		return new LatencyPoints(points.size(), values.size(), sum / values.size(), max);
+	}
+
 	private static Long logCount(JsonNode result) {
 		return number(result.path("items").path(0), "count");
 	}
@@ -196,6 +256,15 @@ public final class DossierGatherer {
 		JsonNode value = node.get(field);
 		if (value == null || !value.isIntegralNumber()) {
 			throw new IllegalArgumentException("'" + field + "' is not an integer");
+		}
+		return value.longValue();
+	}
+
+	/** An integer element of an array; anything else makes the output unreadable. */
+	private static long number(JsonNode array, int index) {
+		JsonNode value = array.get(index);
+		if (value == null || !value.isIntegralNumber()) {
+			throw new IllegalArgumentException("element " + index + " is not an integer");
 		}
 		return value.longValue();
 	}
