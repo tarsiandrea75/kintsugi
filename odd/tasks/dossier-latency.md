@@ -59,6 +59,8 @@ Forecast about 250 authored lines, one slice. Branch `feat/dossier-latency`, fro
   - Tokens: 777,136 prompt and 29,871 completion, **$0.0926**; T3's lab round about $0.03. Total cloud spend about $0.55 of the human's $5.
 - 2026-10-19: feature closed.
 
+- 2026-10-19: the F1 `INVALID_REPORT` analysed (read-only): both report answers hit the 512-token cap mid-quote, and the loop recognised a cut only by Ollama's `length`; Spring AI passes Anthropic's stop reason as it is (`max_tokens`, `AnthropicChatModel.java:992` in 2.0.1's sources), so the cloud retry got no "cut" instruction. Fixed on `fix/cloud-cut-report` (route: inline, one class, its test double and test, spec scenario): `max_tokens` is a cut too. RED: the new `aReportCutByAnthropicsMaxTokensIsRetriedWithTheReason` failed; GREEN: full suite 0 failures, 0 errors. Not measured on the replay (a cut happened in 1 of 30 samples). Open: reports run close to the cap on the cloud route (4 of 15 at 485+ tokens); a cap of 3 evidence items or a larger cloud cap are follow-ups.
+
 ## Next step
 
-None in this feature. Open for the human: the one `INVALID_REPORT` in F1 (report rejected twice, cause not analysed); explorer mode's F1, which reads no dossier; the dossier's longer latency section on windows over 180 minutes (rejected by the tool's 360-minute limit).
+None in this feature. Open for the human: explorer mode's F1, which reads no dossier; the dossier's longer latency section on windows over 180 minutes (rejected by the tool's 360-minute limit).

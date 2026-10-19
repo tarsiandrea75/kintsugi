@@ -329,6 +329,20 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void aReportCutByAnthropicsMaxTokensIsRetriedWithTheReason() {
+		// The cloud route's stop reason for a cut is max_tokens, not Ollama's length (replay-harness F1-dossier-5).
+		this.model.quietPhases()
+			.cutWith("max_tokens",
+					"{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPENDENCY_LATENCY\",\"summ")
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat((String) step(4).get("summary")).startsWith("invalid: the answer was cut at 512 tokens");
+		assertThat(userText(this.model.prompts().get(4))).contains("the answer was cut at 512 tokens");
+	}
+
+	@Test
 	void eachRunStartsWithOneWarmUpOnTheRoutesModelAndContext() {
 		this.model.quietPhases().text(unknownReport());
 

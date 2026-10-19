@@ -97,9 +97,17 @@ final class ScriptedChatModel implements ChatModel {
 	 * {@code length}, as when the model runs on until {@code num_predict} stops it.
 	 */
 	ScriptedChatModel cut(String text, ToolCall... calls) {
+		return cutWith("length", text, calls);
+	}
+
+	/**
+	 * Answers {@code text} and these tool calls, cut at the answer's cap with this finish reason: {@code length} on
+	 * Ollama, {@code max_tokens} on Anthropic (Spring AI passes the provider's stop reason as it is).
+	 */
+	ScriptedChatModel cutWith(String finishReason, String text, ToolCall... calls) {
 		AssistantMessage message = AssistantMessage.builder().content(text).toolCalls(List.of(calls)).build();
 		this.script.add(prompt -> new ChatResponse(
-				List.of(new Generation(message, ChatGenerationMetadata.builder().finishReason("length").build())),
+				List.of(new Generation(message, ChatGenerationMetadata.builder().finishReason(finishReason).build())),
 				ChatResponseMetadata.builder().usage(new DefaultUsage(10, 5)).build()));
 		return this;
 	}

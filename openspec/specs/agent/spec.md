@@ -382,7 +382,7 @@ Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it det
 - THEN the step's summary is `1 tool call(s); answer cut at 384 tokens; plan missing`, and the call is checked as usual
 
 #### Scenario: A cut report
-- GIVEN a report answer cut at its cap, so not valid JSON
+- GIVEN a report answer cut at its cap, so not valid JSON, whether the route says so as Ollama does (`length`) or as Anthropic does (`max_tokens`)
 - WHEN it is checked
 - THEN its `REPORT` step says `invalid: the answer was cut at 512 tokens ...`, and the retry's prompt carries that error
 

@@ -614,9 +614,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		AssistantMessage message = response.getResult().getOutput();
 		Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
 		boolean counted = counted(usage);
-		// Ollama's done_reason "length": the answer reached its cap and was cut.
-		boolean cut = response.getResult().getMetadata() != null
-				&& "length".equalsIgnoreCase(response.getResult().getMetadata().getFinishReason());
+		// The answer reached its cap and was cut: Ollama's done_reason "length", Anthropic's stop_reason "max_tokens"
+		// (Spring AI passes each provider's reason as it is).
+		String finishReason = response.getResult().getMetadata() == null ? null
+				: response.getResult().getMetadata().getFinishReason();
+		boolean cut = "length".equalsIgnoreCase(finishReason) || "max_tokens".equalsIgnoreCase(finishReason);
 		return new Answer(message, message.getText() == null ? "" : message.getText(),
 				counted ? usage.getTotalTokens() : null, counted ? countOrNull(usage.getPromptTokens()) : null,
 				counted ? countOrNull(usage.getCompletionTokens()) : null, route.model(),
