@@ -50,14 +50,18 @@ final class Prompts {
 
 			rootCauseCategory is the kind of problem:
 			- DEPENDENCY_LATENCY: a component answers its callers, but too slowly, so they wait or give up.
-			- DEPENDENCY_REJECTING: a component is reachable but refuses or fails the requests it receives.
-			- CONFIGURATION: a component runs with a wrong setting, so it misbehaves although what it depends on \
-			is healthy.
+			- DEPENDENCY_REJECTING: a component is reached and answers, but refuses or fails the requests it \
+			receives, with an error answer.
+			- CONFIGURATION: a component runs with a wrong setting, such as the address or port of a component it \
+			calls, so it misbehaves although what it depends on is healthy.
 			- RESOURCE_EXHAUSTION: a component has run out of a limited resource, such as connections, memory, \
 			disk or threads.
 			- UNKNOWN: the evidence does not support one of the above.
 			For DEPENDENCY_LATENCY and DEPENDENCY_REJECTING, rootCauseService is the component that is slow or \
-			refuses, not its caller: if A times out or fails because B does, name B.""";
+			refuses, not its caller: name B when A waits for B or gets an error answer from B. When A cannot reach B \
+			at all (the connection is refused or closed, or the host is unknown) while B shows no failure of its own \
+			(no errors, no restarts, healthy metrics), B is not the cause: suspect A's own setting for B, a \
+			CONFIGURATION of A.""";
 
 	private static final String PLAN_AND_ACT_TASK = """
 			Task: first write your plan for this phase in your answer's text, as one JSON object with two fields. \

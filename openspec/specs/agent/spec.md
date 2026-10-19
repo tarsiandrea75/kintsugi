@@ -725,9 +725,12 @@ The messages of every model call MUST come in this order, what changes least fir
 The system message MUST also say **(T5c8)**:
 
 - the call path: order-service calls inventory-service and payment-service, payment-service calls gateway-mock, and the three services keep their data in postgres;
-- that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING`, `rootCauseService` is the component that is slow or refuses, not its caller: if A times out or fails because B does, name B;
+- that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING`, `rootCauseService` is the component that is slow or refuses, not its caller: name B when A waits for B or gets an error answer from B;
+- that `DEPENDENCY_REJECTING` means B is reached and answers with an error, and `CONFIGURATION` includes a wrong address or port of a component A calls; when A cannot reach B at all (connection refused or closed, unknown host) while B shows no failure of its own (no errors, no restarts, healthy metrics), B is not the cause and A's own setting for B, a `CONFIGURATION` of A, is suspected **(F3 T3)**;
 - that an affected order to trace is found with `recent_events` with `source=order`, not an older `PAID` one, and that its `orderId` is copied from a result, never a placeholder;
 - that an order never paid stays `PAYMENT_PENDING`, with `PAYMENT_UNAVAILABLE` order events, so `source=order` is filtered by `type=PAYMENT_UNAVAILABLE` or `outcome=PAYMENT_PENDING`, or not at all, and by `outcome=PAYMENT_FAILED` only when `status_summary` shows `PAYMENT_FAILED` orders **(T5c9)**.
+
+Why (F3 T3): the recorded F3 runs applied "if A times out or fails because B does, name B" to a caller that could not connect at all, and named the healthy callee `DEPENDENCY_REJECTING`, although a connect failure means the callee was never reached. The rule now separates an error or slow answer from B, which names B, from a failure to reach a B that shows no failure of its own, which points at the caller's setting. It describes categories, never a fault, service or port of the lab.
 
 Why (T5c9): in the fifth full run one incident filtered `source=order` by `outcome=PAYMENT_FAILED` while its orders were `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, so it saw nothing. The line describes the order states the lab records, never a cause the lab may be put through.
 
@@ -749,6 +752,13 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 - THEN it describes the call path and says that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING` the root-cause service is the slow or refusing component, not its caller
 - AND it says to trace a `PAYMENT_PENDING` or `PAYMENT_FAILED` order found with `recent_events` with `source=order`
 - AND it names no cause the lab may be put through
+
+#### Scenario: A caller that cannot reach a healthy dependency points at its own setting (F3 T3)
+- GIVEN A's calls to B fail because the connection is refused or closed, or the host is unknown
+- AND B shows no failure of its own: no errors, no restarts, healthy metrics
+- WHEN the loop builds the system message
+- THEN it says that B is not the cause and that A's own setting for B, a `CONFIGURATION` of A, is suspected
+- AND it still says to name B when A waits for B or gets an error answer from B
 
 ### Requirement: The report
 

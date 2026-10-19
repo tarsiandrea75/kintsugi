@@ -31,7 +31,18 @@ class PromptsTest {
 	void aDependencyCauseNamesTheDependencyNotItsCaller() {
 		assertThat(Prompts.system("orders are slow", 15)).contains("DEPENDENCY_LATENCY and DEPENDENCY_REJECTING")
 			.contains("not its caller")
-			.contains("if A times out or fails because B does, name B");
+			.contains("name B when A waits for B or gets an error answer from B")
+			.doesNotContain("if A times out or fails because B does, name B");
+	}
+
+	@Test
+	void aCallerThatCannotReachAHealthyDependencyPointsAtTheCallersSetting() {
+		// F3 runs named the callee DEPENDENCY_REJECTING for a caller that could not connect to it at all.
+		assertThat(Prompts.system("orders are slow", 15))
+			.contains("DEPENDENCY_REJECTING: a component is reached and answers, but refuses or fails")
+			.contains("such as the address or port of a component it calls")
+			.contains("When A cannot reach B at all")
+			.contains("B is not the cause: suspect A's own setting for B, a CONFIGURATION of A");
 	}
 
 	@Test
