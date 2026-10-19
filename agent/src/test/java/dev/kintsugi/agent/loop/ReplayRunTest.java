@@ -81,20 +81,25 @@ class ReplayRunTest {
 		ReplayDriver driver = new ReplayDriver(this.router, this.settings, this.incidents, AgentDatabase.admin(),
 				recordings, ReplayDriver.DEFAULT_TOOLS_LIST);
 		List<ReplayDriver.Sample> done = new ArrayList<>();
-		for (String fault : faults) {
-			for (AgentMode mode : modes) {
-				for (int n = 1; n <= samples; n++) {
-					ReplayDriver.Sample sample = driver.sample(fault, mode, n);
-					ReplayDriver.write(out, sample);
-					done.add(sample);
-					System.out.println("replay " + sample.summaryLine());
+		try {
+			for (String fault : faults) {
+				for (AgentMode mode : modes) {
+					for (int n = 1; n <= samples; n++) {
+						ReplayDriver.Sample sample = driver.sample(fault, mode, n);
+						ReplayDriver.write(out, sample);
+						done.add(sample);
+						System.out.println("replay " + sample.summaryLine());
+					}
 				}
 			}
 		}
-		List<String> aggregate = ReplayDriver.aggregate(done);
-		Files.writeString(out.resolve("aggregate.tsv"), String.join("\n", aggregate) + "\n");
-		System.out.println("replay out: " + out);
-		aggregate.forEach(line -> System.out.println("replay " + line));
+		finally {
+			// Written for the samples that ran even when a later one fails, so a paid partial run still has its totals.
+			List<String> aggregate = ReplayDriver.aggregate(done);
+			Files.writeString(out.resolve("aggregate.tsv"), String.join("\n", aggregate) + "\n");
+			System.out.println("replay out: " + out);
+			aggregate.forEach(line -> System.out.println("replay " + line));
+		}
 	}
 
 	private static List<AgentMode> modes(String mode) {

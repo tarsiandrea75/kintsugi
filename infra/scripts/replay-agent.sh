@@ -35,6 +35,8 @@ EOF
 OLLAMA=http://127.0.0.1:11434
 MODEL=granite4.1:8b
 ALL_FAULTS=(F1 F2 F3)
+# The most samples one cloud run may make (about $0.005 each on claude-haiku-5-5, ADR-012).
+MAX_CLOUD_SAMPLES=60
 
 route=cloud
 mode=both
@@ -45,9 +47,11 @@ while (( $# )); do
     -h|--help) usage; exit 0 ;;
     --route|--mode|--samples|--faults)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
-      declare "${1#--}=$2"; shift 2 ;;
-    --route=*|--mode=*|--samples=*|--faults=*)
-      option=${1%%=*}; declare "${option#--}=${1#*=}"; shift ;;
+      set -- "$1=$2" "${@:3}" ;;
+    --route=*) route=${1#*=}; shift ;;
+    --mode=*) mode=${1#*=}; shift ;;
+    --samples=*) samples=${1#*=}; shift ;;
+    --faults=*) faults=${1#*=}; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -57,8 +61,11 @@ done
 [[ "$samples" =~ ^[1-9][0-9]*$ ]] || { echo "--samples needs a positive integer, not '$samples'" >&2; exit 2; }
 IFS=, read -r -a selected <<<"$faults"
 (( ${#selected[@]} )) || { echo "--faults needs at least one fault" >&2; exit 2; }
+seen=" "
 for fault in "${selected[@]}"; do
   [[ " ${ALL_FAULTS[*]} " == *" $fault "* ]] || { echo "Unknown fault '$fault'; choose from ${ALL_FAULTS[*]}" >&2; exit 2; }
+  [[ "$seen" != *" $fault "* ]] || { echo "Fault '$fault' is listed twice" >&2; exit 2; }
+  seen+="$fault "
 done
 
 # shellcheck source=lib.sh
@@ -68,7 +75,11 @@ if [[ "$route" == cloud ]]; then
   # The key goes to Maven's environment, never to its command line, and its value is never printed.
   export_cloud_key || { echo "$CLOUD_KEY_MISSING" >&2; exit 2; }
   modes=$([[ "$mode" == both ]] && echo 2 || echo 1)
-  echo "COST WARNING: $(( ${#selected[@]} * modes * samples )) samples on the cloud route, each one paid model calls."
+  total=$(( ${#selected[@]} * modes * samples ))
+  # A typo in --samples must not turn into an unbounded paid run: a larger batch is split into several runs.
+  (( total <= MAX_CLOUD_SAMPLES )) \
+    || { echo "$total samples exceed the $MAX_CLOUD_SAMPLES a cloud run may make; split the batch" >&2; exit 2; }
+  echo "COST WARNING: $total samples on the cloud route, each one paid model calls."
   echo "Run this only with the human's go-ahead, and record the cost from aggregate.tsv."
 else
   # The local route never needs the key: keep it out of the test JVM.
