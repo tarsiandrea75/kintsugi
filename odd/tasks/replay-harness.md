@@ -37,7 +37,7 @@ Out of scope: Python aggregation in `evals/` (the TSV is enough at first); match
 - [x] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
 - [x] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth into `agent/src/test/resources/replay/` (the tool listing is the recorded `mcp-outputs/tools-list.json`, which holds the 8 tools mcp-tools serves), refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
 - [x] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
-- [ ] **T5 — First measurement.** With the human's go-ahead: dossier mode only (explorer replays are not valid measurements, see the T4 smoke check), N=5 per fault on the cloud route on the current prompt (15 samples, about $0.09); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
+- [x] **T5 — First measurement.** With the human's go-ahead: dossier mode only (explorer replays are not valid measurements, see the T4 smoke check), N=5 per fault on the cloud route on the current prompt (15 samples, about $0.09); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
 
 ## Acceptance criteria
 
@@ -92,6 +92,12 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
 
 - 2026-10-19: the code-review fixes committed as `972ee5f` (driver) and `8b20ee0` (scripts); both high, reviews (standing consent granted) approved and acknowledged. Their WARNING fixed inline: `manifest_upsert` printed an outcome and returned 0 when the manifest could not be written, so `record-replay.sh` counted a line the manifest did not hold; it now returns 1 with no outcome. RED: `FAIL  a manifest that cannot be written fails` (`replaced`, exit 0); GREEN: `PASS  76 cases`.
 
+- 2026-10-19: T5, with the human's go-ahead: `replay-agent.sh --samples 5` (dossier mode, the default) on `58e2ab9` (`infra/scripts/out/replay-20261019T191958Z-cloud`), 15 samples in about 4 minutes, exit 0.
+  - **F1 0/5** (every sample `payment-service|DEPENDENCY_LATENCY`: the right category, the caller of the slow component), **F2 5/5**, **F3 4/5** (one `payment-service|UNKNOWN`). Coverage 0.86-0.94; every sample's dossier step fully recorded (`dossierCovered` 5/5 per fault), so all 15 are covered samples.
+  - Against the lab's dossier rounds on the same prompt (`f3-caller-config` T5 and `evidence-settling` T3: F1 0/3, F2 3/3, F3 3/3): the same picture, now with five samples on fixed evidence. **F1's dossier miss is systematic, not noise:** on this evidence the model stops one hop short of gateway-mock every time. F2 and F3 are stable.
+  - Tokens: 674,325 prompt and 28,804 completion, **$0.0818**. Total cloud spend about $0.42 of the human's $5.
+- 2026-10-19: feature closed. The replay measures dossier mode in minutes for cents; explorer mode stays measured in the lab (exact matching cannot serve its free arguments).
+
 ## Next step
 
-T5: with the human's go-ahead, dossier mode only, N=5 per fault on the cloud route (15 samples, about $0.09).
+None in this feature. Open for the human: why dossier F1 names payment-service (now measurable on 5+ samples per change); an explorer replay design; the SUGGESTIONs recorded above.
