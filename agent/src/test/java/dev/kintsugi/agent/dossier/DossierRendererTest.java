@@ -52,7 +52,8 @@ class DossierRendererTest {
 	/**
 	 * The ceiling for the stress dossier: every list far above its cap and every value at its length limit, the worst
 	 * case the caps allow (about 15.8k characters with the latency table, near 4k tokens at 4 characters per token;
-	 * 13.4k and 4,500 before it), so a dossier never takes more than about half of {@code num-ctx} 8192.
+	 * 13.4k and 4,500 before it). The ceiling is about two thirds of {@code num-ctx} 8192, no longer half: the stress
+	 * dossier's report call is a known edge (agent spec, dossier size), while the real faults' dossiers stay far below it.
 	 */
 	private static final int STRESS_TOKEN_CEILING = 5_500;
 
