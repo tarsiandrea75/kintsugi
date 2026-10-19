@@ -35,7 +35,7 @@ Out of scope: Python aggregation in `evals/` (the TSV is enough at first); match
 
 - [x] **T1 — This document** and its Engram mirror; route: inline.
 - [x] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
-- [ ] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth and the tool listing into `agent/src/test/resources/replay/`, refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
+- [x] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth and the tool listing into `agent/src/test/resources/replay/`, refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
 - [ ] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
 - [ ] **T5 — First measurement.** With the human's go-ahead: N=5 per fault per mode on the cloud route on the current prompt (about 30 samples, an estimated $0.10–0.15); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
 
@@ -63,6 +63,8 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
 
 - 2026-10-19: T2 done in `45f56bb`. Native assessment `2a57ac5..45f56bb`: medium, `slice_budget_reached`; review (1 lens, reliability, standing consent granted) approved and acknowledged. Two WARNINGs fixed inline (route: inline, one class and its test): recordings are now capped like calls, so a recorded call without the cap still matches; an unreadable dossier step fails with the incident's id instead of a bare parse error. The SUGGESTION (no test that a recorded `CLIENT_ERROR` is not replayed) is covered too. RED: the cap case failed without the fix (18 tests, 1 failure); GREEN: 18/18; full suite 400/0/0.
 
+- 2026-10-19: T3, route delegated writer. `infra/scripts/record-replay.sh <run dir>...` copies each `F?-incident.json` to `agent/src/test/resources/replay/<fault>/<run dir>-<fault>.json` and keeps `replay/recordings.tsv` (fault, recorded mode and route, truth, file, incident), idempotent on re-run; it skips a fault with no score or truth and refuses a key-like or non-object incident (exit 1). Pure parts in `lib.sh`: `holds_key_like_string`, `score_fields`. RED: `test-lib.sh` failed on `holds_key_like_string: command not found`; GREEN: `PASS 61 cases`. End-to-end on a temporary `REPLAY_DIR`: three faults recorded, a `sk-ant-` incident refused, a fault without score and one without truth skipped, the re-run added no manifest line. Recorded F1-F3 from `verify-agent-20261019T170520Z-explorer-cloud` and `verify-agent-20261019T173217Z-dossier-cloud` (the two cloud runs after the leftover-evidence fix): six incidents, 28-58 KB each, none refused. Tool listing: `mcp-outputs/tools-list.json` holds the same eight tools `verify-mcp.sh` expects, so the replay uses it and no listing is copied.
+
 ## Next step
 
-T3, the record script.
+T4, the replay driver.

@@ -152,4 +152,38 @@ expect "a restore just now waits the margin and a minute" \
   "$(( ${waited#slept } >= (INCIDENT_WINDOW_MARGIN_MINUTES + 1) * 60 - 1 ))" 1
 unset -f sleep
 
+# holds_key_like_string: record-replay.sh refuses a recording that holds something shaped like an API key.
+KEY_DIR=$(mktemp -d)
+trap 'rm -f "$ENV_FILE"; rm -rf "$FAULT_END_DIR" "$KEY_DIR"' EXIT
+key_like() { printf '%s' "$1" >"$KEY_DIR/f"; if holds_key_like_string "$KEY_DIR/f"; then echo yes; else echo no; fi; }
+expect "an Anthropic key prefix" "$(key_like '{"toolOutput":"token sk-ant-api03-abc"}')" yes
+expect "the key variable with a value" "$(key_like 'env: ANTHROPIC_API_KEY=abc123')" yes
+expect "the key variable with a quoted value, JSON-escaped" "$(key_like '"ANTHROPIC_API_KEY=\"abc\""')" yes
+expect "an x-api-key header" "$(key_like '{"headers":{"x-api-key":"v"}}')" yes
+expect "an X-Api-Key header, any case" "$(key_like 'X-Api-Key: v')" yes
+expect "the key variable with an empty value" "$(key_like 'ANTHROPIC_API_KEY=')" no
+expect "the key variable with an empty quoted value" "$(key_like 'ANTHROPIC_API_KEY=""')" no
+expect "the key variable followed by a space" "$(key_like 'ANTHROPIC_API_KEY= # unset')" no
+expect "the key variable named without a value" "$(key_like 'needs ANTHROPIC_API_KEY in infra/.env')" no
+expect "an ordinary incident" "$(key_like '{"steps":[{"toolOutput":"order-service WARN payment pending, ask-ant"}]}')" no
+expect "the check prints nothing" "$(printf 'sk-ant-x' >"$KEY_DIR/f"; holds_key_like_string "$KEY_DIR/f")" ""
+expect "a missing file is refused, not passed" \
+  "$(if holds_key_like_string "$KEY_DIR/missing"; then echo yes; else echo no; fi)" yes
+
+# score_fields: fault, recorded mode, recorded route, truth and incident from a verify-agent score file, none when
+# absent.
+score='fault: F1
+mode (requested, recorded): dossier, explorer
+route (requested, recorded): cloud, cloud
+model: claude-haiku-5-5
+incident: 34d23554-fc45-452d-8f71-cf64be2e2b87
+truth (service|category): gateway-mock|DEPENDENCY_LATENCY
+reported (service|category, from the report): payment-service|DEPENDENCY_LATENCY
+verdict: MISS'
+expect "a full score file, with the recorded mode and route" "$(score_fields "$score")" \
+  "F1${tab}explorer${tab}cloud${tab}gateway-mock|DEPENDENCY_LATENCY${tab}34d23554-fc45-452d-8f71-cf64be2e2b87"
+expect "a score file with no truth and no route" "$(score_fields $'fault: F2\nmode (requested, recorded): dossier, dossier\ntruth (service|category): ')" \
+  "F2${tab}dossier${tab}none${tab}none${tab}none"
+expect "an empty score file" "$(score_fields '')" "none${tab}none${tab}none${tab}none${tab}none"
+
 echo "PASS  $cases cases"

@@ -725,6 +725,40 @@ agent_verdict() {
   fi
 }
 
+# Succeeds when file $1 holds something shaped like an API key: "sk-ant-", ANTHROPIC_API_KEY= followed by a value
+# (bare, quoted or JSON-escaped; an empty value does not count), or an "x-api-key" header, in any case. A file that
+# cannot be read counts as holding one, so a caller refuses it. Prints nothing. record-replay.sh refuses such a
+# recording; tested by test-lib.sh.
+holds_key_like_string() {
+  local status=0
+  grep -qiE -e 'sk-ant-' -e "ANTHROPIC_API_KEY=(\\\\?[\"'])?[^\"'[:space:]\\\\]" -e 'x-api-key' -- "$1" 2>/dev/null \
+    || status=$?
+  (( status != 1 ))
+}
+
+# Prints "<fault><tab><mode><tab><route><tab><truth><tab><incident>" from the text $1 of a verify-agent score file
+# (<fault>-score.txt): the recorded mode and route (the second of "requested, recorded"), the truth
+# "service|category", and the incident id; a field the text does not hold, or holds empty, is "none". Tested by
+# test-lib.sh.
+score_fields() {
+  local fault=none mode=none route=none truth=none incident=none line value
+  while IFS= read -r line; do
+    [[ "$line" == *:* ]] || continue
+    value=${line#*:}
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    [[ -n "$value" ]] || continue
+    case "${line%%:*}" in
+      fault) fault=$value ;;
+      "mode (requested, recorded)") mode=${value##*, } ;;
+      "route (requested, recorded)") route=${value##*, } ;;
+      "truth (service|category)") truth=$value ;;
+      incident) incident=$value ;;
+    esac
+  done <<<"$1"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$fault" "$mode" "$route" "$truth" "$incident"
+}
+
 # Places an order and requires 201 PAID; exits otherwise. $1 names the order in the messages ("healthy", ...).
 expect_paid_order() {
   local code id status

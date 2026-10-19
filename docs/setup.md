@@ -405,6 +405,18 @@ Every run, pass or fail, is logged under `infra/scripts/out/verify-agent-<UTC ti
 
 The cloud route needs `ANTHROPIC_API_KEY`. The human adds it to `infra/.env` (git-ignored); it is never committed, and no placeholder is either. Compose passes it to the agent (empty by default); a value set in the shell wins over the file, and `verify-agent.sh` drops an empty shell value so it cannot hide the file's. With `--route cloud` and no key in either place, the script stops with exit status 2 before it touches the lab, naming `ANTHROPIC_API_KEY` and `infra/.env`; it never prints the key. On the cloud route it skips the local model's checks (Ollama serving `granite4.1:8b`, `ollama-proxy` healthy) with an info line; `search_runbooks` still embeds through Ollama, so `start_lab` warns as usual when `ollama-proxy` or the indexer is down. Every cloud call costs money: each cloud batch (a `verify-agent.sh --route cloud` run or a `compare-agent-modes.sh --route cloud` comparison) needs the human's go-ahead, and its cost is recorded (ADR-012).
 
+### Record a run for replay
+
+The replay harness (`odd/tasks/replay-harness.md`) runs the real agent loop against tool outputs recorded from a `verify-agent.sh` run, so a prompt or loop change can be scored on many samples without the lab. `record-replay.sh` takes those recordings from run directories; it never contacts the lab:
+
+```bash
+infra/scripts/record-replay.sh infra/scripts/out/verify-agent-<UTC time>-dossier-cloud [<run dir>...]
+```
+
+For each `<fault>-incident.json` it reads `<fault>-score.txt` and copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json` (committed: recordings are lab output, not secrets), and adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file and the incident id. Re-running it on the same run replaces the copy and adds no second manifest line. A fault with no score file or no truth is skipped with a warning. An incident that holds a key-like string (`sk-ant-`, `ANTHROPIC_API_KEY=` with a value, or `x-api-key`, checked by `holds_key_like_string` in `lib.sh`) or that is not a JSON object is refused: nothing is written for it and the script exits 1. `REPLAY_DIR` names another destination, for a dry run in a temporary directory.
+
+The tool listing is not recorded per run: the replay offers the tools of `agent/src/test/resources/mcp-outputs/tools-list.json`, a recorded `tools/list` answer holding the same eight tools `verify-mcp.sh` expects.
+
 ### Reset a volume
 
 Init scripts (`infra/postgres/init/`, `infra/knowledge-db/init/`) run only when their volume is empty. When one changes after the volume was created (for example when the `agent` database was added to `knowledge-db`), or when a volume's state is broken, delete that one volume and start the lab again:
