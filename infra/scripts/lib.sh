@@ -68,22 +68,41 @@ env_file_has_value() {
 }
 
 # Reads ENV_FILE's value of variable $1 into the caller's variable named $2, by the rules of env_file_has_value; fails,
-# leaving $2 empty, when the file gives none. Prints nothing, so a value is never shown.
+# leaving $2 empty, when the file gives none. Prints nothing, so a value is never shown. The locals are prefixed _efr_
+# so they cannot shadow the caller's variable; a target with that prefix is refused (exit 1, nothing written).
 env_file_read() {
-  local line value="" name=$1
+  [[ "$2" != _efr_* ]] || { echo "env_file_read: the target name '$2' is reserved" >&2; return 1; }
+  local _efr_line _efr_value="" _efr_name=$1
   printf -v "$2" '%s' ""
   [[ -r "$ENV_FILE" ]] || return 1
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line=${line#"${line%%[![:space:]]*}"}
-    line=${line#export }
-    [[ "$line" == "$name="* ]] || continue
-    value=${line#"$name="}
-    value=${value%%[[:space:]]#*}
-    value=${value%"${value##*[![:space:]]}"}
-    [[ "$value" == \"*\" || "$value" == \'*\' ]] && value=${value:1:${#value}-2}
+  while IFS= read -r _efr_line || [[ -n "$_efr_line" ]]; do
+    _efr_line=${_efr_line#"${_efr_line%%[![:space:]]*}"}
+    _efr_line=${_efr_line#export }
+    [[ "$_efr_line" == "$_efr_name="* ]] || continue
+    _efr_value=${_efr_line#"$_efr_name="}
+    _efr_value=${_efr_value%%[[:space:]]#*}
+    _efr_value=${_efr_value%"${_efr_value##*[![:space:]]}"}
+    [[ "$_efr_value" == \"*\" || "$_efr_value" == \'*\' ]] && _efr_value=${_efr_value:1:${#_efr_value}-2}
   done <"$ENV_FILE"
-  [[ -n "$value" ]] || return 1
-  printf -v "$2" '%s' "$value"
+  [[ -n "$_efr_value" ]] || return 1
+  printf -v "$2" '%s' "$_efr_value"
+}
+
+# Puts tab-separated manifest line $2 into manifest $1 (record-replay.sh's recordings.tsv), keyed by its fifth column,
+# the file: replaces the first line for the same file in place and drops any later one, else appends. Prints added,
+# replaced or unchanged. The manifest's first line is its header and is never matched.
+manifest_upsert() {
+  local manifest=$1 row=$2 file outcome tmp
+  IFS=$'\t' read -r _ _ _ _ file _ <<<"$row"
+  tmp=$(mktemp) || return 1
+  outcome=$(awk -F'\t' -v file="$file" -v row="$row" -v out="$tmp" '
+    NR > 1 && $5 == file { if (!found) { changed = $0 != row; print row > out; found = 1 } else changed = 1; next }
+    { print > out }
+    END { if (!found) print row > out; print (!found ? "added" : changed ? "replaced" : "unchanged") }' "$manifest") \
+    || { rm -f "$tmp"; return 1; }
+  # Copied over, not moved, so the manifest keeps its own file mode.
+  cat "$tmp" >"$manifest" && rm -f "$tmp"
+  echo "$outcome"
 }
 
 # Unsets an empty ANTHROPIC_API_KEY in the calling shell: compose lets a variable set in the shell, even to an empty

@@ -197,4 +197,43 @@ expect "a score file with no truth and no route" "$(score_fields $'fault: F2\nmo
   "F2${tab}dossier${tab}none${tab}none${tab}none"
 expect "an empty score file" "$(score_fields '')" "none${tab}none${tab}none${tab}none${tab}none"
 
+# env_file_read writes the caller's variable even when it has the name of one of the function's own locals.
+ENV_FILE="$KEY_DIR/env"
+printf 'ANTHROPIC_API_KEY=dummy-for-test\n' >"$ENV_FILE"
+read_into_value() { local value=""; env_file_read ANTHROPIC_API_KEY value; echo "[$value]"; }
+expect "a caller variable named value" "$(read_into_value)" "[dummy-for-test]"
+read_into_line() { local line=""; env_file_read ANTHROPIC_API_KEY line; echo "[$line]"; }
+expect "a caller variable named line" "$(read_into_line)" "[dummy-for-test]"
+expect "a target named like the function's own locals is refused" \
+  "$(if env_file_read ANTHROPIC_API_KEY _efr_value 2>/dev/null; then echo yes; else echo no; fi)" no
+rm -f "$ENV_FILE"
+
+# manifest_upsert: record-replay.sh's manifest keeps one line per file (column 5), the latest values.
+MANIFEST_FILE="$KEY_DIR/recordings.tsv"
+printf 'fault\tmode\troute\ttruth\tfile\tincident\n' >"$MANIFEST_FILE"
+row_a="F1${tab}dossier${tab}cloud${tab}a|B${tab}F1/run-F1.json${tab}id-1"
+row_b="F2${tab}dossier${tab}cloud${tab}c|D${tab}F2/run-F2.json${tab}id-2"
+expect "a new file is added" "$(manifest_upsert "$MANIFEST_FILE" "$row_a")" added
+manifest_upsert "$MANIFEST_FILE" "$row_b" >/dev/null
+expect "the same line again is unchanged" "$(manifest_upsert "$MANIFEST_FILE" "$row_a")" unchanged
+row_a2="F1${tab}explorer${tab}cloud${tab}a|B${tab}F1/run-F1.json${tab}id-9"
+expect "a re-recorded file replaces its line" "$(manifest_upsert "$MANIFEST_FILE" "$row_a2")" replaced
+expect "the manifest keeps its order, one line per file, the new values" "$(<"$MANIFEST_FILE")" \
+  "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident"$'\n'"$row_a2"$'\n'"$row_b"
+
+# replay-agent.sh bounds --samples' digits before multiplying, so the cloud bound cannot wrap. Run on the local route
+# with a failing curl stub, so a regression stops at the Ollama check: never Maven, never the key.
+STUB_DIR="$KEY_DIR/bin"
+mkdir -p "$STUB_DIR"
+printf '#!/bin/sh\nexit 7\n' >"$STUB_DIR/curl"
+chmod +x "$STUB_DIR/curl"
+samples_check() {
+  local err code
+  err=$(PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" --route local --samples "$1" 2>&1 >/dev/null)
+  code=$?
+  echo "$code ${err%% *}"
+}
+expect "a 4-digit --samples exits 2 on the option itself" "$(samples_check 1000)" "2 --samples"
+expect "a --samples that would wrap exits 2 on the option itself" "$(samples_check 30744573456182586)" "2 --samples"
+
 echo "PASS  $cases cases"

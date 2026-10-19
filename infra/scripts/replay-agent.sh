@@ -8,13 +8,13 @@ usage() {
 Replays recorded faults through the agent loop, without the lab (odd/tasks/replay-harness.md, agent spec "Replay of
 recorded tool outputs").
 
-  infra/scripts/replay-agent.sh                       # one sample of F1, F2 and F3 in both modes, cloud route
-  infra/scripts/replay-agent.sh --samples 5 --mode dossier --faults F1,F3
+  infra/scripts/replay-agent.sh                       # one dossier sample of F1, F2 and F3, cloud route
+  infra/scripts/replay-agent.sh --samples 5 --faults F1,F3
   infra/scripts/replay-agent.sh --route local         # the local model on Ollama, 127.0.0.1:11434
 
   --route cloud|local            the model's route (default cloud)
-  --mode explorer|dossier|both   the loop's mode (default both)
-  --samples N                    samples per fault and mode (default 1)
+  --mode dossier|explorer|both   the loop's mode (default dossier)
+  --samples N                    samples per fault and mode, 1 to 999 (default 1)
   --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
 
 It runs ReplayRunTest (./mvnw test -Preplay) in agent/: for each fault, mode and sample, the real loop and the route's
@@ -22,7 +22,13 @@ real model over the recorded tool outputs in agent/src/test/resources/replay/, s
 writes infra/scripts/out/replay-<UTC time>-<route>/: <fault>-<mode>-<n>.json (the incident with its steps),
 summary.tsv (one line per sample: verdict, coverage, conflicts, tokens, seconds) and aggregate.tsv (per fault and mode:
 matches out of samples, mean coverage, tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per
-million prompt and completion tokens). A sample with coverage below 1 had calls no recording holds: read it as such.
+million prompt and completion tokens; then the covered samples, coverage at least 0.8, and the matches among them,
+and the samples whose dossier was fully recorded). A sample with coverage below 1 had calls no recording holds: read
+it as such.
+
+EXPLORER REPLAYS ARE NOT VALID MEASUREMENTS: under exact matching the explorer's model-chosen calls are mostly not
+recorded (coverage 0.00-0.38 in the T4 smoke check), so its samples measure the replay's gaps, not the agent. Explorer
+and both stay available to inspect that, not to score the agent.
 
 COST: on the cloud route every sample is paid model calls. Run it only with the human's go-ahead, and record the cost.
 The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reaches Maven through the environment only
@@ -39,7 +45,7 @@ ALL_FAULTS=(F1 F2 F3)
 MAX_CLOUD_SAMPLES=60
 
 route=cloud
-mode=both
+mode=dossier
 samples=1
 faults=F1,F2,F3
 while (( $# )); do
@@ -58,7 +64,8 @@ done
 [[ "$route" == cloud || "$route" == local ]] || { echo "Unknown route '$route'; choose cloud or local" >&2; exit 2; }
 [[ "$mode" == explorer || "$mode" == dossier || "$mode" == both ]] \
   || { echo "Unknown mode '$mode'; choose explorer, dossier or both" >&2; exit 2; }
-[[ "$samples" =~ ^[1-9][0-9]*$ ]] || { echo "--samples needs a positive integer, not '$samples'" >&2; exit 2; }
+# At most 3 digits, so the bound on cloud samples below cannot wrap around in bash's 64-bit arithmetic.
+[[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
 IFS=, read -r -a selected <<<"$faults"
 (( ${#selected[@]} )) || { echo "--faults needs at least one fault" >&2; exit 2; }
 seen=" "

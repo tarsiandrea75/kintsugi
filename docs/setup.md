@@ -413,7 +413,7 @@ The replay harness (`odd/tasks/replay-harness.md`) runs the real agent loop agai
 infra/scripts/record-replay.sh infra/scripts/out/verify-agent-<UTC time>-dossier-cloud [<run dir>...]
 ```
 
-For each `<fault>-incident.json` it reads `<fault>-score.txt` and copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json` (committed: recordings are lab output, not secrets), and adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file and the incident id. Re-running it on the same run replaces the copy and adds no second manifest line. A fault with no score file or no truth is skipped with a warning. An incident that holds a key-like string (`sk-ant-`, `ANTHROPIC_API_KEY=` with a value, or `x-api-key`, checked by `holds_key_like_string` in `lib.sh`) or that is not a JSON object is refused: nothing is written for it and the script exits 1. `REPLAY_DIR` names another destination, for a dry run in a temporary directory.
+For each `<fault>-incident.json` it reads `<fault>-score.txt` and copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json` (committed: recordings are lab output, not secrets), and adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file and the incident id. Re-running it on the same run replaces the copy and replaces that file's manifest line with the new values (`manifest_upsert` in `lib.sh`; unchanged when they are the same), never adding a second one. A fault with no score file or no truth is skipped with a warning. An incident that holds a key-like string (`sk-ant-`, `ANTHROPIC_API_KEY=` with a value, or `x-api-key`, checked by `holds_key_like_string` in `lib.sh`) or that is not a JSON object is refused: nothing is written for it and the script exits 1. `REPLAY_DIR` names another destination, for a dry run in a temporary directory.
 
 The tool listing is not recorded per run: the replay offers the tools of `agent/src/test/resources/mcp-outputs/tools-list.json`, a recorded `tools/list` answer holding the same eight tools `verify-mcp.sh` expects.
 
@@ -422,14 +422,16 @@ The tool listing is not recorded per run: the replay offers the tools of `agent/
 `replay-agent.sh` runs the real agent loop and the route's real model over those recordings, without the lab, and scores every sample against the recorded truth:
 
 ```bash
-infra/scripts/replay-agent.sh                                     # 1 sample of F1-F3, both modes, cloud route
-infra/scripts/replay-agent.sh --samples 5 --mode dossier --faults F1,F3
+infra/scripts/replay-agent.sh                                     # 1 dossier sample of F1-F3, cloud route
+infra/scripts/replay-agent.sh --samples 5 --faults F1,F3
 infra/scripts/replay-agent.sh --route local                       # Ollama with granite4.1:8b on 127.0.0.1:11434
 ```
 
 **Cost:** on the cloud route every sample is paid model calls (the script prints how many samples it will run). Run it only with the human's go-ahead, and record the cost from `aggregate.tsv`. The key comes from the shell or `infra/.env` (`export_cloud_key` in `lib.sh`) and reaches Maven through its environment only; it is never printed or put on a command line.
 
-It runs `ReplayRunTest` with the `replay` Maven profile (the default `./mvnw test` leaves it out) and needs Docker for the Testcontainers database. It writes `infra/scripts/out/replay-<UTC time>-<route>/`: `<fault>-<mode>-<n>.json`, the incident with its steps; `summary.tsv`, one line per sample with its status, verdict, coverage (calls answered from a recording out of all calls), conflicts, tokens and seconds; and `aggregate.tsv`, per fault and mode, matches out of samples, mean coverage, tokens and the estimated cloud cost. A sample with coverage below 1.00 made calls no recording holds, answered as `CLIENT_ERROR`: read its verdict with that in mind. A `MISS` is a measurement; the script exits 1 only when a sample could not run.
+It runs `ReplayRunTest` with the `replay` Maven profile (the default `./mvnw test` leaves it out) and needs Docker for the Testcontainers database. It writes `infra/scripts/out/replay-<UTC time>-<route>/`: `<fault>-<mode>-<n>.json`, the incident with its steps; `summary.tsv`, one line per sample with its status, verdict, coverage (calls answered from a recording out of all calls), conflicts, tokens and seconds; and `aggregate.tsv`, per fault and mode, matches out of samples, mean coverage, `coveredSamples` (coverage at least 0.8), `matchesCovered` (matches among them, out of them), `dossierCovered` (samples whose dossier was fully recorded, out of samples), tokens and the estimated cloud cost. A sample with coverage below 1.00 made calls no recording holds, answered as `CLIENT_ERROR`: read its verdict with that in mind. A dossier sample usually shows about 0.91, its model-chosen calls (free-text `search_runbooks` queries) being unrecorded, which is why the covered threshold is 0.8.
+
+The default mode is `dossier`; `--samples` takes 1 to 999. `--mode explorer` and `--mode both` still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. A `MISS` is a measurement; the script exits 1 only when a sample could not run.
 
 ### Reset a volume
 
