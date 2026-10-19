@@ -26,7 +26,7 @@ The prompt rule (`Prompts.java`, F3 T5) needs per-hop latency; the gap is in the
 
 - [x] **T1 — This document** and its Engram mirror; route: inline.
 - [x] **T2 — Latency in the dossier.** Gather and render it; tests first (`DossierGatherer`/renderer tests, recorded-lab fixtures); spec updated. Route: delegated writer (2+ files).
-- [ ] **T3 — Record a fresh dossier round** on the cloud route (`verify-agent.sh --mode dossier --route cloud`, F1-F3, about 27 minutes and $0.02) and replace the old dossier recordings in `agent/src/test/resources/replay/` with it (the old ones lack the latency calls, and the driver serves the first same-mode recording). Route: parent (runs).
+- [x] **T3 — Record a fresh dossier round** on the cloud route (`verify-agent.sh --mode dossier --route cloud`, F1-F3, about 27 minutes and $0.02) and replace the old dossier recordings in `agent/src/test/resources/replay/` with it (the old ones lack the latency calls, and the driver serves the first same-mode recording). Route: parent (runs).
 - [ ] **T4 — Measure on the replay:** `replay-agent.sh --samples 5` (dossier), about $0.08; compare with F1 0/5, F2 5/5, F3 4/5. Route: parent (runs).
 
 ## Acceptance criteria
@@ -51,6 +51,8 @@ Forecast about 250 authored lines, one slice. Branch `feat/dossier-latency`, fro
 
 - 2026-10-19: T2 done in `673aa4a` (also the stale "29 calls" comment in `AgentLoop`). Native assessment high; review (1 lens, standing consent granted) approved and acknowledged. WARNINGs: the stress ceiling comment claimed "half of num-ctx" after the raise to 5,500 tokens (two thirds): the comment now says so and names the known edge; the integer-timestamp check on latency points is kept, since mcp-tools writes each point's time as an integer (`ObservabilityTools.java:229`, `asLong`), so a fractional time would be a contract break worth failing on. SUGGESTION left: `ReplayDriverTest`'s partial coverage until T3.
 
+- 2026-10-19: T3, with the human's go-ahead: `verify-agent.sh --mode dossier --route cloud` on `f20fc74` (`infra/scripts/out/verify-agent-20261019T214629Z`), exit 0: **F1 MATCH, F2 MATCH, F3 MATCH**, the first dossier 3/3 on any route (one sample). Recorded with `record-replay.sh`; the three `173217Z` dossier recordings and their manifest lines removed (they lack the latency calls). `ReplayDriverTest` now replays the new F1 recording with full coverage (33 calls, 0 unrecorded): 8/8.
+
 ## Next step
 
-T3.
+T4.

@@ -39,11 +39,11 @@ class ReplayDriverTest {
 	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
 
 	private static final Path F1_DOSSIER = ReplayDriver.DEFAULT_RECORDINGS
-		.resolve("F1/verify-agent-20261019T173217Z-dossier-cloud-F1.json");
+		.resolve("F1/verify-agent-20261019T214629Z-F1.json");
 
 	private static final String F1_TRUTH = "gateway-mock|DEPENDENCY_LATENCY";
 
-	private static final Instant F1_DOSSIER_START = Instant.parse("2026-10-19T17:44:08.969873Z");
+	private static final Instant F1_DOSSIER_START = Instant.parse("2026-10-19T21:48:59.713752Z");
 
 	private final ScriptedChatModel model = new ScriptedChatModel();
 
@@ -87,13 +87,12 @@ class ReplayDriverTest {
 		assertThat(sample.truth()).isEqualTo("gateway-mock|DEPENDENCY_LATENCY");
 		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
 		assertThat(sample.verdict()).isEqualTo("MISS");
-		// The recordings predate the dossier's 4 query_metric latency calls (dossier-latency T2), so those 4 are
-		// unrecorded; dossier-latency T3 replaces the recordings and restores full coverage.
+		// The recording holds the dossier's 33 calls, the 4 latency calls included (dossier-latency T3).
 		assertThat(sample.dossierCalls()).isEqualTo(33);
-		assertThat(sample.dossierUnrecorded()).isEqualTo(4);
-		assertThat(sample.recorded()).isEqualTo(29);
-		assertThat(sample.unrecorded()).isEqualTo(4);
-		assertThat(sample.coverage()).isEqualTo(29.0 / 33);
+		assertThat(sample.dossierUnrecorded()).isZero();
+		assertThat(sample.recorded()).isEqualTo(33);
+		assertThat(sample.unrecorded()).isZero();
+		assertThat(sample.coverage()).isEqualTo(1.0);
 
 		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
 		assertThat(summary).hasSize(2);
@@ -101,7 +100,7 @@ class ReplayDriverTest {
 		String[] line = summary.get(1).split("\t", -1);
 		assertThat(line).hasSize(15);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
-				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "29", "4", "0.88");
+				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "0", "1.00");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
 		assertThat(line[12]).isEqualTo(String.valueOf(sample.promptTokens()));
 		assertThat(line[14]).matches("\\d+\\.\\d");
