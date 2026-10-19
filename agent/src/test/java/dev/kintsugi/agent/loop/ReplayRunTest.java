@@ -30,7 +30,8 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  *
  * <p>
  * System properties: {@code replay.route} ({@code cloud}, the default, or {@code local}), {@code replay.mode}
- * ({@code explorer}, {@code dossier} or {@code both}, the default), {@code replay.faults} ({@code F1,F2,F3}),
+ * ({@code dossier}, the default, {@code explorer} or {@code both}; an explorer replay is low-coverage and not a valid
+ * measurement, see the feature document's T4 smoke check), {@code replay.faults} ({@code F1,F2,F3}),
  * {@code replay.samples} (1), {@code replay.recordings} (the committed {@code replay/} directory) and {@code replay.out}
  * ({@code infra/scripts/out/replay-<UTC time>-<route>/}). A miss is a measurement, not a failure: the test fails only
  * when it cannot run a sample.
@@ -63,7 +64,7 @@ class ReplayRunTest {
 	@Test
 	void replay() throws IOException {
 		String route = System.getProperty("replay.route", "cloud");
-		List<AgentMode> modes = modes(System.getProperty("replay.mode", "both"));
+		List<AgentMode> modes = modes(System.getProperty("replay.mode", "dossier"));
 		List<String> faults = Arrays.stream(System.getProperty("replay.faults", "F1,F2,F3").split(","))
 			.map(String::strip)
 			.filter(fault -> !fault.isEmpty())
@@ -86,8 +87,9 @@ class ReplayRunTest {
 				for (AgentMode mode : modes) {
 					for (int n = 1; n <= samples; n++) {
 						ReplayDriver.Sample sample = driver.sample(fault, mode, n);
-						ReplayDriver.write(out, sample);
+						// Counted before it is written: a paid sample stays in aggregate.tsv even when its write fails.
 						done.add(sample);
+						ReplayDriver.write(out, sample);
 						System.out.println("replay " + sample.summaryLine());
 					}
 				}

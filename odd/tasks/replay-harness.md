@@ -37,14 +37,14 @@ Out of scope: Python aggregation in `evals/` (the TSV is enough at first); match
 - [x] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
 - [x] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth into `agent/src/test/resources/replay/` (the tool listing is the recorded `mcp-outputs/tools-list.json`, which holds the 8 tools mcp-tools serves), refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
 - [x] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
-- [ ] **T5 — First measurement.** With the human's go-ahead: N=5 per fault per mode on the cloud route on the current prompt (about 30 samples, an estimated $0.10–0.15); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
+- [ ] **T5 — First measurement.** With the human's go-ahead: dossier mode only (explorer replays are not valid measurements, see the T4 smoke check), N=5 per fault on the cloud route on the current prompt (15 samples, about $0.09); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
 
 ## Acceptance criteria
 
 - T2: a recorded call returns its recorded output and outcome; an unrecorded one returns `CLIENT_ERROR` and raises the miss count; caps match `McpLabTools`; `./mvnw test` passes.
 - T3: the script copies a run's three faults with their truth and refuses a key-like string.
 - T4: `./mvnw test` without the tag runs no replay; with it, one sample per fault produces a scored line with coverage; dossier gathering has full coverage.
-- T5: rates per fault and mode with N=5, coverage per mode, cost recorded.
+- T5: dossier-mode rates per fault with N=5, with coverage and the covered columns, cost recorded.
 
 ## Checks
 
@@ -78,6 +78,18 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
 
 - 2026-10-19: the fixes `718986f`..`9469b14` reviewed (high, standing consent granted): approved and acknowledged. Its WARNING fixed inline: a failure writing `aggregate.tsv` in the `finally` is now only reported, so it cannot hide the sample's own failure. SUGGESTIONs left (script option-parsing tests, comment wording).
 
+- 2026-10-19: nine code-review findings on `ae6bf2c` fixed, route delegated writer (2+ non-trivial files).
+  1. A sample's primary recording (same mode) is handed to `ReplayLabTools` first, so a dossier sample gets the dossier run's output for a call both recordings hold. RED: `aSampleIsServedItsOwnModesRecordingBeforeTheOthers` got "the explorer run's output"; GREEN.
+  2. `ReplayRunTest` adds a sample to the totals before writing it. Not deterministically testable (the test needs a real model); checked by reading and `test-compile -Preplay`.
+  3. `replay-agent.sh` and `ReplayRunTest` default to dossier mode; `--help`, the spec and `docs/setup.md` say explorer replays are low-coverage and not valid measurements. Checked with `--help`.
+  4. `aggregate.tsv` gained `coveredSamples` (coverage at least `COVERED_THRESHOLD`, 0.8), `matchesCovered` and `dossierCovered`. RED: three aggregate tests failed on the old columns; GREEN.
+  5. `record-replay.sh` replaces a re-recorded file's manifest line (`manifest_upsert` in `lib.sh`, which also drops a later duplicate). RED: `manifest_upsert: command not found` on HEAD's `lib.sh`; GREEN in `test-lib.sh`; end to end on a temporary `REPLAY_DIR`: added, unchanged, then replaced with the new mode and incident, one line.
+  6. A recording without `startedAt`, `symptom` or a positive `sinceMinutes` fails with an `IllegalArgumentException` naming the fault and file, before any model call. RED: a `DateTimeParseException`; GREEN, with zero model calls.
+  7. Each fault's recordings and the tool listing are parsed once per driver; each sample gets a fresh `ReplayLabTools` from the parsed nodes. Behaviour unchanged: the existing driver tests stay green.
+  8. `env_file_read`'s locals are prefixed `_efr_` and a target with that prefix is refused. RED: a caller variable named `value` stayed empty; GREEN.
+  9. `--samples` takes at most 3 digits, checked before the key and Maven. RED: a 4-digit value passed the option check (stopped by a stubbed Ollama check on the local route, so never Maven nor the key); GREEN: exit 2 on the option.
+  Totals: `ReplayDriverTest` 8/8 (RED 5 failures), `ReplayLabToolsTest` 18/18, `test-lib.sh` PASS 75 cases, full `./mvnw test` 408 run, 0 failures, 0 errors, `ReplayRunTest` not run; `test-compile -Preplay` passes.
+
 ## Next step
 
-T5, after the human decides how to treat explorer mode (measure dossier mode only, or change the design for explorer).
+T5: with the human's go-ahead, dossier mode only, N=5 per fault on the cloud route (15 samples, about $0.09).
