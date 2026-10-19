@@ -417,6 +417,20 @@ For each `<fault>-incident.json` it reads `<fault>-score.txt` and copies the inc
 
 The tool listing is not recorded per run: the replay offers the tools of `agent/src/test/resources/mcp-outputs/tools-list.json`, a recorded `tools/list` answer holding the same eight tools `verify-mcp.sh` expects.
 
+### Replay the recorded faults
+
+`replay-agent.sh` runs the real agent loop and the route's real model over those recordings, without the lab, and scores every sample against the recorded truth:
+
+```bash
+infra/scripts/replay-agent.sh                                     # 1 sample of F1-F3, both modes, cloud route
+infra/scripts/replay-agent.sh --samples 5 --mode dossier --faults F1,F3
+infra/scripts/replay-agent.sh --route local                       # Ollama with granite4.1:8b on 127.0.0.1:11434
+```
+
+**Cost:** on the cloud route every sample is paid model calls (the script prints how many samples it will run). Run it only with the human's go-ahead, and record the cost from `aggregate.tsv`. The key comes from the shell or `infra/.env` (`export_cloud_key` in `lib.sh`) and reaches Maven through its environment only; it is never printed or put on a command line.
+
+It runs `ReplayRunTest` with the `replay` Maven profile (the default `./mvnw test` leaves it out) and needs Docker for the Testcontainers database. It writes `infra/scripts/out/replay-<UTC time>-<route>/`: `<fault>-<mode>-<n>.json`, the incident with its steps; `summary.tsv`, one line per sample with its status, verdict, coverage (calls answered from a recording out of all calls), conflicts, tokens and seconds; and `aggregate.tsv`, per fault and mode, matches out of samples, mean coverage, tokens and the estimated cloud cost. A sample with coverage below 1.00 made calls no recording holds, answered as `CLIENT_ERROR`: read its verdict with that in mind. A `MISS` is a measurement; the script exits 1 only when a sample could not run.
+
 ### Reset a volume
 
 Init scripts (`infra/postgres/init/`, `infra/knowledge-db/init/`) run only when their volume is empty. When one changes after the volume was created (for example when the `agent` database was added to `knowledge-db`), or when a volume's state is broken, delete that one volume and start the lab again:

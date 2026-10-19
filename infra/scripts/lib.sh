@@ -63,7 +63,15 @@ ENV_FILE="$REPO_DIR/infra/.env"
 # True when ENV_FILE gives variable $1 a non-empty value (the last definition wins, as in compose; "export " and quotes
 # around the value are allowed). Prints nothing, so it never shows a value.
 env_file_has_value() {
+  local found
+  env_file_read "$1" found
+}
+
+# Reads ENV_FILE's value of variable $1 into the caller's variable named $2, by the rules of env_file_has_value; fails,
+# leaving $2 empty, when the file gives none. Prints nothing, so a value is never shown.
+env_file_read() {
   local line value="" name=$1
+  printf -v "$2" '%s' ""
   [[ -r "$ENV_FILE" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     line=${line#"${line%%[![:space:]]*}"}
@@ -74,7 +82,8 @@ env_file_has_value() {
     value=${value%"${value##*[![:space:]]}"}
     [[ "$value" == \"*\" || "$value" == \'*\' ]] && value=${value:1:${#value}-2}
   done <"$ENV_FILE"
-  [[ -n "$value" ]]
+  [[ -n "$value" ]] || return 1
+  printf -v "$2" '%s' "$value"
 }
 
 # Unsets an empty ANTHROPIC_API_KEY in the calling shell: compose lets a variable set in the shell, even to an empty
@@ -85,6 +94,17 @@ drop_empty_cloud_key() { [[ -n "${ANTHROPIC_API_KEY:-}" ]] || unset ANTHROPIC_AP
 # True when the cloud route has its key (ADR-012), in the shell or else in ENV_FILE. Changes nothing, prints nothing.
 cloud_key_available() { [[ -n "${ANTHROPIC_API_KEY:-}" ]] || env_file_has_value ANTHROPIC_API_KEY; }
 CLOUD_KEY_MISSING="The cloud route needs ANTHROPIC_API_KEY: set it in infra/.env (git-ignored), or export it in the shell"
+
+# Exports ANTHROPIC_API_KEY for a process that does not read ENV_FILE itself (Maven, in replay-agent.sh): the shell's
+# non-empty value wins, else ENV_FILE's. Fails, leaving it unset, when neither has one. Prints nothing; call it
+# directly, not in $(...), so the export reaches the calling shell.
+export_cloud_key() {
+  local key
+  drop_empty_cloud_key
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] && { export ANTHROPIC_API_KEY; return 0; }
+  env_file_read ANTHROPIC_API_KEY key || return 1
+  export ANTHROPIC_API_KEY="$key"
+}
 
 # "docker compose up" "$@", quiet, without the fault variables (FAULT_VARIABLES): a value left in this shell cannot
 # start a service with a fault already applied, and a service left faulted by an earlier run is put back on its defaults.

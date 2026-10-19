@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Replays the recorded faults through the real agent loop and scores every sample (odd/tasks/replay-harness.md T4).
+# Run with --help.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Replays recorded faults through the agent loop, without the lab (odd/tasks/replay-harness.md, agent spec "Replay of
+recorded tool outputs").
+
+  infra/scripts/replay-agent.sh                       # one sample of F1, F2 and F3 in both modes, cloud route
+  infra/scripts/replay-agent.sh --samples 5 --mode dossier --faults F1,F3
+  infra/scripts/replay-agent.sh --route local         # the local model on Ollama, 127.0.0.1:11434
+
+  --route cloud|local            the model's route (default cloud)
+  --mode explorer|dossier|both   the loop's mode (default both)
+  --samples N                    samples per fault and mode (default 1)
+  --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
+
+It runs ReplayRunTest (./mvnw test -Preplay) in agent/: for each fault, mode and sample, the real loop and the route's
+real model over the recorded tool outputs in agent/src/test/resources/replay/, scored against the recorded truth. It
+writes infra/scripts/out/replay-<UTC time>-<route>/: <fault>-<mode>-<n>.json (the incident with its steps),
+summary.tsv (one line per sample: verdict, coverage, conflicts, tokens, seconds) and aggregate.tsv (per fault and mode:
+matches out of samples, mean coverage, tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per
+million prompt and completion tokens). A sample with coverage below 1 had calls no recording holds: read it as such.
+
+COST: on the cloud route every sample is paid model calls. Run it only with the human's go-ahead, and record the cost.
+The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reaches Maven through the environment only
+and is never printed. The local route needs Ollama serving granite4.1:8b. Both need docker (Testcontainers' Postgres).
+Exit codes: 0 when every sample ran (a MISS is a measurement), 1 when the run failed, 2 on
+a bad option, a missing key or a missing model.
+EOF
+}
+
+OLLAMA=http://127.0.0.1:11434
+MODEL=granite4.1:8b
+ALL_FAULTS=(F1 F2 F3)
+
+route=cloud
+mode=both
+samples=1
+faults=F1,F2,F3
+while (( $# )); do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --route|--mode|--samples|--faults)
+      [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
+      declare "${1#--}=$2"; shift 2 ;;
+    --route=*|--mode=*|--samples=*|--faults=*)
+      option=${1%%=*}; declare "${option#--}=${1#*=}"; shift ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+[[ "$route" == cloud || "$route" == local ]] || { echo "Unknown route '$route'; choose cloud or local" >&2; exit 2; }
+[[ "$mode" == explorer || "$mode" == dossier || "$mode" == both ]] \
+  || { echo "Unknown mode '$mode'; choose explorer, dossier or both" >&2; exit 2; }
+[[ "$samples" =~ ^[1-9][0-9]*$ ]] || { echo "--samples needs a positive integer, not '$samples'" >&2; exit 2; }
+IFS=, read -r -a selected <<<"$faults"
+(( ${#selected[@]} )) || { echo "--faults needs at least one fault" >&2; exit 2; }
+for fault in "${selected[@]}"; do
+  [[ " ${ALL_FAULTS[*]} " == *" $fault "* ]] || { echo "Unknown fault '$fault'; choose from ${ALL_FAULTS[*]}" >&2; exit 2; }
+done
+
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+if [[ "$route" == cloud ]]; then
+  # The key goes to Maven's environment, never to its command line, and its value is never printed.
+  export_cloud_key || { echo "$CLOUD_KEY_MISSING" >&2; exit 2; }
+  modes=$([[ "$mode" == both ]] && echo 2 || echo 1)
+  echo "COST WARNING: $(( ${#selected[@]} * modes * samples )) samples on the cloud route, each one paid model calls."
+  echo "Run this only with the human's go-ahead, and record the cost from aggregate.tsv."
+else
+  # The local route never needs the key: keep it out of the test JVM.
+  unset ANTHROPIC_API_KEY
+  if ! curl -fsS --max-time "$CURL_MAX_SECONDS" "$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
+    echo "Ollama on $OLLAMA does not serve $MODEL (ollama pull $MODEL)" >&2
+    exit 2
+  fi
+fi
+
+OUT_DIR="$REPO_DIR/infra/scripts/out/replay-$(date -u +%Y%m%dT%H%M%SZ)-$route"
+info "replaying ${selected[*]}; mode: $mode; route: $route; samples: $samples; out: $OUT_DIR"
+status=0
+(cd "$REPO_DIR/agent" && ./mvnw -q test -Preplay -Dtest=ReplayRunTest \
+  "-Dreplay.route=$route" "-Dreplay.mode=$mode" "-Dreplay.samples=$samples" "-Dreplay.faults=$faults" \
+  "-Dreplay.out=$OUT_DIR") || status=$?
+
+echo "out: $OUT_DIR"
+if [[ -f "$OUT_DIR/summary.tsv" ]]; then
+  echo "--- summary.tsv"
+  cat "$OUT_DIR/summary.tsv"
+fi
+if [[ -f "$OUT_DIR/aggregate.tsv" ]]; then
+  echo "--- aggregate.tsv"
+  cat "$OUT_DIR/aggregate.tsv"
+fi
+if (( status != 0 )); then
+  echo "The replay run failed (exit $status): see agent/target/surefire-reports/" >&2
+  exit 1
+fi

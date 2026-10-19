@@ -113,6 +113,17 @@ expect "no key and no file" "$(unset ANTHROPIC_API_KEY; key)" "no unset"
 expect "the check alone changes nothing" \
   "$(ANTHROPIC_API_KEY=; cloud_key_available || true; echo "[${ANTHROPIC_API_KEY-unset}]")" "[]"
 
+# export_cloud_key: the key a child process sees (Maven in replay-agent.sh), the shell's else the file's; never printed.
+child() { if export_cloud_key; then echo "yes $(bash -c 'echo "${ANTHROPIC_API_KEY-unset}"')"; else echo "no ${ANTHROPIC_API_KEY-unset}"; fi; }
+printf 'export ANTHROPIC_API_KEY="from-file" # a comment\n' >"$ENV_FILE"
+expect "the file's key reaches a child process" "$(unset ANTHROPIC_API_KEY; child)" "yes from-file"
+expect "an empty shell key is dropped for the file's" "$(ANTHROPIC_API_KEY=; child)" "yes from-file"
+expect "the shell's key wins and is exported" "$(declare +x ANTHROPIC_API_KEY=k; child)" "yes k"
+expect "the export prints nothing" "$(unset ANTHROPIC_API_KEY; export_cloud_key)" ""
+printf 'ANTHROPIC_API_KEY=\n' >"$ENV_FILE"
+expect "no key anywhere fails and leaves it unset" "$(ANTHROPIC_API_KEY=; child)" "no unset"
+rm -f "$ENV_FILE"
+
 # record_fault_end and last_fault_end: the last restore time, kept in LAST_FAULT_END_FILE across runs.
 FAULT_END_DIR=$(mktemp -d)
 trap 'rm -f "$ENV_FILE"; rm -rf "$FAULT_END_DIR"' EXIT
