@@ -34,7 +34,7 @@ Out of scope (follow-ups of the same analysis, not authorized): a read-only `ser
 - [x] **T1 — This document.** Branch `feat/f3-caller-config` (from `feat/cloud-route-05`). Route: inline (one document).
 - [x] **T2 — mcp-tools rejections keep their reason** (item 4 of the analysis). When the MCP result is an error (`isError`) whose text is not mcp-tools' JSON envelope, record `INVALID_PARAMETER` with that text as the reason, in mcp-tools' rejection envelope, so the summarizer and the dossier show it like any rejection. A non-error result that is not JSON stays `CLIENT_ERROR`. Tests first in `McpLabToolsTest` (a missing required argument against `FakeMcpServer` or the real validator). Living spec: agent spec, "Tool calls run small and recorded". Route: delegated writer (2+ files). Done in `4388912`.
 - [x] **T3 — The caller's setting as a cause** (item 1). Reword `DEPENDENCY_REJECTING`, `CONFIGURATION` and the root-cause service rule in `Prompts.java`. Tests first in `PromptsTest`. Living spec: agent spec, the report's cause categories. Route: delegated writer (2+ files).
-- [ ] **T4 — A cloud run,** with the human's go-ahead: `verify-agent.sh --route cloud` in explorer mode, then dossier, recording F1-F3 and the cost. F1 and F2 must not regress. Route: parent (runs).
+- [x] **T4 — A cloud run,** with the human's go-ahead: `verify-agent.sh --route cloud` in explorer mode, then dossier, recording F1-F3 and the cost. F1 and F2 must not regress. Route: parent (runs).
 
 ## Acceptance criteria
 
@@ -59,6 +59,12 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
 - 2026-10-19: T3 implemented (route: delegated writer, 2+ files: prompt, test, spec, this document). `Prompts.SYSTEM` now defines `DEPENDENCY_REJECTING` as a component that is reached and answers with an error, gives a wrong address or port of a called component as a `CONFIGURATION` example, and says: name B when A waits for B or gets an error answer from B; when A cannot reach B at all (connection refused or closed, unknown host) while B shows no failure of its own, B is not the cause, suspect A's own setting for B, a `CONFIGURATION` of A. RED: `PromptsTest` 17 tests, 2 failures (`aDependencyCauseNamesTheDependencyNotItsCaller`, `aCallerThatCannotReachAHealthyDependencyPointsAtTheCallersSetting`); GREEN: 17 tests, 0 failures. Full suite (`./mvnw test` in `agent/`): 379 tests, 0 failures, 0 errors, BUILD SUCCESS. Living spec: agent spec, "What one call sees", rule, why and scenario "A caller that cannot reach a healthy dependency points at its own setting".
 - 2026-10-19: T3 done in `51136ad`. Native assessment of `5b56ade..51136ad`: medium, `under_budget` (no review due); the slice stays pending until a later commit reaches the budget.
 
+- 2026-10-19: T4, with the human's go-ahead: `compare-agent-modes.sh --route cloud --runs 1` (`infra/scripts/out/verify-agent-20261019T010327Z-explorer-cloud`, `-013033Z-dossier-cloud`), on `51136ad`.
+  - **Explorer 2/3:** F1 MISS (`payment-service|DEPENDENCY_LATENCY`: the right category, the wrong service), F2 MATCH, **F3 MATCH** (`order-service|CONFIGURATION`, the first F3 match on any route).
+  - **Dossier 1/3:** F1 MISS (`payment-service|DEPENDENCY_LATENCY` again), F2 MATCH, F3 MISS as `payment-service|CONFIGURATION`: the right category now, the wrong component.
+  - Acceptance: F3 diagnosed at least once, met. "F1 and F2 not worse than T5": F2 1/1 in both modes; F1 0/2, against explorer 2/3 and dossier 1/3 in T5. The same wrong-service miss already happened in T5 (3 of 6), so one sample per mode cannot tell a regression from noise; open.
+  - Tokens: 271,273 prompt and 14,029 completion, **$0.0341**. Total cloud spend about $0.15 of the human's $5.
+
 ## Next step
 
-T4, waiting for the human's go-ahead: `verify-agent.sh --route cloud --mode explorer`, then `--mode dossier` (2 runs, about 1 hour of wall clock, about $0.03).
+The human decides: more cloud rounds to settle F1 (whether the T3 wording moves F1's root cause from gateway-mock to its caller, payment-service) and the dossier's F3 (the callee named with CONFIGURATION), or the next item of the F3 analysis.
