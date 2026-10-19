@@ -90,6 +90,8 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
   9. `--samples` takes at most 3 digits, checked before the key and Maven. RED: a 4-digit value passed the option check (stopped by a stubbed Ollama check on the local route, so never Maven nor the key); GREEN: exit 2 on the option.
   Totals: `ReplayDriverTest` 8/8 (RED 5 failures), `ReplayLabToolsTest` 18/18, `test-lib.sh` PASS 75 cases, full `./mvnw test` 408 run, 0 failures, 0 errors, `ReplayRunTest` not run; `test-compile -Preplay` passes.
 
+- 2026-10-19: the code-review fixes committed as `972ee5f` (driver) and `8b20ee0` (scripts); both high, reviews (standing consent granted) approved and acknowledged. Their WARNING fixed inline: `manifest_upsert` printed an outcome and returned 0 when the manifest could not be written, so `record-replay.sh` counted a line the manifest did not hold; it now returns 1 with no outcome. RED: `FAIL  a manifest that cannot be written fails` (`replaced`, exit 0); GREEN: `PASS  76 cases`.
+
 ## Next step
 
 T5: with the human's go-ahead, dossier mode only, N=5 per fault on the cloud route (15 samples, about $0.09).

@@ -220,6 +220,10 @@ row_a2="F1${tab}explorer${tab}cloud${tab}a|B${tab}F1/run-F1.json${tab}id-9"
 expect "a re-recorded file replaces its line" "$(manifest_upsert "$MANIFEST_FILE" "$row_a2")" replaced
 expect "the manifest keeps its order, one line per file, the new values" "$(<"$MANIFEST_FILE")" \
   "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident"$'\n'"$row_a2"$'\n'"$row_b"
+chmod 444 "$MANIFEST_FILE"
+expect "a manifest that cannot be written fails, with no outcome" \
+  "$(manifest_upsert "$MANIFEST_FILE" "$row_a" 2>/dev/null; echo "exit $?")" "exit 1"
+chmod 644 "$MANIFEST_FILE"
 
 # replay-agent.sh bounds --samples' digits before multiplying, so the cloud bound cannot wrap. Run on the local route
 # with a failing curl stub, so a regression stops at the Ollama check: never Maven, never the key.

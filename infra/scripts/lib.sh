@@ -101,7 +101,9 @@ manifest_upsert() {
     END { if (!found) print row > out; print (!found ? "added" : changed ? "replaced" : "unchanged") }' "$manifest") \
     || { rm -f "$tmp"; return 1; }
   # Copied over, not moved, so the manifest keeps its own file mode.
-  cat "$tmp" >"$manifest" && rm -f "$tmp"
+  # A failed write returns 1 with no outcome, so the caller cannot count a line the manifest does not hold.
+  cat "$tmp" >"$manifest" 2>/dev/null || { echo "could not write $manifest" >&2; rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
   echo "$outcome"
 }
 
