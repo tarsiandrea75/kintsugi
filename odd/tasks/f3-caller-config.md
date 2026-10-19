@@ -36,6 +36,7 @@ Out of scope (follow-ups of the same analysis, not authorized): a read-only `ser
 - [x] **T3 — The caller's setting as a cause** (item 1). Reword `DEPENDENCY_REJECTING`, `CONFIGURATION` and the root-cause service rule in `Prompts.java`. Tests first in `PromptsTest`. Living spec: agent spec, the report's cause categories. Route: delegated writer (2+ files).
 - [x] **T4 — A cloud run,** with the human's go-ahead: `verify-agent.sh --route cloud` in explorer mode, then dossier, recording F1-F3 and the cost. F1 and F2 must not regress. Route: parent (runs).
 - [x] **T5 — Follow the chain to the slow component** (fixes T3's F1 regression). The root-cause service rule in `Prompts.SYSTEM` follows the calls down to the last slow or refusing component, counts a slow answer that ends in success as that component's failure, and excludes a timeout from "cannot reach"; tests first in `PromptsTest`, living spec in the agent spec. Route: delegated writer (2+ files: prompt, test, spec, this document).
+- [ ] **T6 — Confirm on the local route** (ADR-012: only the verification route decides): `compare-agent-modes.sh --runs 1` on `granite4.1:8b`, explorer then dossier, F1-F3; compared with `evidence-dossier` T6b (explorer 3/9, dossier 0/9). No cloud cost. Route: parent (runs).
 
 ## Acceptance criteria
 
@@ -82,6 +83,8 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
 
 - 2026-10-19: review of the slice `5b56ade..c3c573d` (T2, T3, T5; 1 lens, reliability): approved, acknowledged. WARNING: any plain-text error result became `INVALID_PARAMETER`, so a server-side failure in plain text would tell the model its arguments were wrong. SUGGESTION: the JSON check accepted scalars. Both fixed inline (route: inline, one class and its test): only a text containing `input validation failed:` (the MCP Java SDK's wording) and not a JSON object is a rejection; any other plain-text error stays `CLIENT_ERROR`. RED: the new case `aPlainTextErrorOtherThanInputValidationIsAClientError` failed (28 tests, 1 failure); GREEN: `./mvnw test` 382/0/0. Spec updated.
 
+- 2026-10-19: development on the cloud route closed with the human's agreement: T1-T5 done, slice reviewed and its WARNING fixed (`5a02a7f`). Total cloud spend for this feature about $0.16 (T4, T4b, T5 rounds). T6, the local confirmation, started.
+
 ## Next step
 
-The human decides: the dossier's F1 (first the leftover F3 lines in the next fault's window, a lab/script follow-up), or close the feature and confirm on the local route (M2's check).
+T6 running: one local round, explorer then dossier (several hours on this CPU). Then record it and close the feature; dossier F1 on the cloud route and the out-of-scope follow-ups stay open for the human.
