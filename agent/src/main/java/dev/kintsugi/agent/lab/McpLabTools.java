@@ -75,6 +75,13 @@ public class McpLabTools implements LabTools {
 			Map<String, Object> arguments = JSON.convertValue(args, LinkedHashMap.class);
 			CallToolResult result = this.client.callTool(CallToolRequest.builder(tool).arguments(arguments).build());
 			String text = text(result);
+			if (Boolean.TRUE.equals(result.isError()) && !isJson(text)) {
+				// The MCP server's input-schema validation rejected the call before mcp-tools' handler ran, in plain
+				// text (e.g. "required property 'service' not found"). It is a rejection of the model's arguments, so
+				// it is recorded in mcp-tools' envelope and the model learns which argument was wrong.
+				return new ToolResult(tool, sent, rejection(text.replaceAll("\\s+", " ").strip()),
+						ToolOutcome.INVALID_PARAMETER, elapsedMs(start));
+			}
 			return new ToolResult(tool, sent, text, outcome(text), elapsedMs(start));
 		}
 		catch (RuntimeException failed) {
@@ -167,13 +174,26 @@ public class McpLabTools implements LabTools {
 		return content.text();
 	}
 
+	/** Whether the text is JSON, once the {@code [truncated]} marker mcp-tools appends after a cut is removed. */
+	private static boolean isJson(String text) {
+		try {
+			JSON.readTree(withoutMarker(text));
+			return true;
+		}
+		catch (JacksonException unreadable) {
+			return false;
+		}
+	}
+
+	private static String withoutMarker(String text) {
+		return text.endsWith(TRUNCATED_SUFFIX) ? text.substring(0, text.length() - TRUNCATED_SUFFIX.length()) : text;
+	}
+
 	/** mcp-tools' own outcome, from its result; a result without one is unreadable, so a client error. */
 	private static ToolOutcome outcome(String text) {
-		String json = text.endsWith(TRUNCATED_SUFFIX) ? text.substring(0, text.length() - TRUNCATED_SUFFIX.length())
-				: text;
 		String outcome;
 		try {
-			outcome = JSON.readTree(json).path("outcome").asString("");
+			outcome = JSON.readTree(withoutMarker(text)).path("outcome").asString("");
 		}
 		catch (JacksonException unreadable) {
 			throw new IllegalStateException("the result is not JSON");

@@ -163,12 +163,46 @@ class McpLabToolsTest {
 	@Test
 	void anUnreadableResultIsAClientError() throws IOException {
 		LabTools tools = connected();
-		this.server.answer("count_logs", "not json");
+		this.server.answer("count_logs", "not json", false);
 
 		ToolResult result = tools.call("count_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}");
 
 		assertThat(result.outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
 		assertThat(result.rawOutput()).startsWith("mcp-tools call failed:").contains("not JSON");
+	}
+
+	@Test
+	void anErrorResultWithNoKnownOutcomeIsAClientError() throws IOException {
+		LabTools tools = connected();
+		this.server.answer("count_logs", "{\"outcome\":\"MAYBE\"}", true);
+
+		ToolResult result = tools.call("count_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}");
+
+		assertThat(result.outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
+		assertThat(result.rawOutput()).startsWith("mcp-tools call failed:").contains("no known outcome");
+	}
+
+	@Test
+	void aPlainTextErrorIsARejectionWithItsReason() throws IOException {
+		// The text the MCP server's input-schema validation answers, with isError true, before mcp-tools' handler runs
+		// (MCP Java SDK 2.0.0, ToolInputValidator); a line break is added to show whitespace is normalized.
+		String text = "Tool (search_logs) input validation failed: Validation failed: JSON schema validation errors:\n"
+				+ " [: required property 'service' not found]";
+		LabTools tools = connected();
+		this.server.answer("search_logs", text, true);
+
+		ToolResult result = tools.call("search_logs", "{\"sinceMinutes\":15}");
+
+		assertThat(result.outcome()).isEqualTo(ToolOutcome.INVALID_PARAMETER);
+		String reason = "Tool (search_logs) input validation failed: Validation failed: JSON schema validation errors:"
+				+ " [: required property 'service' not found]";
+		JsonNode output = JSON.readTree(result.rawOutput());
+		assertThat(output.get("outcome").asString()).isEqualTo("INVALID_PARAMETER");
+		assertThat(output.get("reason").asString()).isEqualTo(reason);
+		assertThat(output.get("returned").asInt()).isZero();
+		assertThat(output.get("items").isEmpty()).isTrue();
+		assertThat(ToolSummaries.summarize(3, "search_logs", result.outcome(), result.rawOutput()))
+			.endsWith("reason=" + JSON.writeValueAsString(reason));
 	}
 
 	@Test

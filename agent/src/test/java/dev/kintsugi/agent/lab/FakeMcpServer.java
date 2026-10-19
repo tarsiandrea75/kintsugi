@@ -30,6 +30,8 @@ final class FakeMcpServer implements AutoCloseable {
 
 	private final Map<String, String> outputs = new ConcurrentHashMap<>();
 
+	private final Map<String, Boolean> errors = new ConcurrentHashMap<>();
+
 	private final List<JsonNode> calls = new CopyOnWriteArrayList<>();
 
 	private final List<String> methods = new CopyOnWriteArrayList<>();
@@ -55,6 +57,17 @@ final class FakeMcpServer implements AutoCloseable {
 	/** The text {@code tools/call} returns for {@code tool}; {@code isError} follows its {@code outcome}. */
 	FakeMcpServer answer(String tool, String text) {
 		this.outputs.put(tool, text);
+		this.errors.remove(tool);
+		return this;
+	}
+
+	/**
+	 * The text {@code tools/call} returns for {@code tool}, with {@code isError} as given: a plain-text answer, such as
+	 * the MCP server's own input-schema rejection, has no {@code outcome} to follow.
+	 */
+	FakeMcpServer answer(String tool, String text, boolean isError) {
+		this.outputs.put(tool, text);
+		this.errors.put(tool, isError);
 		return this;
 	}
 
@@ -96,9 +109,10 @@ final class FakeMcpServer implements AutoCloseable {
 				case "tools/call" -> {
 					JsonNode params = request.path("params");
 					this.calls.add(params);
-					String text = this.outputs.getOrDefault(params.path("name").asString(),
+					String name = params.path("name").asString();
+					String text = this.outputs.getOrDefault(name,
 							"{\"outcome\":\"OK\",\"returned\":0,\"truncated\":false,\"items\":[]}");
-					boolean error = !text.startsWith("{\"outcome\":\"OK\"");
+					boolean error = this.errors.getOrDefault(name, !text.startsWith("{\"outcome\":\"OK\""));
 					ObjectNode result = JSON.createObjectNode().put("isError", error);
 					result.putArray("content").addObject().put("type", "text").put("text", text);
 					response.set("result", result);

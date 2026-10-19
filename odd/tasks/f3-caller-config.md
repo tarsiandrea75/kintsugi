@@ -54,7 +54,8 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
 ## Progress
 
 - 2026-10-19: T1, this document, created after the human chose items 1 and 4 of the F3 analysis.
+- 2026-10-19: T2 implemented (route: delegated writer, 2+ files). Evidence: mcp-tools runs MCP Java SDK 2.0.0, whose stateless server validates arguments against the tool's input schema before the handler (`ToolInputValidator`, on by default, Spring AI 2.0.1 does not turn it off); run against the recorded `search_logs` schema it answers `isError` true with the plain text `Tool (search_logs) input validation failed: Validation failed: JSON schema validation errors: [: required property 'service' not found, : required property 'sinceMinutes' not found]`. `McpLabTools.call` now records an error result whose text is not JSON as `INVALID_PARAMETER`, in mcp-tools' rejection envelope with that text (whitespace normalized) as `reason`; the summarizer and the dossier already read that `reason`. `FakeMcpServer.answer(tool, text, isError)` sets `isError` explicitly. RED: `McpLabToolsTest` 27 tests, 1 failure (`aPlainTextErrorIsARejectionWithItsReason`, expected `INVALID_PARAMETER`); GREEN: 27 tests, 0 failures. Full suite (`./mvnw test` in `agent/`): 378 tests, 0 failures, 0 errors, BUILD SUCCESS. Living spec: agent spec, "Tool calls run small and recorded", rule and scenario "Missing required argument".
 
 ## Next step
 
-T2.
+T3.

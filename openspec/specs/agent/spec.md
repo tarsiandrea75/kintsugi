@@ -472,7 +472,7 @@ The cloud route MUST send the report schema without the keywords Anthropic's str
 
 ### Requirement: Tool calls run small and recorded
 
-Before running a call, code MUST cap `limit` at 20 for `search_logs` and `recent_events` and at 3 for `search_runbooks`, setting it when the model left it out **(chosen)**; the recorded `tool_args` are the arguments actually sent. A `limit` that is not an integer, or is below 1, is sent as written, so that mcp-tools rejects it with `INVALID_PARAMETER` and says why. Arguments that are not a JSON object are not sent: the step records `INVALID_PARAMETER`, the arguments as one JSON string, and an output in mcp-tools' own rejection envelope, `{"outcome":"INVALID_PARAMETER","reason":"the arguments are not a JSON object","returned":0,"truncated":false,"items":[]}`, so its summary carries the reason like any other rejection. Every call MUST be recorded as one step with the full output text returned by mcp-tools, whatever its outcome; the outcome is the result's own `outcome` field. A transport failure, the MCP request timeout, a protocol error or a result without a readable `outcome` MUST be recorded with `tool_outcome` `CLIENT_ERROR` and its reason as the output (`mcp-tools call failed: ...`), and the run MUST continue: an unavailable source is evidence.
+Before running a call, code MUST cap `limit` at 20 for `search_logs` and `recent_events` and at 3 for `search_runbooks`, setting it when the model left it out **(chosen)**; the recorded `tool_args` are the arguments actually sent. A `limit` that is not an integer, or is below 1, is sent as written, so that mcp-tools rejects it with `INVALID_PARAMETER` and says why. Arguments that are not a JSON object are not sent: the step records `INVALID_PARAMETER`, the arguments as one JSON string, and an output in mcp-tools' own rejection envelope, `{"outcome":"INVALID_PARAMETER","reason":"the arguments are not a JSON object","returned":0,"truncated":false,"items":[]}`, so its summary carries the reason like any other rejection. A result that is an error (`isError`) and whose text is not JSON is the MCP server's own input-schema rejection, answered before mcp-tools' handler runs (for example a missing required argument: `Tool (search_logs) input validation failed: ... required property 'service' not found`): the step records `INVALID_PARAMETER` and the same rejection envelope with that text, whitespace normalized, as its `reason`, so the model learns which argument was wrong. Every call MUST be recorded as one step with the full output text returned by mcp-tools, whatever its outcome; the outcome is the result's own `outcome` field. A transport failure, the MCP request timeout, a protocol error or a result without a readable `outcome` MUST be recorded with `tool_outcome` `CLIENT_ERROR` and its reason as the output (`mcp-tools call failed: ...`), and the run MUST continue: an unavailable source is evidence.
 
 The agent MUST start while mcp-tools is down: the MCP client connects on its first request, never during startup. The tool definitions of a phase are listed from mcp-tools on first use and cached once a listing succeeds; when mcp-tools cannot list them, or does not serve one of the phase's tools, the loop is told so by an exception (`LabToolsUnavailableException`), not by an empty list.
 
@@ -480,6 +480,12 @@ The agent MUST start while mcp-tools is down: the MCP client connects on its fir
 - WHEN the model calls `count_logs` with the arguments `[1, 2]`
 - THEN nothing is sent, the step records `INVALID_PARAMETER` with the rejection envelope as its output
 - AND its summary carries `reason="the arguments are not a JSON object"`
+
+#### Scenario: Missing required argument
+- GIVEN the MCP server rejects a `search_logs` call without `service` with an error result in plain text naming `service`
+- WHEN the model calls `search_logs` with only `sinceMinutes`
+- THEN the step records `INVALID_PARAMETER` with the rejection envelope as its output, its `reason` the server's text
+- AND a non-error result that is not JSON is still recorded as `CLIENT_ERROR`
 
 #### Scenario: Limit capped
 - WHEN the model calls `search_logs` with `limit` = 100
