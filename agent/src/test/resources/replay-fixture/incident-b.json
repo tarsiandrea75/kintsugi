@@ -1,0 +1,62 @@
+{
+  "id": "00000000-0000-0000-0000-00000000000b",
+  "symptom": "checkout times out",
+  "sinceMinutes": 12,
+  "mode": "DOSSIER",
+  "route": "cloud",
+  "model": "claude-haiku-5-5",
+  "status": "COMPLETED",
+  "startedAt": "2026-10-19T17:44:09Z",
+  "endedAt": "2026-10-19T17:45:30Z",
+  "report": null,
+  "steps": [
+    {
+      "stepNo": 1,
+      "kind": "TOOL_CALL",
+      "phase": "INVESTIGATE",
+      "model": "claude-haiku-5-5",
+      "toolName": "search_logs",
+      "toolArgs": {
+        "sinceMinutes": 12,
+        "service": "payment-service",
+        "limit": 20
+      },
+      "toolOutcome": "OK",
+      "summary": "toolCallId=1 tool=search_logs outcome=OK",
+      "toolOutput": "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"service\":\"payment-service\",\"level\":\"ERROR\",\"message\":\"a later sample\"}]}",
+      "latencyMs": 40,
+      "createdAt": "2026-10-19T18:44:12Z"
+    },
+    {
+      "stepNo": 2,
+      "kind": "TOOL_CALL",
+      "phase": "INVESTIGATE",
+      "model": "claude-haiku-5-5",
+      "toolName": "get_order_trace",
+      "toolArgs": {
+        "orderId": "1ba57520-0bf7-4413-aa1b-08ec92cf2fa9"
+      },
+      "toolOutcome": "UPSTREAM_ERROR",
+      "summary": "toolCallId=2 tool=get_order_trace outcome=UPSTREAM_ERROR",
+      "toolOutput": "{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"postgres unavailable\",\"returned\":0,\"truncated\":false,\"items\":[]}",
+      "latencyMs": 30,
+      "createdAt": "2026-10-19T18:44:13Z"
+    },
+    {
+      "stepNo": 3,
+      "kind": "TOOL_CALL",
+      "phase": "TRIAGE",
+      "model": "claude-haiku-5-5",
+      "toolName": "query_metric",
+      "toolArgs": {
+        "metric": "error_rate",
+        "service": "order-service"
+      },
+      "toolOutcome": "OK",
+      "summary": "toolCallId=3 tool=query_metric outcome=OK",
+      "toolOutput": "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"value\":0.4}]}",
+      "latencyMs": 20,
+      "createdAt": "2026-10-19T18:44:14Z"
+    }
+  ]
+}

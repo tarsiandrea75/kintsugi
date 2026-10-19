@@ -62,14 +62,10 @@ public class McpLabTools implements LabTools {
 		}
 		ObjectNode args;
 		try {
-			args = capped(tool, parse(jsonArgs));
+			args = sentArgs(tool, jsonArgs);
 		}
 		catch (JacksonException | IllegalArgumentException unreadable) {
-			// The model wrote arguments that are not a JSON object: nothing is sent, as mcp-tools would refuse them.
-			// They are recorded as one JSON string, so the step still shows what the model wrote, and the output is
-			// mcp-tools' own rejection envelope, so the summarizer reads its reason like any other rejection.
-			return new ToolResult(tool, JSON.writeValueAsString(String.valueOf(jsonArgs)),
-					rejection(NOT_AN_OBJECT), ToolOutcome.INVALID_PARAMETER, 0);
+			return notAnObject(tool, jsonArgs);
 		}
 		String sent = JSON.writeValueAsString(args);
 		long start = System.nanoTime();
@@ -127,6 +123,26 @@ public class McpLabTools implements LabTools {
 			throw new LabToolsUnavailableException("mcp-tools does not serve " + missing, null);
 		}
 		return List.copyOf(offered);
+	}
+
+	/**
+	 * The arguments as they are sent: the model's JSON object, blank standing for {@code {}}, with its {@code limit}
+	 * capped. Shared with {@link ReplayLabTools}, so a replay keys its calls on the same arguments.
+	 * @throws JacksonException if {@code jsonArgs} is not JSON
+	 * @throws IllegalArgumentException if it is JSON but not an object
+	 */
+	static ObjectNode sentArgs(String tool, String jsonArgs) {
+		return capped(tool, parse(jsonArgs));
+	}
+
+	/**
+	 * The result for arguments that are not a JSON object: nothing is sent, as mcp-tools would refuse them. They are
+	 * recorded as one JSON string, so the step still shows what the model wrote, and the output is mcp-tools' own
+	 * rejection envelope, so the summarizer reads its reason like any other rejection.
+	 */
+	static ToolResult notAnObject(String tool, String jsonArgs) {
+		return new ToolResult(tool, JSON.writeValueAsString(String.valueOf(jsonArgs)), rejection(NOT_AN_OBJECT),
+				ToolOutcome.INVALID_PARAMETER, 0);
 	}
 
 	private static ObjectNode parse(String jsonArgs) {
@@ -229,7 +245,7 @@ public class McpLabTools implements LabTools {
 	}
 
 	/** A tool definition for the model's request that cannot be executed: the loop calls tools through {@link #call}. */
-	private record DefinitionOnly(ToolDefinition definition) implements ToolCallback {
+	record DefinitionOnly(ToolDefinition definition) implements ToolCallback {
 
 		@Override
 		public ToolDefinition getToolDefinition() {

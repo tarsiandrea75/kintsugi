@@ -503,6 +503,39 @@ The agent MUST start while mcp-tools is down: the MCP client connects on its fir
 - THEN it starts, and a tool call records `tool_outcome` `CLIENT_ERROR` with an output starting `mcp-tools call failed:`
 - AND once mcp-tools is up, the next call answers `OK` without restarting the agent
 
+### Requirement: Replay of recorded tool outputs
+
+`ReplayLabTools` MUST implement the `LabTools` port over recorded incidents, without the lab ([feature document](../../../odd/tasks/replay-harness.md)), so the loop, the dossier gatherer and the report checks run unchanged against fixed evidence. A recording is the incident document `GET /incidents/{id}?full=true` returns. Every top-level `TOOL_CALL` step with an output, and every call in the `DOSSIER` step's array, is indexed by its tool and the canonical JSON of its arguments (keys sorted, so the order the model wrote them does not count). Only mcp-tools' own outcomes (`OK`, `INVALID_PARAMETER`, `UPSTREAM_ERROR`) are replayed: a refused step has no output, and a recorded `CLIENT_ERROR` is the transport's failure, not the lab's evidence. When two recordings hold the same call with different outputs, the first is kept and the conflict is counted; loading does not fail.
+
+A call MUST be checked and capped exactly as `McpLabTools` does it (the same `limit` caps, the same `INVALID_PARAMETER` rejection for arguments that are not a JSON object, an `IllegalArgumentException` for a name outside the lab tools) before the lookup. A recorded call returns its recorded output and outcome, with a duration of 0. A call no recording holds MUST NOT be guessed: it returns `CLIENT_ERROR` with the output `not recorded in this replay: <tool> <canonical arguments>`, and is counted, so each sample reports its coverage (recorded calls / calls). A phase's tool definitions come from the recorded tool listing (`tools-list.json`), with the same semantics as the live listing: none for a phase without tools, and a `LabToolsUnavailableException` naming any tool the listing does not hold.
+
+#### Scenario: A recorded call is replayed
+- GIVEN a recording holds `search_logs` `{"limit":20,"service":"payment-service","sinceMinutes":12}` answered `OK`
+- WHEN the loop calls `search_logs` with `{"sinceMinutes":12,"service":"payment-service","limit":50}`
+- THEN the limit is capped to 20 and the call returns the recorded output with `OK`
+- AND it counts as a recorded call
+
+#### Scenario: The dossier replays fully
+- GIVEN a recording's `DOSSIER` step holds `service_restarts` `{"sinceMinutes":12}`
+- WHEN the gatherer calls `service_restarts` with `{"sinceMinutes":12}`
+- THEN the call returns the recorded output and outcome
+
+#### Scenario: An unrecorded call
+- GIVEN no recording holds `search_logs` for `order-service`
+- WHEN the loop calls it
+- THEN it returns `CLIENT_ERROR` with `not recorded in this replay: search_logs {"limit":20,"service":"order-service",...}`
+- AND the unrecorded count rises and the coverage falls
+
+#### Scenario: Two recordings disagree
+- GIVEN two recordings hold the same call with different outputs
+- WHEN the replay loads them
+- THEN the first recording's output is served and one conflict is counted
+
+#### Scenario: A tool missing from the recorded listing
+- GIVEN the recorded tool listing does not hold `search_runbooks`
+- WHEN the loop asks for the `KNOWLEDGE` phase's tools
+- THEN a `LabToolsUnavailableException` names `search_runbooks`
+
 ### Requirement: Evidence dossier gathering
 
 `DossierGatherer` MUST build the evidence dossier of an incident (ADR-011, [feature document](../../../odd/tasks/evidence-dossier.md)) through the `LabTools` port, the same path to mcp-tools as the loop's calls. For an incident window of N minutes (the incident's `sinceMinutes`) it uses two windows: the **incident window**, `sinceMinutes` N, and the **previous window**, the N minutes just before it, `sinceMinutes` 2N with `untilMinutesAgo` N. It MUST make the same calls, with the same arguments, in this order, for every incident, whatever the symptom or any output says:

@@ -34,7 +34,7 @@ Out of scope: Python aggregation in `evals/` (the TSV is enough at first); match
 ## Tasks
 
 - [x] **T1 — This document** and its Engram mirror; route: inline.
-- [ ] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
+- [x] **T2 — `ReplayLabTools`.** Loads recordings (top-level `TOOL_CALL` steps and the `DOSSIER` array), keys by tool and canonical capped args, answers unrecorded calls as `CLIENT_ERROR` "not recorded" and counts them; `toolsFor` from the recorded `tools-list.json`. Unit tests first over a small fixture. Living spec: agent spec, a "Replay" requirement. Route: delegated writer (2+ files).
 - [ ] **T3 — Record script.** `infra/scripts/record-replay.sh <verify-agent run dir>...` copies each `F?-incident.json` with its truth and the tool listing into `agent/src/test/resources/replay/`, refusing a file that holds a key-like string. Tests in `test-lib.sh` where pure. Then record F1-F3 from existing cloud runs (dossier and explorer). Route: delegated writer.
 - [ ] **T4 — Replay driver.** The `replay`-tagged test, the clock offset, the per-sample output and `summary.tsv`; excluded from the default build (Maven surefire groups). Smoke check: one sample per fault on the cloud route, with the human's go-ahead. Route: delegated writer.
 - [ ] **T5 — First measurement.** With the human's go-ahead: N=5 per fault per mode on the cloud route on the current prompt (about 30 samples, an estimated $0.10–0.15); compare the replayed rates and coverage with the lab rounds. Route: parent (runs).
@@ -59,7 +59,8 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
 ## Progress
 
 - 2026-10-19: T1, after a read-only mapping: no earlier replay design exists beyond ADR-012:37; `LabTools` is the seam; recorded incidents hold post-cap args and full outputs; truth lives only in `F?-score.txt`; the cloud route sets no temperature, so samples measure its sampling variance.
+- 2026-10-19: T2, route delegated writer (2+ non-trivial files). `ReplayLabTools` indexes top-level `TOOL_CALL` steps with an output and the `DOSSIER` array by tool and sorted-key args, after `McpLabTools`' caps; it replays only mcp-tools' own outcomes (a refused step or a recorded `CLIENT_ERROR` is not indexed); unrecorded calls are `CLIENT_ERROR` and counted (`recordedCalls`, `unrecordedCalls`, `coverage`, `conflicts`). `McpLabTools` gained package-private `sentArgs`/`notAnObject` and a package-private `DefinitionOnly`, behaviour unchanged. RED: `ReplayLabToolsTest` against a stub, 15 run, 14 failures, 1 error; GREEN: `ReplayLabToolsTest` 15/15, `McpLabToolsTest` 28/28; full `./mvnw test` 397 run, 0 failures, 0 errors, 0 skipped. Spec: agent spec, "Replay of recorded tool outputs".
 
 ## Next step
 
-T2, after the human's go-ahead on this plan.
+T3, the record script.
