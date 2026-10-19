@@ -80,6 +80,8 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
   - Against cloud-route T5 (before T3, rates over three rounds): F1 explorer 2/3 → 2/2, dossier 1/3 → 0/2; F2 5/6 → 4/4; F3 0/6 → 3/4. Acceptance: F3 diagnosed, met; F1 and F2 not worse, met in explorer mode; dossier F1 stays open, with a lab cause (the leftover F3 lines) to rule out first.
   - Tokens: 511,127 prompt and 26,764 completion, **$0.0645**. Total cloud spend about $0.28 of the human's $5.
 
+- 2026-10-19: review of the slice `5b56ade..c3c573d` (T2, T3, T5; 1 lens, reliability): approved, acknowledged. WARNING: any plain-text error result became `INVALID_PARAMETER`, so a server-side failure in plain text would tell the model its arguments were wrong. SUGGESTION: the JSON check accepted scalars. Both fixed inline (route: inline, one class and its test): only a text containing `input validation failed:` (the MCP Java SDK's wording) and not a JSON object is a rejection; any other plain-text error stays `CLIENT_ERROR`. RED: the new case `aPlainTextErrorOtherThanInputValidationIsAClientError` failed (28 tests, 1 failure); GREEN: `./mvnw test` 382/0/0. Spec updated.
+
 ## Next step
 
-Review the slice `5b56ade..c3c573d` (T2, T3, T5) before closing the feature. Then the human decides: the dossier's F1 (first the leftover F3 lines in the next fault's window, a lab/script follow-up), or close the feature and confirm on the local route (M2's check).
+The human decides: the dossier's F1 (first the leftover F3 lines in the next fault's window, a lab/script follow-up), or close the feature and confirm on the local route (M2's check).

@@ -183,6 +183,19 @@ class McpLabToolsTest {
 	}
 
 	@Test
+	void aPlainTextErrorOtherThanInputValidationIsAClientError() throws IOException {
+		// A failure inside the server, which the framework also answers in plain text with isError true, is not the
+		// model's fault: telling it that its arguments were wrong would mislead it.
+		LabTools tools = connected();
+		this.server.answer("count_logs", "Error executing tool count_logs: connection to Loki lost", true);
+
+		ToolResult result = tools.call("count_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}");
+
+		assertThat(result.outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
+		assertThat(result.rawOutput()).startsWith("mcp-tools call failed:");
+	}
+
+	@Test
 	void aPlainTextErrorIsARejectionWithItsReason() throws IOException {
 		// The text the MCP server's input-schema validation answers, with isError true, before mcp-tools' handler runs
 		// (MCP Java SDK 2.0.0, ToolInputValidator); a line break is added to show whitespace is normalized.

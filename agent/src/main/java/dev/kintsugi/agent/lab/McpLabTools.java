@@ -37,6 +37,9 @@ public class McpLabTools implements LabTools {
 	/** The reason recorded when the model's arguments are not a JSON object. */
 	static final String NOT_AN_OBJECT = "the arguments are not a JSON object";
 
+	/** The text the MCP Java SDK's input-schema validation answers with: "Tool (name) input validation failed: ...". */
+	static final String INPUT_VALIDATION_FAILED = "input validation failed:";
+
 	private static final String TRUNCATED_SUFFIX = "\n[truncated]";
 
 	private static final Logger log = LoggerFactory.getLogger(McpLabTools.class);
@@ -75,10 +78,11 @@ public class McpLabTools implements LabTools {
 			Map<String, Object> arguments = JSON.convertValue(args, LinkedHashMap.class);
 			CallToolResult result = this.client.callTool(CallToolRequest.builder(tool).arguments(arguments).build());
 			String text = text(result);
-			if (Boolean.TRUE.equals(result.isError()) && !isJson(text)) {
+			if (Boolean.TRUE.equals(result.isError()) && !isJsonObject(text) && text.contains(INPUT_VALIDATION_FAILED)) {
 				// The MCP server's input-schema validation rejected the call before mcp-tools' handler ran, in plain
 				// text (e.g. "required property 'service' not found"). It is a rejection of the model's arguments, so
-				// it is recorded in mcp-tools' envelope and the model learns which argument was wrong.
+				// it is recorded in mcp-tools' envelope and the model learns which argument was wrong. Any other
+				// plain-text error is a failure of the server, not of the arguments, and stays a client error.
 				return new ToolResult(tool, sent, rejection(text.replaceAll("\\s+", " ").strip()),
 						ToolOutcome.INVALID_PARAMETER, elapsedMs(start));
 			}
@@ -174,11 +178,13 @@ public class McpLabTools implements LabTools {
 		return content.text();
 	}
 
-	/** Whether the text is JSON, once the {@code [truncated]} marker mcp-tools appends after a cut is removed. */
-	private static boolean isJson(String text) {
+	/**
+	 * Whether the text is a JSON object, as mcp-tools' envelope is, once the {@code [truncated]} marker mcp-tools
+	 * appends after a cut is removed.
+	 */
+	private static boolean isJsonObject(String text) {
 		try {
-			JSON.readTree(withoutMarker(text));
-			return true;
+			return JSON.readTree(withoutMarker(text)) instanceof ObjectNode;
 		}
 		catch (JacksonException unreadable) {
 			return false;
