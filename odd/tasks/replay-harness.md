@@ -76,6 +76,8 @@ Forecast about 700 authored lines (Java, tests, script, spec, recordings exclude
   - **Explorer mode does not replay with exact matching:** coverage 0.38, 0.00 and 0.25; every sample ended `UNKNOWN|UNKNOWN`, the model having been told most of its calls were not recorded. Checked on F2: no systematic key bug, the model chose different arguments (no `sinceMinutes` on `status_summary`, other `recent_events` filters, other queries). Explorer replay scores measure the replay's gaps, not the agent: they are not valid measurements under this design.
   - Tokens: 246,064 prompt and 12,055 completion, **$0.0306**. Total cloud spend about $0.34 of the human's $5.
 
+- 2026-10-19: the fixes `718986f`..`9469b14` reviewed (high, standing consent granted): approved and acknowledged. Its WARNING fixed inline: a failure writing `aggregate.tsv` in the `finally` is now only reported, so it cannot hide the sample's own failure. SUGGESTIONs left (script option-parsing tests, comment wording).
+
 ## Next step
 
 T5, after the human decides how to treat explorer mode (measure dossier mode only, or change the design for explorer).

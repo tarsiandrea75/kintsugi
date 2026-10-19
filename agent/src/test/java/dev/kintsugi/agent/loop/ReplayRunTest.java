@@ -95,8 +95,14 @@ class ReplayRunTest {
 		}
 		finally {
 			// Written for the samples that ran even when a later one fails, so a paid partial run still has its totals.
+			// A failure here is only reported, so it never hides the sample's own failure that brought us here.
 			List<String> aggregate = ReplayDriver.aggregate(done);
-			Files.writeString(out.resolve("aggregate.tsv"), String.join("\n", aggregate) + "\n");
+			try {
+				Files.writeString(out.resolve("aggregate.tsv"), String.join("\n", aggregate) + "\n");
+			}
+			catch (IOException unwritten) {
+				System.err.println("replay: aggregate.tsv not written: " + unwritten);
+			}
 			System.out.println("replay out: " + out);
 			aggregate.forEach(line -> System.out.println("replay " + line));
 		}
