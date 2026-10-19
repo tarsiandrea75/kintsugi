@@ -29,7 +29,7 @@ A cut report is a lost diagnosis even when the cause is right. The 512 cap is ju
 - [x] **T2 — Cloud caps plumbing (C).** `CloudRouteProperties` gains `numPredict`, `LoopConfig` passes it to `AnthropicRoute`, `application.yaml` sets it equal to the local caps; tests first; spec "Answer caps". Route: delegated writer.
 - [x] **T3 — Measure C:** the replay with the cloud report cap at 768. Route: parent (runs).
 - [x] **T4 — At most 3 evidence items (B):** `Prompts` report instruction; tests first in `PromptsTest`; spec. Route: inline or delegated by size.
-- [ ] **T5 — Measure B:** the replay with the default cap. Then the human decides what to keep. Route: parent (runs).
+- [x] **T5 — Measure B:** the replay with the default cap. Then the human decides what to keep. Route: parent (runs).
 
 ## Acceptance criteria
 
@@ -54,6 +54,9 @@ Forecast about 120 authored lines, one slice. Branch `feat/report-length`, from 
 - 2026-10-19: T3, with the human's go-ahead: `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT=768 replay-agent.sh --samples 5` on `49f32d7` (`infra/scripts/out/replay-20261019T225038Z-cloud`). The override took effect (a report used 586 tokens). **F1 5/5, F2 5/5, F3 4/5** (one `payment-service|DEPENDENCY_REJECTING`); 0 invalid runs, 0 cuts; report tokens median 393, max 586, 2 of 15 at 485+; evidence items 2:4, 3:9, 4:2. Baseline (`221420Z`, cap 512): F1 4/5, F2 5/5, F3 5/5; 1 invalid run; median 447.5, max 512, 6 of 16 at 485+. Cost **$0.0905**.
 - 2026-10-19: T4 (route: inline, one prompt line, its test and the spec row): the report task asks for 1 to 3 evidence items; `ReportCheck` still takes 5. RED: `theReportAsksForAtMostThreeEvidenceItems` failed (20 tests, 1 failure); GREEN: full suite 422/0/0.
 
+- 2026-10-19: T5: `replay-agent.sh --samples 5` (cap 512) on `5158692` (`infra/scripts/out/replay-20261019T225608Z-cloud`). **F1 5/5, F2 5/5, F3 3/5** (`payment-service|UNKNOWN`, `payment-service|DEPENDENCY_REJECTING`); 0 invalid runs, 0 cuts; report tokens median 410, max 504, 1 of 15 at 485+; evidence items 2:6, 3:9 (no fourth). Cost **$0.0917**.
+  - Both levers remove the cuts. F3 went 5/5 (baseline) → 4/5 (C) → 3/5 (B), the misses all naming payment-service (the caller of order-service's dependency): with five samples per arm this cannot be told from noise, and B and C change nothing F3's diagnosis depends on in an obvious way. Total cloud spend about $0.74 of the human's $5.
+
 ## Next step
 
-T5: the replay with the default cap (512).
+The human decides what to keep (C, B, both or neither); a larger F3 sample per arm would tell the F3 drop from noise.
