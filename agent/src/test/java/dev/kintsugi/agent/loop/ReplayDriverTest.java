@@ -1,0 +1,157 @@
+package dev.kintsugi.agent.loop;
+
+import static dev.kintsugi.agent.loop.ScriptedChatModel.call;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import dev.kintsugi.agent.AgentDatabase;
+import dev.kintsugi.agent.incident.IncidentRepository;
+import dev.kintsugi.agent.incident.IncidentStatus;
+
+/**
+ * The replay driver's per-sample pipeline (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md
+ * T4), with a scripted model over the committed recordings: no lab and no real model. {@link ReplayRunTest} runs the
+ * same pipeline with the route's real model, on demand only.
+ */
+class ReplayDriverTest {
+
+	private static final JsonMapper JSON = JsonMapper.shared();
+
+	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
+
+	private static final Instant F1_DOSSIER_START = Instant.parse("2026-10-19T17:44:08.969873Z");
+
+	private final ScriptedChatModel model = new ScriptedChatModel();
+
+	@TempDir
+	Path out;
+
+	private ReplayDriver driver;
+
+	@BeforeAll
+	static void migrate() {
+		AgentDatabase.migrate();
+	}
+
+	@BeforeEach
+	void setUp() {
+		AgentDatabase.empty();
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		this.driver = new ReplayDriver(router, new LoopSettings(15, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				new IncidentRepository(AgentDatabase.asAgentApp(), JSON), AgentDatabase.admin(),
+				ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST);
+	}
+
+	@Test
+	void aDossierSampleIsScoredAgainstTheRecordedTruthWithItsCoverage() throws IOException {
+		this.model.quiet().quiet().text(unknownReport());
+
+		ReplayDriver.Sample sample = this.driver.sample("F1", AgentMode.DOSSIER, 1);
+		ReplayDriver.write(this.out, sample);
+
+		assertThat(sample.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(sample.truth()).isEqualTo("gateway-mock|DEPENDENCY_LATENCY");
+		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
+		assertThat(sample.verdict()).isEqualTo("MISS");
+		// Dossier gathering replays fully: every one of its calls is in the recordings.
+		assertThat(sample.dossierCalls()).isEqualTo(29);
+		assertThat(sample.dossierUnrecorded()).isZero();
+		assertThat(sample.recorded()).isEqualTo(29);
+		assertThat(sample.unrecorded()).isZero();
+		assertThat(sample.coverage()).isEqualTo(1.0);
+
+		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
+		assertThat(summary).hasSize(2);
+		assertThat(summary.get(0)).isEqualTo(ReplayDriver.SUMMARY_HEADER);
+		String[] line = summary.get(1).split("\t", -1);
+		assertThat(line).hasSize(15);
+		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
+				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "29", "0", "1.00");
+		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
+		assertThat(line[12]).isEqualTo(String.valueOf(sample.promptTokens()));
+		assertThat(line[14]).matches("\\d+\\.\\d");
+
+		JsonNode incident = JSON.readTree(this.out.resolve("F1-dossier-1.json").toFile());
+		assertThat(incident.path("status").asString()).isEqualTo("COMPLETED");
+		assertThat(incident.path("mode").asString()).isEqualTo("dossier");
+		assertThat(incident.path("sinceMinutes").asInt()).isEqualTo(12);
+		assertThat(incident.path("steps").get(0).path("kind").asString()).isEqualTo("DOSSIER");
+		assertThat(incident.path("report").path("rootCauseService").asString()).isEqualTo("UNKNOWN");
+		// "Now" is the recorded incident's start, so the windows match the recorded timestamps.
+		Instant startedAt = Instant.parse(incident.path("startedAt").asString());
+		assertThat(Duration.between(F1_DOSSIER_START, startedAt).abs()).isLessThan(Duration.ofMinutes(1));
+	}
+
+	@Test
+	void anExplorerSampleCountsTheCallsNoRecordingHolds() {
+		this.model
+			.planned(call("status_summary", "{\"table\":\"orders\",\"sinceMinutes\":12}"),
+					call("status_summary", "{\"table\":\"payments\",\"sinceMinutes\":97}"))
+			.text("")
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		ReplayDriver.Sample sample = this.driver.sample("F1", AgentMode.EXPLORER, 2);
+
+		assertThat(sample.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(sample.recorded()).isEqualTo(1);
+		assertThat(sample.unrecorded()).isEqualTo(1);
+		assertThat(sample.coverage()).isEqualTo(0.5);
+		assertThat(sample.dossierCalls()).isZero();
+		assertThat(sample.summaryLine()).startsWith("F1\texplorer\tlocal\t2\tCOMPLETED\t");
+	}
+
+	@Test
+	void theVerdictIsAgentVerdictsRule() {
+		String truth = "gateway-mock|DEPENDENCY_LATENCY";
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, truth, truth)).isEqualTo("MATCH");
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, "gateway-mock|DEPENDENCY_REJECTING", truth))
+			.isEqualTo("MISS");
+		assertThat(ReplayDriver.verdict(IncidentStatus.TIMED_OUT, truth, truth)).isEqualTo("MISS");
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, truth, "")).isEqualTo("MISS");
+	}
+
+	@Test
+	void theAggregateCountsMatchesCoverageAndCost() {
+		ReplayDriver.Sample a = sample("MATCH", 1.0, 1_000_000, 100_000);
+		ReplayDriver.Sample b = sample("MISS", 0.5, 1_000_000, 100_000);
+
+		List<String> lines = ReplayDriver.aggregate(List.of(a, b));
+
+		assertThat(lines).containsExactly(ReplayDriver.AGGREGATE_HEADER,
+				// 2 M prompt tokens at $0.10 and 0.2 M completion tokens at $0.50 per million.
+				"F2\texplorer\tcloud\t1/2\t0.75\t2000000\t200000\t0.3000");
+	}
+
+	@Test
+	void theLocalRouteHasNoCost() {
+		ReplayDriver.Sample local = new ReplayDriver.Sample("F3", AgentMode.DOSSIER, "local", 1,
+				IncidentStatus.TIMED_OUT, "order-service|CONFIGURATION", "none", "MISS", 29, 0, 1.0, 0, null, null, 1.0,
+				29, 0, JSON.createObjectNode());
+
+		assertThat(ReplayDriver.aggregate(List.of(local))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
+				"F3\tdossier\tlocal\t0/1\t1.00\t-\t-\t-");
+	}
+
+	private static ReplayDriver.Sample sample(String verdict, double coverage, int prompt, int completion) {
+		return new ReplayDriver.Sample("F2", AgentMode.EXPLORER, "cloud", 1, IncidentStatus.COMPLETED,
+				"gateway-mock|DEPENDENCY_REJECTING", "gateway-mock|DEPENDENCY_REJECTING", verdict, 1, 1, coverage, 0,
+				prompt, completion, 1.0, 0, 0, JSON.createObjectNode());
+	}
+
+}

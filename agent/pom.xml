@@ -107,7 +107,8 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
-					<excludedGroups>live</excludedGroups>
+					<!-- live needs the local model; replay calls the route's model and costs money on the cloud route. -->
+					<excludedGroups>live,replay</excludedGroups>
 				</configuration>
 			</plugin>
 		</plugins>
@@ -123,6 +124,23 @@
 						<artifactId>maven-surefire-plugin</artifactId>
 						<configuration>
 							<groups>live</groups>
+							<excludedGroups combine.self="override"/>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+		<profile>
+			<!-- The replay run (odd/tasks/replay-harness.md T4), only through infra/scripts/replay-agent.sh: a -Dgroups
+			     alone cannot run it, since the excludedGroups above still leave it out. -->
+			<id>replay</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-surefire-plugin</artifactId>
+						<configuration>
+							<groups>replay</groups>
 							<excludedGroups combine.self="override"/>
 						</configuration>
 					</plugin>

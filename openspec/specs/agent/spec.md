@@ -536,6 +536,18 @@ A call MUST be checked and capped exactly as `McpLabTools` does it (the same `li
 - WHEN the loop asks for the `KNOWLEDGE` phase's tools
 - THEN a `LabToolsUnavailableException` names `search_runbooks`
 
+The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST run, for each requested fault, mode and sample, the real `AgentLoop` in that mode with the route's real `ChatModel` and settings (the application's own `ModelRouter` and `LoopSettings`), over a fresh `ReplayLabTools` holding every recording of the fault, both modes pooled, and the recorded tool listing. The incident is opened with the symptom and `sinceMinutes` of the fault's recording in the same mode (else its first recording), on a clock offset so that "now" is that recording's `startedAt`: windows and uptimes computed from the clock match the recorded timestamps, and the time budgets still run. Each sample is scored by `agent_verdict`'s rule: `MATCH` only when the incident is `COMPLETED` and its report's `rootCauseService|rootCauseCategory` equals the recorded truth of `recordings.tsv`, else `MISS`. It writes the incident with its steps (`<fault>-<mode>-<n>.json`, as the full view shows it) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds`), then `aggregate.tsv` per fault and mode (matches out of samples, mean coverage, tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens). A miss is a measurement: the run fails only when a sample cannot run. The driver is tagged `replay` and left out of the default build (Maven surefire `excludedGroups`); only the `replay` profile runs it, since it calls a model and costs money on the cloud route.
+
+#### Scenario: A sample is scored against the recorded truth with its coverage
+- GIVEN the recordings of F1 with the truth `gateway-mock|DEPENDENCY_LATENCY`
+- WHEN one dossier-mode sample of F1 runs and its report names `UNKNOWN|UNKNOWN`
+- THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage
+- AND the 29 calls of its dossier are all recorded (coverage 1.00, none unrecorded)
+
+#### Scenario: The replay run is excluded from the default build
+- WHEN `./mvnw test` runs without the `replay` profile
+- THEN `ReplayRunTest` does not run and no model is called
+
 ### Requirement: Evidence dossier gathering
 
 `DossierGatherer` MUST build the evidence dossier of an incident (ADR-011, [feature document](../../../odd/tasks/evidence-dossier.md)) through the `LabTools` port, the same path to mcp-tools as the loop's calls. For an incident window of N minutes (the incident's `sinceMinutes`) it uses two windows: the **incident window**, `sinceMinutes` N, and the **previous window**, the N minutes just before it, `sinceMinutes` 2N with `untilMinutesAgo` N. It MUST make the same calls, with the same arguments, in this order, for every incident, whatever the symptom or any output says:

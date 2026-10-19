@@ -32,7 +32,7 @@ import tools.jackson.databind.node.ObjectNode;
 public class ReplayLabTools implements LabTools {
 
 	/** The text an unrecorded call is answered with, followed by the tool and its canonical arguments. */
-	static final String NOT_RECORDED = "not recorded in this replay: ";
+	public static final String NOT_RECORDED = "not recorded in this replay: ";
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
