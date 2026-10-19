@@ -57,10 +57,13 @@ final class Prompts {
 			- RESOURCE_EXHAUSTION: a component has run out of a limited resource, such as connections, memory, \
 			disk or threads.
 			- UNKNOWN: the evidence does not support one of the above.
-			For DEPENDENCY_LATENCY and DEPENDENCY_REJECTING, rootCauseService is the component that is slow or \
-			refuses, not its caller: name B when A waits for B or gets an error answer from B. When A cannot reach B \
-			at all (the connection is refused or closed, or the host is unknown) while B shows no failure of its own \
-			(no errors, no restarts, healthy metrics), B is not the cause: suspect A's own setting for B, a \
+			For DEPENDENCY_LATENCY and DEPENDENCY_REJECTING, rootCauseService is the component where the slowness \
+			or the error answer starts, not its caller: name B when A waits for B or gets an error answer from B, \
+			and if B in turn waits for C or gets an error answer from C, name C. Follow the calls down to the last \
+			component that is slow or refuses; an answer that takes long is that component's own failure even when \
+			it ends in success and logs no error. When A cannot reach B at all (the connection is refused or \
+			closed, or the host is unknown; a timeout is not this case) while B shows no failure of its own (no \
+			errors, no restarts, healthy metrics), B is not the cause: suspect A's own setting for B, a \
 			CONFIGURATION of A.""";
 
 	private static final String PLAN_AND_ACT_TASK = """

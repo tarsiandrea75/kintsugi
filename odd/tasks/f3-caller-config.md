@@ -21,7 +21,7 @@ F3 is one of the three faults M2 needs (`docs/vision.md`). Both defects are gene
 - T3: the cause categories and the root-cause service rule in the system prompt: an error answer or a slow answer from B names B; a failure to connect to B while B shows no failure of its own points at the caller's setting for B (`CONFIGURATION` on A).
 - T4: a cloud run, with the human's go-ahead and its cost recorded.
 
-Out of scope (follow-ups of the same analysis, not authorized): a read-only `service_config` tool, deterministic dossier facts (the failing URL in the traffic table, the window split at a restart), runbook retrieval changes, `service_restarts` always on in explorer `TRIAGE`, the lab settling between faults.
+Out of scope (follow-ups of the same analysis, not authorized): a read-only `service_config` tool, deterministic dossier facts (the failing URL in the traffic table, the window split at a restart), runbook retrieval changes, `service_restarts` always on in explorer `TRIAGE`, the lab settling between faults. From the F1 analysis of T5: F1 windows contain order-service port-9999 lines left over from the previous run's F3; `docs/runbooks/order-service.md:77` ("payment-service slow") is cited to name payment-service; the dossier's traffic table has no latency column.
 
 ## Constraints
 
@@ -35,6 +35,7 @@ Out of scope (follow-ups of the same analysis, not authorized): a read-only `ser
 - [x] **T2 — mcp-tools rejections keep their reason** (item 4 of the analysis). When the MCP result is an error (`isError`) whose text is not mcp-tools' JSON envelope, record `INVALID_PARAMETER` with that text as the reason, in mcp-tools' rejection envelope, so the summarizer and the dossier show it like any rejection. A non-error result that is not JSON stays `CLIENT_ERROR`. Tests first in `McpLabToolsTest` (a missing required argument against `FakeMcpServer` or the real validator). Living spec: agent spec, "Tool calls run small and recorded". Route: delegated writer (2+ files). Done in `4388912`.
 - [x] **T3 — The caller's setting as a cause** (item 1). Reword `DEPENDENCY_REJECTING`, `CONFIGURATION` and the root-cause service rule in `Prompts.java`. Tests first in `PromptsTest`. Living spec: agent spec, the report's cause categories. Route: delegated writer (2+ files).
 - [x] **T4 — A cloud run,** with the human's go-ahead: `verify-agent.sh --route cloud` in explorer mode, then dossier, recording F1-F3 and the cost. F1 and F2 must not regress. Route: parent (runs).
+- [ ] **T5 — Follow the chain to the slow component** (fixes T3's F1 regression). The root-cause service rule in `Prompts.SYSTEM` follows the calls down to the last slow or refusing component, counts a slow answer that ends in success as that component's failure, and excludes a timeout from "cannot reach"; tests first in `PromptsTest`, living spec in the agent spec. Route: delegated writer (2+ files: prompt, test, spec, this document).
 
 ## Acceptance criteria
 
@@ -71,6 +72,8 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
   - **F3 went from 0/6 to 3/6; F1 went from 3/6 to 0/6.** Every F1 miss names `payment-service|DEPENDENCY_LATENCY`, the caller of the slow gateway-mock: the right category, the wrong component. F1 is now a likely regression of the T3 wording, not noise; acceptance "F1 not worse than T5" fails. The cause is not analysed yet.
   - Tokens: 516,752 prompt and 27,256 completion, **$0.0653**. Total cloud spend about $0.22 of the human's $5.
 
+- 2026-10-19: T5 implemented (route: delegated writer, 2+ files: prompt, test, spec, this document). An analysis of the post-T3 F1 steps found that the model applies "name B when A waits for B" one hop only and stops at payment-service; that gateway-mock's slow answers, which end in HTTP 200 with INFO logs only, look healthy; and that order-service's `HttpTimeoutException` must not be read as "cannot reach". `Prompts.SYSTEM` now names the component where the slowness or the error answer starts, follows the calls to C when B in turn waits for C or gets an error answer from C, counts a long answer as that component's failure even when it ends in success and logs no error, and says a timeout is not the "cannot reach" case. RED: `PromptsTest` 19 tests, 2 failures (`aDependencyCauseFollowsTheChainToTheLastSlowOrRefusingComponent`, `aTimeoutIsNotACallerThatCannotReachItsDependency`); GREEN: 19 tests, 0 failures. Full suite (`./mvnw test` in `agent/`): 381 tests, 0 failures, 0 errors, BUILD SUCCESS. Living spec: agent spec, "What one call sees", rule, why and scenario "A slow dependency behind a dependency is the root cause (F3 T5)".
+
 ## Next step
 
-Analyse the F1 steps after T3 (why the model names payment-service for gateway-mock's latency), then fix the wording without losing F3. The human decides.
+Commit T5, then two cloud rounds (human's go-ahead given).

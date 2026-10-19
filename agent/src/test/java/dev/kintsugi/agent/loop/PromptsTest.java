@@ -46,6 +46,22 @@ class PromptsTest {
 	}
 
 	@Test
+	void aDependencyCauseFollowsTheChainToTheLastSlowOrRefusingComponent() {
+		// After T3, every F1 run named payment-service, the caller of the slow gateway-mock: one hop only (F3 T5).
+		assertThat(Prompts.system("orders are slow", 15))
+			.contains("the component where the slowness or the error answer starts, not its caller")
+			.contains("if B in turn waits for C or gets an error answer from C, name C")
+			.contains("Follow the calls down to the last component that is slow or refuses")
+			.contains("an answer that takes long is that component's own failure even when it ends in success and logs "
+					+ "no error");
+	}
+
+	@Test
+	void aTimeoutIsNotACallerThatCannotReachItsDependency() {
+		assertThat(Prompts.system("orders are slow", 15)).contains("or the host is unknown; a timeout is not this case)");
+	}
+
+	@Test
 	void anAffectedOrderToTraceIsOneThatDidNotEndPaid() {
 		assertThat(Prompts.system("orders are slow", 15)).contains("recent_events with source=order")
 			.contains("not an older PAID one");
