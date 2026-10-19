@@ -44,6 +44,8 @@ in_manifest() { [[ -f "$MANIFEST" ]] && awk -F'\t' -v file="$1" '$5 == file { fo
 # Succeeds when file $1 holds a JSON object.
 is_json_object() { python3 -I -c 'import json, sys; sys.exit(0 if isinstance(json.load(open(sys.argv[1])), dict) else 1)' "$1" 2>/dev/null; }
 
+# is_json_object needs python3: without it every incident would be refused as "not JSON", so say so instead.
+command -v python3 >/dev/null || { echo "python3 is required to check the incidents" >&2; exit 2; }
 # Every run directory is checked before anything is written.
 for run_dir in "$@"; do
   [[ -d "$run_dir" ]] || { echo "Not a directory: $run_dir" >&2; exit 2; }
