@@ -31,7 +31,7 @@ import org.springframework.ai.tool.ToolCallback;
  * @param model the model's name, {@code kintsugi.agent.cloud.name}
  * @param chatModel the auto-configured Anthropic chat model
  * @param callTimeouts the cloud route's deadlines, {@code kintsugi.agent.cloud.call-timeout}
- * @param numPredict the answer caps, the same as the local route's
+ * @param numPredict the cloud route's answer caps, {@code kintsugi.agent.cloud.num-predict}, sent as {@code maxTokens}
  */
 public record AnthropicRoute(String model, ChatModel chatModel, CallTimeouts callTimeouts,
 		NumPredict numPredict) implements ModelRoute {

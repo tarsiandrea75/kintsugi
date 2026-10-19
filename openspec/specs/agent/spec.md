@@ -361,6 +361,8 @@ Every model call MUST carry Ollama's `num_predict`, the most tokens its answer m
 | a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) fits the 420 s `REPORT` deadline with room for a slow prompt read. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
 | the warm-up | 1 | "The warm-up" |
 
+The cloud route MUST carry its own caps, `kintsugi.agent.cloud.num-predict` (`first-act`, `act`, `report`), as `maxTokens` **(report-length T2)**. Today they equal the local ones (384, 160, 512), so with no override nothing changes. Why separate: the reasons above are the CPU's write time, which the cloud route does not have, so its caps can be measured and changed without touching the local route. Like the local caps they are required: a missing `kintsugi.agent.cloud.num-predict` stops the start with a message naming it. The environment variable `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT` overrides the cloud report cap (Spring Boot's relaxed binding of environment variables).
+
 Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:
 
 - a cut `ACT` answer is recorded with `answer cut at <cap> tokens` in its step's `summary` (after the tool-call count, before the plan's verdict), and its tool calls, if any, are checked and run as usual; with no tool call it is handled like any answer with text and no tool call, so it gets the phase's retry if it has not had it **(T5c12)**;
@@ -369,6 +371,11 @@ Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it det
 #### Scenario: Caps by call
 - WHEN a run makes a phase's first `ACT` call, a later `ACT` call and a report call
 - THEN they carry `num_predict` 384, 160 and 512, and the warm-up 1
+
+#### Scenario: The cloud route's own report cap (report-length T2)
+- GIVEN `kintsugi.agent.route=cloud` and `kintsugi.agent.cloud.num-predict.report=768`
+- WHEN the loop asks for the report
+- THEN the call carries `maxTokens` 768, and `kintsugi.agent.model.num-predict.report` stays 512
 
 #### Scenario: A cut answer that summarises
 - GIVEN a later `ACT` answer in `TRIAGE` cut at its cap, with Markdown text and no tool call
@@ -423,7 +430,7 @@ The model MUST run on the route of `kintsugi.agent.route` (`${KINTSUGI_AGENT_ROU
 | Route | `spring.ai.model.chat` | Model | Call options | Deadlines | Warm-up |
 |-------|------------------------|-------|--------------|-----------|---------|
 | `local` (default) | `ollama` | `kintsugi.agent.model.name`, `granite4.1:8b` | `OllamaChatOptions`: `temperature` 0, `num-ctx` 8192, `num_predict` the answer cap; byte-identical to every run before the cloud route | `kintsugi.agent.model.call-timeout` | yes ("The warm-up") |
-| `cloud` | `anthropic` | `kintsugi.agent.cloud.name`, `claude-haiku-5-5` | `AnthropicChatOptions`: no `temperature` (the model rejects a non-default one), thinking disabled (thinking tokens would count against `max_tokens`), `maxTokens` the same answer cap as the local route's `num_predict`, the report's `outputSchema`, the phase's tool definitions | `kintsugi.agent.cloud.call-timeout`: `act` 60 s, `report` 90 s (a first guess, measured in cloud-route T5) | none |
+| `cloud` | `anthropic` | `kintsugi.agent.cloud.name`, `claude-haiku-5-5` | `AnthropicChatOptions`: no `temperature` (the model rejects a non-default one), thinking disabled (thinking tokens would count against `max_tokens`), `maxTokens` the call's answer cap from `kintsugi.agent.cloud.num-predict` ("Answer caps"), the report's `outputSchema`, the phase's tool definitions | `kintsugi.agent.cloud.call-timeout`: `act` 60 s, `report` 90 s (a first guess, measured in cloud-route T5) | none |
 
 `RouteEnvironmentPostProcessor` MUST derive `spring.ai.model.chat` from the route, because Spring AI 2.0.1 turns on both chat auto-configurations when it is missing; so exactly one `ChatModel` exists, and on the local route Anthropic's auto-configuration is off. The cloud client's `spring.ai.anthropic.timeout` MUST be the cloud route's longest call deadline (90 s), and `spring.ai.anthropic.max-retries` MUST be 0, since the loop owns retries and their budget. Every cloud call MUST also carry its own timeout, `AnthropicChatOptions.timeout`: the loop's wait for that call (its deadline, or the incident's time left when that is shorter) plus 1 s, so that a call the loop abandons is cancelled at most 1 s later and the provider stops writing its answer. Why (the review of cloud-route T3): the loop interrupts a call it stops waiting for, which closes Ollama's connection ("Budgets"), but Spring AI 2.0.1's `AnthropicChatModel` calls the Anthropic SDK (anthropic-java-core 2.52.0) through Spring AI's `SpringAiAnthropicHttpClient`, whose OkHttp `Call.execute()` blocks in a socket read that ignores the interruption; with the client's timeout alone an abandoned 60 s `ACT` call held its connection, and the provider kept writing, up to 90 s. Spring AI passes the per-call timeout to the SDK as the call's `RequestOptions`, and OkHttp's call timeout cancels the call. The 1 s keeps the loop's deadline, not the client, the one that ends a call, so a timed-out call still ends the run `TIMED_OUT`. The loop's model-call workers are a cached pool, so a call still ending never delays the next one; and a run whose call timed out has ended, so no retry of it can overlap. The key comes only from `ANTHROPIC_API_KEY` (`spring.ai.anthropic.api-key: ${ANTHROPIC_API_KEY:}`); no key is in the repository.
 

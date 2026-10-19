@@ -37,7 +37,7 @@ class LoopConfig {
 		return new OneRouteModelRouter(switch (AgentRoute.of(route)) {
 			case LOCAL -> new OllamaRoute(local.name(), chatModel, local.temperature(), local.numCtx(),
 					local.callTimeout(), local.numPredict());
-			case CLOUD -> new AnthropicRoute(cloud.name(), chatModel, cloud.callTimeout(), local.numPredict());
+			case CLOUD -> new AnthropicRoute(cloud.name(), chatModel, cloud.callTimeout(), cloud.numPredict());
 		});
 	}
 

@@ -85,14 +85,20 @@ kintsugi:
         first-act: 384
         act: 160
         report: 512
-    # The cloud route (ADR-012): claude-haiku-5-5, with the answer caps of kintsugi.agent.model.num-predict and its own
-    # call deadlines, a first guess to be measured in cloud-route T5. The report is the longer one, and
-    # spring.ai.anthropic.timeout follows it.
+    # The cloud route (ADR-012): claude-haiku-5-5, with its own call deadlines, a first guess to be measured in
+    # cloud-route T5. The report is the longer one, and spring.ai.anthropic.timeout follows it.
     cloud:
       name: claude-haiku-5-5
       call-timeout:
         act: 60s
         report: 90s
+      # Its own answer caps, sent as maxTokens, today equal to kintsugi.agent.model.num-predict (agent spec, "Answer
+      # caps"). They are separate because the local 512 report cap is justified by the CPU's write time, which the
+      # cloud route does not have; KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT overrides the report cap for a measurement.
+      num-predict:
+        first-act: 384
+        act: 160
+        report: 512
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
     # run makes at most 15 model calls (8 ACT answers, 2 for uncounted refusals, 3 phase retries and 2 report
     # attempts), so 15 is a guard against a loop bug; the warm-up, which loads the
