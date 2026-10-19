@@ -305,12 +305,12 @@ record_fault_end() {
     echo "WARN  could not record the restore time in $LAST_FAULT_END_FILE" >&2
 }
 
-# Prints the epoch second recorded by record_fault_end, or nothing when the file is missing, empty or holds no
-# positive integer.
+# Prints the epoch second recorded by record_fault_end, or nothing when the file is missing, empty, holds no positive
+# integer, or holds a time in the future (a wrong clock or a hand edit), which would make space_out wait without bound.
 last_fault_end() {
   local value=""
   [[ -r "$LAST_FAULT_END_FILE" ]] && read -r value <"$LAST_FAULT_END_FILE"
-  if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then echo "$value"; fi
+  if [[ "$value" =~ ^[1-9][0-9]{0,11}$ ]] && (( value <= $(date +%s) )); then echo "$value"; fi
 }
 
 # Restores the injection through the injector as a check step.

@@ -128,6 +128,18 @@ printf '0\n' >"$LAST_FAULT_END_FILE"
 expect "a zero epoch second" "$(last_fault_end)" ""
 : >"$LAST_FAULT_END_FILE"
 expect "an empty file" "$(last_fault_end)" ""
+printf '%s\n' $(( $(date +%s) + 3600 )) >"$LAST_FAULT_END_FILE"
+expect "a restore time in the future, which would wait without bound" "$(last_fault_end)" ""
+
+# restore_injection records the restore time only when the injector confirms it; injector_call is stubbed.
+rm -f "$LAST_FAULT_END_FILE"
+injector_call() { echo "500 {}"; }
+restore_injection || true
+expect "a refused restore records nothing" "$(last_fault_end)" ""
+injector_call() { echo '200 {"status":"RESTORED"}'; }
+restore_injection
+expect "a confirmed restore records its time" "$(( $(last_fault_end) >= $(date +%s) - 5 ))" 1
+unset -f injector_call
 
 # space_out, with sleep stubbed so no case waits: no wait without a restore time or once the margin has passed.
 sleep() { echo "slept $1"; }

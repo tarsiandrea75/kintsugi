@@ -93,9 +93,10 @@ printf 'fault\tmode\troute\tinjection\tincident\tstatus\ttruth\treported\tsteps\
 # The fault being diagnosed and its incident, until its score is written; the exit trap records an interrupted one.
 current_fault=""
 current_incident=""
-# When the previous fault was restored (epoch seconds); space_out waits from it. It starts from the last restore that
-# lib.sh recorded on disk, so the first fault also waits for a run that ended just before.
-previous_fault_end=$(last_fault_end)
+# When the previous fault of this run was restored (epoch seconds); space_out waits from it. Until the first restore,
+# diagnose reads the last restore lib.sh recorded on disk, so the first fault also waits for a run that ended just
+# before, or for a leftover injection start_lab restored.
+previous_fault_end=""
 cleanup() {
   local status=$?
   if [[ -n "$current_fault" ]]; then
@@ -162,7 +163,7 @@ diagnose() {
   local verdict injection incident_mode incident_route prompt_tokens completion_tokens incident_model message
   info "--- $fault"
   current_fault=$fault current_incident=""
-  space_out "$previous_fault_end"
+  space_out "${previous_fault_end:-$(last_fault_end)}"
   traffic_start=$(date +%s)
   place_orders "$HEALTHY_ORDERS"
   inject_fault "$fault"

@@ -54,6 +54,8 @@ Forecast about 80 authored lines, one slice. Strategy `feature-branch-chain` if 
 - 2026-10-19: T1, mapping done (read-only explorer): the leak is across processes, not inside one run.
 - 2026-10-19: T2 (route: delegated writer, 2+ non-trivial files). `restore_injection` records every confirmed restore through `record_fault_end` (so `expect_restored`, `on_exit` and `restore_leftover_injection` all do); `last_fault_end` reads it back, empty on a missing, empty or non-numeric file; `LAST_FAULT_END_FILE` overrides the path. `verify-agent.sh` seeds `previous_fault_end` from it. RED: `test-lib.sh` failed with `record_fault_end: command not found` / `FAIL  a recorded restore time, in a directory created for it`. GREEN: `PASS  43 cases` (9 new, `space_out` tested with `sleep` stubbed). `shellcheck` not installed: skipped; `bash -n` clean.
 
+- 2026-10-19: T2 done in `8fd134d`. Native assessment `3e1bf58..8fd134d`: high, review due; 4-lens review (standing consent granted), approved and acknowledged, no correction. Its three WARNINGs fixed inline (route: inline, small and understood): `verify-agent.sh` read the file before `start_lab` restored a leftover injection, so it now reads it in `diagnose` until the run's first restore; `last_fault_end` ignores a time in the future, which would wait without bound; `restore_injection`'s recording is now tested with `injector_call` stubbed. RED: `FAIL  a restore time in the future`; GREEN: `PASS  46 cases`. SUGGESTIONs left (non-atomic write, test trap and parse style, line references in this document).
+
 ## Next step
 
 T3: one `compare-agent-modes.sh` round, with the human's go-ahead.
