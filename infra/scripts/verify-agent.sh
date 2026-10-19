@@ -23,8 +23,9 @@ for every fault and a window that starts with that fault's own orders, and waits
 the agent's 45 min budget, its 5 min warm-up and a margin). It restores the fault, reads the injection's truth row as
 the faults role, and scores the report: it matches when the incident is COMPLETED and both rootCauseService and
 rootCauseCategory of its report equal the truth. Between two faults it waits until the previous fault's traffic is
-older than the next window (11 min after its restore). Nothing it writes into the lab, and nothing in the symptom,
-names a fault.
+older than the next window (11 min after its restore), across runs too: the last restore time is kept in
+infra/scripts/out/.last-fault-end (delete it to skip the wait). Nothing it writes into the lab, and nothing in the
+symptom, names a fault.
 Every run, pass or fail, is logged under infra/scripts/out/verify-agent-<UTC time>/: run.log, and per fault the
 incident with its steps and full tool outputs (<fault>-incident.json), and the score (<fault>-score.txt); summary.tsv
 has one line per fault (VERIFY_AGENT_RUN_DIR, when set, names the directory instead). --mode sets KINTSUGI_AGENT_MODE
@@ -92,8 +93,9 @@ printf 'fault\tmode\troute\tinjection\tincident\tstatus\ttruth\treported\tsteps\
 # The fault being diagnosed and its incident, until its score is written; the exit trap records an interrupted one.
 current_fault=""
 current_incident=""
-# When the previous fault was restored (epoch seconds); space_out waits from it.
-previous_fault_end=""
+# When the previous fault was restored (epoch seconds); space_out waits from it. It starts from the last restore that
+# lib.sh recorded on disk, so the first fault also waits for a run that ended just before.
+previous_fault_end=$(last_fault_end)
 cleanup() {
   local status=$?
   if [[ -n "$current_fault" ]]; then

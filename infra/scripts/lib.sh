@@ -36,6 +36,8 @@ failures=0
 started=$SECONDS
 # The injection this script activated; the exit trap restores it through the injector.
 injection_id=""
+# When the last fault was restored (epoch second), kept on disk so space_out holds across runs (git-ignored with out/).
+LAST_FAULT_END_FILE="${LAST_FAULT_END_FILE:-$REPO_DIR/infra/scripts/out/.last-fault-end}"
 
 # Parses --down and --help; usage() is defined by the caller.
 parse_args() {
@@ -292,7 +294,23 @@ restore_injection() {
   local code body status
   read -r code body <<<"$(injector_call POST "/faults/$injection_id/restore")"
   status=$(json_field status "$body")
-  [[ "$code" == 200 && ( "$status" == RESTORED || "$status" == FAILED ) ]]
+  [[ "$code" == 200 && ( "$status" == RESTORED || "$status" == FAILED ) ]] || return 1
+  record_fault_end
+}
+
+# Writes epoch second $1 (default now) to LAST_FAULT_END_FILE: the end of the last fault, for space_out in a later run.
+# A failed write only warns: the next run then waits less, as before the file existed.
+record_fault_end() {
+  { mkdir -p "$(dirname "$LAST_FAULT_END_FILE")" && echo "${1:-$(date +%s)}" >"$LAST_FAULT_END_FILE"; } 2>/dev/null ||
+    echo "WARN  could not record the restore time in $LAST_FAULT_END_FILE" >&2
+}
+
+# Prints the epoch second recorded by record_fault_end, or nothing when the file is missing, empty or holds no
+# positive integer.
+last_fault_end() {
+  local value=""
+  [[ -r "$LAST_FAULT_END_FILE" ]] && read -r value <"$LAST_FAULT_END_FILE"
+  if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then echo "$value"; fi
 }
 
 # Restores the injection through the injector as a check step.
@@ -589,6 +607,7 @@ incident_window() {
 # Waits until INCIDENT_WINDOW_MARGIN_MINUTES + 1 minutes have passed since epoch second $1, the end of the previous
 # fault (its restore), before the next fault's traffic starts. So no window from incident_window reaches back to the
 # previous fault's orders, logs or restarts, however early that fault's incident ended. No wait when $1 is empty.
+# verify-agent.sh seeds $1 from last_fault_end, so the spacing holds across runs too.
 space_out() {
   [[ -n "$1" ]] || return 0
   local wait=$(($1 + (INCIDENT_WINDOW_MARGIN_MINUTES + 1) * 60 - $(date +%s)))

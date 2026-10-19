@@ -113,4 +113,30 @@ expect "no key and no file" "$(unset ANTHROPIC_API_KEY; key)" "no unset"
 expect "the check alone changes nothing" \
   "$(ANTHROPIC_API_KEY=; cloud_key_available || true; echo "[${ANTHROPIC_API_KEY-unset}]")" "[]"
 
+# record_fault_end and last_fault_end: the last restore time, kept in LAST_FAULT_END_FILE across runs.
+FAULT_END_DIR=$(mktemp -d)
+trap 'rm -f "$ENV_FILE"; rm -rf "$FAULT_END_DIR"' EXIT
+LAST_FAULT_END_FILE="$FAULT_END_DIR/out/.last-fault-end"
+expect "no file, no restore time" "$(last_fault_end)" ""
+record_fault_end 1700000000
+expect "a recorded restore time, in a directory created for it" "$(last_fault_end)" 1700000000
+before=$(date +%s); record_fault_end; recorded=$(last_fault_end)
+expect "the default restore time is now" "$(( recorded >= before && recorded <= $(date +%s) ))" 1
+printf 'garbage\n' >"$LAST_FAULT_END_FILE"
+expect "a file that holds no epoch second" "$(last_fault_end)" ""
+printf '0\n' >"$LAST_FAULT_END_FILE"
+expect "a zero epoch second" "$(last_fault_end)" ""
+: >"$LAST_FAULT_END_FILE"
+expect "an empty file" "$(last_fault_end)" ""
+
+# space_out, with sleep stubbed so no case waits: no wait without a restore time or once the margin has passed.
+sleep() { echo "slept $1"; }
+expect "no restore time, no wait" "$(space_out "")" ""
+expect "a restore older than the margin, no wait" \
+  "$(space_out $(( $(date +%s) - (INCIDENT_WINDOW_MARGIN_MINUTES + 2) * 60 )))" ""
+waited=$(space_out "$(date +%s)" | tail -n 1)
+expect "a restore just now waits the margin and a minute" \
+  "$(( ${waited#slept } >= (INCIDENT_WINDOW_MARGIN_MINUTES + 1) * 60 - 1 ))" 1
+unset -f sleep
+
 echo "PASS  $cases cases"
