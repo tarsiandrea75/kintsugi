@@ -36,7 +36,7 @@ Out of scope (follow-ups of the same analysis, not authorized): a read-only `ser
 - [x] **T3 — The caller's setting as a cause** (item 1). Reword `DEPENDENCY_REJECTING`, `CONFIGURATION` and the root-cause service rule in `Prompts.java`. Tests first in `PromptsTest`. Living spec: agent spec, the report's cause categories. Route: delegated writer (2+ files).
 - [x] **T4 — A cloud run,** with the human's go-ahead: `verify-agent.sh --route cloud` in explorer mode, then dossier, recording F1-F3 and the cost. F1 and F2 must not regress. Route: parent (runs).
 - [x] **T5 — Follow the chain to the slow component** (fixes T3's F1 regression). The root-cause service rule in `Prompts.SYSTEM` follows the calls down to the last slow or refusing component, counts a slow answer that ends in success as that component's failure, and excludes a timeout from "cannot reach"; tests first in `PromptsTest`, living spec in the agent spec. Route: delegated writer (2+ files: prompt, test, spec, this document).
-- [ ] **T6 — Confirm on the local route** (ADR-012: only the verification route decides): `compare-agent-modes.sh --runs 1` on `granite4.1:8b`, explorer then dossier, F1-F3; compared with `evidence-dossier` T6b (explorer 3/9, dossier 0/9). No cloud cost. Route: parent (runs).
+- [x] **T6 — Confirm on the local route** (ADR-012: only the verification route decides): `compare-agent-modes.sh --runs 1` on `granite4.1:8b`, explorer then dossier, F1-F3; compared with `evidence-dossier` T6b (explorer 3/9, dossier 0/9). No cloud cost. Route: parent (runs).
 
 ## Acceptance criteria
 
@@ -85,6 +85,12 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
 
 - 2026-10-19: development on the cloud route closed with the human's agreement: T1-T5 done, slice reviewed and its WARNING fixed (`5a02a7f`). Total cloud spend for this feature about $0.16 (T4, T4b, T5 rounds). T6, the local confirmation, started.
 
+- 2026-10-19: T6, `compare-agent-modes.sh --route local --runs 1` on `granite4.1:8b` (`infra/scripts/out/verify-agent-20261019T133209Z-explorer`, `-150129Z-dossier`), on `65e5aaf`; exit 1.
+  - **Explorer 1/3:** F1 MISS (`INVALID_REPORT`), F2 MATCH, F3 MISS as `gateway-mock|DEPENDENCY_REJECTING`: the callee, the same miss as before T3.
+  - **Dossier 0/3:** F1 and F2 `TIMED_OUT` (1622 s and 1637 s), F3 `INVALID_REPORT` (1835 s).
+  - Against `evidence-dossier` T6b (explorer 3/9, dossier 0/9): the same rates. **The local route does not confirm the cloud gain:** F3 stays undiagnosed on `granite4.1:8b`, and the dossier still runs out of time or writes an invalid report on this CPU. No cloud cost.
+- 2026-10-19: feature closed. The prompt and tool fixes hold on the development route (cloud F3 0/6 → 3/4); the verification route is limited by the local model and the CPU, not by these rules.
+
 ## Next step
 
-T6 running: one local round, explorer then dossier (several hours on this CPU). Then record it and close the feature; dossier F1 on the cloud route and the out-of-scope follow-ups stay open for the human.
+None in this feature. Open for the human: why `granite4.1:8b` misses F3 and why the dossier times out locally; dossier F1 on the cloud route; the out-of-scope follow-ups above.
