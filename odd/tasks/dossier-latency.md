@@ -27,7 +27,7 @@ The prompt rule (`Prompts.java`, F3 T5) needs per-hop latency; the gap is in the
 - [x] **T1 — This document** and its Engram mirror; route: inline.
 - [x] **T2 — Latency in the dossier.** Gather and render it; tests first (`DossierGatherer`/renderer tests, recorded-lab fixtures); spec updated. Route: delegated writer (2+ files).
 - [x] **T3 — Record a fresh dossier round** on the cloud route (`verify-agent.sh --mode dossier --route cloud`, F1-F3, about 27 minutes and $0.02) and replace the old dossier recordings in `agent/src/test/resources/replay/` with it (the old ones lack the latency calls, and the driver serves the first same-mode recording). Route: parent (runs).
-- [ ] **T4 — Measure on the replay:** `replay-agent.sh --samples 5` (dossier), about $0.08; compare with F1 0/5, F2 5/5, F3 4/5. Route: parent (runs).
+- [x] **T4 — Measure on the replay:** `replay-agent.sh --samples 5` (dossier), about $0.08; compare with F1 0/5, F2 5/5, F3 4/5. Route: parent (runs).
 
 ## Acceptance criteria
 
@@ -53,6 +53,12 @@ Forecast about 250 authored lines, one slice. Branch `feat/dossier-latency`, fro
 
 - 2026-10-19: T3, with the human's go-ahead: `verify-agent.sh --mode dossier --route cloud` on `f20fc74` (`infra/scripts/out/verify-agent-20261019T214629Z`), exit 0: **F1 MATCH, F2 MATCH, F3 MATCH**, the first dossier 3/3 on any route (one sample). Recorded with `record-replay.sh`; the three `173217Z` dossier recordings and their manifest lines removed (they lack the latency calls). `ReplayDriverTest` now replays the new F1 recording with full coverage (33 calls, 0 unrecorded): 8/8.
 
+- 2026-10-19: T4, with the human's go-ahead: `replay-agent.sh --samples 5` (dossier) on `671b84c` (`infra/scripts/out/replay-20261019T221420Z-cloud`), 15 samples, exit 0; every dossier step fully recorded (`dossierCovered` 5/5 per fault).
+  - **F1 4/5** (was 0/5): four `gateway-mock|DEPENDENCY_LATENCY`; the fifth is `INVALID_REPORT` ("report invalid twice"), not a wrong cause. **F2 5/5** (was 5/5). **F3 5/5** (was 4/5). Acceptance met.
+  - The baseline (0/5, 5/5, 4/5) replayed the earlier recordings, the new run replays a new one, so evidence and latency both changed; the lab round on the same code (T3, 3/3) agrees.
+  - Tokens: 777,136 prompt and 29,871 completion, **$0.0926**; T3's lab round about $0.03. Total cloud spend about $0.55 of the human's $5.
+- 2026-10-19: feature closed.
+
 ## Next step
 
-T4.
+None in this feature. Open for the human: the one `INVALID_REPORT` in F1 (report rejected twice, cause not analysed); explorer mode's F1, which reads no dossier; the dossier's longer latency section on windows over 180 minutes (rejected by the tool's 360-minute limit).
