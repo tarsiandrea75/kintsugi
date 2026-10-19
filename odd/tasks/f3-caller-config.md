@@ -65,6 +65,12 @@ Forecast about 200 authored lines (code, tests, spec, this document): under the 
   - Acceptance: F3 diagnosed at least once, met. "F1 and F2 not worse than T5": F2 1/1 in both modes; F1 0/2, against explorer 2/3 and dossier 1/3 in T5. The same wrong-service miss already happened in T5 (3 of 6), so one sample per mode cannot tell a regression from noise; open.
   - Tokens: 271,273 prompt and 14,029 completion, **$0.0341**. Total cloud spend about $0.15 of the human's $5.
 
+- 2026-10-19: T4b, with the human's go-ahead: `compare-agent-modes.sh --route cloud --runs 2` (`infra/scripts/out/verify-agent-20261019T015826Z-explorer-cloud`, `-022538Z-dossier-cloud`, `-025252Z-explorer-cloud`, `-032023Z-dossier-cloud`), on `51136ad`.
+  - Explorer: F1 0/2, F2 2/2, F3 1/2 (one MATCH, one `UNKNOWN|UNKNOWN`). Dossier: F1 0/2, F2 2/2, F3 1/2 (one MATCH, one `payment-service|CONFIGURATION`).
+  - **With T4, three rounds after T3:** explorer 5/9 (F1 0/3, F2 3/3, F3 2/3), dossier 4/9 (F1 0/3, F2 3/3, F3 1/3). Before T3 (cloud-route T5, three rounds): explorer 5/9 (F1 2/3, F2 3/3, F3 0/3), dossier 3/9 (F1 1/3, F2 2/3, F3 0/3).
+  - **F3 went from 0/6 to 3/6; F1 went from 3/6 to 0/6.** Every F1 miss names `payment-service|DEPENDENCY_LATENCY`, the caller of the slow gateway-mock: the right category, the wrong component. F1 is now a likely regression of the T3 wording, not noise; acceptance "F1 not worse than T5" fails. The cause is not analysed yet.
+  - Tokens: 516,752 prompt and 27,256 completion, **$0.0653**. Total cloud spend about $0.22 of the human's $5.
+
 ## Next step
 
-The human decides: more cloud rounds to settle F1 (whether the T3 wording moves F1's root cause from gateway-mock to its caller, payment-service) and the dossier's F3 (the callee named with CONFIGURATION), or the next item of the F3 analysis.
+Analyse the F1 steps after T3 (why the model names payment-service for gateway-mock's latency), then fix the wording without losing F3. The human decides.
