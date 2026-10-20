@@ -4,30 +4,30 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-16 (session 01, overnight, run autonomously with the human's go-ahead)
+2026-10-20 (session 01; the session ran from 2026-10-19)
 
 ## Milestone
 
-**M2 — First agent: in progress.** Done: the MCP tools server, RAG on the runbooks, and the agent loop through T5c14. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3). The best run is 2/3; the check needs the human's decisions below.
+**M2 — First agent: in progress.** Since the last state: the evidence dossier (ADR-011, `odd/tasks/evidence-dossier.md`), the cloud development route (ADR-012, `odd/tasks/cloud-route.md`), and this session's six features. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3). The cloud route now diagnoses F1–F3 in dossier mode (replay, 5 samples per fault: 5/5, 5/5, 4-5/5); the local route (`granite4.1:8b`) does not yet (`f3-caller-config` T6: explorer 1/3, dossier 0/3, timeouts on this CPU).
 
 ## Last action
 
-- **Host back to speed after the restart:** an Ollama probe read prompts at 10.6-11.1 tokens/s and generated at 4.1-4.2 tokens/s; latencies stayed level through runs 11-13.
-- **Runs 11-13** (`infra/scripts/out/verify-agent-20261015T192159Z/`, `-20261016T024609Z/`, `-20261016T042636Z/`): 2/3, 0/3, 1/3.
-  - F1: 1 MATCH, 2 timeouts on a phase's first answer (over the 300 s `ACT` deadline).
-  - F2: 2 MATCH, 1 report invalidated by an evidence item citing the wrong tool, with the right cause.
-  - F3: 0 of 3; the model always blames gateway-mock and never looks at order-side evidence.
-- **T5c13** (`f29401f`): a repeat of a failed call is refused with the first call's outcome and reason. Review approved.
-- **T5c14** (`fc3a00c`, decided by the agent overnight, extending the human's T5c11 rule): an evidence item citing the wrong tool is dropped, not fatal. Review approved.
-- Branch `feat/agent-loop-04-check`, clean tree, nothing pushed. The next review base is `4801fb7`; later commits are docs only.
+This session (journal `docs/journal/2026-10-20-01.md`), all on local branches, nothing pushed:
+- `f3-caller-config`: F3 diagnosed on the cloud route (0/6 → 3/4); not confirmed on the local route.
+- `evidence-settling`: the last restore time is kept across runs, so a run's F1 no longer sees the previous run's F3 evidence.
+- `replay-harness`: `infra/scripts/replay-agent.sh` replays recorded faults through the real loop; dossier mode replays fully, explorer mode does not (exact matching).
+- `dossier-latency`: the dossier shows each service's answer time; dossier F1 0/5 → 4-5/5 on the replay, 3/3 in the lab.
+- `fix/cloud-cut-report`: Anthropic's `max_tokens` stop is recognised as a cut report.
+- `report-length`: the cloud report cap is 768 (the local one stays 512); asking for at most 3 evidence items cost F3 and was reverted.
+- Cloud spend so far about $0.92 of the human's $5. Current branch `feat/report-length` (`2fc57c6`), clean.
 
 ## Next action
 
-1. **Decided 2026-10-16: the `ACT` deadline is 420 s (T5c15, `767acdd`, reviewed); the incident budget stays 45 min.** The human still decides, with runs 11-13 as evidence (details in `odd/tasks/agent-loop.md`, Next step):
-   - F3: a prompt or tool change toward order-side evidence (close to teaching the test), or record F3 as a known limit of the local model;
-   - the replay harness, to measure several samples per fault without the lab.
-2. Then the fourteenth full run (T5c3).
-3. Waiting for the human: add `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`, and the other lines listed in the 2026-10-08 state:
+1. The human decides what follows. Candidates:
+   - the local route: why `granite4.1:8b` misses F3 and why its dossier runs time out on this CPU (the M2 check depends on it);
+   - an explorer-mode replay design (exact matching cannot serve the model's free arguments);
+   - explorer mode's F1, which reads no dossier and so no latency.
+2. Waiting for the human: add `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`, and the other lines listed in the 2026-10-08 state:
    - `KINTSUGI_REPO_DIR=`
    - `DOCKER_GID=`
    - `POSTGRES_BOOTSTRAP_PASSWORD=postgres`
@@ -38,8 +38,9 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
    - `KNOWLEDGE_INDEXER_DB_PASSWORD=knowledge_indexer`
    - `KNOWLEDGE_AGENT_DB_PASSWORD=knowledge_agent`
    - `OLLAMA_PROXY_BIND_IP=172.17.0.1`
-4. Waiting for the human (needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
-5. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
+   - and the cloud key's placeholder line (ADR-012), with no value.
+3. Waiting for the human (needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
+4. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
 
 ## Local branch chains (not pushed)
 
@@ -56,7 +57,10 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 - `feat/fault-injector` → `-01-core` → `-02-api` → `-03-lab-control` → `-04-wiring`
 - `feat/mcp-tools` → `-01-observability-tools` → `-02-evidence-tools` → `-03-wiring`
 - `feat/runbook-rag` (one branch)
-- `feat/agent-loop` → `-01-state` → `-02-tools` → `-03-loop` → `-04-check` (current, clean)
+- `feat/agent-loop` → `-01-state` → `-02-tools` → `-03-loop` → `-04-check`
+- `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
+- `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
+- `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` (current, clean)
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -76,6 +80,14 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+This session (details in each feature document):
+- report-length: the local route still asks for 1 to 5 evidence items under a 512 cap; the prompt's evidence wording is not pinned by a test.
+- dossier-latency: a window over 180 minutes loses the latency section (the tool's 360-minute limit); latency means are unweighted point means; the dossier stress ceiling is now about two thirds of `num-ctx`.
+- replay-harness: explorer replays are not valid measurements; SUGGESTIONs on the driver and scripts (summary append on a reused out dir, second-resolution out dir, script option-parsing tests).
+- evidence-settling: the dossier's previous window still reaches about 24 minutes back; `status_summary` counts all orders; windows are not anchored to the injection time.
+- f3-caller-config: a `service_config` tool; dossier facts (failing URL); runbook retrieval; `service_restarts` in explorer TRIAGE.
+- cloud-route: `AnthropicSchema` edge cases; `KINTSUGI_AGENT_MODE` leaking into tests.
 
 agent-loop (details in `odd/tasks/agent-loop.md`):
 - T5c13 review: the branch for an earlier failure with no `reason` is untested (WARNING); the reason is read from the first `reason=` line; "change the arguments" is wrong advice after a transient failure.
