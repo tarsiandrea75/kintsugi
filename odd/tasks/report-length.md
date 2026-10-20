@@ -57,6 +57,8 @@ Forecast about 120 authored lines, one slice. Branch `feat/report-length`, from 
 - 2026-10-19: T5: `replay-agent.sh --samples 5` (cap 512) on `5158692` (`infra/scripts/out/replay-20261019T225608Z-cloud`). **F1 5/5, F2 5/5, F3 3/5** (`payment-service|UNKNOWN`, `payment-service|DEPENDENCY_REJECTING`); 0 invalid runs, 0 cuts; report tokens median 410, max 504, 1 of 15 at 485+; evidence items 2:6, 3:9 (no fourth). Cost **$0.0917**.
   - Both levers remove the cuts. F3 went 5/5 (baseline) → 4/5 (C) → 3/5 (B), the misses all naming payment-service (the caller of order-service's dependency): with five samples per arm this cannot be told from noise, and B and C change nothing F3's diagnosis depends on in an obvious way. Total cloud spend about $0.74 of the human's $5.
 
+- 2026-10-20: F3 only, 10 samples per arm, with the human's go-ahead (baseline and C on `49f32d7`, B on `e8f97b9`): baseline **9/10**, C **9/10**, B **7/10** (three `payment-service|UNKNOWN`). With the five-sample runs: baseline 14/15, C 13/15, B 10/15. B's reports are shorter (median 347, max 426, evidence 2:7, 3:3) and its misses leave the category UNKNOWN: asking for fewer items seems to cost F3 support, not only tokens. The baseline arm had one cut, recognised and retried into a valid report (the `fa29d44` fix seen working). Cost about $0.18; total cloud spend about $0.92 of the human's $5.
+
 ## Next step
 
-The human decides what to keep (C, B, both or neither); a larger F3 sample per arm would tell the F3 drop from noise.
+The human decides: the data favour keeping C (cloud report cap 768) and reverting B.
