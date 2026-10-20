@@ -94,7 +94,7 @@ kintsugi:
         report: 90s
       # Its own answer caps, sent as maxTokens (agent spec, "Answer caps"): the local ones but the report at 768. The
       # local 512 report cap is justified by the CPU's write time, which the cloud route does not have; on the replay
-      # 768 removed the reports cut at 512 with no loss in diagnoses (odd/tasks/report-length.md).
+      # 768 removed the reports cut at 512, with F3 at 13/15 against 14/15 (odd/tasks/report-length.md).
       # KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT overrides the report cap for a measurement.
       num-predict:
         first-act: 384
