@@ -361,7 +361,7 @@ Every model call MUST carry Ollama's `num_predict`, the most tokens its answer m
 | a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) fits the 420 s `REPORT` deadline with room for a slow prompt read. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
 | the warm-up | 1 | "The warm-up" |
 
-The cloud route MUST carry its own caps, `kintsugi.agent.cloud.num-predict` (`first-act`, `act`, `report`), as `maxTokens` **(report-length T2)**. Today they equal the local ones (384, 160, 512), so with no override nothing changes. Why separate: the reasons above are the CPU's write time, which the cloud route does not have, so its caps can be measured and changed without touching the local route. Like the local caps they are required: a missing `kintsugi.agent.cloud.num-predict` stops the start with a message naming it. The environment variable `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT` overrides the cloud report cap (Spring Boot's relaxed binding of environment variables).
+The cloud route MUST carry its own caps, `kintsugi.agent.cloud.num-predict` (`first-act`, `act`, `report`), as `maxTokens` **(report-length T2)**. They are the local ones but the report at 768 **(report-length)**: on the replay, 512 cut some reports mid-JSON (4 of 15 at 485+ tokens, one run invalid), and 768 removed the cuts with F3 at 13/15 against 14/15, while asking for at most 3 evidence items instead cost F3 (10/15) and was reverted. Why separate: the reasons above are the CPU's write time, which the cloud route does not have, so its caps can be measured and changed without touching the local route. Like the local caps they are required: a missing `kintsugi.agent.cloud.num-predict` stops the start with a message naming it. The environment variable `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT` overrides the cloud report cap (Spring Boot's relaxed binding of environment variables).
 
 Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:
 
@@ -861,7 +861,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN` |
 | `summary` | 1 to 500 characters |
 | `confidence` | number, 0 to 1 |
-| `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN`. The report task asks for 1 to 3 (report-length B): cloud reports with a fourth item ran into their 512-token cap, and the check still accepts up to 5 |
+| `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step; in dossier mode also `"dossier"` **(T5b)** |
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |
 | `evidence[].quote` | 8 to 160 characters (300 before T5c5): a short verbatim fragment, not a whole line |

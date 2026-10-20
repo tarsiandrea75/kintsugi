@@ -59,6 +59,8 @@ Forecast about 120 authored lines, one slice. Branch `feat/report-length`, from 
 
 - 2026-10-20: F3 only, 10 samples per arm, with the human's go-ahead (baseline and C on `49f32d7`, B on `e8f97b9`): baseline **9/10**, C **9/10**, B **7/10** (three `payment-service|UNKNOWN`). With the five-sample runs: baseline 14/15, C 13/15, B 10/15. B's reports are shorter (median 347, max 426, evidence 2:7, 3:3) and its misses leave the category UNKNOWN: asking for fewer items seems to cost F3 support, not only tokens. The baseline arm had one cut, recognised and retried into a valid report (the `fa29d44` fix seen working). Cost about $0.18; total cloud spend about $0.92 of the human's $5.
 
+- 2026-10-20: the human chose C and not B. B reverted (prompt, its test and the spec row back to `5158692~1`); the cloud report cap set to 768 in `application.yaml` (route: inline, config, two tests, spec). RED: `CloudRouteDefaultCapsTest` expecting 768 failed; GREEN: full suite 421/0/0 (`CloudRouteWiringTest`'s cap expectation updated to 768). Spec "Answer caps" records the measurement and the reverted B. Feature closed.
+
 ## Next step
 
-The human decides: the data favour keeping C (cloud report cap 768) and reverting B.
+None in this feature.

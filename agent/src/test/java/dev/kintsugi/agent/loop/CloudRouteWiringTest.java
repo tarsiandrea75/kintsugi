@@ -57,7 +57,7 @@ class CloudRouteWiringTest {
 			assertThat(route.chatModel()).isInstanceOf(AnthropicChatModel.class);
 			assertThat(route.callTimeouts())
 				.isEqualTo(new CallTimeouts(Duration.ofSeconds(60), Duration.ofSeconds(90)));
-			assertThat(route.numPredict()).isEqualTo(new NumPredict(384, 160, 512));
+			assertThat(route.numPredict()).isEqualTo(new NumPredict(384, 160, 768));
 		}
 	}
 

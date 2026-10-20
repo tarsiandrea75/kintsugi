@@ -140,14 +140,6 @@ class PromptsTest {
 	}
 
 	@Test
-	void theReportAsksForAtMostThreeEvidenceItems() {
-		// Cloud reports ran near their 512-token cap with a fourth item (report-length B); the check still takes 5.
-		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), List.of());
-
-		assertThat(task).contains("evidence: 1 to 3 items {toolCallId, tool, quote, why}").doesNotContain("1 to 5 items");
-	}
-
-	@Test
 	void withNoRefusedCallTheReportTaskListsOnlyTheCitableOnes() {
 		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(),
 				List.of(new ToolStep(3, "status_summary", "OK", "{}", null)));

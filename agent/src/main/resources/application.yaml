@@ -92,13 +92,14 @@ kintsugi:
       call-timeout:
         act: 60s
         report: 90s
-      # Its own answer caps, sent as maxTokens, today equal to kintsugi.agent.model.num-predict (agent spec, "Answer
-      # caps"). They are separate because the local 512 report cap is justified by the CPU's write time, which the
-      # cloud route does not have; KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT overrides the report cap for a measurement.
+      # Its own answer caps, sent as maxTokens (agent spec, "Answer caps"): the local ones but the report at 768. The
+      # local 512 report cap is justified by the CPU's write time, which the cloud route does not have; on the replay
+      # 768 removed the reports cut at 512 with no loss in diagnoses (odd/tasks/report-length.md).
+      # KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT overrides the report cap for a measurement.
       num-predict:
         first-act: 384
         act: 160
-        report: 512
+        report: 768
     # The run's budgets (agent spec, "Budgets"); the 8 tool calls and the phases' allowances are fixed in code. A valid
     # run makes at most 15 model calls (8 ACT answers, 2 for uncounted refusals, 3 phase retries and 2 report
     # attempts), so 15 is a guard against a loop bug; the warm-up, which loads the
