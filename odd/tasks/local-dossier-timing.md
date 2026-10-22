@@ -12,13 +12,18 @@ Find out why dossier runs on the local route (`granite4.1:8b`, CPU) time out, be
 - **Estimate for the first call on this CPU:** about 6,500 tokens at 11.3 tokens/s is about 575 s to read, plus 384 tokens at about 4 tokens/s (2026-10-16 probe) is about 95 s to write: **about 670 s against the 420 s `ACT` deadline.** No prompt wording can fix this; the call is too large for the deadline on this host.
 - Later calls share the prompt's start (system message, then the dossier, built to change last), so Ollama's prompt cache could make them much cheaper; not yet measured.
 
+- **Replay with longer deadlines** (measurement only: `KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_ACT=900s`, `..._REPORT=900s`, `KINTSUGI_AGENT_LOOP_INCIDENT_TIMEOUT=90m`; `infra/scripts/out/replay-20261022T183259Z-local`): **F1 MATCH, COMPLETED in 1,672 s (28 minutes)**, inside the 45-minute budget. granite's prompts are about 3,800-4,600 tokens (its tokenizer, not Anthropic's).
+  - Calls that only add to the end of the prompt took **26-118 s**: the prompt cache works.
+  - The calls that pay: the first INVESTIGATE answer 325 s (384 tokens, cut), the first KNOWLEDGE answer **406 s** (357 tokens), the REPORT **447 s** (468 tokens). Each starts a phase, so its prompt changes early and is read again, and it writes a long answer at about 3 tokens/s. The REPORT would have timed out at today's 420 s, KNOWLEDGE was 14 s short of it; the first sample's first call ran past 420 s.
+  - So the estimate above (670 s) was too pessimistic: granite's token counts are about a third smaller than Anthropic's. The deadline, not the incident budget, is what stops local dossier runs.
+
 ## Options (for the human)
 
-1. A longer deadline for the run's first call (about 12 minutes), relying on the prompt cache for the later ones; needs a measurement of the cached calls and of the whole run against the 45-minute incident budget.
+1. Longer `ACT` and `REPORT` deadlines on the local route (600 s, against the 447 s measured), keeping the 45-minute incident budget: measured above for F1; F2 and F3 to measure.
 2. A shorter dossier for the local route (fewer sections or rows), measured on the replay for accuracy.
 3. A smaller or faster local model.
 4. Revisit the M2 criterion (a decision on `docs/vision.md`).
 
 ## Next step
 
-The human chooses an option.
+The human decides on option 1 (600 s deadlines); then a local replay of F1-F3, then a local lab round for the M2 check.
