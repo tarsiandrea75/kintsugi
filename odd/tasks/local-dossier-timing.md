@@ -28,6 +28,11 @@ Find out why dossier runs on the local route (`granite4.1:8b`, CPU) time out, be
 
 - 2026-10-22: the human chose option 1. The local `ACT` and `REPORT` deadlines are 600 s (`application.yaml`), the incident budget stays 45 minutes (route: inline; config, `DefaultBudgetsTest`, spec "Budgets" and its scenarios, the `lib.sh` comment). RED: `anActCallAndTheReportMayTake600Seconds` failed on 420 s; GREEN: full suite 421/0/0 (the loop's HTTP read timeout follows to 600 s), `test-lib.sh` PASS.
 
+- 2026-10-22: local replay of F1-F3 with the 600 s deadlines (`infra/scripts/out/replay-20261022T193305Z-local`, on `944d590`, one sample each, no cloud cost). **No timeout: every run COMPLETED inside the 45-minute budget** (F1 1,791 s, F2 2,114 s, F3 1,720 s).
+  - Slowest model calls per run: F1 463 s and 472 s (ACT), 441 s (REPORT); F2 510 s (ACT), 473 s (REPORT); F3 412 s (ACT), 417 s (REPORT). The slowest, 510 s, leaves 90 s under the deadline.
+  - Verdicts: **F2 MATCH; F1 MISS** (payment-service instead of gateway-mock, the type right; the long-deadline run before was a MATCH); **F3 MISS** (payment-service, DEPENDENCY_REJECTING instead of order-service, CONFIGURATION). Coverage 0.85-0.92: granite asks for calls outside the dossier (repeated `recent_events`, `search_runbooks`), which the replay does not hold and the loop refuses as duplicates.
+  - So the timing problem is solved; what remains is accuracy, which one sample per fault cannot measure.
+
 ## Next step
 
-A local replay of F1-F3 (dossier, one sample each), then a local lab round for the M2 check.
+The human chooses: a local lab round for the M2 check (`verify-agent.sh --mode dossier --route local`, several hours, free), or more local replay samples first to measure F1 and F3 accuracy.
