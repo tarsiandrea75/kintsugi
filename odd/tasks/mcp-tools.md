@@ -205,6 +205,8 @@ The agent needs evidence. Today the evidence is in Loki, Prometheus and the even
   - its failure branches were never exercised.
 - 2026-10-08: session closed. STATE and journal `2026-10-08-01` are written. The bundle `kintsugi-2026-10-08-full.bundle` is verified; its checksum is in the `.sha256` file beside it.
 
+- 2026-10-22: the human confirmed the decisions marked "to review": the event-trigger grant strategy with its residual risks as recorded in ADR-004; `get_order_trace` as one time-ordered list (the order row, then at most 50 events per table); `status_summary` rejecting `sinceMinutes` for `stock`. The two open items are closed: (1) **no restart policy and no memory limit on any lab service**, mcp-tools included, decided: in a fault lab a service that dies must stay dead and visible, and an automatic restart could hide the fault the agent has to find; (2) the `PAYMENT_PENDING` rise check comparing the first and last points of a 10-minute window is a **known limit**: an order caught mid-flight could hide the rise in theory, never observed in the runs.
+
 ## Next step
 
 The human reviews the autonomous decisions, and the next M2 feature (the agent) starts.

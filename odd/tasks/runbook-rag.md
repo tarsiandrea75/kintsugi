@@ -215,6 +215,8 @@ The embedding model was decided by the human on 2026-10-08. The rest was propose
   - WARNING (R2): the separator test uses invisible raw Unicode literals instead of escapes;
   - suggestions: the accepted-path PASS message always names both services; the global `UP_ERRORS` is hidden state.
 
+- 2026-10-22: the human confirmed every decision marked "to review": `README.md` indexed without its "Authoring rule" section; `kintsugi_agent` as the knowledge store's reader role; `JdbcTemplate` instead of `PgVectorStore`; CommonMark sections cut at 800 tokens counted with cl100k; an empty runbooks directory stops the run; search with `<=>`, `hnsw.iterative_scan=strict_order`, the model guard (configuration, then the `/api/tags` digest cached 60 s) and 2 s / 5 s Ollama timeouts. Why: in use since 2026-10-08, reviewed, and no run or replay has shown a problem tied to them.
+
 ## Next step
 
-Review the T5 range. Then the human reviews the decisions marked "to review", and M2 continues with the agent loop.
+Done. The decisions marked "to review" were confirmed by the human on 2026-10-22 (see Progress).

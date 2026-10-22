@@ -27,7 +27,6 @@ This session (journal `docs/journal/2026-10-20-01.md`), all on local branches, n
    - the local route: why `granite4.1:8b` misses F3 and why its dossier runs time out on this CPU (the M2 check depends on it);
    - an explorer-mode replay design (exact matching cannot serve the model's free arguments);
    - explorer mode's F1, which reads no dossier and so no latency.
-2. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
 
 ## Local branch chains (not pushed)
 
@@ -102,7 +101,7 @@ mcp-tools (details in the feature document):
 - Restarts less than one step apart merge.
 - The `verify-mcp.sh` probe has no wall-clock bound and its failure branches were not exercised.
 - Small doc and test suggestions from the T5 reviews.
-- No lab service has a restart policy or a memory limit.
+- No lab service has a restart policy or a memory limit: decided 2026-10-22, deliberate (a dead service stays visible).
 
 
 Lab services:
