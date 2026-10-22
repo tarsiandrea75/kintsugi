@@ -75,9 +75,11 @@ kintsugi:
       # the third full run a REPORT call ran past 300 s. In runs 11-13 a phase's first ACT answer, which carries the
       # plan, took 213-300 s and caused every F1 timeout, while the other ACT answers stayed under 175 s; most of that
       # time is reading the prompt (each phase starts from a fresh plan), so a shorter answer would save little.
+      # Dossier mode (local-dossier-timing, 2026-10-22) needs more: a phase's first ACT answer took up to 406 s and the
+      # report 447 s, while calls that only add to the prompt took 26-118 s thanks to Ollama's prompt cache.
       call-timeout:
-        act: 420s
-        report: 420s
+        act: 600s
+        report: 600s
       # The most tokens an answer may hold, Ollama's num_predict (agent spec, "Answer caps", where the values are
       # justified). On the laptop's CPU an answer is written at about 3 tokens/s, so a cap also bounds the call's time:
       # a phase's first ACT answer carries the plan and its tool calls, a later one only tool calls, the report is JSON.

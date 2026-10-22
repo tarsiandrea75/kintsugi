@@ -24,6 +24,10 @@ Find out why dossier runs on the local route (`granite4.1:8b`, CPU) time out, be
 3. A smaller or faster local model.
 4. Revisit the M2 criterion (a decision on `docs/vision.md`).
 
+## Progress
+
+- 2026-10-22: the human chose option 1. The local `ACT` and `REPORT` deadlines are 600 s (`application.yaml`), the incident budget stays 45 minutes (route: inline; config, `DefaultBudgetsTest`, spec "Budgets" and its scenarios, the `lib.sh` comment). RED: `anActCallAndTheReportMayTake600Seconds` failed on 420 s; GREEN: full suite 421/0/0 (the loop's HTTP read timeout follows to 600 s), `test-lib.sh` PASS.
+
 ## Next step
 
-The human decides on option 1 (600 s deadlines); then a local replay of F1-F3, then a local lab round for the M2 check.
+A local replay of F1-F3 (dossier, one sample each), then a local lab round for the M2 check.

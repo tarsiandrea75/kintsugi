@@ -34,14 +34,16 @@ class DefaultBudgetsTest {
 	}
 
 	@Test
-	void anActCallAndTheReportMayTake420Seconds() {
-		assertThat(deadlines).isEqualTo(new CallTimeouts(Duration.ofSeconds(420), Duration.ofSeconds(420)));
+	void anActCallAndTheReportMayTake600Seconds() {
+		// Dossier mode on the local route (local-dossier-timing): a phase's first ACT answer took up to 406 s and the
+		// report 447 s, past the 420 s these deadlines were.
+		assertThat(deadlines).isEqualTo(new CallTimeouts(Duration.ofSeconds(600), Duration.ofSeconds(600)));
 	}
 
 	@Test
 	void theIncidentBudgetHoldsTheLongestIncidentMeasured() {
 		// The longest incident measured (runs 11-13) took 1915 s. Since T5c15 the budget no longer holds a run with every model
-		// call at its deadline (6 ACT answers and 2 reports at 420 s, 56 min): a recorded follow-up.
+		// call at its deadline (6 ACT answers and 2 reports at 600 s since local-dossier-timing, 80 min): a recorded follow-up.
 		Duration longestIncidentMeasured = Duration.ofSeconds(1915);
 
 		assertThat(loop.incidentTimeout()).isEqualTo(Duration.ofMinutes(45)).isGreaterThan(longestIncidentMeasured);
@@ -64,7 +66,7 @@ class DefaultBudgetsTest {
 		ModelRouteProperties route = new ModelRouteProperties("granite4.1:8b", 0, 8192, deadlines,
 				new NumPredict(384, 160, 512));
 
-		assertThat(LoopConfig.readTimeout(route, loop)).isEqualTo(Duration.ofSeconds(420));
+		assertThat(LoopConfig.readTimeout(route, loop)).isEqualTo(Duration.ofSeconds(600));
 	}
 
 }
