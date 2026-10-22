@@ -27,20 +27,8 @@ This session (journal `docs/journal/2026-10-20-01.md`), all on local branches, n
    - the local route: why `granite4.1:8b` misses F3 and why its dossier runs time out on this CPU (the M2 check depends on it);
    - an explorer-mode replay design (exact matching cannot serve the model's free arguments);
    - explorer mode's F1, which reads no dossier and so no latency.
-2. Waiting for the human: add `AGENT_DB_PASSWORD=agent_app` to the protected `infra/.env.example`, and the other lines listed in the 2026-10-08 state:
-   - `KINTSUGI_REPO_DIR=`
-   - `DOCKER_GID=`
-   - `POSTGRES_BOOTSTRAP_PASSWORD=postgres`
-   - `LAB_APP_DB_PASSWORD=lab_app`
-   - `FAULTS_DB_PASSWORD=faults`
-   - `KINTSUGI_AGENT_DB_PASSWORD=kintsugi_agent`
-   - `KNOWLEDGE_BOOTSTRAP_PASSWORD=postgres`
-   - `KNOWLEDGE_INDEXER_DB_PASSWORD=knowledge_indexer`
-   - `KNOWLEDGE_AGENT_DB_PASSWORD=knowledge_agent`
-   - `OLLAMA_PROXY_BIND_IP=172.17.0.1`
-   - and the cloud key's placeholder line (ADR-012), with no value.
-3. Waiting for the human (needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
-4. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
+2. Waiting for the human (needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
+3. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
 
 ## Local branch chains (not pushed)
 
