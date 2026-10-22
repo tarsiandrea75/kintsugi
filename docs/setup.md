@@ -16,6 +16,10 @@ Pinned versions and runtime defaults are recorded in [ADR-006](adr/ADR-006-stack
 - [ ] **Docker Desktop**
   - Verify: `docker version`
   - Install: `winget install Docker.DockerDesktop` (WSL 2 backend)
+- [ ] **Docker Compose plugin v5.6.0**, the fault injector's version ([ADR-009](adr/ADR-009-fault-injector-docker-control.md), "Compose version skew with the host")
+  - Verify: `docker compose version` prints `v5.6.0`; `apt-mark showhold` lists `docker-compose-plugin`
+  - Install (WSL, Docker's apt repository): `sudo apt-get update && sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then `sudo apt-mark hold docker-compose-plugin`
+  - Why pinned and held: a different host version recreates, once, every service the injector recreated, which is noise in the deploy evidence. Upgrade the host and the injector's `docker/compose-bin` together, then `sudo apt-mark unhold docker-compose-plugin`.
 - [ ] **Ollama >= 0.4.6**
   - Verify: `ollama --version`
   - Install: `winget install Ollama.Ollama`

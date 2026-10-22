@@ -27,8 +27,7 @@ This session (journal `docs/journal/2026-10-20-01.md`), all on local branches, n
    - the local route: why `granite4.1:8b` misses F3 and why its dossier runs time out on this CPU (the M2 check depends on it);
    - an explorer-mode replay design (exact matching cannot serve the model's free arguments);
    - explorer mode's F1, which reads no dossier and so no latency.
-2. Waiting for the human (needs sudo): `sudo apt-get install --only-upgrade docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble`, then record "host Compose = v5.6.0" in ADR-009 and `docs/setup.md`.
-3. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
+2. Waiting for the human: the "to review" decisions in `odd/tasks/runbook-rag.md` and `odd/tasks/mcp-tools.md`.
 
 ## Local branch chains (not pushed)
 
