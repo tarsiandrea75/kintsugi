@@ -39,6 +39,8 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 - 2026-10-23: T2, first cloud run, F3 15 samples (`infra/scripts/out/replay-20261023T125404Z-cloud`, on `d396ec4`, **cost $0.095**; cloud spend total about $1.16 of $5). **F3 8/15, and every valid report matched (8/8)**; the 7 misses are `INVALID_REPORT`. 20 of 28 report attempts failed one rule, every time the same: `summary must be a string of 1 to 500 characters`. With the reasoning first and "your reasoning" in the task, summaries ran past 500 characters (the cloud schema cannot carry `maxLength`), and the retry error did not say by how much.
 - T1b (route: inline): the task asks for "your reasoning in brief, at most 500 characters (about 80 words)", and the length error gives the summary's length (`…, not 612`). RED: `aSummaryTooLongIsRejectedWithItsLength` and the prompt test failed; GREEN: full suite passed.
 
+- T1b review (`2f255ca`, base `d396ec4`, consent granted): approved; WARNING R3-length-unit-mismatch checked: the reported length and the rule both count code points (`Causes.string`), so they agree; SUGGESTION R3-suffix-branches-untested (a non-string summary gets no length) left as a follow-up.
+
 ## Next step
 
 T2 again: the cloud replay, F3 15 samples (about $0.10), with the human's go-ahead.
