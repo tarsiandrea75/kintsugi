@@ -871,21 +871,27 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 
 ### Requirement: The report
 
-In `CONCLUDE` the model MUST be called without tools, constrained by the report schema. The model writes:
+In `CONCLUDE` the model MUST be called without tools, constrained by the report schema. The model writes these fields in this order, which the schema's properties, its `required` list and the report task all follow **(report-field-order)**: the reasoning (`summary`, then `evidence`) before the cause it leads to (`rootCauseService`, `rootCauseCategory`), then `confidence`. A model writes left to right, so a field written earlier conditions the later ones; with the cause first, cloud F3 reports named a cause their own summary then argued against (`odd/tasks/report-field-order.md`).
 
 | Field | Rule |
 |-------|------|
-| `rootCauseService` | `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN` |
-| `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN` |
 | `summary` | 1 to 500 characters |
-| `confidence` | number, 0 to 1 |
 | `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step; in dossier mode also `"dossier"` **(T5b)** |
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |
 | `evidence[].line` | an integer of at least 1: the number of the cited line in that step's summary, or `D<line>` in the dossier **(evidence-by-reference)** |
 | `evidence[].why` | at most 200 characters **(chosen)** |
+| `rootCauseService` | `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN` |
+| `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN` |
+| `confidence` | number, 0 to 1 |
 
 No other field is allowed, and all five are required. Code then adds `incidentId`, `mode` (`explorer` or `dossier`, **T5a**), `route` and `model` (see "Routes", **cloud-route T3**) and `stepsUsed` (the number of step rows, the `DOSSIER` and accepted `REPORT` steps included) and stores the report in `incidents.report` (as `jsonb`, which keeps the fields but not their order), written in the order `incidentId`, `mode`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each stored item is `{toolCallId, tool, line, quote, why}`: code adds `quote`, the text of the cited line without its number, cut to its first 160 characters ("Evidence is checked", **evidence-by-reference**). The model never writes a `quote`. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
+
+#### Scenario: The reasoning comes before the cause (report-field-order)
+- WHEN the loop builds the report schema and the report task, in either mode
+- THEN the schema's properties and its `required` list are `summary, evidence, rootCauseService, rootCauseCategory, confidence`, in that order
+- AND the report task describes the fields in that order, the cause as what the summary concludes
+- AND the stored report keeps that order
 
 #### Scenario: Value outside the enums
 - WHEN the model answers `rootCauseService` = `payment-gateway`

@@ -173,6 +173,14 @@ class PromptsTest {
 	}
 
 	@Test
+	void theReportTaskAsksForTheReasoningBeforeTheCause() {
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), List.of());
+
+		assertThat(task).contains("with these fields, in this order: summary")
+			.containsSubsequence("summary:", "evidence:", "rootCauseService and rootCauseCategory", "confidence:");
+	}
+
+	@Test
 	void theDossierIntroductionSaysHowToCiteTheDossier() {
 		// T5b: the dossier has its own citation id; before, the introduction said it had no toolCallId (T5a).
 		// Evidence-by-reference: it is cited by the number of a line, no longer by a quote.

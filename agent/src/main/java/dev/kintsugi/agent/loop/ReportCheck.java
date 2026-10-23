@@ -29,9 +29,12 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  */
 final class ReportCheck {
 
-	/** The fields the model writes, in the stored report's order. */
-	static final List<String> MODEL_FIELDS = List.of("rootCauseService", "rootCauseCategory", "summary",
-			"confidence", "evidence");
+	/**
+	 * The fields the model writes, in the order it writes them and the stored report keeps: the reasoning before the
+	 * cause it leads to (report-field-order), since a model writes left to right.
+	 */
+	static final List<String> MODEL_FIELDS = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory",
+			"confidence");
 
 	private static final Set<String> FIELDS = Set.copyOf(MODEL_FIELDS);
 

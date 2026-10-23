@@ -50,14 +50,14 @@ final class Schemas {
 		item.withObject("properties").set("tool", JSON.createObjectNode().put("type", "string"));
 		item.withObject("properties").set("line", JSON.createObjectNode().put("type", "integer").put("minimum", 1));
 		item.withObject("properties").set("why", string(0, 200));
-		ObjectNode report = object(
-				List.of("rootCauseService", "rootCauseCategory", "summary", "confidence", "evidence"));
+		// The properties in ReportCheck.MODEL_FIELDS' order, the reasoning before the cause (report-field-order).
+		ObjectNode report = object(ReportCheck.MODEL_FIELDS);
 		ObjectNode properties = report.withObject("properties");
+		properties.set("summary", string(1, 500));
+		properties.set("evidence", array(item, 0, 5));
 		properties.set("rootCauseService", enumOf(Causes.SERVICES));
 		properties.set("rootCauseCategory", enumOf(Causes.CATEGORIES));
-		properties.set("summary", string(1, 500));
 		properties.set("confidence", JSON.createObjectNode().put("type", "number").put("minimum", 0).put("maximum", 1));
-		properties.set("evidence", array(item, 0, 5));
 		return report;
 	}
 

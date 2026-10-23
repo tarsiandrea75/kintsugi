@@ -111,12 +111,13 @@ final class Prompts {
 			text: code reads only the tool call.""";
 
 	private static final String REPORT_TASK = """
-			Task: write the final report as a JSON object with these fields. rootCauseService and \
-			rootCauseCategory, from the values listed in the system message. summary: 1 to 500 characters. \
-			confidence: a number from 0 to 1. evidence: 1 to 5 items {toolCallId, tool, line, why}, or none \
-			when both causes are UNKNOWN; each item cites a step and the number of one line of its summary: \
-			toolCallId and tool come from the summary's header, line is the number at the start of one line of \
-			that summary (2 for the line that starts with "2: "), and why is at most 200 characters.""";
+			Task: write the final report as a JSON object with these fields, in this order: summary first, then \
+			the evidence, then the cause they lead to. summary: 1 to 500 characters, your reasoning. evidence: 1 to \
+			5 items {toolCallId, tool, line, why}, or none when both causes are UNKNOWN; each item cites a step \
+			and the number of one line of its summary: toolCallId and tool come from the summary's header, line is \
+			the number at the start of one line of that summary (2 for the line that starts with "2: "), and why \
+			is at most 200 characters. rootCauseService and rootCauseCategory, from the values listed in the \
+			system message, as your summary concludes. confidence: a number from 0 to 1.""";
 
 	/** How the report cites the dossier, when the run has one (T5b). */
 	private static final String REPORT_DOSSIER = """

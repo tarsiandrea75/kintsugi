@@ -333,6 +333,19 @@ class ReportCheckTest {
 	}
 
 	@Test
+	void theSchemaPutsTheReasoningBeforeTheCause() {
+		// report-field-order: the model writes left to right, so the summary and the evidence come before the cause
+		// they lead to.
+		List<String> order = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory", "confidence");
+		for (AgentMode mode : AgentMode.values()) {
+			JsonNode report = JsonMapper.shared().readTree(Schemas.report(mode));
+			assertThat(report.get("properties").propertyNames()).as(mode.value()).containsExactlyElementsOf(order);
+			assertThat(report.get("required")).extracting(JsonNode::asString).containsExactlyElementsOf(order);
+		}
+		assertThat(ReportCheck.MODEL_FIELDS).containsExactlyElementsOf(order);
+	}
+
+	@Test
 	void onlyTheDossierModeSchemaLetsAToolCallIdBeDossier() {
 		JsonNode explorer = JsonMapper.shared().readTree(Schemas.report(AgentMode.EXPLORER))
 			.at("/properties/evidence/items/properties/toolCallId");
