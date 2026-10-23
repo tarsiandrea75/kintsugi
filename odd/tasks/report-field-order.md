@@ -48,6 +48,9 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 
 - 2026-10-23: T2, third cloud run, F3 15 samples, with the human's go-ahead (`infra/scripts/out/replay-20261023T134940Z-cloud`, on `41b9965`, **cost $0.086**; cloud spend total about $1.35 of $5). **F3 15/15**, 15 of 15 report attempts valid at the first try. 12 of the 15 summaries were cut at 500 characters: the model writes its reasoning longer than the limit nearly every time, and the cut costs nothing checked. Against the baselines: 13/15 and 14/15 with quotes, 10/15 with line citations and the cause first. Acceptance criterion 4, cloud F3, is met.
 
+- 2026-10-23: T2, cloud F1 and F2, 5 samples each, with the human's go-ahead (`infra/scripts/out/replay-20261023T135513Z-cloud`, on `d7e1a96`, **cost $0.060**; cloud spend total about $1.41 of $5). **F1 5/5, F2 5/5**: no cost on the other faults.
+- 2026-10-23: T2, local replay, 3 samples per fault (`infra/scripts/out/replay-20261023T135800Z-local`): the session ended during it, after F1 and F2; F3 did not run. **F1 0/3, F2 3/3**, every report valid (6 of 6 at the first try), no timeout (1,719-2,076 s), report calls 413-481 s against the 600 s deadline. Local F1 names payment-service every time, and its summary agrees with its fields: granite reads payment-service's high `/payments` latency and stops there instead of following the calls down to gateway-mock. That is local reasoning, not the field order.
+
 ## Next step
 
-The human's go-ahead for F1 and F2 on the cloud (5 samples each, about $0.06), then the local replay (3 samples per fault, free, about 5 hours). Open question for later: whether to raise the 500-character summary limit, since most summaries are now cut.
+The local F3 replay (3 samples, free, about 1.5 hours) to finish T2; then close the feature. Local F1 (stopping at payment-service) is a separate problem.
