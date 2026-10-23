@@ -68,7 +68,7 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 
 ## Tasks
 
-- [ ] T1 ADR-013 and the spec: the contract, requirements and GIVEN/WHEN/THEN scenarios (route: inline, docs).
+- [x] T1 ADR-013 and the spec: the contract, requirements and GIVEN/WHEN/THEN scenarios (route: inline, docs).
 - [ ] T2 Numbered lines: `DossierRenderer` and `ToolSummaries`, with tests (route: to decide at the task; two non-trivial files, so likely delegated).
 - [ ] T3 Citation by line: `Schemas`, `ReportCheck`, `AgentLoop` storing the filled quote, `Prompts`, with tests.
 - [ ] T4 Measurement: the local replay, 3 samples per fault (free, about 5 hours), then the cloud replay, 5 samples per fault (cents, the human's go-ahead).
@@ -77,6 +77,11 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 
 - 2026-10-23: design written, from a read-only map of `ReportCheck`, `Schemas`, `DossierRenderer`, `ToolSummaries`, `Prompts` and the spec. Branch `feat/evidence-by-reference`, from `feat/local-deadlines`.
 
+- 2026-10-23: the human approved the design and left the work to run unattended until 08:00 (no cloud batch). T1 done (route: delegated, two non-trivial docs): `docs/adr/ADR-013-evidence-cited-by-line.md` and the spec ("Evidence dossier rendering", "Summaries built in code", "The report", "Evidence is checked" and their scenarios). Check: structural readback of the new requirements and the remaining `quote` mentions. Decisions taken on the writer's open points:
+  - Every dossier line that is not a heading, a blank line, a table header or a separator is numbered (simpler than a list of kinds, and the window and `not shown:` lines are facts too).
+  - The numbers count toward the summary's 1,500-character cap.
+  - Every summary line after the header is citable, also lines code computed (`events=20`): code computes them from the tool's output, as it does the dossier, which is already citable.
+
 ## Next step
 
-The human approves the design; then T1.
+T2: numbered lines in `DossierRenderer` and `ToolSummaries`.

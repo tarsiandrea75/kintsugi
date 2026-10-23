@@ -168,7 +168,7 @@ Why the retry (T5c12, the human's decision of 2026-10-15 after the eighth full r
 
 A tool call never consumes the model-call budget: the model answer that requested it is the one model call.
 
-A refused call is a `TOOL_CALL` step with no `tool_output`; its `tool_args` are the model's arguments (as one JSON string when they are not JSON), and its summary, which the model sees, is the header `toolCallId=<step_no> tool=<name> outcome=<REFUSED_PHASE, REFUSED_BUDGET, REFUSED_PLACEHOLDER or REFUSED_DUPLICATE>` and the line `the call was refused and did not run: <why>`. A tool name that is not plain (letters, digits, `_`, `.` or `-`, at most 64) is written as a JSON literal in summaries and log lines. A call without a name is refused `REFUSED_PHASE` like any tool the phase does not offer; its step has no `tool_name`, and its summary names the tool `"null"`.
+A refused call is a `TOOL_CALL` step with no `tool_output`; its `tool_args` are the model's arguments (as one JSON string when they are not JSON), and its summary, which the model sees, is the header `toolCallId=<step_no> tool=<name> outcome=<REFUSED_PHASE, REFUSED_BUDGET, REFUSED_PLACEHOLDER or REFUSED_DUPLICATE>` and the line `1: the call was refused and did not run: <why>`, numbered like any summary line ("Summaries built in code"). A tool name that is not plain (letters, digits, `_`, `.` or `-`, at most 64) is written as a JSON literal in summaries and log lines. A call without a name is refused `REFUSED_PHASE` like any tool the phase does not offer; its step has no `tool_name`, and its summary names the tool `"null"`.
 
 The definitions of a phase's tools are listed at the start of the phase, before its first call. When `LabTools` cannot list them (`LabToolsUnavailableException`), the run ends `FAILED` with reason `lab tools unavailable: <why>`.
 
@@ -440,7 +440,7 @@ The start MUST stop, before any bean, on a route other than `local` or `cloud`, 
 
 The run MUST record its route and the route's model on the incident when it starts, with the mode (`incidents.route`, `incidents.model`, migration V6), and in the stored report, as `route` and `model` beside `mode`. Earlier incidents whose run wrote a step are `local`, with the model their steps name; an earlier incident with no step has neither, although V4 gave it a mode. The checks (`PlanCheck`, `ReportCheck`) are the same on both routes.
 
-The cloud route MUST send the report schema without the keywords Anthropic's structured outputs reject (`AnthropicSchema`): `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `maxItems`, and a `minItems` above 1, dropped wherever they appear, and with `additionalProperties: false` on every object; types, `enum`, `anyOf`, `properties` and `required` are kept. Why (cloud-route T5): in the first live cloud run every report call failed with HTTP 400, `For 'number' type, properties maximum, minimum are not supported`. Nothing is lost: `ReportCheck` already enforces each dropped constraint on both routes (`confidence` 0 to 1, `summary` 1 to 500 characters, at most 5 evidence items, `quote` 8 to 160 characters, `why` at most 200 characters, and a `toolCallId` that must be a recorded step of the incident, which no number below 1 is). The local route's schema stays byte-identical.
+The cloud route MUST send the report schema without the keywords Anthropic's structured outputs reject (`AnthropicSchema`): `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `maxItems`, and a `minItems` above 1, dropped wherever they appear, and with `additionalProperties: false` on every object; types, `enum`, `anyOf`, `properties` and `required` are kept. Why (cloud-route T5): in the first live cloud run every report call failed with HTTP 400, `For 'number' type, properties maximum, minimum are not supported`. Nothing is lost: `ReportCheck` already enforces each dropped constraint on both routes (`confidence` 0 to 1, `summary` 1 to 500 characters, at most 5 evidence items, a `line` of at least 1 that exists in its source, `why` at most 200 characters, and a `toolCallId` that must be a recorded step of the incident, which no number below 1 is). The local route's schema stays byte-identical.
 
 #### Scenario: No route set
 - GIVEN no `kintsugi.agent.route`
@@ -637,6 +637,14 @@ Every section and every fixed row is written for every dossier, in this order, w
 
 Variable rows are sorted by incident count, then previous count, largest first, then by their labels. Caps keep the size bounded, and what they leave out is stated as a fact (`not shown: rows=<n>, previous=<sum>, incident=<sum>`; `not shown: signatures=<n> lines=<sum>`): at most 5 rows per table and per side of an edge; at most 3 signatures per service and level and 8 in the whole log section, handed out one per level per round in the section's order; table values cut at 40 characters, log messages at 300, failure reasons at 200. A failed call is written as one line in its section, `<tool> failed[ for the <previous|incident> window| for <service>]: outcome=<outcome> reason="<reason>"`, and the section keeps its fixed rows, with `-` for the counts it could not read. Log messages are written as `untrustedText="..."` literals, and reasons as `reason="..."`, with the same JSON escaping as the tool summaries ("Summaries built in code"), so text from the lab can never close its literal or start a line of its own; table values are escaped the same way, without quotes, and with `|` escaped. The rendering is deterministic: the same dossier always gives the same text, whatever the default locale or time zone.
 
+Every line of the rendered dossier that a report may cite MUST start with its number, `D1`, `D2`, … in order from the top, then one space (`D7 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |`) **(evidence-by-reference)**: the bullet facts, the table rows, the log-signature lines, and every other line that is not a heading, a blank line, a table header row or a table separator row; those four are not numbered and do not take a number. A report cites a dossier line by that number ("Evidence is checked"). The numbers are written by the renderer, so the same dossier always gets the same numbers. Why (ADR-013): a small model that must copy a row rebuilds it in its own format; choosing a number is an exact choice, and code then copies the text.
+
+#### Scenario: Citable lines numbered (evidence-by-reference)
+- WHEN the F3 dossier is rendered
+- THEN its first table row or bullet fact starts with `D1 `, and every later citable line with the next number, with no gap and no repeat
+- AND no heading, blank line, table header row or separator row (`|---|`) carries a number
+- AND rendering the same dossier twice gives the same numbers on the same lines
+
 #### Scenario: Facts only
 - WHEN the F3 dossier, the healthy dossier, a dossier with failed calls and a stress dossier are rendered with every value from the lab masked
 - THEN none of the renderer's own words is interpretive ("anomalous", "unusual", "suspicious", "likely", "should", "expected", "because", "cause", "root", "healthy", "normal", "spike", "drop", "fault", "degraded", ...) and no mark such as ⚠, ✅ or ❌ appears
@@ -681,13 +689,13 @@ The loop MUST run in the mode of `kintsugi.agent.mode` **(T5a)**: `explorer` (th
 | `explorer` | the warm-up | `TRIAGE` 2, `INVESTIGATE` 4, `KNOWLEDGE` 2 | 8 |
 | `dossier` | the warm-up, then the dossier | `INVESTIGATE` 4, `KNOWLEDGE` 2 | 6 |
 
-In dossier mode, after the warm-up, code MUST gather the evidence dossier ("Evidence dossier gathering", with N the incident's `sinceMinutes` and the loop's `Clock`) and render it ("Evidence dossier rendering"). The result is the **dossier message**, a user message that every later model call, the report included, carries right after the system message and before the evidence message. It starts with one neutral line: `Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for every incident, over the incident window and the window just before it. It is not a tool call result: cite it with toolCallId "dossier" and tool "dossier", and a quote copied exactly from it.` (**T5b**; `It is not a tool call result and has no toolCallId.` in T5a), then a blank line and the rendered dossier. The dossier MUST NOT be part of the system message: the system message is the same in both modes, so Ollama keeps reusing the prefix it has read. `TRIAGE` is skipped, since the dossier covers its tools; the instruction's phase line reads `the phases run in order: INVESTIGATE, KNOWLEDGE, CONCLUDE`. `INVESTIGATE`'s first plan follows the first-plan rule ("The plan"): no tool result has a `toolCallId` yet, so it is asked for hypotheses along the call path, not for a fresh plan; once a dossier is gathered it may also start each hypothesis's `why` with the dossier fact that supports it, `toolCallId=dossier: ...` **(T5b)**. `KNOWLEDGE` asks for a fresh plan as in explorer mode, whose hypotheses may cite `toolCallId=3: ...` or `toolCallId=dossier: ...` **(T5b)**. The model-call budget is unchanged (15; a valid dossier run makes at most 6 + 2 + 2 `ACT` answers and 2 report attempts, 12).
+In dossier mode, after the warm-up, code MUST gather the evidence dossier ("Evidence dossier gathering", with N the incident's `sinceMinutes` and the loop's `Clock`) and render it ("Evidence dossier rendering"). The result is the **dossier message**, a user message that every later model call, the report included, carries right after the system message and before the evidence message. It starts with one neutral line: `Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for every incident, over the incident window and the window just before it. It is not a tool call result: cite it with toolCallId "dossier" and tool "dossier", and the number of the line you cite: D7 is line 7.` (**evidence-by-reference**; `and a quote copied exactly from it.` in **T5b**; `It is not a tool call result and has no toolCallId.` in T5a), then a blank line and the rendered dossier. The dossier MUST NOT be part of the system message: the system message is the same in both modes, so Ollama keeps reusing the prefix it has read. `TRIAGE` is skipped, since the dossier covers its tools; the instruction's phase line reads `the phases run in order: INVESTIGATE, KNOWLEDGE, CONCLUDE`. `INVESTIGATE`'s first plan follows the first-plan rule ("The plan"): no tool result has a `toolCallId` yet, so it is asked for hypotheses along the call path, not for a fresh plan; once a dossier is gathered it may also start each hypothesis's `why` with the dossier fact that supports it, `toolCallId=dossier: ...` **(T5b)**. `KNOWLEDGE` asks for a fresh plan as in explorer mode, whose hypotheses may cite `toolCallId=3: ...` or `toolCallId=dossier: ...` **(T5b)**. The model-call budget is unchanged (15; a valid dossier run makes at most 6 + 2 + 2 `ACT` answers and 2 report attempts, 12).
 
 The dossier's 33 calls are code's: they pass no check, count against no tool budget, are never offered to the model and have no `toolCallId`. The dossier is recorded as one step, kind `DOSSIER` in phase `DOSSIER`, before the first `ACT` step: `summary` holds the dossier message the model saw, `tool_output` the 33 calls as a JSON array of `{tool, args, outcome, durationMs, output}` in call order (shown only with `?full=true`), `latency_ms` the gathering's time, and no model, tool name or outcome. A report cites the dossier as a whole, with `toolCallId` and `tool` both `"dossier"` ("Evidence is checked", **T5b**); a citation of the `DOSSIER` step's number is rejected like a citation of any step that is not a tool call.
 
 The gathering counts against the incident's time budget and is bounded by the `ACT` call deadline (`kintsugi.agent.model.call-timeout.act`, 600 s), or the incident's time left when that is shorter. A call that fails is a fact in the dossier ("Evidence dossier gathering"). A gathering that throws, or runs past its deadline, gives no dossier: the dossier message is the introduction's first sentence and `The dossier was not gathered: the gathering took longer than <deadline>; there is no dossier to cite.` (or `the gathering failed: <exception>; ...`), recorded the same way with no `tool_output`, and the run goes on; its plans and report task are then explorer mode's, with no mention of the dossier **(T5b)**. Only when the incident's own time runs out does the run end `TIMED_OUT`. Why the ACT deadline: each of the 33 calls is already bounded by the MCP request timeout (20 s), and a live gathering takes seconds; the bound keeps a hung mcp-tools from holding the run longer than one model call would.
 
-Size: the largest call of a dossier run is the report call. With the longest symptom, the F3 dossier with its introduction (about 5,560 characters with the latency table; 4,366 since T5b's citation sentence, 4,298 in T5a), the 6 summaries at their cap of 1,500 characters and the report task with its dossier sentence, it is about 18.8k characters, about 6,770 tokens with its 512-token answer by a conservative estimate of one token per 3 characters, within `num-ctx` 8192 (a test checks it). The stress dossier (about 15.8k characters with the latency table; 13.4k before it) would reach about 10,270 by that estimate and about 7,800 at 4 characters per token: a known edge, recorded for T6's live runs.
+Size: the largest call of a dossier run is the report call. With the longest symptom, the F3 dossier with its introduction (about 5,560 characters with the latency table; 4,366 since T5b's citation sentence, 4,298 in T5a), the 6 summaries at their cap of 1,500 characters and the report task with its dossier sentence, it is about 18.8k characters, about 6,770 tokens with its 512-token answer by a conservative estimate of one token per 3 characters, within `num-ctx` 8192 (a test checks it). The stress dossier (about 15.8k characters with the latency table; 13.4k before it) would reach about 10,270 by that estimate and about 7,800 at 4 characters per token: a known edge, recorded for T6's live runs. The line numbers ("Evidence dossier rendering", "Summaries built in code") add about 300 tokens to the prompt, about 150 dossier lines at about 2 tokens each, and the report's answer loses its quotes, about 150-200 tokens (ADR-013).
 
 #### Scenario: Explorer mode is the default
 - GIVEN `kintsugi.agent.mode` is not set
@@ -733,7 +741,7 @@ Size: the largest call of a dossier run is the report call. With the longest sym
 
 ### Requirement: Summaries built in code
 
-The model MUST never receive a raw tool output. For each recorded call, code MUST build a summary that is deterministic (the same output always gives the same summary), at most 1,500 characters, and starts with the header `toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n> truncated=<bool>` (`returned` is 0 and `truncated` false when the output is not a readable result, as for `CLIENT_ERROR`; `truncated` is also true when the output ends with mcp-tools' `[truncated]` marker). Text copied from the output MUST be copied verbatim (cut only at its end), so that a quote of a copied string is a quote of the output; the lines around it reshape the output (`status="PAID" count=3`), which is why the evidence check also reads the summary **(T5c6)**. Text from `untrustedText` fields MUST stay labelled as `untrustedText` in the summary.
+The model MUST never receive a raw tool output. For each recorded call, code MUST build a summary that is deterministic (the same output always gives the same summary), at most 1,500 characters, and starts with the header `toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n> truncated=<bool>` (`returned` is 0 and `truncated` false when the output is not a readable result, as for `CLIENT_ERROR`; `truncated` is also true when the output ends with mcp-tools' `[truncated]` marker). Text copied from the output MUST be copied verbatim (cut only at its end), so that the text of a summary line that copies a string is the output's own text; the lines around it reshape the output (`status="PAID" count=3`), and a report cites any of them by its number **(T5c6; evidence-by-reference)**. Text from `untrustedText` fields MUST stay labelled as `untrustedText` in the summary.
 
 Every string copied from the output is written as a JSON string literal after its field's label, as in `untrustedText="..."`, with Jackson's escaping, the same as mcp-tools' own result: a quote, backslash or newline inside it stays escaped, so text from the lab can never close the literal, start a line of its own, or pass for a header or an instruction. The text between the quotes is therefore also a substring of the raw output. A literal cut at its limit is followed by `(cut)`, outside the quotes. When the lines exceed 1,500 characters, whole lines are dropped from the end and the summary ends with `[summary cut at 1500 characters]`. An output that is not `OK` gets the header, one line saying what the outcome means (the arguments were rejected and no query ran; a data source failed, which is evidence too; or mcp-tools could not be reached), and its `reason`; when such an output is not a JSON result, the whole output is the `reason` literal, escaped and cut like any other.
 
@@ -748,6 +756,8 @@ Every string copied from the output is written as a JSON string literal after it
 | `recent_events` | counts by `type` and `outcome` pair; min, median (the lower one for an even count) and max `durationMs`; the 3 newest events with `untrustedText` at most 150 characters |
 | `get_order_trace` | the order's `status`, `createdAt`, `updatedAt`; its first 10 events in time order (`source`, `occurredAt`, `type`, `outcome`, `durationMs`, `untrustedText` at most 150 characters) |
 | `search_runbooks` | the nearest chunks, at most 3, while they fit the 1,500 characters (the nearest always): `service`, `section`, `score` and the first 900 characters of `untrustedText` **(T5c8)**; `shown` counts the chunks the summary holds |
+
+Every line of a summary after its header MUST start with its number within that step, `1:`, `2:`, … then one space (`2: status="PAYMENT_FAILED" count=6`) **(evidence-by-reference)**. The header and the cut note `[summary cut at 1500 characters]` are not numbered; the lines dropped by the cut are not in the summary, so they have no number. The numbers count toward the 1,500 characters. A report cites a summary line by `toolCallId` and that number ("Evidence is checked"). Why (ADR-013): the model chooses the line, code copies its text, so the stored quote is verbatim without the model copying it.
 
 Every "top N" or "at most N" selection above MUST be deterministic, with no tie left to the order of a hash map or of the output:
 
@@ -796,6 +806,12 @@ Each model call MUST be built from the incident state (symptom, window, phase, b
 - WHEN the summary is built
 - THEN it shows the nearest chunk whole, says `chunks=3 shown=1`, and stays within 1,500 characters without the cut note
 - AND with 3 chunks of 300 characters it shows all three and says `shown=3`
+
+#### Scenario: Lines numbered within the step (evidence-by-reference)
+- GIVEN step 3 is `status_summary` and its output holds the statuses `PAID` 3 and `PAYMENT_FAILED` 6
+- WHEN the summary is built
+- THEN its first line is the header `toolCallId=3 tool=status_summary ...`, with no number, followed by `1: status="PAID" count=3` and `2: status="PAYMENT_FAILED" count=6`, in the output's order
+- AND a summary cut at 1,500 characters numbers only the lines it keeps and ends with `[summary cut at 1500 characters]`, with no number
 
 ### Requirement: What one call sees
 
@@ -866,10 +882,10 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step; in dossier mode also `"dossier"` **(T5b)** |
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |
-| `evidence[].quote` | 8 to 160 characters (300 before T5c5): a short verbatim fragment, not a whole line |
+| `evidence[].line` | an integer of at least 1: the number of the cited line in that step's summary, or `D<line>` in the dossier **(evidence-by-reference)** |
 | `evidence[].why` | at most 200 characters **(chosen)** |
 
-No other field is allowed, and all five are required. Code then adds `incidentId`, `mode` (`explorer` or `dossier`, **T5a**), `route` and `model` (see "Routes", **cloud-route T3**) and `stepsUsed` (the number of step rows, the `DOSSIER` and accepted `REPORT` steps included) and stores the report in `incidents.report` (as `jsonb`, which keeps the fields but not their order), written in the order `incidentId`, `mode`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
+No other field is allowed, and all five are required. Code then adds `incidentId`, `mode` (`explorer` or `dossier`, **T5a**), `route` and `model` (see "Routes", **cloud-route T3**) and `stepsUsed` (the number of step rows, the `DOSSIER` and accepted `REPORT` steps included) and stores the report in `incidents.report` (as `jsonb`, which keeps the fields but not their order), written in the order `incidentId`, `mode`, the model's five fields, `stepsUsed`, with only the verified evidence items, in their order **(T5c11)**: what is stored and scored has been checked. Each stored item is `{toolCallId, tool, line, quote, why}`: code adds `quote`, the text of the cited line without its number, cut to its first 160 characters ("Evidence is checked", **evidence-by-reference**). The model never writes a `quote`. Each attempt is a `REPORT` step, with the raw answer, dropped items included, in `model_output` and `valid`, `valid; dropped: <errors of the dropped items>` **(T5c11)** or `invalid: <errors>` in `summary`.
 
 #### Scenario: Value outside the enums
 - WHEN the model answers `rootCauseService` = `payment-gateway`
@@ -879,21 +895,25 @@ No other field is allowed, and all five are required. Code then adds `incidentId
 - WHEN the model answers both enums `UNKNOWN` with no evidence
 - THEN the report is valid
 
+#### Scenario: A quote written by the model (evidence-by-reference)
+- WHEN an evidence item carries a `quote`, or a `line` of 0 or that is not an integer
+- THEN the report fails the schema, the error names the field, and the model is asked once more
+
 ### Requirement: Evidence is checked
 
-Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId` that is another incident's step, or a plan, act or report step, is not one) whose `tool_name` equals `tool` and which ran (not refused: `REFUSED_PHASE`, `REFUSED_BUDGET`, `REFUSED_PLACEHOLDER` or `REFUSED_DUPLICATE`). Its `quote` MUST be at most 160 characters **(T5c5)** and, after normalization of both sides, a substring of that step's `tool_output`, of one of the string values of that output's JSON (decoded, so that escaped quotes and newlines compare as text) **(chosen)**, or of a line of that step's summary, the text the model was shown **(T5c6)**, that copies the output **(T5c8)**: every line but the header that holds a JSON string literal, with the `(cut)` markers code wrote after a cut literal removed. So a quote of text only code wrote is rejected: the header, the counts and aggregates code computed (`events=20`, `durationMs min=... max=...`, `newest 3:`, `chunks=3 shown=1`), the outcome sentences, the cut note and the `(cut)` markers. Every string copied from the output is written as a literal, so a line without one copies nothing; a kept line keeps its labels and per-item figures (`status="PAID" count=3`), the shape the model saw, and a quote is matched within one line. Why (the T5c6 review): matching the whole summary let a quote of the header or of a computed aggregate pass as evidence, though the tool never returned it; asking the summarizers to tag their lines would change every summarizer for what one rule on the literals already tells; and the fourth run's replay is unchanged by it (still 20 of 26). Normalization decodes the escapes `\n`, `\t`, `\"` and `\\`, then turns every run of whitespace, line breaks included, into one space, then trims; case is kept. Why (T5c6): the model quotes what it sees, and it sees only the summary. A summary reshapes the output (`status="PAYMENT_FAILED" count=6` for `{"status":"PAYMENT_FAILED","count":6}`) and shows untrusted text as an escaped literal, which the model copies with real line breaks; in the fourth full run 16 of 26 quotes were verbatim in their step's summary and none in the raw output, so all six reports were rejected; with this check 20 of 26 pass and one report is valid. The summary is built from the output by deterministic code, so a quote of it is still a quote of what the tool returned, and a quote in neither form is still rejected. A quote longer than 160 characters MUST be rejected with a reason that tells the model what to change: quote only the distinctive fragment (an exception name, a status, an error message), not the whole line. The report task MUST ask for such a fragment and name the limit, and the schema sent with the call MUST carry the same bounds (8 to 160). Why (T5c5): in the third full run the model copied whole escaped log lines, about 200 tokens per quote, so the 512-token report was cut before its JSON closed, twice, and the run ended `INVALID_REPORT`; five 160-character quotes are at most about 250 tokens. The report task MUST list the `toolCallId`s a report may cite, `Citable toolCallIds: <ids>.` (every tool step that was not refused, or `none`), and, when there are any, the refused ones, `Refused calls did not run and are not citable: <ids>.` **(T5c10)**; the check above stays the guard. Why (T5c10): in the sixth full run both reports of one incident cited a refused call, `REFUSED_DUPLICATE` and then `REFUSED_PLACEHOLDER`, whose summaries look like evidence, and the run ended `INVALID_REPORT`; marking only the refused steps in their own summaries would leave the model to scan every one of them. An evidence item that passes every rule but this substring test MUST be dropped, not fatal **(T5c11)**: the report stays valid while at least one verified item is left, or none is needed because both causes are `UNKNOWN`, and the `REPORT` step's summary names each dropped item. So MUST an item that passes every rule but cites a step whose `tool_name` is not its `tool` **(T5c14)**, named `evidence[<i>].tool is <tool>, but step <n> is <tool_name>`. The substring test itself is unchanged, and every other rule still rejects the report: a missing or refused step, a quote outside its bounds, the schema, the enums, or no verified item left. Why (T5c11): in the seventh full run two reports that named the right cause were each rejected twice for one item, out of up to five, whose quote was not verbatim (a shortened JSON fragment closed with an added `}`, a log line with its middle tokens skipped, `(no logs found)` quoted for an empty result), while their other items were; dropping the item keeps "the LLM proposes, code verifies", since every item kept is still verified by code. Why (T5c14): in the twelfth full run both reports of one incident named the true cause but cited a `recent_events` step with `tool` `search_runbooks`, and the run ended `INVALID_REPORT`; an item citing the wrong tool is no more trustworthy than an unverified quote, and no less droppable. A missing or refused step stays fatal: it says the model cites a call that never ran, not one it mislabelled. A report that fails the schema or any evidence check MUST get one retry, with the list of errors, every invalid item named in it at once, the unverified quotes included; a second failure MUST end the run `INVALID_REPORT`, with both reports stored on their steps and none in `incidents.report`.
+Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId` that is another incident's step, or a plan, act or report step, is not one) whose `tool_name` equals `tool` and which ran (not refused: `REFUSED_PHASE`, `REFUSED_BUDGET`, `REFUSED_PLACEHOLDER` or `REFUSED_DUPLICATE`), and a `line` of that step's summary, the text the model was shown **(evidence-by-reference)**: line N is the summary line numbered `N:` ("Summaries built in code"), so line 1 is the first line after the header, and the header and the cut note are no line. Every numbered line is citable: the lines that copy the output and the lines code computed from it (`status="PAID" count=3`, `events=20`, an outcome sentence), since the summary is built from the output by deterministic code. Code then fills the verified item's `quote` with the cited line's text without its number, cut to its first 160 characters, and stores it ("The report"); the stored quote is verbatim by construction. Why (evidence-by-reference, ADR-013): in the local replay of 2026-10-23 5 of 9 runs ended `INVALID_REPORT` because `granite4.1:8b` rebuilt a dossier row in its own format or shortened a log line instead of copying it, while every valid F1 and F2 report named the right cause, and 4 report attempts were cut at the 512-token cap, quotes being a large share of the answer; a line number keeps the check exact without asking a small model to copy text, and "the LLM proposes, code verifies" still holds, since every item kept points at a line code wrote. The report task MUST say that each item cites a step and the number of one line of its summary, and MUST list the `toolCallId`s a report may cite, `Citable toolCallIds: <ids>.` (every tool step that was not refused, or `none`), and, when there are any, the refused ones, `Refused calls did not run and are not citable: <ids>.` **(T5c10)**; the check above stays the guard. Why (T5c10): in the sixth full run both reports of one incident cited a refused call, `REFUSED_DUPLICATE` and then `REFUSED_PLACEHOLDER`, whose summaries look like evidence, and the run ended `INVALID_REPORT`; marking only the refused steps in their own summaries would leave the model to scan every one of them. An evidence item that passes every rule but cites a line its step's summary does not have MUST be dropped, not fatal **(T5c11; evidence-by-reference)**, named `evidence[<i>]: line <N> is not in the output of step <n>`: the report stays valid while at least one verified item is left, or none is needed because both causes are `UNKNOWN`, and the `REPORT` step's summary names each dropped item. So MUST an item that passes every rule but cites a step whose `tool_name` is not its `tool` **(T5c14)**, named `evidence[<i>].tool is <tool>, but step <n> is <tool_name>`. Every other rule still rejects the report: a missing or refused step, the schema (a `line` below 1, a `quote` written by the model), the enums, or no verified item left. Why (T5c11): in the seventh full run two reports that named the right cause were each rejected twice for one item, out of up to five, that did not hold up, while their other items did; dropping the item keeps "the LLM proposes, code verifies", since every item kept is still verified by code. Why (T5c14): in the twelfth full run both reports of one incident named the true cause but cited a `recent_events` step with `tool` `search_runbooks`, and the run ended `INVALID_REPORT`; an item citing the wrong tool is no more trustworthy than a line that does not exist, and no less droppable. A missing or refused step stays fatal: it says the model cites a call that never ran, not one it mislabelled. A report that fails the schema or any evidence check MUST get one retry, with the list of errors, every invalid item named in it at once, the dropped items included; a second failure MUST end the run `INVALID_REPORT`, with both reports stored on their steps and none in `incidents.report`.
 
-An evidence item MAY instead cite the dossier **(T5b)**: `toolCallId` `"dossier"` and `tool` `"dossier"`. In dossier mode, once the dossier is gathered, it is verified when its quote passes the same bounds and, normalized as above, is a substring of the rendered dossier the model read (the dossier message after its introduction; the introduction is code's wording and is not matched), by the same rule as a tool output: the raw text, or a string value of its JSON when it is JSON. Every way such an item fails is dropped, never fatal on its own, like an unverified quote (T5c11): `evidence[<i>].quote is not in the dossier`; `evidence[<i>].tool is <tool>, but toolCallId dossier is the dossier`; in dossier mode when the gathering gave no dossier, `evidence[<i>].toolCallId dossier: the dossier was not gathered`; and in explorer mode, `evidence[<i>].toolCallId dossier: this run has no dossier`. A `toolCallId` that is neither an integer nor `"dossier"` stays fatal (`must be an integer`, and in dossier mode `must be an integer or "dossier"`), and the rule "at least one verified item unless both causes are `UNKNOWN`" is unchanged. The schema sent with the report call is explorer mode's in explorer mode; in dossier mode its `toolCallId` is `anyOf` an integer of at least 1 or the string `"dossier"`. Once a dossier is gathered, the report task says `To cite the dossier, write toolCallId "dossier" and tool "dossier", with a quote copied exactly from the dossier.` and lists `dossier` last among the citable ids (`Citable toolCallIds: 3, dossier.`, or `Citable toolCallIds: dossier.` with no tool step). Why (T5b): in dossier mode the dossier holds most of the evidence, so a report that could cite only the model's own follow-up calls would have to repeat the dossier's calls to prove what it already shows; matching its quotes against the text the model read keeps "the LLM proposes, code verifies". Why one id for the whole dossier, not its 33 calls (29 in T5a): those calls are code's and their outputs are not what the model read.
+An evidence item MAY instead cite the dossier **(T5b)**: `toolCallId` `"dossier"` and `tool` `"dossier"`, and as `line` the number of a line of the rendered dossier the model read, `D7` written as `line: 7` ("Evidence dossier rendering", **evidence-by-reference**). In dossier mode, once the dossier is gathered, it is verified when that numbered line exists, and code fills its `quote` the same way, from the line's text without `D<line> `. Every way such an item fails is dropped, never fatal on its own (T5c11): `evidence[<i>]: line <N> is not in the dossier`; `evidence[<i>].tool is <tool>, but toolCallId dossier is the dossier`; in dossier mode when the gathering gave no dossier, `evidence[<i>].toolCallId dossier: the dossier was not gathered`; and in explorer mode, `evidence[<i>].toolCallId dossier: this run has no dossier`. A `toolCallId` that is neither an integer nor `"dossier"` stays fatal (`must be an integer`, and in dossier mode `must be an integer or "dossier"`), and the rule "at least one verified item unless both causes are `UNKNOWN`" is unchanged. The schema sent with the report call is explorer mode's in explorer mode; in dossier mode its `toolCallId` is `anyOf` an integer of at least 1 or the string `"dossier"`. Once a dossier is gathered, the report task says `To cite the dossier, write toolCallId "dossier" and tool "dossier", with the number of the line you cite: D7 is line 7.` and lists `dossier` last among the citable ids (`Citable toolCallIds: 3, dossier.`, or `Citable toolCallIds: dossier.` with no tool step). Why (T5b): in dossier mode the dossier holds most of the evidence, so a report that could cite only the model's own follow-up calls would have to repeat the dossier's calls to prove what it already shows; checking its lines against the text the model read keeps "the LLM proposes, code verifies". Why one id for the whole dossier, not its 33 calls (29 in T5a): those calls are code's and their outputs are not what the model read.
 
-#### Scenario: A quote of the dossier (T5b)
-- GIVEN a dossier-mode run whose rendered dossier holds the row `| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |`
-- WHEN the report cites `{toolCallId: "dossier", tool: "dossier", quote: "CLIENT_ERROR | UNKNOWN | ConnectException"}`
-- THEN the evidence passes, and the incident ends `COMPLETED` with that item in `incidents.report`
+#### Scenario: A line of the dossier (T5b)
+- GIVEN a dossier-mode run whose rendered dossier holds the line `D7 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |`
+- WHEN the report cites `{toolCallId: "dossier", tool: "dossier", line: 7}`
+- THEN the evidence passes, and the incident ends `COMPLETED` with that item in `incidents.report`, its `quote` `| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |`
 
-#### Scenario: A dossier quote not in the dossier (T5b)
-- GIVEN a dossier-mode report whose item 0 is verified and whose item 1 cites `dossier` with a quote that is not in the rendered dossier
+#### Scenario: A dossier line that does not exist (T5b)
+- GIVEN a dossier-mode report whose rendered dossier numbers its lines `D1` to `D60`, whose item 0 is verified and whose item 1 cites `dossier` with `line` 61
 - WHEN the report is checked
-- THEN it is valid, holds item 0 only, and its `REPORT` step's summary names `evidence[1].quote is not in the dossier`
+- THEN it is valid, holds item 0 only, and its `REPORT` step's summary names `evidence[1]: line 61 is not in the dossier`
 - AND a report naming a cause whose only item is such a dossier citation is rejected and retried once, as no verified item is left
 - AND an item citing `dossier` with `tool` `traffic_counts` is dropped with `evidence[<i>].tool is traffic_counts, but toolCallId dossier is the dossier`
 
@@ -902,33 +922,39 @@ An evidence item MAY instead cite the dossier **(T5b)**: `toolCallId` `"dossier"
 - THEN that item is dropped with `this run has no dossier`, or `the dossier was not gathered`, and the other items are checked as usual
 - AND an explorer-mode report task and schema do not mention the dossier
 
-#### Scenario: Existing quote
-- GIVEN step 4 is `search_logs` and its output holds a line with `Connection refused`
-- WHEN the report cites `{toolCallId: 4, tool: "search_logs", quote: "Connection   refused"}`
-- THEN the evidence passes
+#### Scenario: Existing line
+- GIVEN step 4 is `search_logs` and its summary's line `2:` holds a group whose newest message is `Connection refused`
+- WHEN the report cites `{toolCallId: 4, tool: "search_logs", line: 2}`
+- THEN the evidence passes, and the stored item's `quote` is that line's text without `2: `
 
-#### Scenario: Invented quote
-- WHEN the report's only evidence item cites a quote that is in no recorded output
-- THEN the report is rejected, since no verified item is left, and the model is asked once more, with the error naming the item
+#### Scenario: A line the summary reshaped
+- GIVEN step 3 is `status_summary`, its output is `{..."items":[{"status":"PAID","count":3},{"status":"PAYMENT_FAILED","count":6}]}` and its summary shows the line `2: status="PAYMENT_FAILED" count=6`
+- WHEN the report cites `{toolCallId: 3, tool: "status_summary", line: 2}`
+- THEN the evidence passes, and the stored `quote` is `status="PAYMENT_FAILED" count=6`, the text the model saw, though it is not in the raw output
 
-#### Scenario: One unverified quote among verified ones (T5c11)
-- GIVEN a report naming a cause, whose items 0 and 2 quote their steps verbatim and whose item 1 quotes text that is not in step 4
+#### Scenario: The loop checks against the summary it showed (T5c8)
+- GIVEN a run whose `status_summary` step showed the model the line `1: status="PAYMENT_PENDING" count=7`
+- WHEN the report cites that step and line 1
+- THEN the report is accepted at its first attempt and the incident ends `COMPLETED`, since the loop stored on the step the numbered summary it sent
+
+#### Scenario: One line out of range among verified ones (T5c11)
+- GIVEN a report naming a cause, whose items 0 and 2 cite existing lines of their steps and whose item 1 cites line 9 of step 4, whose summary has 5 numbered lines
 - WHEN the report is checked
 - THEN it is valid and is not retried
 - AND `incidents.report` holds items 0 and 2 only
-- AND the `REPORT` step's summary is `valid; dropped: evidence[1].quote is not in the output of step 4`
+- AND the `REPORT` step's summary is `valid; dropped: evidence[1]: line 9 is not in the output of step 4`
 
 #### Scenario: No verified item left (T5c11)
-- GIVEN a report naming a cause, none of whose quotes is in its step
+- GIVEN a report naming a cause, none of whose lines exists in its step
 - WHEN the report is checked
-- THEN it is rejected, with `evidence[<i>].quote is not in the output of step <n>` for each item, and retried once
+- THEN it is rejected, with `evidence[<i>]: line <N> is not in the output of step <n>` for each item, and retried once
 - AND a report whose two causes are `UNKNOWN` stays valid with its unverified items dropped
 
 #### Scenario: Other evidence errors are never dropped (T5c11)
-- GIVEN a report with one verified item, one citing a refused step and one whose quote is not in its step
+- GIVEN a report with one verified item, one citing a refused step and one citing a line its step does not have
 - WHEN the report is checked
 - THEN it is rejected: the refused citation is fatal, and the retry's errors name both invalid items
-- AND an item whose quote is shorter than 8 or longer than 160 characters, or that cites a missing step, is likewise fatal
+- AND an item that cites a missing step is likewise fatal
 
 #### Scenario: An item citing the wrong tool is dropped (T5c14)
 - GIVEN a report naming a cause, whose items 0 and 1 are verified and whose item 2 cites step 12, a `recent_events` step, with `tool` `search_runbooks`
@@ -938,42 +964,17 @@ An evidence item MAY instead cite the dossier **(T5b)**: `toolCallId` `"dossier"
 - AND the `REPORT` step's summary is `valid; dropped: evidence[2].tool is search_runbooks, but step 12 is recent_events`
 - AND a report none of whose items is verified is rejected, with that error for each wrong-tool item, and retried once
 
-#### Scenario: Quote of the summary the model saw
-- GIVEN step 3 is `status_summary`, its output is `{..."items":[{"status":"PAID","count":3},{"status":"PAYMENT_FAILED","count":6}]}` and its summary shows the line `status="PAYMENT_FAILED" count=6`
-- WHEN the report cites `{toolCallId: 3, tool: "status_summary", quote: "status=\"PAYMENT_FAILED\" count=6"}`
-- THEN the evidence passes, from the summary
+#### Scenario: The header and the cut note are not lines (evidence-by-reference)
+- GIVEN step 5 is `recent_events` and its summary is its header, 6 numbered lines and the note `[summary cut at 1500 characters]`
+- WHEN the report cites step 5 with `line` 7
+- THEN that item is dropped with `evidence[<i>]: line 7 is not in the output of step 5`, since neither the header nor the cut note has a number
+- AND an item citing `line` 6, the last kept line, passes
 
-#### Scenario: Runbook quote with its line breaks collapsed
-- GIVEN step 11 is `search_runbooks` and its summary shows `untrustedText="### Burst of \`PAYMENT_FAILED\` orders\n\nAn order ends ...`, with the escapes as text
-- WHEN the report quotes `untrustedText="### Burst of \`PAYMENT_FAILED\` orders` and `An order ends` on the next line, with one real line break
-- THEN the evidence passes: both sides normalize to `untrustedText="### Burst of \`PAYMENT_FAILED\` orders An order ends`
-
-#### Scenario: Invented marker or text
-- GIVEN step 11's summary shows `| Gatewa"(cut)`
-- WHEN the report quotes `Gatewa...(cut)`, or text that is in neither the output nor the summary, such as `| **g` for `| gateway-mock`
-- THEN the report is rejected with `evidence[<i>].quote is not in the output of step <n>`
-
-#### Scenario: Text only code wrote (T5c8)
-- GIVEN step 5 is `recent_events` and its summary shows its header, `events=20`, a `durationMs min=... max=... of ... events` line, `newest 3:` and a newest event cut as `...b272-3c5"(cut)`
-- WHEN the report quotes the header, one of those computed lines, `b272-3c5"(cut)`, an outcome sentence such as `a data source of the tool failed` or the note `[summary cut at 1500 characters]`
-- THEN each is rejected with `evidence[<i>].quote is not in the output of step <n>`
-- AND a quote of a line that copies the output, such as `type="PAYMENT_UNAVAILABLE" outcome="PAYMENT_PENDING"`, passes
-
-#### Scenario: The loop checks against the summary it showed (T5c8)
-- GIVEN a run whose `status_summary` step showed the model `status="PAYMENT_PENDING" count=7`, which is not in the raw output
-- WHEN the report quotes that line
-- THEN the report is accepted at its first attempt and the incident ends `COMPLETED`, since the loop stored on the step the summary it sent
-
-#### Scenario: Short quote of an escaped line
-- GIVEN step 5 is `recent_events` and its output holds an event detail whose JSON is escaped, such as `{\"exception\":\"java.net.http.HttpTimeoutException\", ...}`
-- WHEN the report quotes only `HttpTimeoutException calling POST`, or the escaped `\"exception\":\"java.net.http.HttpTimeoutException\"`
-- THEN the evidence passes, from the decoded or the raw text
-
-#### Scenario: Quote too long
-- GIVEN a quote that is in the cited output but longer than 160 characters, such as a whole event detail
-- WHEN the report is checked
-- THEN it is rejected with `evidence[<i>].quote is longer than 160 characters; quote only its distinctive fragment, such as an exception name, a status or an error message, not the whole line`
-- AND the model is asked once more with that reason, like any invalid report
+#### Scenario: Quote filled and capped (evidence-by-reference)
+- GIVEN step 5's line `3:` is 240 characters long, a newest event with its `untrustedText`
+- WHEN the report cites `{toolCallId: 5, tool: "recent_events", line: 3}` and is valid
+- THEN the stored item is `{toolCallId: 5, tool: "recent_events", line: 3, quote, why}`, its `quote` the first 160 characters of the line's text without `3: `
+- AND the `REPORT` step's `model_output` holds the model's raw answer, with no `quote`
 
 #### Scenario: Wrong tool or step
 - WHEN the report cites `toolCallId` 2 with `tool` `search_logs` while step 2 is `query_metric`, or a step that does not exist
