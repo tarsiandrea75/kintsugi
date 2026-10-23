@@ -98,6 +98,10 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
   - Matches: **F1 5/5, F2 5/5, F3 3/5**; 15 of 15 report attempts valid at the first try, none cut.
   - F3's two misses name payment-service (DEPENDENCY_LATENCY, DEPENDENCY_REJECTING). The cloud F3 baselines with the 768 report cap were 13/15 and 14/15 (`odd/tasks/report-length.md`): at about 87%, 3/5 or worse happens about 13% of the time, so it is within noise but not proof of no cost.
 
+- 2026-10-23: 10 more cloud F3 samples, with the human's go-ahead (`infra/scripts/out/replay-20261023T121015Z-cloud`, on `66e8887`). **Cost $0.057**; cloud spend total about $1.06 of $5.
+  - F3 7/10; misses: payment-service UNKNOWN, payment-service CONFIGURATION, order-service UNKNOWN (service right, category not).
+  - **F3 with line citations: 10/15**, against 13/15 and 14/15 with quotes. At a rate of 87-90%, 10/15 or worse happens 1-4% of the time: **line citations very likely cost cloud F3**. F1 and F2 are unaffected (5/5, 5/5).
+
 ## Next step
 
-The human chooses: 10 more cloud F3 samples (about $0.06) to settle whether line citations cost F3, or close the feature on this evidence; then local F1 and F3 reasoning, a separate problem.
+The human decides. The trade so far: local invalid reports 5/9 to 1/9 (local F2 1/3 to 3/3) against cloud F3 about 90% to 67%. Recommended first, at no cost: read the 5 cloud F3 misses (cited lines, `why`, summary) to see how citing by number changed the reasoning, before choosing a fix or a revert.
