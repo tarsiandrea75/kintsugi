@@ -51,11 +51,12 @@ class DossierRendererTest {
 
 	/**
 	 * The ceiling for the stress dossier: every list far above its cap and every value at its length limit, the worst
-	 * case the caps allow (about 15.8k characters with the latency table, near 4k tokens at 4 characters per token;
-	 * 13.4k and 4,500 before it). The ceiling is about two thirds of {@code num-ctx} 8192, no longer half: the stress
-	 * dossier's report call is a known edge (agent spec, dossier size), while the real faults' dossiers stay far below it.
+	 * case the caps allow (about 16.8k characters with the latency table and the change column, near 4.2k tokens at 4
+	 * characters per token; 15.8k and 5,500 before the change column, 13.4k and 4,500 before the latency table). The
+	 * ceiling is about 70% of {@code num-ctx} 8192, no longer half: the stress dossier's report call is a known edge
+	 * (agent spec, dossier size), while the real faults' dossiers stay far below it.
 	 */
-	private static final int STRESS_TOKEN_CEILING = 5_500;
+	private static final int STRESS_TOKEN_CEILING = 5_700;
 
 	/**
 	 * Words and marks that would interpret a fact (ADR-011, "Facts only"); matched as whole words, ignoring case.
@@ -165,11 +166,44 @@ class DossierRendererTest {
 				"service_restarts failed: outcome=CLIENT_ERROR "
 						+ "reason=\"mcp-tools call failed: ResourceAccessException: Connection refused\"\n",
 				"| order-service | - | - | - |\n", "| gateway-mock | - | - | - |\n",
-				"| client | 201 | SUCCESS | none | 4 | - |\n",
-				"| server | 201 | SUCCESS | - | 4 | - |\n",
+				"| client | 201 | SUCCESS | none | 4 | - | - |\n",
+				"| server | 201 | SUCCESS | - | 4 | - | - |\n",
 				"- ERROR: count_logs failed outcome=INVALID_PARAMETER reason=\"level must be one of WARN, ERROR\"; "
 						+ "search_logs returned=0 truncated=false signatures=0\n");
 		assertThat(shape(markdown)).isEqualTo(shape(DossierRenderer.render(gather("f3"))));
+	}
+
+	@Test
+	void everyCountTableHasAChangeColumnOfIncidentMinusPrevious() {
+		// The model reads the direction of a change from code, not by comparing two columns (ADR-011 still holds: the
+		// change is arithmetic, with no threshold or marker).
+		String text = unnumbered(DossierRenderer.render(gather("f3")));
+
+		assertThat(text).contains(
+				"Columns \"previous\" and \"incident\" hold the counts of those windows; \"change\" is incident minus"
+						+ " previous.",
+				"| status | previous | incident | change | sample order ids, incident |\n",
+				"| PAYMENT_PENDING | 0 | 6 | +6 | 7d3a2b1c-",
+				"| side | status | outcome | exception | previous | incident | change |\n",
+				"| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 | +6 |\n",
+				"| client | 201 | SUCCESS | none | 4 | 0 | -4 |\n",
+				"| side | service | client | method | uri | status | outcome | exception | previous | incident | change |\n",
+				"| no rows | - | - | - | - | - | - | - | 0 | 0 | 0 |\n", "| type | outcome | previous | incident | change |\n",
+				"| PAYMENT_AUTHORIZED | PAID | 4 | 0 | -4 |\n");
+		assertThat(text).contains(
+				"| service | uri | previous mean | incident mean | previous max | incident max | previous points "
+						+ "| incident points |\n");
+	}
+
+	@Test
+	void aFailedWindowGivesNoChange() {
+		RecordedLab lab = new RecordedLab("f3").answer("traffic_counts-previous",
+				"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\"}");
+
+		String markdown = DossierRenderer.render(new DossierGatherer(lab, CLOCK).gather(10));
+
+		assertThat(markdown).contains("| client | CLIENT_ERROR | UNKNOWN | ConnectException | - | 6 | - |\n",
+				"| no rows | - | - | - | - | - | - | - | - | 0 | - |\n");
 	}
 
 	@Test

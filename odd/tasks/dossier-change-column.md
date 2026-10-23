@@ -34,13 +34,15 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 ## Tasks
 
-- [ ] T1 The change column in `DossierRenderer`, with tests, golden files and the spec (route: delegated writer; the renderer, its test, two golden files and the spec are several non-trivial files).
+- [x] T1 The change column in `DossierRenderer`, with tests, golden files and the spec (route: delegated writer; the renderer, its test, two golden files and the spec are several non-trivial files).
 - [ ] T2 Measurement: the local replay, F1-F3, 3 samples each.
 
 ## Progress
 
 - 2026-10-23: branch `feat/dossier-change-column`, from `feat/report-field-order` (closed at `d044eae`). Forecast: about 150 authored changed lines; under the 400-line budget.
 
+- 2026-10-23: T1 done (route: delegated writer). `DossierRenderer.countTable` adds `change` after `incident` (`+n`, `-n`, `0`, `-` when a window is unknown); D4 states it; no line added, D-numbers unchanged. RED: `everyCountTableHasAChangeColumnOfIncidentMinusPrevious`, `aFailedWindowGivesNoChange` and the updated failed-section test failed; GREEN: full suite 432 tests, 0 failures, 0 errors. Golden files differ only in D4 and the count tables. The stress dossier grew to 5,606 est. tokens, so its ceiling moved from 5,500 to 5,700 (test and spec). The F3 fixture has no 429 row, so acceptance criterion 1 is shown with `+6` (ConnectException) and `-4` (PAID, AUTHORIZED, success rows). `ReportCheckTest` and the spec's "Evidence is checked" example carry the new row literal.
+
 ## Next step
 
-T1.
+T2, the local replay.

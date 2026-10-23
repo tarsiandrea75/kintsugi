@@ -245,7 +245,7 @@ class ReportCheckTest {
 	@Test
 	void aDossierLineIsVerifiedAndItsQuoteIsThatLineWithoutItsNumber() {
 		// T5b, evidence-by-reference: D17 is written as line 17 with toolCallId and tool "dossier".
-		assertThat(DOSSIER).contains("\nD17 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |\n");
+		assertThat(DOSSIER).contains("\nD17 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 | +6 |\n");
 		ReportCheck.Result result = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
 				dossierEvidence(17), dossierEvidence(1)));
 
@@ -254,7 +254,7 @@ class ReportCheckTest {
 		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").asString())
 			.containsExactly("dossier", "dossier");
 		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
-			.containsExactly("| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |",
+			.containsExactly("| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 | +6 |",
 					"- Incident window: the last 10 min, 2026-10-16T09:50:00Z to 2026-10-16T10:00:00Z.");
 		assertThat(result.evidence().get(0).propertyNames()).containsExactly("toolCallId", "tool", "line", "quote", "why");
 	}

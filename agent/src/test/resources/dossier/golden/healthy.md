@@ -3,7 +3,7 @@
 D1 - Incident window: the last 10 min, 2026-10-16T09:50:00Z to 2026-10-16T10:00:00Z.
 D2 - Previous window: the 10 min before it, 2026-10-16T09:40:00Z to 2026-10-16T09:50:00Z.
 D3 - Gathered at 2026-10-16T10:00:00Z. All times are UTC.
-D4 - Columns "previous" and "incident" hold the counts of those windows. "-" means no value.
+D4 - Columns "previous" and "incident" hold the counts of those windows; "change" is incident minus previous. "-" means no value.
 D5 - Text copied from the lab is quoted as untrustedText="...".
 
 ## Service status (incident window)
@@ -17,15 +17,15 @@ D9 | gateway-mock | 0 | - | 1 h 59 min 58.8 s |
 
 ## Order states (orders table)
 
-| status | previous | incident | sample order ids, incident |
-|---|---|---|---|
-D10 | PAID | 4 | 5 | 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e01, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e02, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e03 |
+| status | previous | incident | change | sample order ids, incident |
+|---|---|---|---|---|
+D10 | PAID | 4 | 5 | +1 | 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e01, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e02, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e03 |
 
 ## Payment states (payments table)
 
-| status | previous | incident | sample order ids, incident |
-|---|---|---|---|
-D11 | AUTHORIZED | 4 | 5 | 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e01, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e02, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e03 |
+| status | previous | incident | change | sample order ids, incident |
+|---|---|---|---|---|
+D11 | AUTHORIZED | 4 | 5 | +1 | 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e01, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e02, 9c2e1d3f-4b5a-4c6d-9e8f-1a2b3c4d5e03 |
 
 ## Traffic
 
@@ -33,36 +33,36 @@ D12 Requests per edge from traffic_counts, which leaves out rows of count 0. "no
 
 ### external client -> order-service POST /orders (server side only)
 
-| side | status | outcome | exception | previous | incident |
-|---|---|---|---|---|---|
-D13 | server | 201 | SUCCESS | - | 4 | 5 |
+| side | status | outcome | exception | previous | incident | change |
+|---|---|---|---|---|---|---|
+D13 | server | 201 | SUCCESS | - | 4 | 5 | +1 |
 
 ### order-service -> inventory-service POST /reservations
 
-| side | status | outcome | exception | previous | incident |
-|---|---|---|---|---|---|
-D14 | client | 201 | SUCCESS | none | 4 | 5 |
-D15 | server | 201 | SUCCESS | - | 4 | 5 |
+| side | status | outcome | exception | previous | incident | change |
+|---|---|---|---|---|---|---|
+D14 | client | 201 | SUCCESS | none | 4 | 5 | +1 |
+D15 | server | 201 | SUCCESS | - | 4 | 5 | +1 |
 
 ### order-service -> payment-service POST /payments
 
-| side | status | outcome | exception | previous | incident |
-|---|---|---|---|---|---|
-D16 | client | 201 | SUCCESS | none | 4 | 5 |
-D17 | server | 201 | SUCCESS | - | 4 | 5 |
+| side | status | outcome | exception | previous | incident | change |
+|---|---|---|---|---|---|---|
+D16 | client | 201 | SUCCESS | none | 4 | 5 | +1 |
+D17 | server | 201 | SUCCESS | - | 4 | 5 | +1 |
 
 ### payment-service -> gateway-mock POST /authorize
 
-| side | status | outcome | exception | previous | incident |
-|---|---|---|---|---|---|
-D18 | client | 200 | SUCCESS | none | 4 | 5 |
-D19 | server | 200 | SUCCESS | - | 4 | 5 |
+| side | status | outcome | exception | previous | incident | change |
+|---|---|---|---|---|---|---|
+D18 | client | 200 | SUCCESS | none | 4 | 5 | +1 |
+D19 | server | 200 | SUCCESS | - | 4 | 5 | +1 |
 
 ### Other rows
 
-| side | service | client | method | uri | status | outcome | exception | previous | incident |
-|---|---|---|---|---|---|---|---|---|---|
-D20 | no rows | - | - | - | - | - | - | - | 0 | 0 |
+| side | service | client | method | uri | status | outcome | exception | previous | incident | change |
+|---|---|---|---|---|---|---|---|---|---|---|
+D20 | no rows | - | - | - | - | - | - | - | 0 | 0 | 0 |
 
 ## Latency (server side)
 
@@ -107,24 +107,24 @@ D37 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
 
 D38 Total: previous 12, incident 15.
 
-| type | outcome | previous | incident |
-|---|---|---|---|
-D39 | INVENTORY_RESERVED | CREATED | 4 | 5 |
-D40 | ORDER_RECEIVED | CREATED | 4 | 5 |
-D41 | PAYMENT_AUTHORIZED | PAID | 4 | 5 |
+| type | outcome | previous | incident | change |
+|---|---|---|---|---|
+D39 | INVENTORY_RESERVED | CREATED | 4 | 5 | +1 |
+D40 | ORDER_RECEIVED | CREATED | 4 | 5 | +1 |
+D41 | PAYMENT_AUTHORIZED | PAID | 4 | 5 | +1 |
 
 ### payment events
 
 D42 Total: previous 4, incident 5.
 
-| type | outcome | previous | incident |
-|---|---|---|---|
-D43 | PAYMENT_ATTEMPT | AUTHORIZED | 4 | 5 |
+| type | outcome | previous | incident | change |
+|---|---|---|---|---|
+D43 | PAYMENT_ATTEMPT | AUTHORIZED | 4 | 5 | +1 |
 
 ### reservation events
 
 D44 Total: previous 4, incident 5.
 
-| type | outcome | previous | incident |
-|---|---|---|---|
-D45 | RESERVATION_ATTEMPT | RESERVED | 4 | 5 |
+| type | outcome | previous | incident | change |
+|---|---|---|---|---|
+D45 | RESERVATION_ATTEMPT | RESERVED | 4 | 5 | +1 |
