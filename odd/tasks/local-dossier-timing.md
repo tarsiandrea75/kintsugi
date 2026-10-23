@@ -33,6 +33,11 @@ Find out why dossier runs on the local route (`granite4.1:8b`, CPU) time out, be
   - Verdicts: **F2 MATCH; F1 MISS** (payment-service instead of gateway-mock, the type right; the long-deadline run before was a MATCH); **F3 MISS** (payment-service, DEPENDENCY_REJECTING instead of order-service, CONFIGURATION). Coverage 0.85-0.92: granite asks for calls outside the dossier (repeated `recent_events`, `search_runbooks`), which the replay does not hold and the loop refuses as duplicates.
   - So the timing problem is solved; what remains is accuracy, which one sample per fault cannot measure.
 
+- 2026-10-23: local replay, three samples per fault (`infra/scripts/out/replay-20261022T220256Z-local`, on `91e3f0d`, no cloud cost). **No timeout** (1,535-1,961 s per run). Matches: **F1 2/3, F2 1/3, F3 0/3**.
+  - **5 of 9 runs ended `INVALID_REPORT`** ("report invalid twice"). The cause is the quotes: in almost every report, of every run, each `evidence[].quote` fails the check that it is a verbatim substring of the cited output. granite rebuilds a dossier row in its own format instead of copying it (for example `gateway-mock | client | POST /authorize | status: 429 | exception: TooManyRequests`) or shortens a log line. A run survives only when one item happens to be exact.
+  - 4 report attempts were cut at the 512-token cap.
+  - Every valid F1 and F2 report named the right cause; the misses there are invalid reports, not wrong diagnoses. F3 is a wrong diagnosis as well: its one valid report and the invalid ones name gateway-mock, DEPENDENCY_REJECTING, instead of order-service, CONFIGURATION.
+
 ## Next step
 
-The human chooses: a local lab round for the M2 check (`verify-agent.sh --mode dossier --route local`, several hours, free), or more local replay samples first to measure F1 and F3 accuracy.
+The timing problem is solved. The human chooses how to make local reports valid. The recommendation: evidence cites what to quote by reference (a dossier row or a tool step and a line number), and code fills in the verbatim text, so that verification stays exact while the model no longer has to copy text. The alternative, looser quote matching, would let through evidence the outputs do not hold. F3 on the local route then remains a separate reasoning problem.
