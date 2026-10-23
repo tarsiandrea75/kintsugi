@@ -213,21 +213,23 @@ final class ScriptedChatModel implements ChatModel {
 				+ String.join(",", evidence) + "]}";
 	}
 
-	static String evidence(int toolCallId, String tool, String quote) {
-		return "{\"toolCallId\":" + toolCallId + ",\"tool\":\"" + tool + "\",\"quote\":"
-				+ tools.jackson.databind.json.JsonMapper.shared().writeValueAsString(quote)
+	/** An evidence item citing line {@code line} of step {@code toolCallId}'s summary (evidence-by-reference). */
+	static String evidence(int toolCallId, String tool, int line) {
+		return "{\"toolCallId\":" + toolCallId + ",\"tool\":\"" + tool + "\",\"line\":" + line
 				+ ",\"why\":\"it shows the cause\"}";
 	}
 
-	/** An evidence item citing the dossier (T5b): {@code toolCallId} and {@code tool} are both {@code "dossier"}. */
-	static String dossierEvidence(String quote) {
-		return dossierEvidence("dossier", quote);
+	/**
+	 * An evidence item citing line {@code D<line>} of the dossier (T5b): {@code toolCallId} and {@code tool} are both
+	 * {@code "dossier"}.
+	 */
+	static String dossierEvidence(int line) {
+		return dossierEvidence("dossier", line);
 	}
 
 	/** An evidence item citing the dossier with {@code tool}. */
-	static String dossierEvidence(String tool, String quote) {
-		return "{\"toolCallId\":\"dossier\",\"tool\":\"" + tool + "\",\"quote\":"
-				+ tools.jackson.databind.json.JsonMapper.shared().writeValueAsString(quote)
+	static String dossierEvidence(String tool, int line) {
+		return "{\"toolCallId\":\"dossier\",\"tool\":\"" + tool + "\",\"line\":" + line
 				+ ",\"why\":\"it shows the cause\"}";
 	}
 

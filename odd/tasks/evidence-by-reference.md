@@ -70,7 +70,7 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 
 - [x] T1 ADR-013 and the spec: the contract, requirements and GIVEN/WHEN/THEN scenarios (route: inline, docs).
 - [x] T2 Numbered lines: `DossierRenderer` and `ToolSummaries`, with tests (route: to decide at the task; two non-trivial files, so likely delegated).
-- [ ] T3 Citation by line: `Schemas`, `ReportCheck`, `AgentLoop` storing the filled quote, `Prompts`, with tests.
+- [x] T3 Citation by line: `Schemas`, `ReportCheck`, `AgentLoop` storing the filled quote, `Prompts`, with tests.
 - [ ] T4 Measurement: the local replay, 3 samples per fault (free, about 5 hours), then the cloud replay, 5 samples per fault (cents, the human's go-ahead).
 
 ## Progress
@@ -84,6 +84,9 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 
 - 2026-10-23: T2 done (route: delegated, two non-trivial source files). `DossierRenderer` numbers lines in its `Out` helper and exposes `line(dossier, n)`; `ToolSummaries.capped` numbers summary lines before the cap and exposes `line` and `lines`; the `search_runbooks` budget counts the numbers; a refused call's summary is `1: the call was refused…`, and `AgentLoop.reasonLine` reads numbered lines. Until T3, `quotableLines` falls back to unnumbered summaries (recorded live run). RED: 4 new tests failed on stubs; GREEN: `DossierRendererTest`, `ToolSummariesTest` 57/0/0 (parent re-ran: 12 + 45, 0 failures), full suite 424/0/0.
 
+- T2 review (`19afa42`, base `2154ecd`, consent granted): approved; WARNING R3-quotable-strips-visible-number (the transitional quote matching, removed in T3), SUGGESTION R3-runbook-budget-untested (follow-up).
+- 2026-10-23: T3 done (route: delegated). The evidence item is `{toolCallId, tool, line, why}`; `ReportCheck` resolves the line with `ToolSummaries.line` / `DossierRenderer.line` and rebuilds each verified item as `{toolCallId, tool, line, quote, why}`, the quote being the line's first 160 code points without its number. Quote matching (`quoted`, `normalized`, `inSummary`, `quotableLines`) is removed. `LiveRunReportCheckTest` and its fixture are retired: they tested the removed quote matcher on unnumbered summaries. `AnthropicSchema` needs no change (it already drops `minimum`). RED: 45 failures and 1 error in six focused classes; GREEN: 180/0/0; full suite 422/0/0; parent re-ran `ReportCheckTest` 40/0/0 and `AgentLoopDossierModeTest` 13/0/0.
+
 ## Next step
 
-T3: citation by line in `Schemas`, `ReportCheck`, `AgentLoop` and `Prompts`.
+T4: the local replay, 3 samples per fault; then the cloud replay with the human's go-ahead.

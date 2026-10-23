@@ -34,7 +34,8 @@ final class Schemas {
 	}
 
 	private static ObjectNode report(boolean dossier) {
-		ObjectNode item = object(List.of("toolCallId", "tool", "quote", "why"));
+		// Evidence-by-reference (ADR-013): an item cites a line by its number, and code fills in its text.
+		ObjectNode item = object(List.of("toolCallId", "tool", "line", "why"));
 		ObjectNode stepNo = JSON.createObjectNode().put("type", "integer").put("minimum", 1);
 		if (dossier) {
 			ObjectNode either = JSON.createObjectNode();
@@ -47,7 +48,7 @@ final class Schemas {
 			item.withObject("properties").set("toolCallId", stepNo);
 		}
 		item.withObject("properties").set("tool", JSON.createObjectNode().put("type", "string"));
-		item.withObject("properties").set("quote", string(ReportCheck.MIN_QUOTE_LENGTH, ReportCheck.MAX_QUOTE_LENGTH));
+		item.withObject("properties").set("line", JSON.createObjectNode().put("type", "integer").put("minimum", 1));
 		item.withObject("properties").set("why", string(0, 200));
 		ObjectNode report = object(
 				List.of("rootCauseService", "rootCauseCategory", "summary", "confidence", "evidence"));

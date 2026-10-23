@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -19,11 +18,12 @@ import dev.kintsugi.agent.lab.ToolOutcome;
  *
  * <p>
  * Every summary starts with the header {@code toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n>
- * truncated=<bool>}, then one line per fact, numbered within the step ({@code 1: }, {@code 2: }, ...). Every string copied from the output is written as a JSON string literal
- * ({@code field="..."}): its quotes, backslashes and newlines stay escaped, so text from the lab can never close the
- * quote, start a line of its own or pass for a header or an instruction; it is always a labelled value. The escaping
- * is Jackson's, as in mcp-tools' own result, so the text between the quotes is also a substring of the raw output,
- * and a quote of the summary is a quote of the output. Text is only ever cut at its end, never in the middle.
+ * truncated=<bool>}, then one line per fact, numbered within the step ({@code 1: }, {@code 2: }, ...): a report
+ * cites a line by that number (evidence-by-reference). Every string copied from the output is written as a JSON
+ * string literal ({@code field="..."}): its quotes, backslashes and newlines stay escaped, so text from the lab can
+ * never close the quote, start a line of its own or pass for a header or an instruction; it is always a labelled
+ * value. The escaping is Jackson's, as in mcp-tools' own result, so the text between the quotes is also a substring of
+ * the raw output. Text is only ever cut at its end, never in the middle.
  */
 public final class ToolSummaries {
 
@@ -44,12 +44,6 @@ public final class ToolSummaries {
 			"recent_events", Summarizers::recentEvents, //
 			"get_order_trace", Summarizers::orderTrace, //
 			"search_runbooks", Summarizers::searchRunbooks);
-
-	/**
-	 * The {@code (cut)} marker {@link SummaryText#quote} writes after a cut literal: a {@code "} that closes a literal
-	 * (not escaped: preceded by an even number of backslashes), then {@code (cut)}.
-	 */
-	private static final Pattern CUT_MARKER = Pattern.compile("((?:^|[^\\\\])(?:\\\\\\\\)*)\"\\(cut\\)");
 
 	private ToolSummaries() {
 	}
@@ -88,27 +82,6 @@ public final class ToolSummaries {
 	/** The prefix of summary line {@code n}: {@code n: }. */
 	static String linePrefix(int n) {
 		return n + ": ";
-	}
-
-	/**
-	 * The lines of {@code summary} that copy text from the tool output, without the {@code (cut)} markers code wrote:
-	 * what a quote of the summary may come from (T5c8, the T5c6 review). Every string the output holds is written as a
-	 * JSON string literal, so a line without a {@code "} holds none: the header, the counts and aggregates the code
-	 * computed ({@code events=20}, {@code durationMs min=... max=...}, {@code newest 3:}), the outcome sentences and
-	 * the cut note. A kept line keeps its labels and per-item figures ({@code status="PAID" count=3}), the shape the
-	 * model saw, without its line number, which code wrote. A summary recorded before lines were numbered
-	 * (evidence-by-reference), as in the live-run fixtures, is read line by line after its header.
-	 * @param summary a summary as {@link #summarize} built it, or null
-	 */
-	public static List<String> quotableLines(String summary) {
-		if (summary == null) {
-			return List.of();
-		}
-		List<String> numbered = lines(summary);
-		return (numbered.isEmpty() ? summary.lines().skip(1).toList() : numbered).stream()
-			.filter(line -> line.indexOf('"') >= 0)
-			.map(line -> CUT_MARKER.matcher(line).replaceAll("$1\""))
-			.toList();
 	}
 
 	/**

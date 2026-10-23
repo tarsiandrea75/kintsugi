@@ -159,9 +159,26 @@ class PromptsTest {
 	}
 
 	@Test
+	void theReportTaskAsksForTheNumberOfALineAndNoQuote() {
+		// Evidence-by-reference (ADR-013): the model chooses a line by its number; code fills in its text.
+		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(),
+				List.of(new ToolStep(3, "status_summary", "OK", "{}", null)));
+
+		assertThat(task).contains("{toolCallId, tool, line, why}")
+			.contains("line is the number at the start of one line of that summary")
+			.doesNotContain("quote")
+			.doesNotContain("copied exactly");
+		assertThat(Prompts.system("orders stay pending", 15)).contains("the number of one line of that tool call's result")
+			.doesNotContain("quote copied exactly");
+	}
+
+	@Test
 	void theDossierIntroductionSaysHowToCiteTheDossier() {
 		// T5b: the dossier has its own citation id; before, the introduction said it had no toolCallId (T5a).
-		assertThat(Prompts.DOSSIER_INTRO).contains("cite it with toolCallId \"dossier\" and tool \"dossier\"")
+		// Evidence-by-reference: it is cited by the number of a line, no longer by a quote.
+		assertThat(Prompts.DOSSIER_INTRO).endsWith("It is not a tool call result: cite it with toolCallId \"dossier\" "
+				+ "and tool \"dossier\", and the number of the line you cite: D7 is line 7.")
+			.doesNotContain("quote")
 			.doesNotContain("has no toolCallId");
 		assertThat(Prompts.dossierNotGathered("the gathering failed")).contains("The dossier was not gathered")
 			.contains("there is no dossier to cite")
@@ -174,7 +191,9 @@ class PromptsTest {
 
 		String dossier = Prompts.report(dossierState(Phase.CONCLUDE, true), List.of(), steps);
 		assertThat(dossier).contains("Citable toolCallIds: 3, dossier.")
-			.contains("To cite the dossier, write toolCallId \"dossier\" and tool \"dossier\"");
+			.contains("To cite the dossier, write toolCallId \"dossier\" and tool \"dossier\", with the number of the "
+					+ "line you cite: D7 is line 7.")
+			.doesNotContain("quote");
 		assertThat(Prompts.report(dossierState(Phase.CONCLUDE, true), List.of(), List.of()))
 			.contains("Citable toolCallIds: dossier.");
 

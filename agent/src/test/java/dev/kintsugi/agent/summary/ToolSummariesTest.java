@@ -347,24 +347,6 @@ class ToolSummariesTest {
 	}
 
 	@Test
-	void theQuotableLinesAreThoseThatCopyTheOutputWithoutTheCutMarkers() {
-		String summary = ToolSummaries.summarize(5, "recent_events", OK, fixture("recent_events-order.json"));
-
-		List<String> quotable = ToolSummaries.quotableLines(summary);
-
-		// Not the header, the counts, the durations or "newest 3:": no string of the output is on them.
-		assertThat(quotable).noneMatch(line -> line.startsWith("toolCallId=") || line.startsWith("events=")
-				|| line.startsWith("durationMs") || line.startsWith("newest"));
-		assertThat(quotable).anySatisfy(line -> assertThat(line).startsWith("type=\"PAYMENT_UNAVAILABLE\""));
-		assertThat(quotable).noneMatch(line -> line.contains("(cut)"))
-			.anySatisfy(line -> assertThat(line).endsWith("5c3034dc-dacc-474c-b272-3c5\""));
-		// A "(cut)" inside copied text is the output's own and stays; so do an escaped quote and backslash before it.
-		assertThat(ToolSummaries.quotableLines("h\n1: x=\"a \\\"(cut)\" y=\"b\\\\\"(cut)"))
-			.containsExactly("x=\"a \\\"(cut)\" y=\"b\\\\\"");
-		assertThat(ToolSummaries.quotableLines(null)).isEmpty();
-	}
-
-	@Test
 	void instructionLikeLogTextStaysQuotedLabelledData() {
 		ArrayNode items = JSON.createArrayNode();
 		log(items, "2026-10-08T10:00:00Z",

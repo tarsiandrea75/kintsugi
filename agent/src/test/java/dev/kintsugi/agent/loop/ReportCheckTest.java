@@ -15,141 +15,164 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ToolOutcome;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /** The report's schema and evidence rules, without a run (agent spec, "The report", "Evidence is checked"). */
 class ReportCheckTest {
 
+	/** This incident's tool steps, each with the numbered summary the model was shown (evidence-by-reference). */
 	private static final Map<Integer, ToolStep> STEPS = Map.of( //
-			3, new ToolStep(3, "status_summary", "OK", fixture("status_summary-orders.json"), null), //
-			4, new ToolStep(4, "search_logs", "OK", fixture("search_logs-order.json"), null), //
-			5, new ToolStep(5, "recent_events", "OK", fixture("recent_events-order.json"), null), //
-			6, new ToolStep(6, "search_logs", "REFUSED_PHASE", null, null));
+			3, ran(3, "status_summary", "status_summary-orders.json"), //
+			4, ran(4, "search_logs", "search_logs-order.json"), //
+			5, ran(5, "recent_events", "recent_events-order.json"), //
+			6, new ToolStep(6, "search_logs", "REFUSED_PHASE", null,
+					"toolCallId=6 tool=search_logs outcome=REFUSED_PHASE\n1: the call was refused and did not run: x"), //
+			7, new ToolStep(7, "recent_events", "OK", "{}", "toolCallId=7 tool=recent_events outcome=OK returned=20 "
+					+ "truncated=false\n1: a\n2: b\n3: c\n4: d\n5: e\n6: the last kept line\n[summary cut at 1500 characters]"), //
+			8, new ToolStep(8, "search_logs", "OK", "{}",
+					"toolCallId=8 tool=search_logs outcome=OK returned=1 truncated=false\n1: " + "\uD83D\uDE00".repeat(200)));
 
 	/** A rendered dossier, the golden F3 one (T4b), as the dossier message carries it after its introduction. */
 	private static final String DOSSIER = golden();
 
-	/** The first event detail of recent_events-order.json, decoded: a whole line, about 230 characters. */
-	private static final String WHOLE_DETAIL = "{\"exception\":\"java.net.http.HttpTimeoutException\","
-			+ "\"url\":\"http://payment-service:8081/payments\",\"message\":\"Payment of order "
-			+ "5c3034dc-dacc-474c-b272-3c5fac9023a4 failed: HttpTimeoutException calling POST "
-			+ "http://payment-service:8081/payments: Request cancelled\"}";
-
 	@Test
-	void aQuoteOfTheRawOutputPasses() {
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "{\"status\":\"PAYMENT_PENDING\",\"count\":7}"))))
-			.isEmpty();
-	}
-
-	@Test
-	void whitespaceIsNormalizedOnBothSidesButCaseIsKept() {
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(4, "search_logs", "  16:32:03.395Z \n INFO   1 --- [order-service]  ")))).isEmpty();
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(4, "search_logs", "16:32:03.395Z info 1 --- [order-service]")))).hasSize(1);
-	}
-
-	@Test
-	void normalizationDecodesEscapesThenCollapsesWhitespace() {
-		assertThat(ReportCheck.normalized("  a\\n\\nb\\t c \n\n d \\\"e\\\" f\\\\n  ")).isEqualTo("a b c d \"e\" f\\n");
-	}
-
-	@Test
-	void aQuoteOfTheSummaryIsCheckedLikeTheOutput() {
-		Map<Integer, ToolStep> steps = Map.of(3, new ToolStep(3, "status_summary", "OK",
-				fixture("status_summary-orders.json"), "toolCallId=3 tool=status_summary outcome=OK\nstatus=\"PAID\" count=3"));
-		assertThat(ReportCheck.errors(Answers.json(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "status=\"PAID\" count=3"))), steps)).isEmpty();
-		assertThat(ReportCheck.errors(Answers.json(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "status=\"PAID\" count=4"))), steps))
-			.containsExactly("evidence[0].quote is not in the output of step 3");
-	}
-
-	@Test
-	void aQuoteOfTextTheSummaryCodeWroteIsRejected() {
-		// T5c6 review WARNING A: only the summary lines that copy the tool output count, without the (cut) markers.
-		String events = fixture("recent_events-order.json");
-		String eventsSummary = ToolSummaries.summarize(5, "recent_events", ToolOutcome.OK, events);
-		String failed = "{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Loki answered 503\",\"returned\":0,"
-				+ "\"truncated\":false,\"items\":[]}";
-		String logs = manyLogLines();
-		Map<Integer, ToolStep> steps = Map.of( //
-				5, new ToolStep(5, "recent_events", "OK", events, eventsSummary), //
-				7, new ToolStep(7, "search_logs", "UPSTREAM_ERROR", failed,
-						ToolSummaries.summarize(7, "search_logs", ToolOutcome.UPSTREAM_ERROR, failed)), //
-				8, new ToolStep(8, "search_logs", "OK", logs, ToolSummaries.summarize(8, "search_logs", ToolOutcome.OK, logs)));
-		String durations = ToolSummaries.lines(eventsSummary).stream().filter(line -> line.startsWith("durationMs min=")).findFirst().orElseThrow();
-		assertThat(eventsSummary).contains("b272-3c5\"(cut)");
-		assertThat(steps.get(8).summary()).endsWith("[summary cut at 1500 characters]");
-
-		for (String[] quote : List.of(new String[] { "5", "recent_events", "toolCallId=5 tool=recent_events outcome=OK" },
-				new String[] { "5", "recent_events", "events=20" }, new String[] { "5", "recent_events", durations },
-				new String[] { "5", "recent_events", "newest 3:" },
-				new String[] { "5", "recent_events", "b272-3c5\"(cut)" },
-				new String[] { "7", "search_logs", "a data source of the tool failed" },
-				new String[] { "8", "search_logs", "[summary cut at 1500 characters]" })) {
-			assertThat(ReportCheck.errors(Answers.json(report("payment-service", "DEPENDENCY_LATENCY",
-					evidence(Integer.parseInt(quote[0]), quote[1], quote[2]))), steps))
-				.as(quote[2])
-				.containsExactly("evidence[0].quote is not in the output of step " + quote[0]);
-		}
-		// A line that copies the output still counts, with its labels: the shape the model sees.
-		assertThat(ReportCheck.errors(Answers.json(report("payment-service", "DEPENDENCY_LATENCY",
-				evidence(5, "recent_events", "type=\"PAYMENT_UNAVAILABLE\" outcome=\"PAYMENT_PENDING\""),
-				evidence(7, "search_logs", "Loki answered 503"))), steps)).isEmpty();
-	}
-
-	@Test
-	void aQuoteOfADecodedJsonStringPasses() {
-		// The event detail is a JSON string holding escaped JSON; the decoded text holds plain quotes.
-		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY",
-				evidence(5, "recent_events", "\"exception\":\"java.net.http.HttpTimeoutException\"")))).isEmpty();
-	}
-
-	@Test
-	void aFabricatedQuoteAmongVerifiedItemsIsDroppedAndRecorded() {
-		// The seventh live run: one item's quote was not verbatim, the others were (T5c11).
-		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(4, "search_logs", "Connection refused by peer"),
-				evidence(5, "recent_events", "HttpTimeoutException calling POST")));
+	void anExistingLineIsVerifiedAndItsQuoteIsThatLineWithoutItsNumber() {
+		// Step 4's line 2 holds the newest group, "Completed initialization in 2 ms".
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(4, "search_logs", 2)));
 
 		assertThat(result.errors()).isEmpty();
-		assertThat(result.dropped()).containsExactly("evidence[1].quote is not in the output of step 4");
+		assertThat(result.dropped()).isEmpty();
+		assertThat(result.evidence()).singleElement().satisfies(item -> {
+			assertThat(item.propertyNames()).containsExactly("toolCallId", "tool", "line", "quote", "why");
+			assertThat(item.get("toolCallId").intValue()).isEqualTo(4);
+			assertThat(item.get("tool").asString()).isEqualTo("search_logs");
+			assertThat(item.get("line").intValue()).isEqualTo(2);
+			assertThat(item.get("quote").asString()).isEqualTo(ToolSummaries.line(STEPS.get(4).summary(), 2).orElseThrow())
+				.isEqualTo("count=1 newest=\"2026-10-08T16:32:03.396024993Z\" untrustedText=\"Completed initialization in 2 ms\"");
+			assertThat(item.get("why").asString()).isEqualTo("it shows the cause");
+		});
+	}
+
+	@Test
+	void aLineTheSummaryReshapedOrComputedIsCitable() {
+		// status="PAYMENT_PENDING" count=7 is not in the raw output, and events=20 is computed: both are lines the
+		// model was shown, built from the output by code.
+		assertThat(STEPS.get(3).output()).doesNotContain("status=\"PAYMENT_PENDING\" count=7");
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
+				evidence(3, "status_summary", 3), evidence(5, "recent_events", 1)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
+			.containsExactly("status=\"PAYMENT_PENDING\" count=7", "events=20");
+	}
+
+	@Test
+	void oneLineOutOfRangeAmongVerifiedOnesIsDroppedAndRecorded() {
+		// T5c11: one item that does not hold up no longer costs a valid report. Step 4's summary has 6 numbered lines.
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", 3),
+				evidence(4, "search_logs", 9), evidence(5, "recent_events", 4)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[1]: line 9 is not in the output of step 4");
 		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").intValue()).containsExactly(3, 5);
 	}
 
 	@Test
-	void aReportWhoseEveryQuoteIsFabricatedIsRejectedNamingEachItem() {
-		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "PAYMENT_FAILED badly"), evidence(4, "search_logs", "Connection refused by peer")));
+	void aReportNoneOfWhoseLinesExistsIsRejectedNamingEachItem() {
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", 5),
+				evidence(4, "search_logs", 7)));
 
-		assertThat(result.errors()).containsExactly("evidence[0].quote is not in the output of step 3",
-				"evidence[1].quote is not in the output of step 4");
+		assertThat(result.errors()).containsExactly("evidence[0]: line 5 is not in the output of step 3",
+				"evidence[1]: line 7 is not in the output of step 4");
 		assertThat(result.evidence()).isNull();
 	}
 
 	@Test
-	void aCitedRefusedCallStillRejectsTheReportAndTheRetryNamesTheBadQuoteToo() {
-		// Only a quote that is not in its step, or a wrong tool (T5c14), is dropped; a refused or missing step still
+	void anUnknownReportStaysValidWhenItsOnlyLineIsDropped() {
+		ReportCheck.Result result = check(report("UNKNOWN", "UNKNOWN", evidence(4, "search_logs", 7)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[0]: line 7 is not in the output of step 4");
+		assertThat(result.evidence()).isEmpty();
+	}
+
+	@Test
+	void theHeaderAndTheCutNoteAreNotLines() {
+		// Step 7's summary is its header, 6 numbered lines and the cut note: neither of those two has a number.
+		ReportCheck.Result result = check(report("payment-service", "DEPENDENCY_LATENCY", evidence(7, "recent_events", 6),
+				evidence(7, "recent_events", 7)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[1]: line 7 is not in the output of step 7");
+		assertThat(result.evidence()).singleElement()
+			.satisfies(item -> assertThat(item.get("quote").asString()).isEqualTo("the last kept line"));
+	}
+
+	@Test
+	void theQuoteIsTheFirst160CharactersOfALongLine() {
+		// Step 5's line 8 is the newest event, with its untrustedText, well over 160 characters.
+		String line = ToolSummaries.line(STEPS.get(5).summary(), 8).orElseThrow();
+		assertThat(line).hasSizeGreaterThan(200);
+
+		ReportCheck.Result result = check(report("payment-service", "DEPENDENCY_LATENCY", evidence(5, "recent_events", 8)));
+
+		assertThat(result.evidence()).singleElement()
+			.satisfies(item -> assertThat(item.get("quote").asString()).isEqualTo(line.substring(0, 160)));
+	}
+
+	@Test
+	void theQuoteCapCountsCharactersAsTheSchemaDoesAndNeverSplitsOne() {
+		// Code points, as Causes.string counts them: 160 emoji, never a lone surrogate.
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(8, "search_logs", 1)));
+
+		String quote = result.evidence().get(0).get("quote").asString();
+		assertThat(quote).isEqualTo("\uD83D\uDE00".repeat(160));
+	}
+
+	@Test
+	void aQuoteWrittenByTheModelFailsTheSchemaAndIsNeverDropped() {
+		String withQuote = "{\"toolCallId\":3,\"tool\":\"status_summary\",\"line\":3,\"quote\":\"PAYMENT_PENDING\","
+				+ "\"why\":\"\"}";
+		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(4, "search_logs", 2), withQuote)))
+			.containsExactly("evidence[1].unexpected field \"quote\"; allowed: line, tool, toolCallId, why");
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "0", "-1", "1.5", "\"2\"", "\"D7\"", "null" })
+	void aLineThatIsNotAnIntegerOfAtLeastOneFailsTheSchema(String line) {
+		String item = "{\"toolCallId\":3,\"tool\":\"status_summary\",\"line\":" + line + ",\"why\":\"\"}";
+		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(4, "search_logs", 2), item)))
+			.containsExactly("evidence[1].line must be an integer of at least 1");
+		assertThat(checkInDossierMode(report("order-service", "DEPENDENCY_LATENCY", evidence(4, "search_logs", 2),
+				item.replace("3,\"tool\":\"status_summary\"", "\"dossier\",\"tool\":\"dossier\""))).errors())
+			.containsExactly("evidence[1].line must be an integer of at least 1");
+	}
+
+	@Test
+	void aMissingLineFailsTheSchema() {
+		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY",
+				"{\"toolCallId\":3,\"tool\":\"status_summary\",\"why\":\"\"}")))
+			.containsExactly("evidence[0].line must be an integer of at least 1");
+	}
+
+	@Test
+	void aCitedRefusedCallStillRejectsTheReportAndTheRetryNamesTheBadLineToo() {
+		// Only a line that is not in its step, or a wrong tool (T5c14), is dropped; a refused or missing step still
 		// rejects the report.
-		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(6, "search_logs", "PAYMENT_PENDING"),
-				evidence(4, "search_logs", "Connection refused by peer")));
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", 3),
+				evidence(6, "search_logs", 1), evidence(4, "search_logs", 9)));
 
 		assertThat(result.errors()).containsExactly("evidence[1].toolCallId 6 was refused (REFUSED_PHASE) and did not run",
-				"evidence[2].quote is not in the output of step 4");
+				"evidence[2]: line 9 is not in the output of step 4");
 		assertThat(result.evidence()).isNull();
 	}
 
 	@Test
 	void anItemCitingTheWrongToolAmongVerifiedItemsIsDroppedAndRecorded() {
 		// The twelfth live run, F2: the report named the true cause but cited a recent_events step as search_runbooks (T5c14).
-		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "status_summary", "PAYMENT_PENDING"), evidence(4, "search_logs", "16:32:03.395Z"),
-				evidence(5, "search_runbooks", "HttpTimeoutException calling POST")));
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", 3),
+				evidence(4, "search_logs", 2), evidence(5, "search_runbooks", 8)));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.dropped()).containsExactly("evidence[2].tool is search_runbooks, but step 5 is recent_events");
@@ -158,8 +181,8 @@ class ReportCheckTest {
 
 	@Test
 	void aReportWhoseEveryItemCitesTheWrongToolIsRejectedNamingEachItem() {
-		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY",
-				evidence(3, "search_logs", "PAYMENT_PENDING"), evidence(5, "search_runbooks", "HttpTimeoutException calling POST")));
+		ReportCheck.Result result = check(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "search_logs", 3),
+				evidence(5, "search_runbooks", 8)));
 
 		assertThat(result.errors()).containsExactly("evidence[0].tool is search_logs, but step 3 is status_summary",
 				"evidence[1].tool is search_runbooks, but step 5 is recent_events");
@@ -168,24 +191,9 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void anItemOutsideItsQuoteBoundsIsNeverDropped() {
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", "PAYMENT_PENDING"),
-				evidence(3, "status_summary", "PAID")))).containsExactly("evidence[1].quote must be a string of 8 to 160 characters");
-	}
-
-	@Test
-	void anUnknownReportStaysValidWhenItsOnlyQuoteIsDropped() {
-		ReportCheck.Result result = check(report("UNKNOWN", "UNKNOWN", evidence(4, "search_logs", "Connection refused by peer")));
-
-		assertThat(result.errors()).isEmpty();
-		assertThat(result.dropped()).containsExactly("evidence[0].quote is not in the output of step 4");
-		assertThat(result.evidence()).isEmpty();
-	}
-
-	@Test
 	void aMissingStepOrARefusedCallIsRejectedAndTheRetryNamesAWrongToolToo() {
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "search_logs", "PAYMENT_PENDING"),
-				evidence(9, "search_logs", "PAYMENT_PENDING"), evidence(6, "search_logs", "PAYMENT_PENDING"))))
+		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "search_logs", 3),
+				evidence(9, "search_logs", 1), evidence(6, "search_logs", 1))))
 			.containsExactly("evidence[0].tool is search_logs, but step 3 is status_summary",
 					"evidence[1].toolCallId 9 is not a tool call of this incident",
 					"evidence[2].toolCallId 6 was refused (REFUSED_PHASE) and did not run");
@@ -193,7 +201,7 @@ class ReportCheckTest {
 
 	@Test
 	void aValueOutsideTheEnumsNamesTheFieldAndItsValues() {
-		assertThat(errors(report("payment-gateway", "DEPENDENCY_LATENCY", evidence(3, "status_summary", "PAYMENT_PENDING"))))
+		assertThat(errors(report("payment-gateway", "DEPENDENCY_LATENCY", evidence(3, "status_summary", 3))))
 			.containsExactly("rootCauseService must be one of gateway-mock, payment-service, order-service, "
 					+ "inventory-service, postgres, UNKNOWN; got \"payment-gateway\"");
 	}
@@ -216,49 +224,17 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void aQuoteOutsideItsBoundsIsRejected() {
-		assertThat(errors(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "status_summary", "PAID"))))
-			.containsExactly("evidence[0].quote must be a string of 8 to 160 characters");
-	}
-
-	@Test
-	void aQuoteLongerThan160CharactersIsRejectedWithAReasonTheRetryCanActOn() {
-		// A whole event detail, decoded: it is in the output, so only its length is wrong (the third live run).
-		assertThat(WHOLE_DETAIL).hasSizeGreaterThan(160);
-		assertThat(ReportCheck.quoted(WHOLE_DETAIL, STEPS.get(5).output())).isTrue();
-
-		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY", evidence(5, "recent_events", WHOLE_DETAIL))))
-			.containsExactly("evidence[0].quote is longer than 160 characters; quote only its distinctive fragment, "
-					+ "such as an exception name, a status or an error message, not the whole line");
-	}
-
-	@Test
-	void aQuoteOfExactly160CharactersPasses() {
-		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY",
-				evidence(5, "recent_events", WHOLE_DETAIL.substring(0, 160))))).isEmpty();
-	}
-
-	@Test
-	void aShortFragmentOfAnEscapedLineMatchesEscapedOrDecoded() {
-		// The summary shows the detail as an escaped JSON literal; the model may copy it either way.
-		assertThat(errors(report("payment-service", "DEPENDENCY_LATENCY",
-				evidence(5, "recent_events", "\\\"exception\\\":\\\"java.net.http.HttpTimeoutException\\\""),
-				evidence(5, "recent_events", "HttpTimeoutException calling POST")))).isEmpty();
-	}
-
-	@Test
-	void theSchemaSentToTheModelHasTheSameQuoteBounds() {
-		JsonNode quote = JsonMapper.shared()
-			.readTree(Schemas.REPORT)
-			.at("/properties/evidence/items/properties/quote");
-		assertThat(quote.get("minLength").intValue()).isEqualTo(8);
-		assertThat(quote.get("maxLength").intValue()).isEqualTo(160);
-	}
-
-	@Test
-	void theReportTaskAsksForAShortFragmentPerQuote() {
-		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), STEPS.values());
-		assertThat(task).contains("at most 160 characters").contains("not the whole line");
+	void theSchemaSentToTheModelAsksForALineOfAtLeastOneAndNoQuote() {
+		for (AgentMode mode : AgentMode.values()) {
+			JsonNode item = JsonMapper.shared().readTree(Schemas.report(mode)).at("/properties/evidence/items");
+			assertThat(item.get("properties").propertyNames()).as(mode.value())
+				.containsExactly("toolCallId", "tool", "line", "why");
+			assertThat(item.get("required")).extracting(JsonNode::asString)
+				.containsExactly("toolCallId", "tool", "line", "why");
+			assertThat(item.at("/properties/line/type").asString()).isEqualTo("integer");
+			assertThat(item.at("/properties/line/minimum").intValue()).isEqualTo(1);
+			assertThat(item.get("additionalProperties").booleanValue()).isFalse();
+		}
 	}
 
 	@Test
@@ -267,33 +243,38 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void aDossierCitationWhoseQuoteIsInTheDossierPassesInDossierMode() {
-		// T5b: the dossier is cited as toolCallId "dossier", tool "dossier", its quote matched like a tool output's.
+	void aDossierLineIsVerifiedAndItsQuoteIsThatLineWithoutItsNumber() {
+		// T5b, evidence-by-reference: D17 is written as line 17 with toolCallId and tool "dossier".
+		assertThat(DOSSIER).contains("\nD17 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |\n");
 		ReportCheck.Result result = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
-				dossierEvidence("CLIENT_ERROR | UNKNOWN | ConnectException"),
-				dossierEvidence("  PAYMENT_PENDING \n|  0 | 6  ")));
+				dossierEvidence(17), dossierEvidence(1)));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.dropped()).isEmpty();
 		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").asString())
 			.containsExactly("dossier", "dossier");
+		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
+			.containsExactly("| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |",
+					"- Incident window: the last 10 min, 2026-10-16T09:50:00Z to 2026-10-16T10:00:00Z.");
+		assertThat(result.evidence().get(0).propertyNames()).containsExactly("toolCallId", "tool", "line", "quote", "why");
 	}
 
 	@Test
-	void aDossierCitationWhoseQuoteIsNotInTheDossierIsDropped() {
+	void aDossierLineThatDoesNotExistIsDropped() {
+		// The golden F3 dossier numbers its lines D1 to D49.
+		assertThat(DOSSIER).contains("\nD49 ").doesNotContain("\nD50 ");
 		ReportCheck.Result result = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(3, "status_summary", "PAYMENT_PENDING"), dossierEvidence("payment-service restarted 3 times")));
+				evidence(3, "status_summary", 3), dossierEvidence(50)));
 
 		assertThat(result.errors()).isEmpty();
-		assertThat(result.dropped()).containsExactly("evidence[1].quote is not in the dossier");
+		assertThat(result.dropped()).containsExactly("evidence[1]: line 50 is not in the dossier");
 		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").asString()).containsExactly("3");
 	}
 
 	@Test
 	void aDossierCitationNamingAnotherToolIsDroppedLikeAWrongTool() {
 		ReportCheck.Result result = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(3, "status_summary", "PAYMENT_PENDING"),
-				dossierEvidence("traffic_counts", "CLIENT_ERROR | UNKNOWN | ConnectException")));
+				evidence(3, "status_summary", 3), dossierEvidence("traffic_counts", 17)));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.dropped())
@@ -303,8 +284,7 @@ class ReportCheckTest {
 	@Test
 	void inExplorerModeADossierCitationIsDroppedAsCitingNoSource() {
 		ReportCheck.Result result = check(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(3, "status_summary", "PAYMENT_PENDING"),
-				dossierEvidence("CLIENT_ERROR | UNKNOWN | ConnectException")));
+				evidence(3, "status_summary", 3), dossierEvidence(17)));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.dropped()).containsExactly("evidence[1].toolCallId dossier: this run has no dossier");
@@ -314,8 +294,7 @@ class ReportCheckTest {
 	@Test
 	void aDossierModeRunWhoseDossierWasNotGatheredDropsADossierCitation() {
 		ReportCheck.Result result = ReportCheck.check(Answers.json(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(3, "status_summary", "PAYMENT_PENDING"), dossierEvidence("CLIENT_ERROR | UNKNOWN"))), STEPS,
-				AgentMode.DOSSIER, null);
+				evidence(3, "status_summary", 3), dossierEvidence(17))), STEPS, AgentMode.DOSSIER, null);
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.dropped()).containsExactly("evidence[1].toolCallId dossier: the dossier was not gathered");
@@ -324,8 +303,7 @@ class ReportCheckTest {
 	@Test
 	void dossierAndToolCitationsMixAndKeepTheirOrder() {
 		ReportCheck.Result result = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(5, "recent_events", "HttpTimeoutException calling POST"),
-				dossierEvidence("CLIENT_ERROR | UNKNOWN | ConnectException"), evidence(3, "status_summary", "PAYMENT_PENDING")));
+				evidence(5, "recent_events", 8), dossierEvidence(17), evidence(3, "status_summary", 3)));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").asString())
@@ -334,23 +312,20 @@ class ReportCheckTest {
 
 	@Test
 	void aReportWhoseOnlyEvidenceIsADroppedDossierItemFollowsTheNoEvidenceLeftRule() {
-		String named = report("payment-service", "DEPENDENCY_REJECTING", dossierEvidence("payment-service restarted 3 times"));
-		ReportCheck.Result rejected = checkInDossierMode(named);
-		assertThat(rejected.errors()).containsExactly("evidence[0].quote is not in the dossier");
+		ReportCheck.Result rejected = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
+				dossierEvidence(50)));
+		assertThat(rejected.errors()).containsExactly("evidence[0]: line 50 is not in the dossier");
 		assertThat(rejected.evidence()).isNull();
 
-		ReportCheck.Result unknown = checkInDossierMode(report("UNKNOWN", "UNKNOWN",
-				dossierEvidence("payment-service restarted 3 times")));
+		ReportCheck.Result unknown = checkInDossierMode(report("UNKNOWN", "UNKNOWN", dossierEvidence(50)));
 		assertThat(unknown.errors()).isEmpty();
 		assertThat(unknown.evidence()).isEmpty();
 	}
 
 	@Test
 	void aDossierCitationKeepsTheOtherRules() {
-		// Bounds stay fatal, and a toolCallId that is neither an integer nor "dossier" is still rejected.
-		assertThat(checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING", dossierEvidence("6 | 6"))).errors())
-			.containsExactly("evidence[0].quote must be a string of 8 to 160 characters");
-		String other = "{\"toolCallId\":\"step3\",\"tool\":\"status_summary\",\"quote\":\"PAYMENT_PENDING\",\"why\":\"\"}";
+		// A toolCallId that is neither an integer nor "dossier" is still rejected.
+		String other = "{\"toolCallId\":\"step3\",\"tool\":\"status_summary\",\"line\":3,\"why\":\"\"}";
 		assertThat(checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING", other)).errors())
 			.containsExactly("evidence[0].toolCallId must be an integer or \"dossier\"");
 		assertThat(errors(report("payment-service", "DEPENDENCY_REJECTING", other)))
@@ -369,21 +344,10 @@ class ReportCheckTest {
 		assertThat(dossier.get(1).get("enum").get(0).asString()).isEqualTo("dossier");
 	}
 
-	/** A search_logs result whose summary passes the cap: 40 distinct long lines full of quotes. */
-	private static String manyLogLines() {
-		StringBuilder items = new StringBuilder();
-		for (int i = 0; i < 40; i++) {
-			items.append(i == 0 ? "" : ",")
-				.append("{\"timestamp\":\"2026-10-08T10:00:%02dZ\",\"service\":\"order-service\",".formatted(i))
-				.append("\"level\":\"WARN\",\"untrustedText\":\"x : failure ")
-				// A letter, not a number: lines that differ only in a number form one group (T5c10).
-				.append("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN".charAt(i))
-				.append(' ')
-				// Quotes, which the summary escapes, so that five lines no longer fit.
-				.append("\\\"".repeat(190))
-				.append("\"}");
-		}
-		return "{\"outcome\":\"OK\",\"returned\":40,\"truncated\":false,\"items\":[" + items + "]}";
+	/** A step that ran, with its fixture's output and the summary the loop builds from it. */
+	private static ToolStep ran(int stepNo, String tool, String fixture) {
+		String output = fixture(fixture);
+		return new ToolStep(stepNo, tool, "OK", output, ToolSummaries.summarize(stepNo, tool, ToolOutcome.OK, output));
 	}
 
 	private static ReportCheck.Result checkInDossierMode(String answer) {

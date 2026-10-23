@@ -77,7 +77,7 @@ class AgentLoopApiTest {
 		MODEL.planned(call("status_summary", "{\"table\":\"orders\"}"))
 			.quiet()
 			.quietPhasesAfterTriage()
-			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(2, "status_summary", "PAYMENT_PENDING")));
+			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(2, "status_summary", 3)));
 		assertThat(this.runner).isInstanceOf(AgentLoop.class);
 
 		HttpResponse<String> opened = send(HttpRequest.newBuilder(uri("/incidents"))

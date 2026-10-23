@@ -549,8 +549,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/**
 	 * The report as stored: the model's fields, with {@code incidentId}, {@code mode} (T5a), {@code route} and
 	 * {@code model} (cloud-route T3) and {@code stepsUsed} filled in by code, and
-	 * only the verified evidence items (T5c11): what is stored and scored has been checked. The dropped items stay in
-	 * the {@code REPORT} step's answer, and its summary names them.
+	 * only the verified evidence items (T5c11): what is stored and scored has been checked. Each is
+	 * {@code {toolCallId, tool, line, quote, why}}, its quote the cited line's text, filled in by {@link ReportCheck}
+	 * (evidence-by-reference). The dropped items stay in the {@code REPORT} step's answer, and its summary names them.
 	 */
 	private String stored(Run run, JsonNode report, List<JsonNode> evidence) {
 		ObjectNode stored = JSON.createObjectNode();

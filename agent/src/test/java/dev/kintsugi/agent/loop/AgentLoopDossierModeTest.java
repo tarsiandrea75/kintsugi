@@ -96,7 +96,7 @@ class AgentLoopDossierModeTest {
 			.quiet()
 			.planned(call("search_runbooks", "{\"query\":\"orders pending\"}"))
 			.quiet()
-			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "search_logs", "Initializing Servlet")));
+			.text(report("order-service", "DEPENDENCY_LATENCY", evidence(3, "search_logs", 3)));
 
 		assertThat(run(AgentMode.DOSSIER)).isEqualTo(IncidentStatus.COMPLETED);
 
@@ -160,20 +160,24 @@ class AgentLoopDossierModeTest {
 
 	@Test
 	void aReportMayCiteTheDossierAndIsCompleted() {
-		// T5b: the dossier is cited as toolCallId "dossier", its quote checked against the rendered dossier.
+		// T5b, evidence-by-reference: the dossier is cited as toolCallId "dossier" with the number of a line, D1 as 1.
 		this.model.quiet()
 			.quiet()
-			.text(report("payment-service", "DEPENDENCY_REJECTING",
-					dossierEvidence("CLIENT_ERROR | UNKNOWN | ConnectException"),
-					dossierEvidence("payment-service answered 503 to every call")));
+			.text(report("payment-service", "DEPENDENCY_REJECTING", dossierEvidence(1), dossierEvidence(999)));
 
 		assertThat(run(AgentMode.DOSSIER)).isEqualTo(IncidentStatus.COMPLETED);
 
+		String dossier = this.model.prompts().get(0).getInstructions().get(1).getText();
+		String first = dossier.lines().filter(line -> line.startsWith("D1 ")).findFirst().orElseThrow();
+		assertThat(dossier).doesNotContain("\nD999 ");
 		JsonNode evidence = storedReport().get("evidence");
 		assertThat(evidence).hasSize(1);
 		assertThat(evidence.get(0).get("toolCallId").asString()).isEqualTo("dossier");
 		assertThat(evidence.get(0).get("tool").asString()).isEqualTo("dossier");
-		assertThat((String) step(4).get("summary")).contains("evidence[1].quote is not in the dossier");
+		assertThat(evidence.get(0).get("line").intValue()).isEqualTo(1);
+		assertThat(evidence.get(0).get("quote").asString()).isEqualTo(first.substring("D1 ".length()));
+		assertThat((String) step(4).get("summary"))
+			.isEqualTo("valid; dropped: evidence[1]: line 999 is not in the dossier");
 		Prompt reportPrompt = this.model.prompts().get(2);
 		assertThat(last(reportPrompt)).contains("Citable toolCallIds: dossier.")
 			.contains("To cite the dossier, write toolCallId \"dossier\" and tool \"dossier\"");

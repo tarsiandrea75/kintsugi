@@ -145,7 +145,10 @@ class ModelRouteTest {
 		assertThat(sent.path("properties").path("evidence").path("type").asString()).isEqualTo("array");
 		assertThat(item.path("required")).isEqualTo(
 				original.path("properties").path("evidence").path("items").path("required"));
-		assertThat(item.path("properties").path("quote").path("type").asString()).isEqualTo("string");
+		// Evidence-by-reference: the item cites a line by its number, of at least 1 only by ReportCheck here.
+		assertThat(item.path("properties").path("line").path("type").asString()).isEqualTo("integer");
+		assertThat(item.path("properties").has("quote")).isFalse();
+		assertThat(item.path("properties").path("line").has("minimum")).isFalse();
 		if (mode == AgentMode.DOSSIER) {
 			assertThat(item.path("properties").path("toolCallId").path("anyOf").get(1))
 				.isEqualTo(original.path("properties").path("evidence").path("items").path("properties")
