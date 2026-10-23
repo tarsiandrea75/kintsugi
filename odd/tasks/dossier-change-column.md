@@ -45,4 +45,4 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 ## Next step
 
-T2, the local replay. T1 review assessment (`46139df`, base `f1a2d71`): medium, `review_due=false` (`under_budget`), pending in the slice.
+T2, the local replay. T1 review assessment (`46139df`, base `f1a2d71`): medium, `review_due=false` (`under_budget`), pending in the slice; then reviewed per commit with consent granted (base `879cf4b`, the T1 commit's parent): approved and acknowledged; SUGGESTION R3-stress-ceiling-margin (5,606 of 5,700, under 2% headroom; check that report prompts still fit `num-ctx` 8192 in T2) left as a follow-up.
