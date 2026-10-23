@@ -45,4 +45,4 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 ## Next step
 
-T2, the local replay.
+T2, the local replay. T1 review assessment (`46139df`, base `f1a2d71`): medium, `review_due=false` (`under_budget`), pending in the slice.
