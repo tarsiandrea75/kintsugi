@@ -41,6 +41,8 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 
 - T1b review (`2f255ca`, base `d396ec4`, consent granted): approved; WARNING R3-length-unit-mismatch checked: the reported length and the rule both count code points (`Causes.string`), so they agree; SUGGESTION R3-suffix-branches-untested (a non-string summary gets no length) left as a follow-up.
 
+- 2026-10-23: T2, second cloud run, F3 15 samples, with the human's go-ahead (`infra/scripts/out/replay-20261023T132036Z-cloud`, on `eadd1d4`, **cost $0.099**; cloud spend total about $1.26 of $5). **F3 10/15; every valid report matched again (10/10, 18/18 over both runs).** The 5 misses are `INVALID_REPORT`: 16 of 26 attempts had a summary over 500 characters (501-624), also on the retry that was told the length. The valid summaries were 363-496 characters. The model cannot count characters well enough to land under a hard limit it overshoots by 1-25%.
+
 ## Next step
 
-T2 again: the cloud replay, F3 15 samples (about $0.10), with the human's go-ahead.
+The human decides how a long summary is handled. Recommended: code cuts a summary over 500 characters at 500 and marks the cut, instead of rejecting the report; the summary is the model's reasoning, not evidence, the fields after it are checked as before, and no retry is spent. Alternative: raise the limit (for example to 1,000), which costs local write time against the 512-token local report cap.
