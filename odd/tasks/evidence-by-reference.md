@@ -94,6 +94,10 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
   - Matches: **F1 0/3, F2 3/3, F3 0/3** (before: 2/3, 1/3, 0/3). Every F1 and F3 report is now valid and wrong: F1 names payment-service (DEPENDENCY_LATENCY, the type right), F3 gateway-mock or payment-service, DEPENDENCY_REJECTING.
   - Reading: the copying failure is gone; what is left on the local route is reasoning on F1 and F3. Whether line citations cost F1 (the design's main risk) is not settled: F1 was 2/3 before, but one of the earlier local F1 runs at 600 s already named payment-service, so local F1 is about 3 of 7 overall. Acceptance criterion 7, local half, is met (fewer invalid runs); the cloud half is pending.
 
+- 2026-10-23: T4, cloud half, with the human's go-ahead: replay with line citations, 5 samples per fault (`infra/scripts/out/replay-20261023T113454Z-cloud`, on `c71d571`). **Cost $0.084** (F1 $0.0283, F2 $0.0273, F3 $0.0287); cloud spend total about $1.00 of $5.
+  - Matches: **F1 5/5, F2 5/5, F3 3/5**; 15 of 15 report attempts valid at the first try, none cut.
+  - F3's two misses name payment-service (DEPENDENCY_LATENCY, DEPENDENCY_REJECTING). The cloud F3 baselines with the 768 report cap were 13/15 and 14/15 (`odd/tasks/report-length.md`): at about 87%, 3/5 or worse happens about 13% of the time, so it is within noise but not proof of no cost.
+
 ## Next step
 
-The human decides the cloud replay (5 samples per fault, cents) to check that line citations keep the cloud match rate; then local F1 and F3 reasoning, a separate problem.
+The human chooses: 10 more cloud F3 samples (about $0.06) to settle whether line citations cost F3, or close the feature on this evidence; then local F1 and F3 reasoning, a separate problem.
