@@ -891,7 +891,6 @@ No other field is allowed, and all five are required. Code then adds `incidentId
 - WHEN the loop builds the report schema and the report task, in either mode
 - THEN the schema's properties and its `required` list are `summary, evidence, rootCauseService, rootCauseCategory, confidence`, in that order
 - AND the report task describes the fields in that order, the cause as what the summary concludes
-- AND the stored report keeps that order
 
 #### Scenario: Value outside the enums
 - WHEN the model answers `rootCauseService` = `payment-gateway`

@@ -21,7 +21,7 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 1. The report schema lists its properties, and its `required` array, in the order `summary, evidence, rootCauseService, rootCauseCategory, confidence`.
 2. The report task describes the fields in that order.
 3. The spec's "The report" table and a scenario state the order and why.
-4. Measured on the cloud replay, F3 15 samples (about $0.09, the human's go-ahead given on 2026-10-23): F3 at least as good as 10/15 with line citations, aimed at the 13-14/15 of the quote baselines; F1 and F2 checked on 5 samples each in the same run if the cost stays under $0.15. Then the local replay.
+4. Measured on the cloud replay, F3 15 samples (about $0.09, the human's go-ahead given on 2026-10-23): F3 at least as good as 10/15 with line citations, aimed at the 13-14/15 of the quote baselines. F1 and F2 on the cloud need their own go-ahead. Then the local replay.
 
 ## Tasks
 
@@ -34,6 +34,8 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 
 - 2026-10-23: T1 done (route: inline). `ReportCheck.MODEL_FIELDS` is `summary, evidence, rootCauseService, rootCauseCategory, confidence` and `Schemas.report` builds its properties and `required` from it; the report task lists the fields in that order, the cause "as your summary concludes"; spec "The report" table, paragraph and scenario. RED: `theSchemaPutsTheReasoningBeforeTheCause` and `theReportTaskAsksForTheReasoningBeforeTheCause` failed; GREEN: full suite passed, 0 failures.
 
+- T1 review (`4585c0c`, base `1811640`, consent granted): approved; WARNING R3-stored-order-unproved: the scenario said the stored report keeps the order, but `incidents.report` is jsonb, which does not keep key order. The line is removed from the scenario.
+
 ## Next step
 
-T2: the cloud replay, F3 15 samples and F1, F2 5 each.
+T2: the cloud replay, F3 15 samples.
