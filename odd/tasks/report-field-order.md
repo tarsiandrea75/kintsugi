@@ -26,7 +26,7 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 ## Tasks
 
 - [x] T1 Order in the schema, the report task and the stored report, with tests and the spec (route: inline; mechanical edits in known places).
-- [ ] T2 Measurement: the cloud replay, then the local replay.
+- [x] T2 Measurement: the cloud replay, then the local replay.
 
 ## Progress
 
@@ -51,6 +51,9 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 - 2026-10-23: T2, cloud F1 and F2, 5 samples each, with the human's go-ahead (`infra/scripts/out/replay-20261023T135513Z-cloud`, on `d7e1a96`, **cost $0.060**; cloud spend total about $1.41 of $5). **F1 5/5, F2 5/5**: no cost on the other faults.
 - 2026-10-23: T2, local replay, 3 samples per fault (`infra/scripts/out/replay-20261023T135800Z-local`): the session ended during it, after F1 and F2; F3 did not run. **F1 0/3, F2 3/3**, every report valid (6 of 6 at the first try), no timeout (1,719-2,076 s), report calls 413-481 s against the 600 s deadline. Local F1 names payment-service every time, and its summary agrees with its fields: granite reads payment-service's high `/payments` latency and stops there instead of following the calls down to gateway-mock. That is local reasoning, not the field order.
 
+- 2026-10-23: T2, local F3, 3 samples (`infra/scripts/out/replay-20261023T173124Z-local`, on `34ee291`): **F3 0/3**, every report valid at the first try, no timeout (1,713-1,830 s), report calls 446-500 s against the 600 s deadline. Named causes: gateway-mock DEPENDENCY_REJECTING, payment-service DEPENDENCY_LATENCY, gateway-mock DEPENDENCY_LATENCY. Each summary agrees with its fields: the order did what it was for (no contradiction left), but granite follows the payment chain downstream (gateway-mock's 429s, /payments latency) and never reaches order-service's own payment URL. Sample 2 even cites order-service's `ConnectException` to payment-service and still calls it latency. Same mode as local F1: local reasoning, not the field order.
+- Local totals with the new order: F1 0/3, F2 3/3, F3 0/3; 9 of 9 reports valid (against 4 of 9 with quotes).
+
 ## Next step
 
-The local F3 replay (3 samples, free, about 1.5 hours) to finish T2; then close the feature. Local F1 (stopping at payment-service) is a separate problem.
+Feature closed. Open, as separate work: local reasoning on F1 and F3 (granite stops at the loudest symptom downstream instead of the service that misbehaves); whether to raise the 500-character summary limit (12 of 15 cloud summaries cut).
