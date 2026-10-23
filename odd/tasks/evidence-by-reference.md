@@ -102,6 +102,12 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
   - F3 7/10; misses: payment-service UNKNOWN, payment-service CONFIGURATION, order-service UNKNOWN (service right, category not).
   - **F3 with line citations: 10/15**, against 13/15 and 14/15 with quotes. At a rate of 87-90%, 10/15 or worse happens 1-4% of the time: **line citations very likely cost cloud F3**. F1 and F2 are unaffected (5/5, 5/5).
 
+- 2026-10-23: the 5 cloud F3 misses read (no cost).
+  - All cite the right lines: D19 (order-service -> payment-service, 6 `ConnectException`), D7 (payment-service 0 restarts), D41 (order-service WARN `PAYMENT_UNAVAILABLE` to `payment-service:9999`). No miss comes from a wrong or unsupported line.
+  - **3 of 5 misses contradict their own summary**: the summary names the right cause and the fields do not. For example, "likely misconfigured payment URL/port in order-service, a CONFIGURATION issue, not payment-service failing" with `payment-service / DEPENDENCY_LATENCY`, and "points to order-service's payment URL setting" with `payment-service / CONFIGURATION`. A fourth says the cause "is not established" (UNKNOWN); one blames gateway-mock's 429s.
+  - **The same failure mode predates line citations.** The 5 earlier cloud F3 misses, with quotes (`replay-20261019*`..`20261020*`), are also `payment-service`, mostly UNKNOWN, with summaries that describe order-service failing to reach a healthy payment-service. So citing by line did not create a new error; at most it made an old one more frequent, which 15 samples cannot separate.
+  - A likely cause: the report's fields come in the order `rootCauseService, rootCauseCategory, summary, confidence, evidence`, so the model commits to the cause before it writes its reasoning, and the summary then reasons its way to the right answer too late.
+
 ## Next step
 
-The human decides. The trade so far: local invalid reports 5/9 to 1/9 (local F2 1/3 to 3/3) against cloud F3 about 90% to 67%. Recommended first, at no cost: read the 5 cloud F3 misses (cited lines, `why`, summary) to see how citing by number changed the reasoning, before choosing a fix or a revert.
+Recommended: a separate, small change that puts `summary` and `evidence` before `rootCauseService` and `rootCauseCategory` in the schema and the report task (reason first, answer last), measured on cloud F3 (15 samples, about $0.09) and then locally. Line citations stay: they fixed local validity and F3's misses are not caused by the cited lines.
