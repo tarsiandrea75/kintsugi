@@ -46,6 +46,8 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 - 2026-10-23: T1c (route: inline), the human's choice: code cuts a summary over 500 characters to its first 499 and `…` instead of rejecting the report; `ReportCheck.Result` carries the stored summary, the verdict lists `summary cut from <n> to 500 characters`, and `AgentLoop.stored` stores the cut summary. An empty or non-string summary is still an error. The length suffix of T1b is gone (no longer reachable). RED: three `ReportCheckTest` tests and `aLongSummaryIsStoredCutAt500Characters` did not compile; GREEN: full suite passed.
 - T1c review (`2b4143f`, base `9a04b5c`, consent granted): approved; SUGGESTION R3-summary-boundary-untested applied: a test keeps 500 characters and cuts 501.
 
+- 2026-10-23: T2, third cloud run, F3 15 samples, with the human's go-ahead (`infra/scripts/out/replay-20261023T134940Z-cloud`, on `41b9965`, **cost $0.086**; cloud spend total about $1.35 of $5). **F3 15/15**, 15 of 15 report attempts valid at the first try. 12 of the 15 summaries were cut at 500 characters: the model writes its reasoning longer than the limit nearly every time, and the cut costs nothing checked. Against the baselines: 13/15 and 14/15 with quotes, 10/15 with line citations and the cause first. Acceptance criterion 4, cloud F3, is met.
+
 ## Next step
 
-T2 again: the cloud replay, F3 15 samples (about $0.10), with the human's go-ahead; then F1 and F2 on the cloud, and the local replay.
+The human's go-ahead for F1 and F2 on the cloud (5 samples each, about $0.06), then the local replay (3 samples per fault, free, about 5 hours). Open question for later: whether to raise the 500-character summary limit, since most summaries are now cut.
