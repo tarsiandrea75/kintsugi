@@ -333,13 +333,33 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void aSummaryTooLongIsRejectedWithItsLength() {
-		// report-field-order: with the reasoning first, cloud summaries ran past 500 characters, and the retry was
-		// not told by how much.
+	void aSummaryTooLongIsCutAt500CharactersAndTheReportStaysValid() {
+		// report-field-order: with the reasoning first, cloud summaries ran 1-25% past 500 characters, also when the
+		// retry was told the length. The summary is reasoning, not evidence: code cuts it instead of rejecting it.
 		String answer = report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2))
-			.replace("what the evidence shows", "x".repeat(612));
+			.replace("what the evidence shows", "😀".repeat(612));
 
-		assertThat(errors(answer)).contains("summary must be a string of 1 to 500 characters, not 612");
+		ReportCheck.Result result = check(answer);
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.summary()).isEqualTo("😀".repeat(499) + "…");
+		assertThat(result.dropped()).containsExactly("summary cut from 612 to 500 characters");
+	}
+
+	@Test
+	void aSummaryWithinTheLimitIsKeptWhole() {
+		ReportCheck.Result result = check(report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2)));
+
+		assertThat(result.summary()).isEqualTo("what the evidence shows");
+		assertThat(result.dropped()).isEmpty();
+	}
+
+	@Test
+	void anEmptySummaryIsStillAnError() {
+		String answer = report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2))
+			.replace("what the evidence shows", "");
+
+		assertThat(errors(answer)).contains("summary must be a string of 1 to 500 characters");
 	}
 
 	@Test

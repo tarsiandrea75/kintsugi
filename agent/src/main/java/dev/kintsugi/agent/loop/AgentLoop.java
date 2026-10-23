@@ -540,7 +540,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					answer.promptTokens(), answer.completionTokens(), null, null, null, null,
 					verdict(errors, checked.dropped()), answer.text(), answer.latencyMs(), now()));
 			if (errors.isEmpty()) {
-				return stored(run, report, checked.evidence());
+				return stored(run, report, checked);
 			}
 		}
 		throw new RunEnd(IncidentStatus.INVALID_REPORT, REPORT_INVALID);
@@ -552,15 +552,17 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * only the verified evidence items (T5c11): what is stored and scored has been checked. Each is
 	 * {@code {toolCallId, tool, line, quote, why}}, its quote the cited line's text, filled in by {@link ReportCheck}
 	 * (evidence-by-reference). The dropped items stay in the {@code REPORT} step's answer, and its summary names them.
+	 * The summary is stored as {@link ReportCheck} kept it, cut when it was too long (report-field-order).
 	 */
-	private String stored(Run run, JsonNode report, List<JsonNode> evidence) {
+	private String stored(Run run, JsonNode report, ReportCheck.Result checked) {
 		ObjectNode stored = JSON.createObjectNode();
 		stored.put("incidentId", run.incident.id().toString());
 		stored.put("mode", run.mode.value());
 		stored.put("route", run.route.value());
 		stored.put("model", run.model);
 		ReportCheck.MODEL_FIELDS.forEach(field -> stored.set(field, report.get(field)));
-		stored.putArray("evidence").addAll(evidence);
+		stored.put("summary", checked.summary());
+		stored.putArray("evidence").addAll(checked.evidence());
 		stored.put("stepsUsed", run.steps);
 		return JSON.writeValueAsString(stored);
 	}

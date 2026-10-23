@@ -43,6 +43,8 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 
 - 2026-10-23: T2, second cloud run, F3 15 samples, with the human's go-ahead (`infra/scripts/out/replay-20261023T132036Z-cloud`, on `eadd1d4`, **cost $0.099**; cloud spend total about $1.26 of $5). **F3 10/15; every valid report matched again (10/10, 18/18 over both runs).** The 5 misses are `INVALID_REPORT`: 16 of 26 attempts had a summary over 500 characters (501-624), also on the retry that was told the length. The valid summaries were 363-496 characters. The model cannot count characters well enough to land under a hard limit it overshoots by 1-25%.
 
+- 2026-10-23: T1c (route: inline), the human's choice: code cuts a summary over 500 characters to its first 499 and `…` instead of rejecting the report; `ReportCheck.Result` carries the stored summary, the verdict lists `summary cut from <n> to 500 characters`, and `AgentLoop.stored` stores the cut summary. An empty or non-string summary is still an error. The length suffix of T1b is gone (no longer reachable). RED: three `ReportCheckTest` tests and `aLongSummaryIsStoredCutAt500Characters` did not compile; GREEN: full suite passed.
+
 ## Next step
 
-The human decides how a long summary is handled. Recommended: code cuts a summary over 500 characters at 500 and marks the cut, instead of rejecting the report; the summary is the model's reasoning, not evidence, the fields after it are checked as before, and no retry is spent. Alternative: raise the limit (for example to 1,000), which costs local write time against the 512-token local report cap.
+T2 again: the cloud replay, F3 15 samples (about $0.10), with the human's go-ahead; then F1 and F2 on the cloud, and the local replay.

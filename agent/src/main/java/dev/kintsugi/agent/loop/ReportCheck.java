@@ -38,6 +38,9 @@ final class ReportCheck {
 
 	private static final Set<String> FIELDS = Set.copyOf(MODEL_FIELDS);
 
+	/** The longest summary stored; a longer one is cut to it, the last character an ellipsis (report-field-order). */
+	static final int MAX_SUMMARY_LENGTH = 500;
+
 	/** The fields of an evidence item the model writes: no {@code quote}, which code fills in. */
 	private static final Set<String> EVIDENCE_FIELDS = Set.of("toolCallId", "tool", "line", "why");
 
@@ -64,11 +67,14 @@ final class ReportCheck {
 	 * @param errors every rule the report breaks, each naming its field or evidence item; empty when it is valid
 	 * @param dropped when the report is valid, the evidence items dropped because their line is not in their step's
 	 * summary (T5c11, evidence-by-reference) or their tool is not their step's tool (T5c14), or because they cite a
-	 * dossier the run has not got or a line it does not have (T5b), each named like an error; empty otherwise
+	 * dossier the run has not got or a line it does not have (T5b), each named like an error, and then a summary
+	 * code cut (report-field-order); empty otherwise
 	 * @param evidence when the report is valid, its verified evidence items, in order, each
 	 * {@code {toolCallId, tool, line, quote, why}} with the quote code filled in; null otherwise
+	 * @param summary when the report is valid, its summary as stored: cut to {@value #MAX_SUMMARY_LENGTH} characters
+	 * when it was longer; null otherwise
 	 */
-	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence) {
+	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence, String summary) {
 	}
 
 	/**
@@ -116,11 +122,8 @@ final class ReportCheck {
 		addIfError(errors, Causes.enumError("rootCauseService", report.get("rootCauseService"), Causes.SERVICES));
 		addIfError(errors, Causes.enumError("rootCauseCategory", report.get("rootCauseCategory"), Causes.CATEGORIES));
 		JsonNode summary = report.get("summary");
-		if (!Causes.string(summary, 1, 500)) {
-			// The length tells a retry by how much to shorten it (report-field-order).
-			String length = summary != null && summary.isString()
-					? ", not " + summary.asString().codePointCount(0, summary.asString().length()) : "";
-			errors.add("summary must be a string of 1 to 500 characters" + length);
+		if (!Causes.string(summary, 1, Integer.MAX_VALUE)) {
+			errors.add("summary must be a string of 1 to " + MAX_SUMMARY_LENGTH + " characters");
 		}
 		JsonNode confidence = report.get("confidence");
 		if (confidence == null || !confidence.isNumber() || confidence.doubleValue() < 0
@@ -160,11 +163,20 @@ final class ReportCheck {
 		if (fatal || (verified.isEmpty() && !unknown)) {
 			return invalid(errors);
 		}
-		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified));
+		String text = summary.asString();
+		int length = text.codePointCount(0, text.length());
+		if (length > MAX_SUMMARY_LENGTH) {
+			// report-field-order: the summary is the model's reasoning, not evidence, and with the reasoning first the
+			// model overran the limit by 1-25% even when told by how much; a cut keeps the report and its checked
+			// fields, and the verdict says so.
+			text = text.substring(0, text.offsetByCodePoints(0, MAX_SUMMARY_LENGTH - 1)) + "…";
+			dropped.add("summary cut from " + length + " to " + MAX_SUMMARY_LENGTH + " characters");
+		}
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text);
 	}
 
 	private static Result invalid(List<String> errors) {
-		return new Result(List.copyOf(errors), List.of(), null);
+		return new Result(List.copyOf(errors), List.of(), null, null);
 	}
 
 	/**

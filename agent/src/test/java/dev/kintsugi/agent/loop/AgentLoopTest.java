@@ -802,6 +802,23 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void aLongSummaryIsStoredCutAt500Characters() {
+		// report-field-order: the stored report keeps the cut summary; the step's verdict says it was cut.
+		this.model.quiet()
+			.planned(call("recent_events", "{\"source\":\"order\",\"sinceMinutes\":15}"))
+			.quiet()
+			.quiet()
+			.text(report("payment-service", "DEPENDENCY_LATENCY", evidence(3, "recent_events", 1))
+				.replace("what the evidence shows", "a".repeat(600)));
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(storedReport().get("summary").asString()).isEqualTo("a".repeat(499) + "…");
+		assertThat(step(6)).containsEntry("summary", "valid; dropped: summary cut from 600 to 500 characters");
+		assertThat(this.model.calls()).isEqualTo(5);
+	}
+
+	@Test
 	void aLongLineIsStoredAsItsFirst160Characters() {
 		// recent_events' line 8 is the newest event with its untrustedText, over 160 characters.
 		this.model.quiet()

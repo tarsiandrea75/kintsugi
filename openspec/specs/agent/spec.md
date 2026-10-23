@@ -875,7 +875,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 
 | Field | Rule |
 |-------|------|
-| `summary` | 1 to 500 characters; out of range, the error gives its length (`summary must be a string of 1 to 500 characters, not 612`) so a retry knows by how much to shorten it **(report-field-order)** |
+| `summary` | a non-empty string; code stores at most 500 characters: a longer one is cut to its first 499 and `…`, the report stays valid and the `REPORT` step's verdict says `summary cut from <n> to 500 characters` **(report-field-order)** |
 | `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step; in dossier mode also `"dossier"` **(T5b)** |
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |
@@ -891,6 +891,11 @@ No other field is allowed, and all five are required. Code then adds `incidentId
 - WHEN the loop builds the report schema and the report task, in either mode
 - THEN the schema's properties and its `required` list are `summary, evidence, rootCauseService, rootCauseCategory, confidence`, in that order
 - AND the report task describes the fields in that order, the cause as what the summary concludes
+
+#### Scenario: A summary too long is cut, not rejected (report-field-order)
+- WHEN a report otherwise valid has a summary of 612 characters
+- THEN it is valid, its stored summary is its first 499 characters and `…`
+- AND the `REPORT` step's summary is `valid; dropped: summary cut from 612 to 500 characters`, and no retry is spent
 
 #### Scenario: Value outside the enums
 - WHEN the model answers `rootCauseService` = `payment-gateway`
