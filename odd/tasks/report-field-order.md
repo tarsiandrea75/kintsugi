@@ -44,6 +44,7 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 - 2026-10-23: T2, second cloud run, F3 15 samples, with the human's go-ahead (`infra/scripts/out/replay-20261023T132036Z-cloud`, on `eadd1d4`, **cost $0.099**; cloud spend total about $1.26 of $5). **F3 10/15; every valid report matched again (10/10, 18/18 over both runs).** The 5 misses are `INVALID_REPORT`: 16 of 26 attempts had a summary over 500 characters (501-624), also on the retry that was told the length. The valid summaries were 363-496 characters. The model cannot count characters well enough to land under a hard limit it overshoots by 1-25%.
 
 - 2026-10-23: T1c (route: inline), the human's choice: code cuts a summary over 500 characters to its first 499 and `…` instead of rejecting the report; `ReportCheck.Result` carries the stored summary, the verdict lists `summary cut from <n> to 500 characters`, and `AgentLoop.stored` stores the cut summary. An empty or non-string summary is still an error. The length suffix of T1b is gone (no longer reachable). RED: three `ReportCheckTest` tests and `aLongSummaryIsStoredCutAt500Characters` did not compile; GREEN: full suite passed.
+- T1c review (`2b4143f`, base `9a04b5c`, consent granted): approved; SUGGESTION R3-summary-boundary-untested applied: a test keeps 500 characters and cuts 501.
 
 ## Next step
 

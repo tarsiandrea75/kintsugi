@@ -355,6 +355,15 @@ class ReportCheckTest {
 	}
 
 	@Test
+	void aSummaryOf500CharactersIsKeptAndOf501IsCut() {
+		String base = report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2));
+
+		assertThat(check(base.replace("what the evidence shows", "b".repeat(500))).summary()).isEqualTo("b".repeat(500));
+		assertThat(check(base.replace("what the evidence shows", "b".repeat(501))).summary())
+			.isEqualTo("b".repeat(499) + "…");
+	}
+
+	@Test
 	void anEmptySummaryIsStillAnError() {
 		String answer = report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2))
 			.replace("what the evidence shows", "");
