@@ -87,6 +87,13 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 - T2 review (`19afa42`, base `2154ecd`, consent granted): approved; WARNING R3-quotable-strips-visible-number (the transitional quote matching, removed in T3), SUGGESTION R3-runbook-budget-untested (follow-up).
 - 2026-10-23: T3 done (route: delegated). The evidence item is `{toolCallId, tool, line, why}`; `ReportCheck` resolves the line with `ToolSummaries.line` / `DossierRenderer.line` and rebuilds each verified item as `{toolCallId, tool, line, quote, why}`, the quote being the line's first 160 code points without its number. Quote matching (`quoted`, `normalized`, `inSummary`, `quotableLines`) is removed. `LiveRunReportCheckTest` and its fixture are retired: they tested the removed quote matcher on unnumbered summaries. `AnthropicSchema` needs no change (it already drops `minimum`). RED: 45 failures and 1 error in six focused classes; GREEN: 180/0/0; full suite 422/0/0; parent re-ran `ReportCheckTest` 40/0/0 and `AgentLoopDossierModeTest` 13/0/0.
 
+- T3 review (`c2c09bf`, base `19afa42`, consent granted): approved, no findings.
+- 2026-10-23: T4, local half: replay with line citations, 3 samples per fault (`infra/scripts/out/replay-20261023T032154Z-local`, on `c2c09bf`, no cloud cost).
+  - **Validity solved: 1 of 9 runs `INVALID_REPORT`** (5 of 9 before). 17 of 18 report attempts were valid at the first try; the one invalid run cited a refused step twice (fatal, as before). No report was cut at 512 (4 attempts before); report answers 347-501 tokens.
+  - No timeout (1,627-1,920 s per run).
+  - Matches: **F1 0/3, F2 3/3, F3 0/3** (before: 2/3, 1/3, 0/3). Every F1 and F3 report is now valid and wrong: F1 names payment-service (DEPENDENCY_LATENCY, the type right), F3 gateway-mock or payment-service, DEPENDENCY_REJECTING.
+  - Reading: the copying failure is gone; what is left on the local route is reasoning on F1 and F3. Whether line citations cost F1 (the design's main risk) is not settled: F1 was 2/3 before, but one of the earlier local F1 runs at 600 s already named payment-service, so local F1 is about 3 of 7 overall. Acceptance criterion 7, local half, is met (fewer invalid runs); the cloud half is pending.
+
 ## Next step
 
-T4: the local replay, 3 samples per fault; then the cloud replay with the human's go-ahead.
+The human decides the cloud replay (5 samples per fault, cents) to check that line citations keep the cloud match rate; then local F1 and F3 reasoning, a separate problem.
