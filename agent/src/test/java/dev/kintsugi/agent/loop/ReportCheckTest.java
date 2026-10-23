@@ -81,7 +81,7 @@ class ReportCheckTest {
 				7, new ToolStep(7, "search_logs", "UPSTREAM_ERROR", failed,
 						ToolSummaries.summarize(7, "search_logs", ToolOutcome.UPSTREAM_ERROR, failed)), //
 				8, new ToolStep(8, "search_logs", "OK", logs, ToolSummaries.summarize(8, "search_logs", ToolOutcome.OK, logs)));
-		String durations = eventsSummary.lines().filter(line -> line.startsWith("durationMs min=")).findFirst().orElseThrow();
+		String durations = ToolSummaries.lines(eventsSummary).stream().filter(line -> line.startsWith("durationMs min=")).findFirst().orElseThrow();
 		assertThat(eventsSummary).contains("b272-3c5\"(cut)");
 		assertThat(steps.get(8).summary()).endsWith("[summary cut at 1500 characters]");
 

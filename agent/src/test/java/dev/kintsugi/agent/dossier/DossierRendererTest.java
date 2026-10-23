@@ -67,6 +67,12 @@ class DossierRendererTest {
 
 	private static final List<String> BANNED_MARKS = List.of("⚠", "✅", "❌");
 
+	/** A Markdown table separator row, {@code |---|---|}. */
+	private static final Pattern SEPARATOR = Pattern.compile("\\|(---\\|)+");
+
+	/** The number at the start of a citable dossier line, {@code D7 }. */
+	private static final Pattern NUMBER = Pattern.compile("(?m)^D\\d+ ");
+
 	@Test
 	void theF3DossierRendersAsItsGoldenFile() {
 		assertThat(DossierRenderer.render(gather("f3"))).isEqualTo(golden("f3"));
@@ -75,6 +81,35 @@ class DossierRendererTest {
 	@Test
 	void theHealthyDossierRendersAsItsGoldenFile() {
 		assertThat(DossierRenderer.render(gather("healthy"))).isEqualTo(golden("healthy"));
+	}
+
+	@Test
+	void everyCitableLineIsNumberedInOrderAndNoHeadingBlankOrTableHeaderIs() {
+		// evidence-by-reference: a report cites a dossier line by its number, and code copies its text.
+		for (Dossier dossier : List.of(gather("f3"), gather("healthy"), failing(), stress())) {
+			String markdown = DossierRenderer.render(dossier);
+			List<String> lines = markdown.lines().toList();
+			int next = 1;
+			for (int i = 0; i < lines.size(); i++) {
+				String line = lines.get(i);
+				boolean separator = SEPARATOR.matcher(line).matches();
+				boolean tableHeader = i + 1 < lines.size() && SEPARATOR.matcher(lines.get(i + 1)).matches();
+				if (line.isEmpty() || line.startsWith("#") || separator || tableHeader) {
+					assertThat(line).as("line %d", i).doesNotMatch("D\\d+ .*");
+				}
+				else {
+					assertThat(line).as("line %d", i).startsWith("D" + next + " ");
+					assertThat(DossierRenderer.line(markdown, next)).hasValue(line.substring(("D" + next + " ").length()));
+					next++;
+				}
+			}
+			assertThat(next).isGreaterThan(1);
+			assertThat(DossierRenderer.line(markdown, 0)).isEmpty();
+			assertThat(DossierRenderer.line(markdown, next)).isEmpty();
+			assertThat(DossierRenderer.render(dossier)).isEqualTo(markdown);
+		}
+		assertThat(DossierRenderer.line(DossierRenderer.render(gather("f3")), 1))
+			.hasValue("- Incident window: the last 10 min, 2026-10-16T09:50:00Z to 2026-10-16T10:00:00Z.");
 	}
 
 	@Test
@@ -142,8 +177,8 @@ class DossierRendererTest {
 		// F1: gateway-mock answers /authorize with 200 in about 10 s; traffic shows only successes.
 		String markdown = DossierRenderer.render(new DossierGatherer(new RecordedLab("f1", "healthy"), CLOCK).gather(10));
 
-		String latency = markdown.substring(markdown.indexOf("## Latency (server side)"),
-				markdown.indexOf("## Log signatures"));
+		String text = unnumbered(markdown);
+		String latency = text.substring(text.indexOf("## Latency (server side)"), text.indexOf("## Log signatures"));
 		assertThat(latency).contains(
 				"| payment-service | /payments | 0.045 | 8.917 | 0.045 | 10.033 | 10/10 | 9/11 |\n"
 						+ "| payment-service | /actuator/prometheus | 0.003 | 0.003 | 0.003 | 0.003 | 10/10 | 11/11 |\n",
@@ -216,7 +251,7 @@ class DossierRendererTest {
 		assertThat(markdown).contains("  - not shown: signatures=29 lines=", "not shown for gateway-mock: rows=27\n",
 				"not shown: rows=25, previous=", "| order-service | 30 | 2026-10-16T09:59:30Z, 2026-10-16T09:59:20Z, "
 						+ "2026-10-16T09:59:10Z, 27 earlier |");
-		assertThat(markdown.lines().filter(line -> line.startsWith("  - count="))).hasSize(8);
+		assertThat(unnumbered(markdown).lines().filter(line -> line.startsWith("  - count="))).hasSize(8);
 		assertThat(markdown.lines().mapToInt(String::length).max().orElseThrow()).isLessThan(1_000);
 	}
 
@@ -231,7 +266,7 @@ class DossierRendererTest {
 	 */
 	private static List<String> shape(String markdown) {
 		List<String> shape = new ArrayList<>();
-		for (String line : markdown.lines().toList()) {
+		for (String line : unnumbered(markdown).lines().toList()) {
 			if (line.startsWith("#") || line.startsWith("| service ") || line.startsWith("| side ")
 					|| line.startsWith("| status ") || line.startsWith("| type ")) {
 				shape.add(line);
@@ -247,6 +282,11 @@ class DossierRendererTest {
 			}
 		}
 		return shape;
+	}
+
+	/** The rendered dossier with every line's {@code D<n> } number removed. */
+	private static String unnumbered(String markdown) {
+		return NUMBER.matcher(markdown).replaceAll("");
 	}
 
 	private static Dossier gather(String set) {

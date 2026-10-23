@@ -69,7 +69,7 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 ## Tasks
 
 - [x] T1 ADR-013 and the spec: the contract, requirements and GIVEN/WHEN/THEN scenarios (route: inline, docs).
-- [ ] T2 Numbered lines: `DossierRenderer` and `ToolSummaries`, with tests (route: to decide at the task; two non-trivial files, so likely delegated).
+- [x] T2 Numbered lines: `DossierRenderer` and `ToolSummaries`, with tests (route: to decide at the task; two non-trivial files, so likely delegated).
 - [ ] T3 Citation by line: `Schemas`, `ReportCheck`, `AgentLoop` storing the filled quote, `Prompts`, with tests.
 - [ ] T4 Measurement: the local replay, 3 samples per fault (free, about 5 hours), then the cloud replay, 5 samples per fault (cents, the human's go-ahead).
 
@@ -82,6 +82,8 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
   - The numbers count toward the summary's 1,500-character cap.
   - Every summary line after the header is citable, also lines code computed (`events=20`): code computes them from the tool's output, as it does the dossier, which is already citable.
 
+- 2026-10-23: T2 done (route: delegated, two non-trivial source files). `DossierRenderer` numbers lines in its `Out` helper and exposes `line(dossier, n)`; `ToolSummaries.capped` numbers summary lines before the cap and exposes `line` and `lines`; the `search_runbooks` budget counts the numbers; a refused call's summary is `1: the call was refused…`, and `AgentLoop.reasonLine` reads numbered lines. Until T3, `quotableLines` falls back to unnumbered summaries (recorded live run). RED: 4 new tests failed on stubs; GREEN: `DossierRendererTest`, `ToolSummariesTest` 57/0/0 (parent re-ran: 12 + 45, 0 failures), full suite 424/0/0.
+
 ## Next step
 
-T2: numbered lines in `DossierRenderer` and `ToolSummaries`.
+T3: citation by line in `Schemas`, `ReportCheck`, `AgentLoop` and `Prompts`.

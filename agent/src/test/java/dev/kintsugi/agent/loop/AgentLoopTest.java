@@ -521,7 +521,7 @@ class AgentLoopTest {
 			.containsEntry("tool_output", null);
 		// A duplicate of a call that ended OK keeps the T5c9 text exactly (T5c13).
 		assertThat((String) step(4).get("summary")).isEqualTo("toolCallId=4 tool=status_summary "
-				+ "outcome=REFUSED_DUPLICATE\nthe call was refused and did not run: the same tool with the same "
+				+ "outcome=REFUSED_DUPLICATE\n1: the call was refused and did not run: the same tool with the same "
 				+ "arguments was already called as toolCallId 2; read that result");
 		assertThat(userText(this.model.prompts().get(2))).contains("Tool calls left: 1 in this phase, 7 in the incident");
 		assertThat(step(6)).containsEntry("tool_outcome", "OK");
@@ -544,7 +544,7 @@ class AgentLoopTest {
 		assertThat(step(2)).containsEntry("tool_outcome", "INVALID_PARAMETER");
 		assertThat(step(4)).containsEntry("tool_outcome", "REFUSED_DUPLICATE").containsEntry("tool_output", null);
 		assertThat((String) step(4).get("summary")).isEqualTo("toolCallId=4 tool=status_summary "
-				+ "outcome=REFUSED_DUPLICATE\nthe call was refused and did not run: the same tool with the same "
+				+ "outcome=REFUSED_DUPLICATE\n1: the call was refused and did not run: the same tool with the same "
 				+ "arguments already failed as toolCallId 2 with INVALID_PARAMETER, reason=\"type must be one of "
 				+ "[PAYMENT_ATTEMPT] for source payment\"; change the arguments, do not repeat the call");
 		// The refusal is still uncounted: the budget is the same as after the first call.

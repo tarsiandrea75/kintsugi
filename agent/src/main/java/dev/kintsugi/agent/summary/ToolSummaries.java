@@ -3,6 +3,7 @@ package dev.kintsugi.agent.summary;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -18,7 +19,7 @@ import dev.kintsugi.agent.lab.ToolOutcome;
  *
  * <p>
  * Every summary starts with the header {@code toolCallId=<step_no> tool=<name> outcome=<outcome> returned=<n>
- * truncated=<bool>}, then one line per fact. Every string copied from the output is written as a JSON string literal
+ * truncated=<bool>}, then one line per fact, numbered within the step ({@code 1: }, {@code 2: }, ...). Every string copied from the output is written as a JSON string literal
  * ({@code field="..."}): its quotes, backslashes and newlines stay escaped, so text from the lab can never close the
  * quote, start a line of its own or pass for a header or an instruction; it is always a labelled value. The escaping
  * is Jackson's, as in mcp-tools' own result, so the text between the quotes is also a substring of the raw output,
@@ -54,20 +55,57 @@ public final class ToolSummaries {
 	}
 
 	/**
+	 * The text of line {@code n} of {@code summary}, without its number {@code n: }; empty when the summary has no such
+	 * line: the header and the cut note have no number (agent spec, "Summaries built in code", evidence-by-reference).
+	 * @param summary a summary as {@link #summarize} built it, or a refused call's summary, or null
+	 * @param n the cited line's number, from 1
+	 */
+	public static Optional<String> line(String summary, int n) {
+		List<String> lines = lines(summary);
+		return n >= 1 && n <= lines.size() ? Optional.of(lines.get(n - 1)) : Optional.empty();
+	}
+
+	/**
+	 * The numbered lines of {@code summary}, in order and without their numbers: line {@code n} is at index
+	 * {@code n - 1}. The header, the cut note and any line that does not carry the next number are not among them.
+	 * @param summary a summary as {@link #summarize} built it, or a refused call's summary, or null
+	 */
+	public static List<String> lines(String summary) {
+		if (summary == null) {
+			return List.of();
+		}
+		List<String> lines = new ArrayList<>();
+		for (String line : summary.lines().skip(1).toList()) {
+			String number = linePrefix(lines.size() + 1);
+			if (!line.startsWith(number)) {
+				break;
+			}
+			lines.add(line.substring(number.length()));
+		}
+		return lines;
+	}
+
+	/** The prefix of summary line {@code n}: {@code n: }. */
+	static String linePrefix(int n) {
+		return n + ": ";
+	}
+
+	/**
 	 * The lines of {@code summary} that copy text from the tool output, without the {@code (cut)} markers code wrote:
 	 * what a quote of the summary may come from (T5c8, the T5c6 review). Every string the output holds is written as a
 	 * JSON string literal, so a line without a {@code "} holds none: the header, the counts and aggregates the code
 	 * computed ({@code events=20}, {@code durationMs min=... max=...}, {@code newest 3:}), the outcome sentences and
 	 * the cut note. A kept line keeps its labels and per-item figures ({@code status="PAID" count=3}), the shape the
-	 * model saw.
+	 * model saw, without its line number, which code wrote. A summary recorded before lines were numbered
+	 * (evidence-by-reference), as in the live-run fixtures, is read line by line after its header.
 	 * @param summary a summary as {@link #summarize} built it, or null
 	 */
 	public static List<String> quotableLines(String summary) {
 		if (summary == null) {
 			return List.of();
 		}
-		return summary.lines()
-			.skip(1)
+		List<String> numbered = lines(summary);
+		return (numbered.isEmpty() ? summary.lines().skip(1).toList() : numbered).stream()
 			.filter(line -> line.indexOf('"') >= 0)
 			.map(line -> CUT_MARKER.matcher(line).replaceAll("$1\""))
 			.toList();
@@ -131,11 +169,14 @@ public final class ToolSummaries {
 		}
 	}
 
-	/** Header and lines, dropping whole lines from the end, with a note, until the summary fits. */
+	/**
+	 * Header and lines, each line numbered from 1, dropping whole lines from the end, with a note, until the summary
+	 * fits; the numbers count toward the cap, and the note has none (evidence-by-reference).
+	 */
 	static String capped(String header, List<String> lines) {
 		StringBuilder out = new StringBuilder(header);
 		for (int i = 0; i < lines.size(); i++) {
-			String line = lines.get(i);
+			String line = linePrefix(i + 1) + lines.get(i);
 			int left = MAX_CHARS - out.length() - 1;
 			boolean last = i == lines.size() - 1;
 			if (line.length() <= left && (last || line.length() + 1 + CUT_NOTE.length() <= left)) {

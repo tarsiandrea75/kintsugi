@@ -258,16 +258,23 @@ final class Summarizers {
 					+ field(r.item(), "untrustedText", RUNBOOK_TEXT_CHARS));
 		}
 		String first = ", nearest first";
-		int left = ToolSummaries.MAX_CHARS - HEADER_ROOM - ("chunks=" + items.size() + " shown=N" + first).length() - 1;
+		// Every line costs its number too (evidence-by-reference): the count line is line 1, chunk k is line k + 2.
+		int left = ToolSummaries.MAX_CHARS - HEADER_ROOM
+				- (ToolSummaries.linePrefix(1) + "chunks=" + items.size() + " shown=N" + first).length() - 1;
 		int shown = 0;
-		while (shown < chunks.size() && (shown == 0 || chunks.get(shown).length() + 1 <= left)) {
-			left -= chunks.get(shown).length() + 1;
+		while (shown < chunks.size() && (shown == 0 || cost(shown, chunks) <= left)) {
+			left -= cost(shown, chunks);
 			shown++;
 		}
 		List<String> lines = new ArrayList<>();
 		lines.add("chunks=" + items.size() + " shown=" + shown + first);
 		lines.addAll(chunks.subList(0, shown));
 		return lines;
+	}
+
+	/** The characters chunk {@code index} adds to a summary: its line break, its number and its text. */
+	private static int cost(int index, List<String> chunks) {
+		return 1 + ToolSummaries.linePrefix(index + 2).length() + chunks.get(index).length();
 	}
 
 	private static String event(JsonNode event, boolean withOrder) {

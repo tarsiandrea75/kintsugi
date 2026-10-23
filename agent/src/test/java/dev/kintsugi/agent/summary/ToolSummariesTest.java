@@ -77,6 +77,57 @@ class ToolSummariesTest {
 	}
 
 	@Test
+	void everyLineAfterTheHeaderIsNumberedWithinTheStep() {
+		// evidence-by-reference: a report cites a summary line by its number, and code copies its text.
+		ArrayNode items = JSON.createArrayNode();
+		items.addObject().put("status", "PAID").put("count", 3);
+		items.addObject().put("status", "PAYMENT_FAILED").put("count", 6);
+
+		String summary = ToolSummaries.summarize(3, "status_summary", OK, ok(items));
+
+		assertThat(summary).isEqualTo("toolCallId=3 tool=status_summary outcome=OK returned=2 truncated=false\n"
+				+ "1: status=\"PAID\" count=3\n2: status=\"PAYMENT_FAILED\" count=6");
+		assertThat(ToolSummaries.line(summary, 1)).hasValue("status=\"PAID\" count=3");
+		assertThat(ToolSummaries.line(summary, 2)).hasValue("status=\"PAYMENT_FAILED\" count=6");
+		assertThat(ToolSummaries.line(summary, 0)).isEmpty();
+		assertThat(ToolSummaries.line(summary, 3)).isEmpty();
+		assertThat(ToolSummaries.lines(summary)).containsExactly("status=\"PAID\" count=3",
+				"status=\"PAYMENT_FAILED\" count=6");
+		// The numbering restarts with every step.
+		assertThat(ToolSummaries.summarize(9, "count_logs", OK, fixture("count_logs.json")).lines().skip(1).findFirst())
+			.hasValueSatisfying(line -> assertThat(line).startsWith("1: "));
+	}
+
+	@Test
+	void aCutSummaryNumbersOnlyTheLinesItKeepsAndNotItsCutNote() {
+		ArrayNode items = JSON.createArrayNode();
+		for (int i = 0; i < 5; i++) {
+			log(items, "2026-10-08T10:00:0%dZ".formatted(i), LETTERS.charAt(i) + " " + "\"quoted\"\n".repeat(30));
+		}
+
+		String summary = ToolSummaries.summarize(6, "search_logs", OK, ok(items));
+
+		List<String> after = summary.lines().skip(1).toList();
+		assertThat(summary.length()).isLessThanOrEqualTo(ToolSummaries.MAX_CHARS);
+		assertThat(after.get(after.size() - 1)).isEqualTo(ToolSummaries.CUT_NOTE);
+		for (int i = 0; i < after.size() - 1; i++) {
+			assertThat(after.get(i)).startsWith((i + 1) + ": ");
+		}
+		assertThat(ToolSummaries.lines(summary)).hasSize(after.size() - 1);
+		assertThat(ToolSummaries.line(summary, after.size())).isEmpty();
+	}
+
+	@Test
+	void theLineNumbersCountTowardTheCap() {
+		// A line that would just fit without its number is dropped once "1: " is counted.
+		String line = "x".repeat(ToolSummaries.MAX_CHARS - 2);
+
+		assertThat(ToolSummaries.capped("h", List.of(line))).isEqualTo("h\n" + ToolSummaries.CUT_NOTE);
+		assertThat(ToolSummaries.capped("h", List.of(line.substring(3)))).isEqualTo("h\n1: " + line.substring(3))
+			.hasSize(ToolSummaries.MAX_CHARS);
+	}
+
+	@Test
 	void stockShowsTheTenLowestWithTiesInOutputOrder() {
 		ArrayNode items = JSON.createArrayNode();
 		for (int i = 1; i <= 12; i++) {
@@ -259,7 +310,7 @@ class ToolSummariesTest {
 
 		assertThat(summary.length()).isLessThanOrEqualTo(ToolSummaries.MAX_CHARS);
 		assertThat(summary).endsWith("\n" + ToolSummaries.CUT_NOTE);
-		assertThat(summary.lines().filter(line -> line.startsWith("count=")).toList()).hasSizeBetween(1, 4)
+		assertThat(body(summary).stream().filter(line -> line.startsWith("count=")).toList()).hasSizeBetween(1, 4)
 			.allSatisfy(line -> assertThat(line).endsWith("\"(cut)"));
 		assertEveryLiteralIsInTheOutput(summary, output);
 	}
@@ -308,7 +359,7 @@ class ToolSummariesTest {
 		assertThat(quotable).noneMatch(line -> line.contains("(cut)"))
 			.anySatisfy(line -> assertThat(line).endsWith("5c3034dc-dacc-474c-b272-3c5\""));
 		// A "(cut)" inside copied text is the output's own and stays; so do an escaped quote and backslash before it.
-		assertThat(ToolSummaries.quotableLines("h\nx=\"a \\\"(cut)\" y=\"b\\\\\"(cut)"))
+		assertThat(ToolSummaries.quotableLines("h\n1: x=\"a \\\"(cut)\" y=\"b\\\\\"(cut)"))
 			.containsExactly("x=\"a \\\"(cut)\" y=\"b\\\\\"");
 		assertThat(ToolSummaries.quotableLines(null)).isEmpty();
 	}
@@ -445,7 +496,7 @@ class ToolSummariesTest {
 		String summary = ToolSummaries.summarize(3, "count_logs", OK, output);
 
 		assertThat(summary).isEqualTo(
-				"toolCallId=3 tool=count_logs outcome=OK returned=1 truncated=true\nservice=\"order-service\" count=4");
+				"toolCallId=3 tool=count_logs outcome=OK returned=1 truncated=true\n1: service=\"order-service\" count=4");
 	}
 
 	@Test
@@ -453,8 +504,8 @@ class ToolSummariesTest {
 		String summary = ToolSummaries.summarize(2, "search_logs", INVALID_PARAMETER, fixture("search_logs-invalid.json"));
 
 		assertThat(summary).isEqualTo("toolCallId=2 tool=search_logs outcome=INVALID_PARAMETER returned=0 truncated=false\n"
-				+ "the tool rejected the arguments; no query ran\n"
-				+ "reason=\"service must be one of [order-service, payment-service, inventory-service, gateway-mock]\"");
+				+ "1: the tool rejected the arguments; no query ran\n"
+				+ "2: reason=\"service must be one of [order-service, payment-service, inventory-service, gateway-mock]\"");
 	}
 
 	@Test
@@ -462,8 +513,8 @@ class ToolSummariesTest {
 		String summary = ToolSummaries.summarize(5, "count_logs", INVALID_PARAMETER, "plain \"text\"\nfrom somewhere");
 
 		assertThat(summary).isEqualTo("toolCallId=5 tool=count_logs outcome=INVALID_PARAMETER returned=0 truncated=false\n"
-				+ "the tool rejected the arguments; no query ran\n"
-				+ "reason=\"plain \\\"text\\\"\\nfrom somewhere\"");
+				+ "1: the tool rejected the arguments; no query ran\n"
+				+ "2: reason=\"plain \\\"text\\\"\\nfrom somewhere\"");
 	}
 
 	@Test
@@ -473,8 +524,8 @@ class ToolSummariesTest {
 
 		assertThat(ToolSummaries.summarize(1, "status_summary", UPSTREAM_ERROR, output))
 			.isEqualTo("toolCallId=1 tool=status_summary outcome=UPSTREAM_ERROR returned=0 truncated=false\n"
-					+ "a data source of the tool failed; the failure itself is evidence\n"
-					+ "reason=\"PostgreSQL orders is unreachable\"");
+					+ "1: a data source of the tool failed; the failure itself is evidence\n"
+					+ "2: reason=\"PostgreSQL orders is unreachable\"");
 	}
 
 	@Test
@@ -483,8 +534,8 @@ class ToolSummariesTest {
 				"mcp-tools call failed: RuntimeException: Client failed to initialize calling tool");
 
 		assertThat(summary).isEqualTo("toolCallId=1 tool=count_logs outcome=CLIENT_ERROR returned=0 truncated=false\n"
-				+ "mcp-tools could not be reached or gave no readable result; no evidence was read\n"
-				+ "reason=\"mcp-tools call failed: RuntimeException: Client failed to initialize calling tool\"");
+				+ "1: mcp-tools could not be reached or gave no readable result; no evidence was read\n"
+				+ "2: reason=\"mcp-tools call failed: RuntimeException: Client failed to initialize calling tool\"");
 	}
 
 	@Test
@@ -509,9 +560,22 @@ class ToolSummariesTest {
 		assertThat(found).isNotNegative();
 	}
 
+	/**
+	 * The lines after the header, without their numbers, which must run from 1 with no gap; the cut note keeps its
+	 * place, unnumbered.
+	 */
 	private static List<String> body(String summary) {
-		List<String> lines = new ArrayList<>(summary.lines().toList());
-		return lines.subList(1, lines.size());
+		List<String> lines = new ArrayList<>();
+		for (String line : summary.lines().skip(1).toList()) {
+			if (line.equals(ToolSummaries.CUT_NOTE)) {
+				lines.add(line);
+				continue;
+			}
+			String number = (lines.size() + 1) + ": ";
+			assertThat(line).startsWith(number);
+			lines.add(line.substring(number.length()));
+		}
+		return lines;
 	}
 
 	private static String ok(ArrayNode items) {

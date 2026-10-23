@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -113,6 +114,30 @@ public final class DossierRenderer {
 	}
 
 	/**
+	 * The text of line {@code D<n>} of a rendered dossier, without {@code D<n> }; empty when it has no such line
+	 * (agent spec, "Evidence dossier rendering", evidence-by-reference). Only the renderer starts a line with
+	 * {@code D}: headings start with {@code #}, table header and separator rows with {@code |}, and text from the lab
+	 * is escaped, so it never starts a line of its own.
+	 * @param dossier the dossier as {@link #render} wrote it, or null
+	 * @param n the cited line's number, from 1
+	 */
+	public static Optional<String> line(String dossier, int n) {
+		if (dossier == null || n < 1) {
+			return Optional.empty();
+		}
+		String prefix = linePrefix(n);
+		return dossier.lines()
+			.filter(line -> line.startsWith(prefix))
+			.map(line -> line.substring(prefix.length()))
+			.findFirst();
+	}
+
+	/** The prefix of dossier line {@code n}: {@code D<n> }. */
+	private static String linePrefix(int n) {
+		return "D" + n + " ";
+	}
+
+	/**
 	 * One traffic edge: the caller's client calls and the target's server requests with this method and uri.
 	 *
 	 * @param caller the calling lab service, or {@code null} when the caller is outside the lab
@@ -162,7 +187,7 @@ public final class DossierRenderer {
 	private static void header(Out out, Dossier dossier) {
 		Dossier.Window incident = dossier.incidentWindow();
 		Dossier.Window previous = dossier.previousWindow();
-		out.line("# Evidence dossier");
+		out.heading("# Evidence dossier");
 		out.blank();
 		out.line("- Incident window: the last " + minutes(incident) + " min, " + incident.from() + " to "
 				+ incident.to() + ".");
@@ -559,12 +584,24 @@ public final class DossierRenderer {
 
 	}
 
-	/** The text being written; sections are separated by one blank line. */
+	/**
+	 * The text being written; sections are separated by one blank line. Every line written with {@link #line} is
+	 * citable and gets the next number, {@code D1 }, {@code D2 }, ... from the top; headings, blank lines and table
+	 * header and separator rows are not numbered (evidence-by-reference).
+	 */
 	private static final class Out {
 
 		private final StringBuilder text = new StringBuilder();
 
+		private int lines;
+
 		void line(String line) {
+			this.lines++;
+			this.text.append(linePrefix(this.lines)).append(line).append('\n');
+		}
+
+		/** A heading, or a table's header or separator row: not citable, so not numbered. */
+		void heading(String line) {
 			this.text.append(line).append('\n');
 		}
 
@@ -577,13 +614,13 @@ public final class DossierRenderer {
 			if (!this.text.isEmpty() && !this.text.toString().endsWith("\n\n")) {
 				blank();
 			}
-			line(heading);
+			heading(heading);
 			blank();
 		}
 
 		void table(List<String> headers, List<List<String>> rows) {
-			line("| " + String.join(" | ", headers) + " |");
-			line("|" + "---|".repeat(headers.size()));
+			heading("| " + String.join(" | ", headers) + " |");
+			heading("|" + "---|".repeat(headers.size()));
 			rows.forEach(row -> line("| " + String.join(" | ", row) + " |"));
 		}
 

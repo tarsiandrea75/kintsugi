@@ -261,8 +261,8 @@ class McpLabToolsTest {
 		assertThat(output.get("items").isEmpty()).isTrue();
 		assertThat(ToolSummaries.summarize(4, "count_logs", result.outcome(), result.rawOutput()))
 			.isEqualTo("toolCallId=4 tool=count_logs outcome=INVALID_PARAMETER returned=0 truncated=false\n"
-					+ "the tool rejected the arguments; no query ran\n"
-					+ "reason=\"the arguments are not a JSON object\"");
+					+ "1: the tool rejected the arguments; no query ran\n"
+					+ "2: reason=\"the arguments are not a JSON object\"");
 	}
 
 	@Test

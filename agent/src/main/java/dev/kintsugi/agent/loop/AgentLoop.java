@@ -497,17 +497,18 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * The {@code reason="..."} line of a failed call's summary, or null: the tool's reason as the summary already quotes
-	 * it, escaped and cut at its end, so a refusal that repeats it adds no unchecked tool text (T5c13).
+	 * it, escaped and cut at its end, so a refusal that repeats it adds no unchecked tool text (T5c13); without its line
+	 * number, which belongs to that summary (evidence-by-reference).
 	 */
 	private static String reasonLine(String summary) {
-		return summary.lines().filter(line -> line.startsWith("reason=")).findFirst().orElse(null);
+		return ToolSummaries.lines(summary).stream().filter(line -> line.startsWith("reason=")).findFirst().orElse(null);
 	}
 
 	/** Records a call that did not run, and the summary that tells the model why. */
 	private String refuse(Run run, Phase phase, ToolCall call, String model, String outcome, String why) {
 		int stepNo = run.steps + 1;
 		String summary = "toolCallId=" + stepNo + " tool=" + label(call.name()) + " outcome=" + outcome
-				+ "\nthe call was refused and did not run: " + why;
+				+ "\n1: the call was refused and did not run: " + why;
 		write(run, new StepRow(stepNo, "TOOL_CALL", phase.name(), model, null, null, null, call.name(),
 				jsonArgs(call.arguments()), null, outcome, summary, null, 0, now()));
 		run.toolSteps.put(stepNo, new ToolStep(stepNo, String.valueOf(call.name()), outcome, null, summary));
