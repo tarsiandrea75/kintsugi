@@ -333,6 +333,16 @@ class ReportCheckTest {
 	}
 
 	@Test
+	void aSummaryTooLongIsRejectedWithItsLength() {
+		// report-field-order: with the reasoning first, cloud summaries ran past 500 characters, and the retry was
+		// not told by how much.
+		String answer = report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2))
+			.replace("what the evidence shows", "x".repeat(612));
+
+		assertThat(errors(answer)).contains("summary must be a string of 1 to 500 characters, not 612");
+	}
+
+	@Test
 	void theSchemaPutsTheReasoningBeforeTheCause() {
 		// report-field-order: the model writes left to right, so the summary and the evidence come before the cause
 		// they lead to.

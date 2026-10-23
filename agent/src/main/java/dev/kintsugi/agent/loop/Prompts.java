@@ -112,7 +112,8 @@ final class Prompts {
 
 	private static final String REPORT_TASK = """
 			Task: write the final report as a JSON object with these fields, in this order: summary first, then \
-			the evidence, then the cause they lead to. summary: 1 to 500 characters, your reasoning. evidence: 1 to \
+			the evidence, then the cause they lead to. summary: your reasoning in brief, at most 500 characters \
+			(about 80 words). evidence: 1 to \
 			5 items {toolCallId, tool, line, why}, or none when both causes are UNKNOWN; each item cites a step \
 			and the number of one line of its summary: toolCallId and tool come from the summary's header, line is \
 			the number at the start of one line of that summary (2 for the line that starts with "2: "), and why \

@@ -115,8 +115,12 @@ final class ReportCheck {
 		unexpected(report, FIELDS, "", errors);
 		addIfError(errors, Causes.enumError("rootCauseService", report.get("rootCauseService"), Causes.SERVICES));
 		addIfError(errors, Causes.enumError("rootCauseCategory", report.get("rootCauseCategory"), Causes.CATEGORIES));
-		if (!Causes.string(report.get("summary"), 1, 500)) {
-			errors.add("summary must be a string of 1 to 500 characters");
+		JsonNode summary = report.get("summary");
+		if (!Causes.string(summary, 1, 500)) {
+			// The length tells a retry by how much to shorten it (report-field-order).
+			String length = summary != null && summary.isString()
+					? ", not " + summary.asString().codePointCount(0, summary.asString().length()) : "";
+			errors.add("summary must be a string of 1 to 500 characters" + length);
 		}
 		JsonNode confidence = report.get("confidence");
 		if (confidence == null || !confidence.isNumber() || confidence.doubleValue() < 0

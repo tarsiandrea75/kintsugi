@@ -875,7 +875,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 
 | Field | Rule |
 |-------|------|
-| `summary` | 1 to 500 characters |
+| `summary` | 1 to 500 characters; out of range, the error gives its length (`summary must be a string of 1 to 500 characters, not 612`) so a retry knows by how much to shorten it **(report-field-order)** |
 | `evidence` | 1 to 5 items **(chosen)**; 0 to 5 when both enums are `UNKNOWN` |
 | `evidence[].toolCallId` | the `step_no` of a recorded tool step; in dossier mode also `"dossier"` **(T5b)** |
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |

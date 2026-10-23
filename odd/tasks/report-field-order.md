@@ -36,6 +36,9 @@ In: `Schemas.report` (property and `required` order), `Prompts.REPORT_TASK` (the
 
 - T1 review (`4585c0c`, base `1811640`, consent granted): approved; WARNING R3-stored-order-unproved: the scenario said the stored report keeps the order, but `incidents.report` is jsonb, which does not keep key order. The line is removed from the scenario.
 
+- 2026-10-23: T2, first cloud run, F3 15 samples (`infra/scripts/out/replay-20261023T125404Z-cloud`, on `d396ec4`, **cost $0.095**; cloud spend total about $1.16 of $5). **F3 8/15, and every valid report matched (8/8)**; the 7 misses are `INVALID_REPORT`. 20 of 28 report attempts failed one rule, every time the same: `summary must be a string of 1 to 500 characters`. With the reasoning first and "your reasoning" in the task, summaries ran past 500 characters (the cloud schema cannot carry `maxLength`), and the retry error did not say by how much.
+- T1b (route: inline): the task asks for "your reasoning in brief, at most 500 characters (about 80 words)", and the length error gives the summary's length (`…, not 612`). RED: `aSummaryTooLongIsRejectedWithItsLength` and the prompt test failed; GREEN: full suite passed.
+
 ## Next step
 
-T2: the cloud replay, F3 15 samples.
+T2 again: the cloud replay, F3 15 samples (about $0.10), with the human's go-ahead.

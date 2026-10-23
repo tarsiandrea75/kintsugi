@@ -177,7 +177,8 @@ class PromptsTest {
 		String task = Prompts.report(new Prompts.State(Phase.CONCLUDE, 0, 0, null), List.of(), List.of());
 
 		assertThat(task).contains("with these fields, in this order: summary")
-			.containsSubsequence("summary:", "evidence:", "rootCauseService and rootCauseCategory", "confidence:");
+			.containsSubsequence("summary:", "evidence:", "rootCauseService and rootCauseCategory", "confidence:")
+			.contains("summary: your reasoning in brief, at most 500 characters (about 80 words)");
 	}
 
 	@Test
