@@ -71,7 +71,7 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
 - [x] T1 ADR-013 and the spec: the contract, requirements and GIVEN/WHEN/THEN scenarios (route: inline, docs).
 - [x] T2 Numbered lines: `DossierRenderer` and `ToolSummaries`, with tests (route: to decide at the task; two non-trivial files, so likely delegated).
 - [x] T3 Citation by line: `Schemas`, `ReportCheck`, `AgentLoop` storing the filled quote, `Prompts`, with tests.
-- [ ] T4 Measurement: the local replay, 3 samples per fault (free, about 5 hours), then the cloud replay, 5 samples per fault (cents, the human's go-ahead).
+- [x] T4 Measurement: the local replay, 3 samples per fault (free, about 5 hours), then the cloud replay, 5 samples per fault (cents, the human's go-ahead).
 
 ## Progress
 
@@ -108,6 +108,8 @@ In: `DossierRenderer`, `ToolSummaries`, `Schemas`, `ReportCheck`, `AgentLoop` (s
   - **The same failure mode predates line citations.** The 5 earlier cloud F3 misses, with quotes (the `replay-20261020*-cloud` runs), are also `payment-service`, mostly UNKNOWN, with summaries that describe order-service failing to reach a healthy payment-service. So citing by line did not create a new error; at most it made an old one more frequent, which 15 samples cannot separate.
   - A likely cause: the report's fields come in the order `rootCauseService, rootCauseCategory, summary, confidence, evidence`, so the model commits to the cause before it writes its reasoning, and the summary then reasons its way to the right answer too late.
 
+- 2026-10-23: the human approved the field-order change as a separate feature (`odd/tasks/report-field-order.md`). This feature is closed.
+
 ## Next step
 
-Recommended: a separate, small change that puts `summary` and `evidence` before `rootCauseService` and `rootCauseCategory` in the schema and the report task (reason first, answer last), measured on cloud F3 (15 samples, about $0.09) and then locally. Line citations stay: they fixed local validity and F3's misses are not caused by the cited lines.
+None here. Recommended (now `odd/tasks/report-field-order.md`): a separate, small change that puts `summary` and `evidence` before `rootCauseService` and `rootCauseCategory` in the schema and the report task (reason first, answer last), measured on cloud F3 (15 samples, about $0.09) and then locally. Line citations stay: they fixed local validity and F3's misses are not caused by the cited lines.
