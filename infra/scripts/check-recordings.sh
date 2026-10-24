@@ -14,7 +14,7 @@ For every <fault>-incident.json and <fault>-r<round>-incident.json in each run d
 calls, recorded with their arguments and outputs in the incident's DOSSIER step. The incident window is the last N
 minutes (N is the incident's sinceMinutes), the previous window the N minutes before it. It checks:
 - the previous window: the orders table shows at least 3 PAID orders and no order in any other status, and no traffic
-  row, on any edge, has an outcome other than SUCCESS (a client error);
+  row, on any edge and either side, has an outcome other than SUCCESS;
 - the incident window: no service restarted, except once for the fault's own recreate: order-service for F3,
   inventory-service for F4. F1 and F2 restart nothing.
 It prints one PASS or FAIL line per incident, with the facts that fail it, then a RESULT line. An incident that is not
@@ -152,7 +152,7 @@ if isinstance(traffic, str):
 else:
     errors = [row(item) for item in traffic if item.get("outcome") != "SUCCESS" and number(item, "count") > 0]
     if errors:
-        facts.append("previous window: client errors: " + ", ".join(errors))
+        facts.append("previous window: traffic not SUCCESS: " + ", ".join(errors))
 
 own = RECREATES.get(fault)
 recreated = False
@@ -174,7 +174,8 @@ else:
 if facts:
     done(False, facts)
 restarted = "%s restarted once, %s's own recreate" % (own, fault) if recreated else "no restart"
-done(True, ["previous window: %d PAID orders, no other state, no client error" % paid, "incident window: " + restarted])
+done(True, ["previous window: %d PAID orders, no other state, all traffic SUCCESS" % paid,
+            "incident window: " + restarted])
 EOF
 }
 

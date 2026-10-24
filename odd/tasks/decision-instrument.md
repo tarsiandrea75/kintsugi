@@ -118,7 +118,7 @@ Explorer and dossier replays keep today's behavior.
 1. In decision mode a run makes no INVESTIGATE or KNOWLEDGE call. It gathers the dossier before the warm-up, then makes the REPORT call (at most one retry), then stores the report. The explorer and dossier modes behave as before, and their tests stay unchanged and green.
 2. `replay-agent.sh --mode decision --split <name>` replays each recording of the split once, or M times with `--repeats`. It makes no unrecorded call, and the summary names each recording.
 3. A recording round made with `verify-agent.sh --mode decision --route cloud` passes `check-recordings.sh`:
-   - every previous window holds at least 3 PAID orders, and no failed order state or client error row;
+   - every previous window holds at least 3 PAID orders, no order in any other state, and no traffic row other than SUCCESS (either side);
    - every incident window shows no restart except the one the fault itself makes (F3 recreates order-service).
 4. The manifest holds at least 5 `dev` and 5 `holdout` recordings per fault for F1-F3, plus the `stress` rows and any `probe` rows.
 5. This document records M0: today's REPORT prompt in decision mode on `dev`, on the local route (`granite4.1:8b`) and the cloud route, as matches per fault over distinct recordings.
@@ -132,6 +132,7 @@ Explorer and dossier replays keep today's behavior.
   - in `verify-agent.sh` and `lib.sh`: `--mode decision`, the margin, the baseline phase and `--rounds` (F4 left out, see Design);
   - `check-recordings.sh`;
   - the docs.
+- [x] T2r The slice review's findings (the label and the flaky test; the `diagnose()` tests are T2r2, after T4). Route: inline, for the label and the flaky test. The `diagnose()` tests wait for T4 to end, because they touch `verify-agent.sh`, which T4 is running.
 - [ ] T3 Replay over many recordings. Route: delegated writer. It covers:
   - the manifest splits;
   - one case per recording;
@@ -209,6 +210,22 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - About 650 authored lines, over the 400 heuristic: the check script is 190 lines and the tests about 175.
   - Not covered by a test: the `diagnose` branch of `verify-agent.sh`. It needs the lab; its loop shape is tested against the real `baseline_phase`.
 
+- Slice review, T1r and T2 (`cf005a0`, base `3830488`, four lenses, 13 files, 988 lines, consent granted): approved and acknowledged (lineage `review-bfba21c58f6dd791`). Findings:
+  - WARNING R2-check-recordings-client-error-label: the previous-window check flags every non-SUCCESS row, server side included, but labels them all "client errors". The check is right; the label is wrong.
+  - SUGGESTION R3-wallclock-budget-test-timing: `theGatheringDoesNotCountAgainstTheIncidentsTimeBudget` uses the real clock with a 400 ms budget, so it can fail on a loaded host.
+  - SUGGESTION R3-decision-diagnose-branches-unproved: no test covers decision mode's two branches in `diagnose()`, the `baseline failed` row and the window-too-large MISS.
+- 2026-10-24 16:26 UTC: T4 started, `verify-agent.sh --mode decision --route cloud --rounds 10` on `cf005a0`, about 11 h. Until it ends, nothing that it runs may change: `verify-agent.sh`, `lib.sh` and the lab's sources.
+
+- 2026-10-24: T2r done (route: inline; mechanical edits in known places).
+  - The label: `check-recordings.sh` now says "traffic not SUCCESS" (either side), and its PASS line says "all traffic SUCCESS". The check itself is unchanged.
+    - RED: the `test-lib.sh` expectations were updated first, and "a clean decision-mode recording passes" failed.
+    - GREEN: 112 cases.
+  - The flaky test: `theGatheringDoesNotCountAgainstTheIncidentsTimeBudget` now uses a 3 s gathering and a 2 s budget. `theTimeBudgetStartsWhenTheWarmUpEndsNotWhenTheIncidentOpened`, which had the same 400 ms real-time window, now uses a 10 s clock offset and a 2 s budget.
+    - Each test still proves its property: the gathering outlasts the whole budget, and the offset exceeds it.
+    - Mutation check: with the old `elapsed()` restored, exactly these two tests failed (12 run, 2 failures). With the fix, they are green.
+  - The full agent suite is green.
+  - T2r2, after T4 ends, will test decision mode's two `diagnose()` branches: the `baseline failed` row and the window-too-large MISS.
+
 ## Next step
 
-Review the slice T1r and T2 (base `3830488`), then T3 and T4.
+T3 while T4 records; T2r2 after T4.

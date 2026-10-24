@@ -383,8 +383,8 @@ expect "explorer mode logs as before: no rounds, no baseline" "$(verify_agent ex
 check_recordings="$(dirname "${BASH_SOURCE[0]}")/check-recordings.sh"
 clean_run="$(dirname "${BASH_SOURCE[0]}")/testdata/check-recordings/clean"
 expect "a clean decision-mode recording passes" "$("$check_recordings" "$clean_run" 2>&1; echo "exit $?")" \
-  "PASS  $clean_run/F3-r1-incident.json: previous window: 5 PAID orders, no other state, no client error; incident\
- window: order-service restarted once, F3's own recreate"$'\n'"RESULT: PASS (1 recording(s) clean)"$'\n'"exit 0"
+  "PASS  $clean_run/F3-r1-incident.json: previous window: 5 PAID orders, no other state, all traffic SUCCESS;\
+ incident window: order-service restarted once, F3's own recreate"$'\n'"RESULT: PASS (1 recording(s) clean)"$'\n'"exit 0"
 old_run="$KEY_DIR/verify-agent-20261019T214629Z"
 mkdir -p "$old_run"
 for fault in F1 F2 F3; do
@@ -397,11 +397,11 @@ expect "F1: no order in its previous window, the lab's start in its incident win
   "FAIL  $old_run/F1-incident.json: previous window: 0 PAID orders, at least 3 needed; incident window: restarts\
  besides the fault's own (F1 restarts nothing): gateway-mock 1, inventory-service 1, order-service 1, payment-service 1"
 expect "F2: F1's pending orders and timeouts in its previous window" "$(grep -F "/F2-incident.json:" <<<"$checked")" \
-  "FAIL  $old_run/F2-incident.json: previous window: orders not PAID: PAYMENT_PENDING 6; previous window: client\
- errors: client order-service -> payment-service POST /payments CLIENT_ERROR UNKNOWN HttpTimeoutException x6"
+  "FAIL  $old_run/F2-incident.json: previous window: orders not PAID: PAYMENT_PENDING 6; previous window: traffic not\
+ SUCCESS: client order-service -> payment-service POST /payments CLIENT_ERROR UNKNOWN HttpTimeoutException x6"
 expect "F3: F2's failed payments and 429s in its previous window" "$(grep -F "/F3-incident.json:" <<<"$checked")" \
-  "FAIL  $old_run/F3-incident.json: previous window: orders not PAID: PAYMENT_FAILED 6; previous window: client\
- errors: client payment-service -> gateway-mock POST /authorize 429 CLIENT_ERROR TooManyRequests x6, server\
+  "FAIL  $old_run/F3-incident.json: previous window: orders not PAID: PAYMENT_FAILED 6; previous window: traffic not\
+ SUCCESS: client payment-service -> gateway-mock POST /authorize 429 CLIENT_ERROR TooManyRequests x6, server\
  gateway-mock POST /authorize 429 CLIENT_ERROR x6"
 expect "the 2026-10-19 recordings fail the check" "$(tail -n 2 <<<"$checked")" \
   "RESULT: FAIL (3 of 3 recording(s) failed)"$'\n'"exit 1"

@@ -251,10 +251,11 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theGatheringDoesNotCountAgainstTheIncidentsTimeBudget() {
 		// Like the warm-up: the incident's time budget starts when the warm-up ends, after the gathering, which only
-		// the ACT deadline bounds.
-		this.lab.slow("service_restarts", Duration.ofMillis(600));
+		// the ACT deadline bounds. The gathering (3 s) outlasts the whole budget (2 s), which still leaves the report
+		// call and its writes ample real time on a loaded host.
+		this.lab.slow("service_restarts", Duration.ofSeconds(3));
 		this.model.text(unknownReport());
-		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofMillis(400), Clock.systemUTC());
+		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofSeconds(2), Clock.systemUTC());
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 
@@ -264,11 +265,11 @@ class AgentLoopDecisionModeTest {
 
 	@Test
 	void theTimeBudgetStartsWhenTheWarmUpEndsNotWhenTheIncidentOpened() {
-		// By the loop's clock the incident opened a second before its run started, longer ago than its whole time
-		// budget: the check before the gathering, before the warm-up, must not end the run.
-		Clock later = Clock.offset(Clock.systemUTC(), Duration.ofSeconds(1));
+		// By the loop's clock the incident opened ten seconds before its run started, longer ago than its whole time
+		// budget (2 s): the check before the gathering, before the warm-up, must not end the run.
+		Clock later = Clock.offset(Clock.systemUTC(), Duration.ofSeconds(10));
 		this.model.text(unknownReport());
-		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofMillis(400), later);
+		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofSeconds(2), later);
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 
