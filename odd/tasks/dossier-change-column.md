@@ -47,4 +47,4 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 ## Next step
 
-The human decides whether to keep the column (harmless on F2, about 4% more dossier tokens) or revert it.
+The human decides whether to keep the column (harmless on F2, one more cell per count row) or revert it.
