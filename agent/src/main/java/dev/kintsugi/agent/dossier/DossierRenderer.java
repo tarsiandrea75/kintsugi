@@ -194,8 +194,8 @@ public final class DossierRenderer {
 		out.line("- Previous window: the " + minutes(previous) + " min before it, " + previous.from() + " to "
 				+ previous.to() + ".");
 		out.line("- Gathered at " + dossier.gatheredAt() + ". All times are UTC.");
-		out.line("- Columns \"previous\" and \"incident\" hold the counts of those windows; \"change\" is incident minus"
-				+ " previous. \"" + NO_VALUE + "\" means no value.");
+		out.line("- Columns \"previous\" and \"incident\" hold the counts of those windows. \"" + NO_VALUE
+				+ "\" means no value.");
 		out.line("- Text copied from the lab is quoted as untrustedText=\"...\".");
 	}
 
@@ -571,18 +571,6 @@ public final class DossierRenderer {
 		return count == null ? NO_VALUE : String.valueOf(count);
 	}
 
-	/**
-	 * Incident minus previous: {@code +n}, {@code -n} or {@code 0}; {@code -} when either count is unknown. Arithmetic
-	 * only, with no threshold or marker (ADR-011, "Facts only").
-	 */
-	private static String change(Row row) {
-		if (row.previous() == null || row.incident() == null) {
-			return NO_VALUE;
-		}
-		long change = row.incident() - row.previous();
-		return change > 0 ? "+" + change : String.valueOf(change);
-	}
-
 	/** A table row: its labels and its counts in the previous and incident windows, {@code null} when not read. */
 	private record Row(List<String> labels, Long previous, Long incident) {
 
@@ -637,7 +625,7 @@ public final class DossierRenderer {
 		}
 
 		/**
-		 * A table of labelled rows with their previous and incident counts and their change, then {@code extra} columns; at most
+		 * A table of labelled rows with their previous and incident counts, then {@code extra} columns; at most
 		 * {@link #ROWS} rows, the others counted in one line; a "no rows" row when there are none.
 		 */
 		void countTable(Compared<?> windows, List<String> labelHeaders, List<String> extraHeaders, List<Row> rows,
@@ -665,7 +653,6 @@ public final class DossierRenderer {
 			List<String> headers = new ArrayList<>(labelHeaders);
 			headers.add("previous");
 			headers.add("incident");
-			headers.add("change");
 			headers.addAll(extraHeaders);
 			List<List<String>> cells = new ArrayList<>();
 			for (Row row : rows) {
@@ -673,7 +660,6 @@ public final class DossierRenderer {
 				row.labels().forEach(label -> line.add(cell(label)));
 				line.add(count(row.previous()));
 				line.add(count(row.incident()));
-				line.add(change(row));
 				line.addAll(extra.apply(row));
 				cells.add(line);
 			}

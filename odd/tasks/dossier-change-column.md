@@ -45,6 +45,8 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 - 2026-10-24: T2, local replay, 3 samples per fault (`infra/scripts/out/replay-20261023T194351Z-local`, on `cd9d575`): **F1 0/3, F2 3/3, F3 0/3**, the same as without the column. 9 of 9 runs `COMPLETED`, 10 of 10 report attempts valid but one (F3-2, an evidence-count error, valid at the retry), report calls 155-464 s against the 600 s deadline, so the prompts still fit. F1 names payment-service three times (the column does not reach latency, as scoped). F3 names gateway-mock three times, once with the right category (`CONFIGURATION`); in sample 2 the dossier shows `D23 | client | 429 | ... | 6 | 0 | -6 |` and the summary still speaks of "a surge of ... 429 Too Many Requests". The direction is now written out and granite still reads the previous window's rows as the incident: acceptance criterion 5 is **not met**. The column does not fix what it was built for on the local model; the cloud was not measured.
 
+- 2026-10-24: the human chose to revert the column (`git revert` of `46139df`): it did not change the local results, and it took headroom from the stress ceiling. Feature closed without its behavior; what it showed stays: on the local model, writing the direction of a change out does not stop the previous window's rows being read as the incident's.
+
 ## Next step
 
-The human decides whether to keep the column (harmless on F2, one more cell per count row) or revert it.
+Feature closed (reverted).
