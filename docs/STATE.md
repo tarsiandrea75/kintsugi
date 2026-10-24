@@ -17,7 +17,7 @@ This session (journal `docs/journal/2026-10-24-01.md`), all on local branches, n
 - `evidence-by-reference` (ADR-013): the model cites a numbered line (`D<n>` or `n:`) and code fills in the quote; local invalid reports 5/9 → 1/9.
 - `report-field-order`: the report's reasoning (`summary`, `evidence`) comes before the cause; a summary over 500 characters is cut, not rejected. Cloud F3 10/15 → 15/15.
 - `dossier-change-column`: a `change` column (incident minus previous) in the dossier's count tables; no local gain (F1 0/3, F2 3/3, F3 0/3), so reverted (`7b8a4cf`).
-- Cloud spend so far about $1.41 of the human's $5. Current branch `feat/dossier-change-column` (`7b8a4cf`), clean.
+- Cloud spend so far about $1.41 of the human's $5. Current branch `feat/dossier-change-column`, clean; its last code commit is the revert `7b8a4cf`, followed by docs commits.
 
 ## Next action
 

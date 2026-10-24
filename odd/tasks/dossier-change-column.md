@@ -26,7 +26,7 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 ## Acceptance criteria
 
-1. Every count table with `previous` and `incident` has a `change` column, as above; the F3 golden file shows `+6` on the `ConnectException` row and `-6` on the 429 row.
+1. Every count table with `previous` and `incident` has a `change` column, as above; the F3 golden file shows `+6` on the `ConnectException` row and `-6` on the 429 row. Amended at T1: the F3 fixture has no 429 row, so the criterion accepted is `+6` on the `ConnectException` row and `-4` on the `PAID`, `AUTHORIZED` and success rows; the `-6` on the 429 row was observed in the T2 replay dossier (D23).
 2. A failed window gives `-` in `change`.
 3. No banned interpretive word, and the fixture dossiers stay under the token ceiling.
 4. The spec lists the change as a computed value and shows it in a scenario.
@@ -35,7 +35,7 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 ## Tasks
 
 - [x] T1 The change column in `DossierRenderer`, with tests, golden files and the spec (route: delegated writer; the renderer, its test, two golden files and the spec are several non-trivial files).
-- [x] T2 Measurement: the local replay, F1-F3, 3 samples each.
+- [x] T2 Measurement: the local replay, F1-F3, 3 samples each (route: inline; one script run in the background and a bounded read of its outputs).
 
 ## Progress
 
@@ -43,9 +43,9 @@ In: `DossierRenderer` (the count tables and the header line that describes the c
 
 - 2026-10-23: T1 done (route: delegated writer). `DossierRenderer.countTable` adds `change` after `incident` (`+n`, `-n`, `0`, `-` when a window is unknown); D4 states it; no line added, D-numbers unchanged. RED: `everyCountTableHasAChangeColumnOfIncidentMinusPrevious`, `aFailedWindowGivesNoChange` and the updated failed-section test failed; GREEN: full suite 432 tests, 0 failures, 0 errors. Golden files differ only in D4 and the count tables. The stress dossier grew to 5,606 est. tokens, so its ceiling moved from 5,500 to 5,700 (test and spec). The F3 fixture has no 429 row, so acceptance criterion 1 is shown with `+6` (ConnectException) and `-4` (PAID, AUTHORIZED, success rows). `ReportCheckTest` and the spec's "Evidence is checked" example carry the new row literal.
 
-- 2026-10-24: T2, local replay, 3 samples per fault (`infra/scripts/out/replay-20261023T194351Z-local`, on `cd9d575`): **F1 0/3, F2 3/3, F3 0/3**, the same as without the column. 9 of 9 runs `COMPLETED`, 10 of 10 report attempts valid but one (F3-2, an evidence-count error, valid at the retry), report calls 155-464 s against the 600 s deadline, so the prompts still fit. F1 names payment-service three times (the column does not reach latency, as scoped). F3 names gateway-mock three times, once with the right category (`CONFIGURATION`); in sample 2 the dossier shows `D23 | client | 429 | ... | 6 | 0 | -6 |` and the summary still speaks of "a surge of ... 429 Too Many Requests". The direction is now written out and granite still reads the previous window's rows as the incident: acceptance criterion 5 is **not met**. The column does not fix what it was built for on the local model; the cloud was not measured.
+- 2026-10-24: T2, local replay, 3 samples per fault (`infra/scripts/out/replay-20261023T194351Z-local`, on `cd9d575`): **F1 0/3, F2 3/3, F3 0/3**, the same as without the column. 9 of 9 runs `COMPLETED`, 9 of 10 report attempts valid (the tenth, F3-2's first, failed an evidence-count rule and its retry was valid), report calls 155-464 s against the 600 s deadline, so the prompts still fit. F1 names payment-service three times (the column does not reach latency, as scoped). F3 names gateway-mock three times, once with the right category (`CONFIGURATION`); in sample 2 the dossier shows `D23 | client | 429 | ... | 6 | 0 | -6 |` and the summary still speaks of "a surge of ... 429 Too Many Requests". The direction is now written out and granite still reads the previous window's rows as the incident: acceptance criterion 5 is **not met**. The column does not fix what it was built for on the local model; the cloud was not measured.
 
-- 2026-10-24: the human chose to revert the column (`git revert` of `46139df`): it did not change the local results, and it took headroom from the stress ceiling. Feature closed without its behavior; what it showed stays: on the local model, writing the direction of a change out does not stop the previous window's rows being read as the incident's.
+- 2026-10-24: the human chose to revert the column (`git revert` of `46139df`): it did not change the local results, and it took headroom from the stress ceiling. Revert `7b8a4cf` (route: inline): `agent/` and `openspec/` are identical to `879cf4b`; full suite 430 tests, 0 failures, 0 errors (the two change-column tests are gone with it); review assessment (base `7b8a4cf~1`, committed only): medium, `review_due=false` (`under_budget`). Feature closed without its behavior; what it showed stays: on the local model, writing the direction of a change out does not stop the previous window's rows being read as the incident's.
 
 ## Next step
 
