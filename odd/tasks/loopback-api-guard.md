@@ -33,12 +33,18 @@ In: a servlet filter (or Spring `OncePerRequestFilter`) in `agent` and in `lab/f
 
 ## Tasks
 
-- [ ] T1 The guard in agent and fault-injector, with tests and specs (route: delegated writer; two services, filters, config, tests and two specs).
+- [x] T1 The guard in agent and fault-injector, with tests and specs (route: delegated writer; two services, filters, config, tests and two specs).
 
 ## Progress
 
 - 2026-10-24: branch `feat/loopback-api-guard`, from `feat/dossier-change-column` (`5711299`). Forecast: about 300 authored changed lines; under the 400-line budget.
 
+- 2026-10-24: T1 done (route: delegated writer), in two work units because the whole was about 760 authored lines (tests included), over the 400-line budget (`feature-branch-chain`, one branch): `68b3fff` agent, `5d3021e` fault-injector. `LoopbackGuardFilter` and `LoopbackGuardConfiguration` in each service: any `Origin` (an empty one too) answers 403, a `Host` outside the list answers 421; an empty or missing list stops the start; the agent's filter exists only with a servlet web server (the `demo` profile has none). An entry ending in `:*` accepts any port (as mcp-tools); the shipped defaults use none, only the random-port tests do, because Java's `HttpClient` cannot set `Host`.
+  - Callers found, and the Host each sends: `infra/scripts/lib.sh` `injector_call` (`127.0.0.1:18084`) and `agent_call` (`127.0.0.1:18086`); the compose healthchecks, inside the containers (`localhost:8084`, `localhost:8086`). Prometheus scrapes neither service, Alloy calls neither, `evals/` is empty, no service calls them. Defaults: `agent:8086,localhost:8086,localhost:18086,127.0.0.1:18086` and `fault-injector:8084,localhost:8084,localhost:18084,127.0.0.1:18084`. `infra/compose.yaml` and ADR-004 unchanged.
+  - RED: agent 22 failures and 1 error, fault-injector 25 failures and 1 error, against pass-through stubs (the Origin request got 415, the body-less restore 200, a foreign Host 200/204). GREEN: agent 463 tests, fault-injector 125, 0 failures, 0 errors.
+- Reviews, consent granted, one per commit (the agent commit in a detached worktree at `68b3fff`, base `39d7356`; the fault-injector commit at base `68b3fff`): both approved and acknowledged. WARNING R3-missing-host-421 (agent): an HTTP/1.1 request with no `Host` gets 400 from the web server before the filter, so the specs now say 421 holds for a request that reaches the check. SUGGESTION R3-restore-state-unasserted (fault-injector): the rejected restore test now also asserts the injection is still `ACTIVE`; fault-injector suite 125 tests, 0 failures.
+- Not done from code: `infra/.env.example` holds an `sk-ant-` match (the security review's scan); the file is the human's, so the human checks it.
+
 ## Next step
 
-T1.
+Feature closed.

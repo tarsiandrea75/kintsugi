@@ -307,7 +307,7 @@ On startup, if an `injections` row is blocking (`ACTIVE` after a crash, or `REST
 
 ### Requirement: Browser requests are rejected
 
-Every request to the injector, its API and the actuator alike, MUST pass two checks before it reaches a controller, the rule mcp-tools applies on `/mcp` ([ADR-004](../../../docs/adr/ADR-004-tools-via-mcp.md)). A request that carries an `Origin` header, whatever its value, MUST answer 403: the injector's callers (`infra/scripts/lib.sh` with `curl`, the compose healthcheck) send none, so one with an `Origin` comes from a browser, and a cross-site body-less `POST /faults/{id}/restore` would otherwise reach the lab without a preflight. A request whose `Host` is missing or outside `kintsugi.fault-injector.allowed-hosts` MUST answer 421, which closes DNS rebinding. An entry matches the whole `host:port` value, the host compared ignoring case; an entry ending in `:*` accepts that host on any port. The default is `fault-injector:8084,localhost:8084,localhost:18084,127.0.0.1:18084`: the compose name, the compose healthcheck inside the container, and the host port. An empty or missing list MUST stop the start with a message naming the property.
+Every request to the injector, its API and the actuator alike, MUST pass two checks before it reaches a controller, the rule mcp-tools applies on `/mcp` ([ADR-004](../../../docs/adr/ADR-004-tools-via-mcp.md)). A request that carries an `Origin` header, whatever its value, MUST answer 403: the injector's callers (`infra/scripts/lib.sh` with `curl`, the compose healthcheck) send none, so one with an `Origin` comes from a browser, and a cross-site body-less `POST /faults/{id}/restore` would otherwise reach the lab without a preflight. A request whose `Host` is outside `kintsugi.fault-injector.allowed-hosts`, or missing (an HTTP/1.1 request with no `Host` is refused with 400 by the web server before the check runs; the check answers 421 to one that reaches it, an HTTP/1.0 request), MUST answer 421, which closes DNS rebinding. An entry matches the whole `host:port` value, the host compared ignoring case; an entry ending in `:*` accepts that host on any port. The default is `fault-injector:8084,localhost:8084,localhost:18084,127.0.0.1:18084`: the compose name, the compose healthcheck inside the container, and the host port. An empty or missing list MUST stop the start with a message naming the property.
 
 #### Scenario: Browser request
 - WHEN `POST /faults` or `POST /faults/{id}/restore` carries `Origin: https://evil.example`, `Origin: http://localhost:18084` or `Origin: null`, with an allowed `Host`
@@ -315,7 +315,7 @@ Every request to the injector, its API and the actuator alike, MUST pass two che
 - AND the lab is neither changed nor restored, and no `injections` row is written
 
 #### Scenario: Unknown host
-- WHEN `GET /faults/active`, `GET /faults/catalog` or `GET /actuator/health` carries `Host: evil.example:18084`, or any value outside the allow-list, or no `Host`
+- WHEN `GET /faults/active`, `GET /faults/catalog` or `GET /actuator/health` carries `Host: evil.example:18084`, or any value outside the allow-list, or no `Host` on a request that reaches the check
 - THEN the response status is 421
 
 #### Scenario: In-repo callers

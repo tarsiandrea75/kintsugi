@@ -255,6 +255,10 @@ class FaultApiIntegrationTest {
 		mvc.perform(post("/faults/" + id + "/restore").header("Origin", "null")).andExpect(status().isForbidden());
 
 		assertThat(lab.calls()).containsExactly("activate F1");
+		mvc.perform(get("/faults/active"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.id").value(id.toString()))
+			.andExpect(jsonPath("$.status").value("ACTIVE"));
 	}
 
 	@Test
