@@ -31,7 +31,8 @@ import dev.kintsugi.agent.lab.LabTools;
  * mode", "Read an incident").
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT,
-		properties = { "kintsugi.agent.mode=dossier", "kintsugi.agent.route=local" })
+		properties = { "kintsugi.agent.mode=dossier", "kintsugi.agent.route=local",
+				"kintsugi.agent.allowed-hosts=127.0.0.1:*" })
 class AgentLoopDossierApiTest {
 
 	private static final JsonMapper JSON = JsonMapper.shared();

@@ -3,6 +3,7 @@ package dev.kintsugi.agent.incident;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 
@@ -35,7 +36,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /** {@code POST /incidents} and {@code GET /incidents/{id}} over HTTP (agent spec, "Open an incident", "Read an incident"). */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "kintsugi.agent.route=local")
+/**
+ * The test server listens on a random port, so the allow-list accepts {@code localhost} on any port; {@code 127.0.0.1}
+ * stays outside it, which the Host test uses.
+ */
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT,
+		properties = { "kintsugi.agent.route=local", "kintsugi.agent.allowed-hosts=localhost:*" })
 class IncidentApiTest {
 
 	private static final String VALID = "{\"symptom\": \"Checkout orders stay pending for a long time\", \"sinceMinutes\": 15}";
@@ -311,6 +317,37 @@ class IncidentApiTest {
 		assertThat(incident.get("status").asString()).isEqualTo("FAILED");
 		assertThat(incident.get("failureReason").asString()).isEqualTo("plan invalid twice");
 		assertThat(incident.has("report")).isFalse();
+	}
+
+	/** A browser sends an Origin: the request is refused before the controller (agent spec, "Browser requests"). */
+	@Test
+	void aRequestWithAnOriginIsRejectedWith403AndOpensNoIncident() throws Exception {
+		HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri("/incidents"))
+			.header("Content-Type", "text/plain")
+			.header("Origin", "https://evil.example")
+			.POST(HttpRequest.BodyPublishers.ofString(VALID))
+			.build(), HttpResponse.BodyHandlers.ofString());
+
+		assertThat(response.statusCode()).isEqualTo(403);
+		assertNoIncident();
+		verify(runner, never()).start(any());
+	}
+
+	/** DNS rebinding sends the attacker's hostname as Host; here 127.0.0.1 plays it, being outside the list. */
+	@Test
+	void aHostOutsideTheAllowListIsRejectedWith421() throws Exception {
+		String outside = "http://127.0.0.1:" + port;
+		HttpResponse<String> post = http.send(HttpRequest.newBuilder(URI.create(outside + "/incidents"))
+			.header("Content-Type", "application/json")
+			.POST(HttpRequest.BodyPublishers.ofString(VALID))
+			.build(), HttpResponse.BodyHandlers.ofString());
+		HttpResponse<String> read = http.send(
+				HttpRequest.newBuilder(URI.create(outside + "/incidents/" + UUID.randomUUID())).GET().build(),
+				HttpResponse.BodyHandlers.ofString());
+
+		assertThat(post.statusCode()).isEqualTo(421);
+		assertThat(read.statusCode()).isEqualTo(421);
+		assertNoIncident();
 	}
 
 	private static UUID completedIncidentWithSteps() {

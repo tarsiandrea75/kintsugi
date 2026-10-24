@@ -107,6 +107,29 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 - WHEN `GET /incidents/{id}` is called with a random UUID, or with `abc`
 - THEN the response status is 404
 
+### Requirement: Browser requests are rejected
+
+Every request to the agent's web server, the incident API and any other path, MUST pass two checks before it reaches a controller, the rule mcp-tools applies on `/mcp` ([ADR-004](../../../docs/adr/ADR-004-tools-via-mcp.md)). A request that carries an `Origin` header, whatever its value, MUST answer 403: the API's callers (`infra/scripts/lib.sh` with `curl`, the compose healthcheck) send none, so one with an `Origin` comes from a browser, and a cross-site `text/plain` `POST /incidents` would otherwise start an incident without a preflight. A request whose `Host` is missing or outside `kintsugi.agent.allowed-hosts` MUST answer 421, which closes DNS rebinding. An entry matches the whole `host:port` value, the host compared ignoring case; an entry ending in `:*` accepts that host on any port. The default is `agent:8086,localhost:8086,localhost:18086,127.0.0.1:18086`: the compose name, the compose healthcheck inside the container, and the host port. An empty or missing list MUST stop the start with a message naming the property. The `demo` profile has no web server and no check.
+
+#### Scenario: Browser request
+- WHEN `POST /incidents` carries `Origin: https://evil.example`, `Origin: http://localhost:18086` or `Origin: null`, with an allowed `Host`
+- THEN the response status is 403
+- AND no incident is opened
+
+#### Scenario: Unknown host
+- WHEN `POST /incidents` or `GET /incidents/{id}` carries `Host: evil.example:18086`, or any value outside the allow-list, or no `Host`
+- THEN the response status is 421
+- AND no incident is opened
+
+#### Scenario: In-repo callers
+- WHEN a request without `Origin` carries `Host: agent:8086`, `localhost:8086`, `localhost:18086`, `127.0.0.1:18086` or `LOCALHOST:18086`
+- THEN it reaches the controller and answers as before
+
+#### Scenario: Empty allow-list
+- GIVEN `kintsugi.agent.allowed-hosts` is empty, blank entries only, or unset
+- WHEN the agent starts with its web server
+- THEN the start fails with a message naming `kintsugi.agent.allowed-hosts`
+
 ### Requirement: Statuses
 
 An incident MUST have exactly one of these statuses, and every end MUST record `ended_at` and, unless `COMPLETED`, a `failure_reason`:

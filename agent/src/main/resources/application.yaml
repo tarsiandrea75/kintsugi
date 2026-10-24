@@ -56,6 +56,11 @@ spring:
 
 kintsugi:
   agent:
+    # The Host values the incident API accepts (agent spec, "Browser requests are rejected"; ADR-004): any other answers
+    # 421, and any request with an Origin header answers 403. agent:8086 on the compose network, localhost:8086 for the
+    # compose healthcheck inside the container, localhost:18086 and 127.0.0.1:18086 for the host (infra/scripts). A new
+    # service name or port needs this list changed too. An empty list stops the start.
+    allowed-hosts: agent:8086,localhost:8086,localhost:18086,127.0.0.1:18086
     # How the loop gathers its evidence (agent spec, "Dossier mode"; ADR-010, "Amended in T5a"): explorer, the ADR-010
     # loop where the model picks every call from TRIAGE on, or dossier, where code first gathers the evidence dossier
     # (ADR-011), the model reads it before INVESTIGATE and KNOWLEDGE, and TRIAGE is skipped. Recorded on every incident.
