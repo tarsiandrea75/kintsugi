@@ -277,6 +277,18 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - Results: full suite 492 tests and `test-lib.sh` 137 cases. Parent spot check: both green, and the listing prints the three stress cases.
   - About 645 lines, about 120 of them moved from `ReplayDriver` to `ReplayCases`.
 
+- T3r review (`0f1398f`, base `4b26044`, four lenses, 10 files, 672 lines, consent granted): approved and acknowledged (lineage `review-5129e067991ad6b0`). Four suggestions, all going to T2r2:
+  - a misleading helper comment in `test-lib.sh`;
+  - two wordings of the unknown-split refusal;
+  - `record-replay.sh`'s split array as a second list next to `ReplayCases.SPLITS`;
+  - an empty case listing counted as 1, probably unreachable because `--faults` with no fault is refused earlier.
+- 2026-10-24 21:40: Part B (`odd/tasks/service-assessment.md`) starts on its own branch while T4 records. It is safe because `verify-agent.sh` builds the agent once, before the fault loop, so later source edits never reach T4's container. Part B's settings default to today's behavior, so M0 still measures today's prompt.
+
 ## Next step
 
-Review T3r, then wait for T4. Then T2r2 (the `diagnose()` branch tests and the ACT deadline headroom), the import, and T5 (M0).
+Wait for T4 (about 03:00 UTC). Then, on this branch:
+- T2r2: the `diagnose()` branch tests, the ACT deadline headroom and the four T3r suggestions;
+- the import, with odd rounds in `dev` and even rounds in `holdout`;
+- T5 (M0).
+
+Then rebase `feat/service-assessment` onto this branch's tip.
