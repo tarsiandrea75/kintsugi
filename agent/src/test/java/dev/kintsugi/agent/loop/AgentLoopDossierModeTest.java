@@ -331,7 +331,7 @@ class AgentLoopDossierModeTest {
 		assertThat(AgentMode.of("dossier")).isEqualTo(AgentMode.DOSSIER);
 		assertThat(AgentMode.DOSSIER.value()).isEqualTo("dossier");
 		assertThatIllegalArgumentException().isThrownBy(() -> AgentMode.of("triage"))
-			.withMessage("kintsugi.agent.mode must be explorer or dossier, got \"triage\"");
+			.withMessage("kintsugi.agent.mode must be explorer, dossier or decision, got \"triage\"");
 		assertThat(AgentMode.EXPLORER.phases()).containsExactly(Phase.TRIAGE, Phase.INVESTIGATE, Phase.KNOWLEDGE);
 		assertThat(AgentMode.EXPLORER.toolBudget()).isEqualTo(LoopSettings.TOOL_BUDGET).isEqualTo(8);
 		assertThat(AgentMode.DOSSIER.phases()).containsExactly(Phase.INVESTIGATE, Phase.KNOWLEDGE);

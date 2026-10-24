@@ -42,8 +42,8 @@ class LoopConfig {
 	}
 
 	/**
-	 * The loop, in the mode of {@code kintsugi.agent.mode} (T5a): {@code explorer}, the default, or {@code dossier}; any
-	 * other value stops the agent's start with the property's name.
+	 * The loop, in the mode of {@code kintsugi.agent.mode} (T5a): {@code explorer}, the default, {@code dossier} or
+	 * {@code decision} (decision-instrument); any other value stops the agent's start with the property's name.
 	 */
 	@Bean
 	AgentLoop agentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,

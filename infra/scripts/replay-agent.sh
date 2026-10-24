@@ -11,9 +11,10 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh                       # one dossier sample of F1, F2 and F3, cloud route
   infra/scripts/replay-agent.sh --samples 5 --faults F1,F3
   infra/scripts/replay-agent.sh --route local         # the local model on Ollama, 127.0.0.1:11434
+  infra/scripts/replay-agent.sh --mode decision       # the dossier, then one report call
 
   --route cloud|local            the model's route (default cloud)
-  --mode dossier|explorer|both   the loop's mode (default dossier)
+  --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
   --samples N                    samples per fault and mode, 1 to 999 (default 1)
   --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
 
@@ -29,6 +30,9 @@ it as such.
 EXPLORER REPLAYS ARE NOT VALID MEASUREMENTS: under exact matching the explorer's model-chosen calls are mostly not
 recorded (coverage 0.00-0.38 in the T4 smoke check), so its samples measure the replay's gaps, not the agent. Explorer
 and both stay available to inspect that, not to score the agent.
+
+A decision sample (agent spec, "Decision mode") replays the fault's decision recording, else its dossier recording:
+the dossier's calls, all recorded, then the report call, with no phase and no drill-down call.
 
 COST: on the cloud route every sample is paid model calls. Run it only with the human's go-ahead, and record the cost.
 The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reaches Maven through the environment only
@@ -62,8 +66,8 @@ while (( $# )); do
   esac
 done
 [[ "$route" == cloud || "$route" == local ]] || { echo "Unknown route '$route'; choose cloud or local" >&2; exit 2; }
-[[ "$mode" == explorer || "$mode" == dossier || "$mode" == both ]] \
-  || { echo "Unknown mode '$mode'; choose explorer, dossier or both" >&2; exit 2; }
+[[ "$mode" == explorer || "$mode" == dossier || "$mode" == decision || "$mode" == both ]] \
+  || { echo "Unknown mode '$mode'; choose explorer, dossier, decision or both" >&2; exit 2; }
 # At most 3 digits, so the bound on cloud samples below cannot wrap around in bash's 64-bit arithmetic.
 [[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
 IFS=, read -r -a selected <<<"$faults"

@@ -20,8 +20,8 @@ final class Schemas {
 	static final String REPORT = JSON.writeValueAsString(report(false));
 
 	/**
-	 * The report schema of dossier mode (T5b): a {@code toolCallId} is a step number or {@code "dossier"}; the rest is
-	 * the same.
+	 * The report schema of the modes that gather the dossier, dossier (T5b) and decision mode: a {@code toolCallId} is
+	 * a step number or {@code "dossier"}; the rest is the same.
 	 */
 	private static final String DOSSIER_REPORT = JSON.writeValueAsString(report(true));
 
@@ -30,7 +30,7 @@ final class Schemas {
 
 	/** The report schema of {@code mode}. */
 	static String report(AgentMode mode) {
-		return mode == AgentMode.DOSSIER ? DOSSIER_REPORT : REPORT;
+		return mode.gathersDossier() ? DOSSIER_REPORT : REPORT;
 	}
 
 	private static ObjectNode report(boolean dossier) {

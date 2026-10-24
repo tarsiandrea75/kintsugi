@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -37,10 +38,11 @@ import dev.kintsugi.agent.lab.ReplayLabTools;
  * T4): the real {@link AgentLoop} over {@link ReplayLabTools}, scored against the recorded truth.
  *
  * <p>
- * For a fault and a mode, a sample opens an incident with the recorded symptom and window of that mode's recording (the
- * first recording of the fault when the mode has none), on a clock offset so that "now" is that recording's start, and
- * runs the loop to its end on the caller's thread over every recording of the fault, both modes pooled, that recording
- * first: when two recordings hold the same call with different outputs, the sample is served its own mode's. Each
+ * For a fault and a mode, a sample opens an incident with the recorded symptom and window of that mode's recording (for
+ * a decision sample with no decision recording, the dossier recording, which holds the same dossier; else the first
+ * recording of the fault), on a clock offset so that "now" is that recording's start, and runs the loop to its end on
+ * the caller's thread over every recording of the fault, all modes pooled, that recording first: when two recordings
+ * hold the same call with different outputs, the sample is served that recording's. Each
  * fault's recordings and the tool listing are parsed once; every sample gets a fresh {@link ReplayLabTools}, so its
  * counters are its own. A recording without {@code startedAt}, {@code symptom} or a positive {@code sinceMinutes}
  * fails the fault before any model call. The loop is
@@ -121,9 +123,8 @@ final class ReplayDriver {
 	 */
 	Sample sample(String fault, AgentMode mode, int n) {
 		List<Parsed> ofFault = parsed(fault);
-		Parsed primary = ofFault.stream()
-			.filter(recording -> recording.recording().mode().equals(mode.value()))
-			.findFirst()
+		Parsed primary = first(ofFault, mode)
+			.or(() -> mode == AgentMode.DECISION ? first(ofFault, AgentMode.DOSSIER) : Optional.empty())
 			.orElse(ofFault.get(0));
 		// The primary recording first: ReplayLabTools keeps the first output of a call two recordings hold.
 		List<JsonNode> served = new ArrayList<>();
@@ -160,6 +161,11 @@ final class ReplayDriver {
 		return new Sample(fault, mode, route, n, status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(), tools.unrecordedCalls(),
 				tools.coverage(), tools.conflicts(), total(incident, "promptTokens"), total(incident, "completionTokens"),
 				seconds, dossier.size(), dossierUnrecorded, incident);
+	}
+
+	/** The fault's first recording made in {@code mode}, if any. */
+	private static Optional<Parsed> first(List<Parsed> ofFault, AgentMode mode) {
+		return ofFault.stream().filter(recording -> recording.recording().mode().equals(mode.value())).findFirst();
 	}
 
 	/** The rule of {@code agent_verdict} in {@code lib.sh}: a completed report naming the truth, else a miss. */

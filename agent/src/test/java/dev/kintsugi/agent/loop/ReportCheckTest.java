@@ -323,6 +323,20 @@ class ReportCheckTest {
 	}
 
 	@Test
+	void decisionModeChecksAndConstrainsAReportAsDossierModeDoes() {
+		ReportCheck.Result result = ReportCheck.check(Answers.json(report("payment-service", "DEPENDENCY_REJECTING",
+				dossierEvidence(17))), STEPS, AgentMode.DECISION, DOSSIER);
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
+			.containsExactly("| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |");
+		String other = "{\"toolCallId\":\"step3\",\"tool\":\"status_summary\",\"line\":3,\"why\":\"\"}";
+		assertThat(ReportCheck.check(Answers.json(report("payment-service", "DEPENDENCY_REJECTING", other)), STEPS,
+				AgentMode.DECISION, DOSSIER).errors()).containsExactly("evidence[0].toolCallId must be an integer or \"dossier\"");
+		assertThat(Schemas.report(AgentMode.DECISION)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+	}
+
+	@Test
 	void aDossierCitationKeepsTheOtherRules() {
 		// A toolCallId that is neither an integer nor "dossier" is still rejected.
 		String other = "{\"toolCallId\":\"step3\",\"tool\":\"status_summary\",\"line\":3,\"why\":\"\"}";

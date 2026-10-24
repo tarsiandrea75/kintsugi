@@ -18,8 +18,8 @@ import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
  * Checks a report in code: its schema, then each evidence item against the recorded tool steps of this incident, or,
- * in dossier mode, against the rendered dossier (agent spec, "The report", "Evidence is checked"). The model proposes,
- * this code verifies.
+ * in dossier and decision mode, against the rendered dossier (agent spec, "The report", "Evidence is checked"). The
+ * model proposes, this code verifies.
  *
  * <p>
  * An evidence item cites a line by its number, in the summary of a step or in the dossier, and code fills in the
@@ -109,7 +109,8 @@ final class ReportCheck {
 	 * An item citing the dossier is dropped in the same way when the run has no dossier (explorer mode, or a gathering
 	 * that gave none), when its tool is not {@code "dossier"}, or when the dossier has no such line (T5b).
 	 * @param toolSteps this incident's tool steps by step number, refused calls included
-	 * @param mode the run's mode: only dossier mode lets a {@code toolCallId} be {@code "dossier"}
+	 * @param mode the run's mode: only a mode that gathers the dossier, dossier or decision mode, lets a
+	 * {@code toolCallId} be {@code "dossier"}
 	 * @param dossier the rendered dossier the model read, its lines numbered, without its introduction; null when
 	 * there is none
 	 */
@@ -197,7 +198,7 @@ final class ReportCheck {
 		JsonNode id = item.get("toolCallId");
 		boolean citesDossier = id != null && id.isString() && DOSSIER.equals(id.asString());
 		if (!citesDossier && (id == null || !id.isIntegralNumber() || !id.canConvertToInt())) {
-			errors.add(name + ".toolCallId must be an integer" + (mode == AgentMode.DOSSIER ? " or \"dossier\"" : ""));
+			errors.add(name + ".toolCallId must be an integer" + (mode.gathersDossier() ? " or \"dossier\"" : ""));
 		}
 		if (item.get("tool") == null || !item.get("tool").isString()) {
 			errors.add(name + ".tool must be a string");
@@ -249,7 +250,7 @@ final class ReportCheck {
 	 * @return the item's only error, or null when the run has a dossier and the item names it as its tool
 	 */
 	private static String dossierItem(String name, String tool, AgentMode mode, String dossier) {
-		if (mode != AgentMode.DOSSIER) {
+		if (!mode.gathersDossier()) {
 			return name + ".toolCallId dossier: this run has no dossier";
 		}
 		if (dossier == null) {

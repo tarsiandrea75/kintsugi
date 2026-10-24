@@ -65,8 +65,9 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  * <p>
  * A run starts with one warm-up request, which loads the model and counts against no budget. In dossier mode
  * ({@link AgentMode}, T5a) code then gathers the evidence dossier, which every later call reads after the system
- * message, and the run skips {@code TRIAGE}. {@code TRIAGE} (explorer mode only), {@code INVESTIGATE} and
- * {@code KNOWLEDGE} then let the model call the phase's tools within the phase's allowance and
+ * message, and the run skips {@code TRIAGE}. Decision mode gathers the dossier before the warm-up and has no evidence
+ * phase: the run goes from the warm-up to {@code CONCLUDE} (decision-instrument). {@code TRIAGE} (explorer mode only),
+ * {@code INVESTIGATE} and {@code KNOWLEDGE} then let the model call the phase's tools within the phase's allowance and
  * the incident's tool budget; the first answer of each phase also writes the phase's plan in its text, which code
  * checks and records but which never ends the run. The model sees each result only as its code-built summary, in a
  * tool-response message. {@code CONCLUDE} asks for the report, which code checks against the recorded outputs. Every
@@ -196,8 +197,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		run.route = first.route();
 		run.model = first.model();
 		this.incidents.recordStart(run.incident.id(), run.mode.value(), run.route.value(), run.model);
+		boolean gatherFirst = run.mode.gathersBeforeWarmUp();
+		if (gatherFirst) {
+			dossier(run);
+		}
 		warmUp(run);
-		if (run.mode == AgentMode.DOSSIER) {
+		if (run.mode.gathersDossier() && !gatherFirst) {
 			dossier(run);
 		}
 		for (Phase phase : run.mode.phases()) {
@@ -262,14 +267,17 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * Dossier mode's first step (T5a): code gathers the evidence dossier through {@link LabTools} and renders it, and
+	 * The first step of dossier mode, after the warm-up (T5a), and of decision mode, before it (decision-instrument):
+	 * code gathers the evidence dossier through {@link LabTools} and renders it, and
 	 * the result becomes the dossier message every later call reads right after the system message. Its 33 calls are
 	 * code's: they pass no check, count against no tool budget and get no {@code toolCallId} (a report cites the dossier
 	 * as a whole, as {@code "dossier"}, T5b); they are stored in the
 	 * {@code DOSSIER} step's {@code tool_output}, with the message the model sees in its {@code summary}. The gathering
 	 * counts against the incident's time and is bounded by the {@code ACT} call deadline; a failed call is a fact in
 	 * the dossier, and a gathering that throws or runs past its bound gives a message that says so, and the run goes
-	 * on. Only the incident's own time running out ends the run.
+	 * on. Only the incident's own time running out ends the run. In decision mode the gathering comes before the
+	 * warm-up, whose end starts the incident's time budget, so that budget does not count it; the deadline still
+	 * bounds it.
 	 */
 	private void dossier(Run run) {
 		checkTime(run);
@@ -791,7 +799,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		final SystemMessage system;
 
-		/** Dossier mode's dossier message, the same for every call once gathered; null in explorer mode. */
+		/**
+		 * The dossier message of dossier and decision mode, the same for every call once gathered; null in explorer
+		 * mode.
+		 */
 		String dossier;
 
 		/**
@@ -843,8 +854,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 
 		/**
-		 * The prompt's opening, which only grows from call to call: the system message, then in dossier mode the
-		 * dossier message (T5a), then the evidence message when there is any. The newest {@code inToolResponse} summaries are left out: they travel in the
+		 * The prompt's opening, which only grows from call to call: the system message, then in dossier and decision
+		 * mode the dossier message (T5a), then the evidence message when there is any. The newest {@code inToolResponse} summaries are left out: they travel in the
 		 * tool-response message after the previous answer.
 		 */
 		List<Message> opening(int inToolResponse) {

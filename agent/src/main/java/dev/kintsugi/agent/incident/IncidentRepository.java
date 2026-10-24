@@ -112,8 +112,8 @@ public class IncidentRepository {
 
 	/**
 	 * Records how the run goes, when it starts, on the incident {@code id} if it is still {@code RUNNING}: the loop's
-	 * mode, {@code explorer} or {@code dossier}, its route, {@code local} or {@code cloud}, and the route's model;
-	 * returns whether it was.
+	 * mode, {@code explorer}, {@code dossier} or {@code decision}, its route, {@code local} or {@code cloud}, and the
+	 * route's model; returns whether it was.
 	 */
 	public boolean recordStart(UUID id, String mode, String route, String model) {
 		return jdbc.sql("UPDATE incidents SET mode = ?, route = ?, model = ? WHERE id = ? AND status = ?")

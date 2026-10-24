@@ -131,15 +131,19 @@ final class Prompts {
 	 */
 	static final String WARM_UP = "Reply with the single word OK.";
 
-	/** What the dossier is: who gathered it, when and how (T5a). Facts only, like the dossier it introduces. */
+	/**
+	 * What the dossier is: who gathered it, when and how (T5a). Facts only, like the dossier it introduces. Decision
+	 * mode shows it unchanged, "before the first phase" included, although no phase follows there: the first
+	 * measurement of decision mode reads the prompt as it is (decision-instrument).
+	 */
 	private static final String DOSSIER_FACTS = """
 			Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for \
 			every incident, over the incident window and the window just before it.""";
 
 	/**
-	 * The first line of the dossier message in dossier mode (T5a): what the dossier is, and how a plan or the report
-	 * cites it (T5b; it said "has no toolCallId" before), by the number of a line since evidence-by-reference (a quote
-	 * copied exactly from it before).
+	 * The first line of the dossier message in dossier and decision mode (T5a): what the dossier is, and how a plan or
+	 * the report cites it (T5b; it said "has no toolCallId" before), by the number of a line since evidence-by-reference
+	 * (a quote copied exactly from it before).
 	 */
 	static final String DOSSIER_INTRO = DOSSIER_FACTS + """
 			 It is not a tool call result: cite it with toolCallId "dossier" and tool "dossier", and the number \
@@ -149,8 +153,9 @@ final class Prompts {
 	}
 
 	/**
-	 * The dossier message of dossier mode: the introduction, then the rendered dossier. It comes right after the
-	 * system message, which stays the same in both modes, so Ollama keeps reusing the system message it has read.
+	 * The dossier message of dossier and decision mode: the introduction, then the rendered dossier. It comes right
+	 * after the system message, which stays the same in every mode, so Ollama keeps reusing the system message it has
+	 * read.
 	 */
 	static String dossier(String rendered) {
 		return DOSSIER_INTRO + "\n\n" + rendered;
@@ -261,8 +266,10 @@ final class Prompts {
 	 * @param phaseLeft the tool calls left in the phase
 	 * @param incidentLeft the tool calls left in the incident
 	 * @param plan this phase's valid plan, as JSON, or null; a phase never sees an earlier phase's plan (T5c8)
-	 * @param phases the run's evidence phases, in order, by its mode; {@code CONCLUDE} follows them (T5a)
-	 * @param dossier whether the run has a dossier the plans and the report may cite: dossier mode, once gathered (T5b)
+	 * @param phases the run's evidence phases, in order, by its mode; {@code CONCLUDE} follows them (T5a); none in
+	 * decision mode, whose report instruction then reads {@code the phases run in order: CONCLUDE}
+	 * @param dossier whether the run has a dossier the plans and the report may cite: dossier or decision mode, once
+	 * gathered (T5b)
 	 */
 	record State(Phase phase, int phaseLeft, int incidentLeft, String plan, List<Phase> phases, boolean dossier) {
 

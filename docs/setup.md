@@ -429,13 +429,14 @@ The tool listing is not recorded per run: the replay offers the tools of `agent/
 infra/scripts/replay-agent.sh                                     # 1 dossier sample of F1-F3, cloud route
 infra/scripts/replay-agent.sh --samples 5 --faults F1,F3
 infra/scripts/replay-agent.sh --route local                       # Ollama with granite4.1:8b on 127.0.0.1:11434
+infra/scripts/replay-agent.sh --mode decision                     # the dossier, then one report call
 ```
 
 **Cost:** on the cloud route every sample is paid model calls (the script prints how many samples it will run). Run it only with the human's go-ahead, and record the cost from `aggregate.tsv`. The key comes from the shell or `infra/.env` (`export_cloud_key` in `lib.sh`) and reaches Maven through its environment only; it is never printed or put on a command line.
 
 It runs `ReplayRunTest` with the `replay` Maven profile (the default `./mvnw test` leaves it out) and needs Docker for the Testcontainers database. It writes `infra/scripts/out/replay-<UTC time>-<route>/`: `<fault>-<mode>-<n>.json`, the incident with its steps; `summary.tsv`, one line per sample with its status, verdict, coverage (calls answered from a recording out of all calls), conflicts, tokens and seconds; and `aggregate.tsv`, per fault and mode, matches out of samples, mean coverage, `coveredSamples` (coverage at least 0.8), `matchesCovered` (matches among them, out of them), `dossierCovered` (samples whose dossier was fully recorded, out of samples), tokens and the estimated cloud cost. A sample with coverage below 1.00 made calls no recording holds, answered as `CLIENT_ERROR`: read its verdict with that in mind. A dossier sample usually shows about 0.91, its model-chosen calls (free-text `search_runbooks` queries) being unrecorded, which is why the covered threshold is 0.8.
 
-The default mode is `dossier`; `--samples` takes 1 to 999. `--mode explorer` and `--mode both` still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. A `MISS` is a measurement; the script exits 1 only when a sample could not run.
+The default mode is `dossier`; `--samples` takes 1 to 999. `--mode explorer` and `--mode both` (explorer and dossier) still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. `--mode decision` runs decision mode (agent spec, "Decision mode"): the dossier, then one report call, with no evidence phase. Each sample replays the fault's decision recording, or its dossier recording when the manifest has none, which holds every call the dossier makes, so its coverage is 1.00. A `MISS` is a measurement; the script exits 1 only when a sample could not run.
 
 ### Reset a volume
 

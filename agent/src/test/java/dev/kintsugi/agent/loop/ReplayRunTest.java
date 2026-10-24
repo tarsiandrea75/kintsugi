@@ -30,8 +30,9 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  *
  * <p>
  * System properties: {@code replay.route} ({@code cloud}, the default, or {@code local}), {@code replay.mode}
- * ({@code dossier}, the default, {@code explorer} or {@code both}; an explorer replay is low-coverage and not a valid
- * measurement, see the feature document's T4 smoke check), {@code replay.faults} ({@code F1,F2,F3}),
+ * ({@code dossier}, the default, {@code explorer}, {@code decision} or {@code both}, which is explorer and dossier; an
+ * explorer replay is low-coverage and not a valid measurement, see the feature document's T4 smoke check; a decision
+ * replay makes only the dossier's recorded calls and the report call), {@code replay.faults} ({@code F1,F2,F3}),
  * {@code replay.samples} (1), {@code replay.recordings} (the committed {@code replay/} directory) and {@code replay.out}
  * ({@code infra/scripts/out/replay-<UTC time>-<route>/}). A miss is a measurement, not a failure: the test fails only
  * when it cannot run a sample.

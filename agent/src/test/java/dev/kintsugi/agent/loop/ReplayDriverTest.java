@@ -163,6 +163,55 @@ class ReplayDriverTest {
 	}
 
 	@Test
+	void aDecisionSampleReplaysTheDossierRecordingWithNoUnrecordedCall() {
+		this.model.text(unknownReport());
+
+		ReplayDriver.Sample sample = this.driver.sample("F1", AgentMode.DECISION, 1);
+
+		assertThat(sample.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(sample.truth()).isEqualTo(F1_TRUTH);
+		// The manifest lists F1's explorer recording first; the dossier recording, which holds the same dossier, opens
+		// the sample: its start is "now".
+		Instant startedAt = Instant.parse(sample.incident().path("startedAt").asString());
+		assertThat(Duration.between(F1_DOSSIER_START, startedAt).abs()).isLessThan(Duration.ofMinutes(1));
+		assertThat(sample.incident().path("mode").asString()).isEqualTo("decision");
+		assertThat(sample.dossierCalls()).isEqualTo(33);
+		assertThat(sample.dossierUnrecorded()).isZero();
+		assertThat(sample.recorded()).isEqualTo(33);
+		assertThat(sample.unrecorded()).isZero();
+		assertThat(sample.coverage()).isEqualTo(1.0);
+		// The report is the sample's only model call.
+		assertThat(this.model.calls()).isEqualTo(1);
+		assertThat(sample.summaryLine()).startsWith("F1\tdecision\tlocal\t1\tCOMPLETED\t");
+	}
+
+	@Test
+	void aDecisionSampleIsServedADecisionRecordingBeforeADossierOne() throws IOException {
+		// The dossier recording is listed first; the decision one holds the dossier's first call with another output.
+		ObjectNode dossier = (ObjectNode) JSON.readTree(F1_DOSSIER.toFile());
+		ObjectNode decision = dossier.deepCopy();
+		ArrayNode decisionCalls = dossierCallsOf(decision);
+		String sharedCall = decisionCalls.get(0).path("tool").asString() + " " + decisionCalls.get(0).path("args");
+		((ObjectNode) decisionCalls.get(0)).put("output", "the decision run's output");
+		setDossierCalls(decision, decisionCalls);
+		Path replay = recordingsDir(List.of(line("dossier", "F1/dossier.json"), line("decision", "F1/decision.json")),
+				List.of(dossier, decision), List.of("F1/dossier.json", "F1/decision.json"));
+		this.model.text(unknownReport());
+
+		ReplayDriver.Sample sample = driverOver(replay).sample("F1", AgentMode.DECISION, 1);
+
+		JsonNode served = null;
+		for (JsonNode call : dossierCallsOf(sample.incident())) {
+			if ((call.path("tool").asString() + " " + call.path("args")).equals(sharedCall)) {
+				served = call;
+			}
+		}
+		assertThat(served).as("the shared call in the sample's dossier").isNotNull();
+		assertThat(served.path("output").asString()).isEqualTo("the decision run's output");
+		assertThat(sample.conflicts()).isEqualTo(1);
+	}
+
+	@Test
 	void aRecordingWithoutItsStartSymptomOrWindowFailsBeforeAnyModelCall() throws IOException {
 		List<Consumer<ObjectNode>> breaks = List.of(recording -> recording.remove("startedAt"),
 				recording -> recording.remove("symptom"), recording -> recording.put("sinceMinutes", 0));
