@@ -4,29 +4,27 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-20 (session 01; the session ran from 2026-10-19)
+2026-10-24 (session 01; the session ran from 2026-10-20)
 
 ## Milestone
 
-**M2 — First agent: in progress.** Since the last state: the evidence dossier (ADR-011, `odd/tasks/evidence-dossier.md`), the cloud development route (ADR-012, `odd/tasks/cloud-route.md`), and this session's six features. Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3). The cloud route now diagnoses F1–F3 in dossier mode (replay, 5 samples per fault: 5/5, 5/5, 4-5/5); the local route (`granite4.1:8b`) does not yet (`f3-caller-config` T6: explorer 1/3, dossier 0/3, timeouts on this CPU).
+**M2 — First agent: in progress.** Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3). The cloud route diagnoses F1–F3 in dossier mode (replay: F1 5/5, F2 5/5, F3 15/15). The local route (`granite4.1:8b`) no longer times out and its reports are valid (9/9), but it diagnoses only F2 (3/3); F1 and F3 stay 0/3.
 
 ## Last action
 
-This session (journal `docs/journal/2026-10-20-01.md`), all on local branches, nothing pushed:
-- `f3-caller-config`: F3 diagnosed on the cloud route (0/6 → 3/4); not confirmed on the local route.
-- `evidence-settling`: the last restore time is kept across runs, so a run's F1 no longer sees the previous run's F3 evidence.
-- `replay-harness`: `infra/scripts/replay-agent.sh` replays recorded faults through the real loop; dossier mode replays fully, explorer mode does not (exact matching).
-- `dossier-latency`: the dossier shows each service's answer time; dossier F1 0/5 → 4-5/5 on the replay, 3/3 in the lab.
-- `fix/cloud-cut-report`: Anthropic's `max_tokens` stop is recognised as a cut report.
-- `report-length`: the cloud report cap is 768 (the local one stays 512); asking for at most 3 evidence items cost F3 and was reverted.
-- Cloud spend so far about $0.92 of the human's $5. Current branch `feat/report-length` (`2fc57c6`), clean.
+This session (journal `docs/journal/2026-10-24-01.md`), all on local branches, nothing pushed:
+- `local-dossier-timing` / `local-deadlines`: 600 s local deadlines; no more timeouts on this CPU.
+- `evidence-by-reference` (ADR-013): the model cites a numbered line (`D<n>` or `n:`) and code fills in the quote; local invalid reports 5/9 → 1/9.
+- `report-field-order`: the report's reasoning (`summary`, `evidence`) comes before the cause; a summary over 500 characters is cut, not rejected. Cloud F3 10/15 → 15/15.
+- `dossier-change-column`: a `change` column (incident minus previous) in the dossier's count tables; no local gain (F1 0/3, F2 3/3, F3 0/3), so reverted (`7b8a4cf`).
+- Cloud spend so far about $1.41 of the human's $5. Current branch `feat/dossier-change-column` (`7b8a4cf`), clean.
 
 ## Next action
 
 1. The human decides what follows. Candidates:
-   - the local route: why `granite4.1:8b` misses F3 and why its dossier runs time out on this CPU (the M2 check depends on it);
-   - an explorer-mode replay design (exact matching cannot serve the model's free arguments);
-   - explorer mode's F1, which reads no dossier and so no latency.
+   - a larger local model for the M2 check: `granite4.1:8b` reads the previous window's rows as the incident's even when the change is written out (`odd/tasks/dossier-change-column.md`), and stops at payment-service on F1;
+   - accept local F1 and F3 as a known limit and run the local lab round for M2 (`verify-agent.sh --mode dossier --route local`);
+   - whether to raise the 500-character summary limit (12 of 15 cloud summaries were cut).
 
 ## Local branch chains (not pushed)
 
@@ -46,7 +44,7 @@ This session (journal `docs/journal/2026-10-20-01.md`), all on local branches, n
 - `feat/agent-loop` → `-01-state` → `-02-tools` → `-03-loop` → `-04-check`
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
-- `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` (current, clean)
+- `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column` (current, clean)
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -68,6 +66,10 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 ## Follow-ups
 
 This session (details in each feature document):
+- evidence-by-reference: ReportCheck checks that a cited line exists, not that it supports the item's `why` (local F3 cited D17, a success row, for a `ConnectException`); the T2 SUGGESTION R3-runbook-budget-untested.
+- report-field-order: a non-string summary gets no length in its error (SUGGESTION); 12 of 15 cloud summaries are cut at 500.
+
+Previous session:
 - report-length: the local route still asks for 1 to 5 evidence items under a 512 cap; the prompt's evidence wording is not pinned by a test.
 - dossier-latency: a window over 180 minutes loses the latency section (the tool's 360-minute limit); latency means are unweighted point means; the dossier stress ceiling is now about two thirds of `num-ctx`.
 - replay-harness: explorer replays are not valid measurements; SUGGESTIONs on the driver and scripts (summary append on a reused out dir, second-resolution out dir, script option-parsing tests).
