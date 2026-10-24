@@ -252,6 +252,31 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
     - `record-replay.sh --split holdout --rounds 2,4,6,8,10 <run>`
 - 2026-10-24 16:47: the first T4 recording (`F1-r1`) passes `check-recordings.sh`. Its previous window holds 5 PAID orders, and all traffic is SUCCESS; its incident window has no restart; the window is 4 minutes. The cloud decision run took 15 s (steps DOSSIER and REPORT) and matched.
 
+- T3 review (`4b26044`, base `f3cd4c3`, four lenses, 10 files, 1,114 lines, consent granted): approved and acknowledged (lineage `review-cdc06bb0f905dcbb`). All findings go to T3r, which is running:
+  - WARNING R2-awk-case-selection-duplicate: `replay-agent.sh` repeats `decisionCases`' rule in awk, with no test that they agree.
+  - WARNING R3-dossier-pools-holdout: explorer and dossier replays pool every split, holdout included, so imports would change them and holdout would leak into non-decision replays.
+  - SUGGESTION: the split names are hard-coded.
+  - SUGGESTION: the comment of `recorded_split` is garbled.
+  - SUGGESTION: the `ReplayRunTest` property refusals are untested.
+- 2026-10-24 21:15, interim T4 results. The cloud route in decision mode on clean incidents (live, rounds 1-5): F1 3/5, F2 5/5, F3 4/4.
+  - **F3 is right every time** once its previous window holds no other fault: the contamination was the F3 problem.
+  - **F1 is now the hard case, on the cloud too.** Both misses name `payment-service|DEPENDENCY_LATENCY`, one hop early. With a healthy baseline a caller's latency includes its callee's: in F1-r1, payment-service's `/payments` mean is 1.229 s against gateway-mock's `/authorize` 1.177 s (maxima 9.979 and 9.905). Comparing magnitudes cannot find the origin. On the old recording F1 looked easy, because its empty baseline left gateway-mock alone at 9.256 s.
+  - This is the case Part B's per-service assessment is designed for: a slow leaf is ORIGIN, and a slow caller of a slow service is AFFECTED.
+
+- 2026-10-24: T3r done (route: delegated writer; trigger: 8 files across the replay driver, two scripts, their tests, the docs and the spec).
+  - **One source for case selection.** A new class `ReplayCases` (JDK only) owns `recordings.tsv`: the splits, the pooled split, the decision cases and `replay.faults`.
+    - `ReplayDriver` uses it.
+    - `replay-agent.sh` runs it straight from its source file through the Java 21 launcher, in 0.6-0.8 s with no Maven and no Docker. Its awk copy is gone.
+    - `ReplayRunTest` was not used for this, because it is a `@SpringBootTest` with a Testcontainers Postgres.
+    - RED: on a manifest with an unknown split, the old script counted 2 recordings while the driver refused it.
+  - **Explorer and dossier replays pool only `stress`**, so no import into `dev`, `holdout` or `probe` can change them, and holdout never reaches a non-decision replay.
+    - RED: `explorerAndDossierSamplesPoolOnlyTheStressRecordings` failed on HEAD (`expected "stress" but was "dev"`).
+  - Split names come from one constant in Java, and from one array in `record-replay.sh`.
+  - The `recorded_split` comment is rewritten.
+  - `ReplayDriver.refuseIgnoredProperties` is now unit-tested.
+  - Results: full suite 492 tests and `test-lib.sh` 137 cases. Parent spot check: both green, and the listing prints the three stress cases.
+  - About 645 lines, about 120 of them moved from `ReplayDriver` to `ReplayCases`.
+
 ## Next step
 
-T3 review, then wait for T4. Then T2r2 (the `diagnose()` branch tests and the ACT deadline headroom), the import, and T5 (M0).
+Review T3r, then wait for T4. Then T2r2 (the `diagnose()` branch tests and the ACT deadline headroom), the import, and T5 (M0).

@@ -5,7 +5,10 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -30,8 +33,8 @@ import dev.kintsugi.agent.incident.IncidentStatus;
 
 /**
  * The replay driver's per-sample pipeline (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md
- * T4) and its decision-mode cases (odd/tasks/decision-instrument.md T3), with a scripted model over the committed
- * recordings: no lab and no real model. {@link ReplayRunTest} runs the same pipeline with the route's real model, on
+ * T4), its decision-mode cases and the listing of {@link ReplayCases} (odd/tasks/decision-instrument.md T3, T3r), with
+ * a scripted model over the committed recordings: no lab and no real model. {@link ReplayRunTest} runs the same pipeline with the route's real model, on
  * demand only.
  */
 class ReplayDriverTest {
@@ -111,8 +114,8 @@ class ReplayDriverTest {
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
 		assertThat(line[12]).isEqualTo(String.valueOf(sample.promptTokens()));
 		assertThat(line[14]).matches("\\d+\\.\\d");
-		// A dossier sample pools the fault's recordings of every split, so it has none; it names the recording it
-		// opened on, which also names its file.
+		// A dossier sample is no case of a split, so it has none; it names the recording it opened on, which also names
+		// its file.
 		assertThat(List.of(line).subList(15, 17)).containsExactly("-", F1_DOSSIER_STEM);
 
 		JsonNode incident = JSON.readTree(this.out.resolve("F1-dossier-" + F1_DOSSIER_STEM + "-1.json").toFile());
@@ -147,9 +150,8 @@ class ReplayDriverTest {
 
 	@Test
 	void aSampleIsServedItsOwnModesRecordingBeforeTheOthers() throws IOException {
-		// Two recordings of F1 hold the dossier's first call with different outputs; the explorer one is listed first.
-		// They are in different splits: explorer and dossier samples pool every recording of the fault, whatever its
-		// split, as before the splits.
+		// Two stress recordings of F1 hold the dossier's first call with different outputs; the explorer one is listed
+		// first. Explorer and dossier samples pool the fault's stress recordings, every mode.
 		ObjectNode dossier = (ObjectNode) JSON.readTree(F1_DOSSIER.toFile());
 		ObjectNode explorer = dossier.deepCopy();
 		ArrayNode explorerCalls = dossierCallsOf(explorer);
@@ -157,7 +159,7 @@ class ReplayDriverTest {
 		((ObjectNode) explorerCalls.get(0)).put("output", "the explorer run's output");
 		setDossierCalls(explorer, explorerCalls);
 		Path replay = recordingsDir(
-				List.of(line("F1", "explorer", "F1/explorer.json", "holdout"),
+				List.of(line("F1", "explorer", "F1/explorer.json", "stress"),
 						line("F1", "dossier", "F1/dossier.json", "stress")),
 				List.of(explorer, dossier), List.of("F1/explorer.json", "F1/dossier.json"));
 		this.model.quiet().quiet().text(unknownReport());
@@ -172,12 +174,53 @@ class ReplayDriverTest {
 	}
 
 	@Test
+	void explorerAndDossierSamplesPoolOnlyTheStressRecordings() throws IOException {
+		// A dev and a holdout recording of F1, listed before its stress one, hold the dossier's first call with other
+		// outputs, as the decision-mode imports will: a dossier sample is served the stress recording alone, so the
+		// imports change nothing and no holdout output reaches it.
+		ObjectNode stress = (ObjectNode) JSON.readTree(F1_DOSSIER.toFile());
+		JsonNode first = dossierCallsOf(stress).get(0);
+		String sharedCall = first.path("tool").asString() + " " + first.path("args");
+		List<ObjectNode> imported = new ArrayList<>();
+		for (String split : List.of("dev", "holdout")) {
+			ObjectNode recording = stress.deepCopy();
+			ArrayNode calls = dossierCallsOf(recording);
+			((ObjectNode) calls.get(0)).put("output", "the " + split + " run's output");
+			setDossierCalls(recording, calls);
+			imported.add(recording);
+		}
+		Path replay = recordingsDir(
+				List.of(line("F1", "dossier", "F1/dev.json", "dev"),
+						line("F1", "decision", "F1/holdout.json", "holdout"),
+						line("F1", "dossier", "F1/stress.json", "stress"), line("F2", "decision", "F2/dev.json", "dev")),
+				List.of(imported.get(0), imported.get(1), stress),
+				List.of("F1/dev.json", "F1/holdout.json", "F1/stress.json"));
+		this.model.quiet().quiet().text(unknownReport());
+		ReplayDriver driver = driverOver(replay);
+
+		ReplayDriver.Sample sample = driver.sample("F1", AgentMode.DOSSIER, 1);
+
+		assertThat(sample.recording()).isEqualTo("stress");
+		assertThat(servedOutput(sample, sharedCall)).isEqualTo(first.path("output").asString());
+		assertThat(sample.conflicts()).isZero();
+		assertThat(sample.coverage()).isEqualTo(1.0);
+		assertThat(sample.split()).isEqualTo("-");
+		// A fault with no stress recording has no explorer or dossier sample: it fails before any model call.
+		int calls = this.model.calls();
+		assertThatThrownBy(() -> driver.sample("F2", AgentMode.EXPLORER, 1))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("F2")
+			.hasMessageContaining("stress");
+		assertThat(this.model.calls()).as("model calls").isEqualTo(calls);
+	}
+
+	@Test
 	void aDecisionCaseReplaysItsDossierRecordingWithNoUnrecordedCall() {
 		this.model.text(unknownReport());
 
 		// The committed manifest's six rows are the stress split; F1's explorer recording, listed first, is no case.
-		List<ReplayDriver.Recording> cases = this.driver.decisionCases("stress", List.of("F1"));
-		assertThat(cases).extracting(ReplayDriver.Recording::file)
+		List<ReplayCases.Recording> cases = this.driver.decisionCases("stress", List.of("F1"));
+		assertThat(cases).extracting(ReplayCases.Recording::file)
 			.containsExactly("F1/" + F1_DOSSIER_STEM + ".json");
 		ReplayDriver.Sample sample = this.driver.decisionSample(cases.get(0), 1);
 
@@ -212,7 +255,7 @@ class ReplayDriverTest {
 		this.model.text(unknownReport()).text(unknownReport());
 		ReplayDriver driver = driverOver(replay);
 
-		List<ReplayDriver.Recording> cases = driver.decisionCases("dev", List.of("F1"));
+		List<ReplayCases.Recording> cases = driver.decisionCases("dev", List.of("F1"));
 		ReplayDriver.Sample first = driver.decisionSample(cases.get(0), 1);
 		ReplayDriver.Sample second = driver.decisionSample(cases.get(1), 1);
 
@@ -246,11 +289,11 @@ class ReplayDriverTest {
 		ReplayDriver driver = driverOver(replay);
 
 		// One case per recording: the chosen faults in their order, each fault's recordings in manifest order.
-		assertThat(driver.decisionCases("dev", List.of("F2", "F1"))).extracting(ReplayDriver.Recording::file)
+		assertThat(driver.decisionCases("dev", List.of("F2", "F1"))).extracting(ReplayCases.Recording::file)
 			.containsExactly("F2/decision-dev.json", "F1/dossier-dev.json", "F1/decision-dev.json");
-		assertThat(driver.decisionCases("holdout", List.of("F2"))).extracting(ReplayDriver.Recording::file)
+		assertThat(driver.decisionCases("holdout", List.of("F2"))).extracting(ReplayCases.Recording::file)
 			.containsExactly("F2/decision-holdout.json");
-		assertThat(driver.decisionCases("stress", List.of("F1"))).extracting(ReplayDriver.Recording::split)
+		assertThat(driver.decisionCases("stress", List.of("F1"))).extracting(ReplayCases.Recording::split)
 			.containsExactly("stress");
 	}
 
@@ -286,6 +329,65 @@ class ReplayDriverTest {
 			.hasMessageContaining("F1/broken.json");
 		assertThat(samples).isEmpty();
 		assertThat(this.model.calls()).as("model calls").isZero();
+	}
+
+	@Test
+	void theListingPrintsTheCasesTheDriverReplays() throws IOException {
+		Path replay = recordingsDir(List.of(line("F1", "decision", "F1/a.json", "dev"),
+				line("F1", "explorer", "F1/b.json", "dev"), line("F2", "dossier", "F2/c.json", "dev"),
+				line("F1", "dossier", "F1/d.json", "holdout"), line("F1", "dossier", "F1/e.json", "dev")), List.of(),
+				List.of());
+		List<String> replayed = driverOver(replay).decisionCases("dev", List.of("F2", "F1"))
+			.stream()
+			.map(recording -> recording.fault() + "\t" + recording.file())
+			.toList();
+
+		// What replay-agent.sh counts before Maven, with the faults written as replay.faults takes them.
+		Listing listing = listing(replay.toString(), "dev", "F2, F1");
+
+		assertThat(listing.status()).isZero();
+		assertThat(listing.lines()).containsExactlyElementsOf(replayed)
+			.containsExactly("F2\tF2/c.json", "F1\tF1/a.json", "F1\tF1/e.json");
+		assertThat(listing.error()).isEmpty();
+		// ReplayCases runs from its source alone, so it names the case modes as the manifest records them.
+		assertThat(ReplayCases.CASE_MODES).containsExactly(AgentMode.DECISION.value(), AgentMode.DOSSIER.value());
+	}
+
+	@Test
+	void theListingRefusesWhatTheDriverRefusesWithStatusTwo() throws IOException {
+		Path replay = recordingsDir(List.of(line("F1", "decision", "F1/a.json", "dev")), List.of(), List.of());
+		Path unknownSplit = recordingsDir(List.of(line("F1", "decision", "F1/a.json", "test")), List.of(), List.of());
+
+		// 2 is replay-agent.sh's status for a bad option; the reason is the driver's.
+		assertThat(listing(replay.toString(), "hold-out", "F1"))
+			.isEqualTo(new Listing(2, List.of(), "unknown split 'hold-out': choose dev, holdout, stress or probe"));
+		assertThat(listing(replay.toString(), "dev", "F1,F3")).isEqualTo(new Listing(2, List.of(),
+				"no decision or dossier recording of F3 in split dev of " + replay.resolve("recordings.tsv")));
+		Listing refused = listing(unknownSplit.toString(), "dev", "F1");
+		assertThat(refused.status()).isEqualTo(2);
+		assertThat(refused.error()).startsWith("a manifest line has the split 'test', not dev, holdout, stress or probe");
+		assertThat(listing(replay.toString(), "dev").status()).isEqualTo(2);
+	}
+
+	@Test
+	void aPropertyOfTheOtherKindOfRunIsRefused() {
+		Map<String, String> samples = Map.of("replay.samples", "3");
+
+		// Decision mode replays the cases of a split: replay.split and replay.repeats, never replay.samples.
+		assertThatThrownBy(() -> ReplayDriver.refuseIgnoredProperties(true, samples::get))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("replay.samples")
+			.hasMessageContaining("replay.repeats");
+		ReplayDriver.refuseIgnoredProperties(true, Map.of("replay.split", "holdout", "replay.repeats", "2")::get);
+		// Explorer and dossier mode sample faults: replay.samples, never replay.split or replay.repeats.
+		for (String property : List.of("replay.split", "replay.repeats")) {
+			assertThatThrownBy(() -> ReplayDriver.refuseIgnoredProperties(false, Map.of(property, "2")::get))
+				.as(property)
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining(property);
+		}
+		ReplayDriver.refuseIgnoredProperties(false, samples::get);
+		ReplayDriver.refuseIgnoredProperties(false, Map.<String, String>of()::get);
 	}
 
 	@Test
@@ -325,7 +427,7 @@ class ReplayDriverTest {
 		for (Consumer<ObjectNode> broken : breaks) {
 			ObjectNode recording = (ObjectNode) JSON.readTree(F1_DOSSIER.toFile());
 			broken.accept(recording);
-			Path replay = recordingsDir(List.of(line("dossier", "F1/broken.json")), List.of(recording),
+			Path replay = recordingsDir(List.of(line("F1", "dossier", "F1/broken.json", "stress")), List.of(recording),
 					List.of("F1/broken.json"));
 			this.model.quiet().quiet().text(unknownReport());
 
@@ -416,6 +518,19 @@ class ReplayDriverTest {
 		}
 		assertThat(served).as("the call " + call + " in the sample's dossier").isNotNull();
 		return served.path("output").asString();
+	}
+
+	/** {@link ReplayCases#list} on {@code args}: its status, the lines it printed, and its error output. */
+	private static Listing listing(String... args) {
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ByteArrayOutputStream err = new ByteArrayOutputStream();
+		int status = ReplayCases.list(List.of(args), new PrintStream(out, true, StandardCharsets.UTF_8),
+				new PrintStream(err, true, StandardCharsets.UTF_8));
+		return new Listing(status, out.toString(StandardCharsets.UTF_8).lines().toList(),
+				err.toString(StandardCharsets.UTF_8).strip());
+	}
+
+	private record Listing(int status, List<String> lines, String error) {
 	}
 
 	/** A manifest line of F1 in the {@code dev} split. */

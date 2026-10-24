@@ -53,11 +53,19 @@ while (( $# )); do
     *) run_dirs+=("$1"); shift ;;
   esac
 done
-case "$split" in
-  dev|holdout|stress|probe) ;;
-  "") echo "--split is required: dev, holdout, stress or probe; see --help" >&2; exit 2 ;;
-  *) echo "Unknown split '$split'; choose dev, holdout, stress or probe" >&2; exit 2 ;;
-esac
+# The splits a recording can join (odd/tasks/decision-instrument.md): the checks and messages below take them from here.
+SPLITS=(dev holdout stress probe)
+# Succeeds when $1 is one of SPLITS.
+is_split() {
+  local name
+  for name in "${SPLITS[@]}"; do [[ "$1" == "$name" ]] && return 0; done
+  return 1
+}
+# SPLITS as the messages name them: "dev, holdout, stress or probe".
+split_choices=$(printf '%s, ' "${SPLITS[@]:0:${#SPLITS[@]}-1}")
+split_choices="${split_choices%, } or ${SPLITS[-1]}"
+[[ -n "$split" ]] || { echo "--split is required: $split_choices; see --help" >&2; exit 2; }
+is_split "$split" || { echo "Unknown split '$split'; choose $split_choices" >&2; exit 2; }
 # The rounds --rounds selects, as " 1 2 3 ": each item is a round or a range of rounds, from 1 to 999.
 selected_rounds=" "
 if [[ -n "$rounds" ]]; then
@@ -98,7 +106,8 @@ if [[ -s "$MANIFEST" ]]; then
   }
 fi
 
-# Prints the split manifest line of file $1 (relative to REPLAY_DIR) holds; nothing when it has no line.
+# Prints the split column of the manifest line for file $1 (relative to REPLAY_DIR), or nothing when there is no such
+# line.
 recorded_split() {
   [[ -s "$MANIFEST" ]] || return 0
   awk -F'\t' -v file="$1" 'NR > 1 && $5 == file { print $7; exit }' "$MANIFEST"

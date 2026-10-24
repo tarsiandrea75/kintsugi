@@ -414,7 +414,9 @@ expect "a run directory with no recording is a wrong argument" \
   "No F<n>-incident.json or F<n>-r<k>-incident.json in $KEY_DIR/empty-run"$'\n'"exit 2"
 
 # replay-agent.sh's decision-mode options and cases, checked before Maven, over a temporary manifest (REPLAY_DIR). Run
-# on the local route with the failing curl stub, so a run that passes them stops at the Ollama check.
+# on the local route with the failing curl stub, so a run that passes them stops at the Ollama check. The cases come
+# from ReplayCases, the class ReplayRunTest picks them with, run from its source by the JDK: the count and the
+# refusals below are the driver's own.
 manifest_dir="$KEY_DIR/replay-manifest"
 mkdir -p "$manifest_dir"
 printf '%s\n' "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split" \
@@ -423,10 +425,11 @@ printf '%s\n' "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${ta
   "F1${tab}explorer${tab}cloud${tab}a|B${tab}F1/r3-F1.json${tab}id-3${tab}dev" \
   "F1${tab}decision${tab}cloud${tab}a|B${tab}F1/r4-F1.json${tab}id-4${tab}holdout" \
   "F3${tab}decision${tab}cloud${tab}c|D${tab}F3/r1-F3.json${tab}id-5${tab}dev" >"$manifest_dir/recordings.tsv"
-replay_agent() {
-  REPLAY_DIR="$manifest_dir" PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" --route local \
-    "$@" 2>&1
+# replay-agent.sh over the replay directory $1, then over the temporary manifest.
+replay_agent_over() {
+  REPLAY_DIR="$1" PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" --route local "${@:2}" 2>&1
 }
+replay_agent() { replay_agent_over "$manifest_dir" "$@"; }
 option_check() {
   local out
   out=$(replay_agent "$@")
@@ -438,7 +441,9 @@ expect "decision mode refuses --samples, and points to --repeats" \
  run each one M times"$'\n'"exit 2"
 expect "dossier mode refuses --split" "$(option_check --mode dossier --split dev)" "2 --split"
 expect "explorer and dossier modes refuse --repeats" "$(option_check --mode both --repeats 2)" "2 --repeats"
-expect "an unknown split exits 2" "$(option_check --mode decision --split train)" "2 Unknown"
+expect "an unknown split exits 2 with the driver's reason, before Maven" \
+  "$(replay_agent --mode decision --split train; echo "exit $?")" \
+  "unknown split 'train': choose dev, holdout, stress or probe"$'\n'"exit 2"
 expect "a 4-digit --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 1000)" \
   "2 --repeats"
 expect "a zero --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 0)" "2 --repeats"
@@ -449,7 +454,16 @@ expect "one case per dev recording of the chosen faults made in decision or doss
   "....  decision mode, split dev: 3 recording(s) of F1 F3, each replayed 2 time(s): 6 samples"
 expect "a chosen fault with no recording in the split stops the run before Maven" \
   "$(replay_agent --mode decision --split holdout --faults F1,F3; echo "exit $?")" \
-  "No decision or dossier recording of F3 in split 'holdout' of $manifest_dir/recordings.tsv"$'\n'"exit 2"
+  "no decision or dossier recording of F3 in split holdout of $manifest_dir/recordings.tsv"$'\n'"exit 2"
+# A manifest line the driver refuses (here the split 'test') stops the run before Maven, even for a fault it does not
+# name, as it would fail the driver.
+bad_dir="$KEY_DIR/replay-bad-line"
+mkdir -p "$bad_dir"
+bad_line="F2${tab}decision${tab}cloud${tab}c|D${tab}F2/r1-F2.json${tab}id-6${tab}test"
+printf '%s\n' "$(<"$manifest_dir/recordings.tsv")" "$bad_line" >"$bad_dir/recordings.tsv"
+expect "a manifest line the driver refuses stops the run before Maven" \
+  "$(replay_agent_over "$bad_dir" --mode decision --faults F1; echo "exit $?")" \
+  "a manifest line has the split 'test', not dev, holdout, stress or probe: $bad_line"$'\n'"exit 2"
 
 # record-replay.sh: a round run imported split by split into a temporary replay directory (REPLAY_DIR), never the
 # committed one. Round 1 holds a clean F3 (the check-recordings fixture) and the 2026-10-19 F2, whose windows fail the
@@ -482,6 +496,8 @@ expect "--split is required" "$(record "$new_run"; echo "exit $?")" \
   "--split is required: dev, holdout, stress or probe; see --help"$'\n'"exit 2"
 expect "an unknown split exits 2" "$(record --split train "$new_run"; echo "exit $?")" \
   "Unknown split 'train'; choose dev, holdout, stress or probe"$'\n'"exit 2"
+expect "two splits in one --split are no split" "$(record --split 'dev holdout' "$new_run"; echo "exit $?")" \
+  "Unknown split 'dev holdout'; choose dev, holdout, stress or probe"$'\n'"exit 2"
 expect "a range of rounds that ends before it starts exits 2" \
   "$(record --split dev --rounds 5-3 "$new_run"; echo "exit $?")" \
   "--rounds: the range 5-3 ends before it starts"$'\n'"exit 2"

@@ -33,12 +33,14 @@ recorded). A sample with coverage below 1 had calls no recording holds: read it 
 A decision run (agent spec, "Decision mode") has one case per recording of the split: each line of recordings.tsv
 for a chosen fault, in that split, recorded in decision or dossier mode. Each case replays its own recording alone,
 which holds every call the dossier makes, --repeats times: the dossier, then the report call, with no phase and no
-drill-down call. A chosen fault with no recording in the split stops the run before Maven. The splits: dev to tune
-on, holdout read once, stress for the 2026-10-19 recordings whose windows hold other faults, probe for faults never
-tuned on.
+drill-down call. Before Maven, the script lists the cases with ReplayCases, the class ReplayRunTest picks them with,
+run from its source by the JDK (about a second): an unknown split, a chosen fault with no recording in the split, or a
+manifest line the driver refuses stops the run there. The splits: dev to tune on, holdout read once, stress for the
+2026-10-19 recordings whose windows hold other faults, probe for faults never tuned on.
 
-Explorer and dossier samples pool every recording of the fault, whatever its split, the first one in the sample's mode
-served first; --split and --repeats are refused there, as --samples is in decision mode.
+Explorer and dossier samples pool the fault's stress recordings, the ones they were measured on, the first one in the
+sample's mode served first, so recordings imported into dev, holdout or probe never change them; --split and
+--repeats are refused there, as --samples is in decision mode.
 
 EXPLORER REPLAYS ARE NOT VALID MEASUREMENTS: under exact matching the explorer's model-chosen calls are mostly not
 recorded (coverage 0.00-0.38 in the T4 smoke check), so its samples measure the replay's gaps, not the agent. Explorer
@@ -49,7 +51,7 @@ The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reache
 and is never printed. The local route needs Ollama serving granite4.1:8b. Both need docker (Testcontainers' Postgres).
 REPLAY_DIR, when set, names the replay directory instead (used to try the options on a temporary manifest).
 Exit codes: 0 when every sample ran (a MISS is a measurement), 1 when the run failed, 2 on a bad option, a missing
-recording, a missing key or a missing model.
+key or a missing model, and in decision mode on a missing recording or a manifest line the driver refuses.
 EOF
 }
 
@@ -87,17 +89,14 @@ done
 if [[ "$mode" == decision ]]; then
   [[ -z "${samples+given}" ]] || { echo "--samples does not apply to decision mode, which replays each recording of" \
     "the split once: use --repeats M to run each one M times" >&2; exit 2; }
+  # The split is checked with the cases below, by the driver's own rule.
   split=${split-dev}
   repeats=${repeats-1}
-  case "$split" in
-    dev|holdout|stress|probe) ;;
-    *) echo "Unknown split '$split'; choose dev, holdout, stress or probe" >&2; exit 2 ;;
-  esac
   [[ "$repeats" =~ ^[1-9][0-9]{0,2}$ ]] \
     || { echo "--repeats needs an integer from 1 to 999, not '$repeats'" >&2; exit 2; }
 else
-  [[ -z "${split+given}" ]] || { echo "--split applies to decision mode only: explorer and dossier samples pool every" \
-    "recording of the fault" >&2; exit 2; }
+  [[ -z "${split+given}" ]] || { echo "--split applies to decision mode only: explorer and dossier samples pool the" \
+    "fault's stress recordings" >&2; exit 2; }
   [[ -z "${repeats+given}" ]] \
     || { echo "--repeats applies to decision mode only: explorer and dossier replays take --samples" >&2; exit 2; }
   samples=${samples-1}
@@ -123,16 +122,15 @@ MANIFEST="$REPLAY_DIR/recordings.tsv"
 REPLAY_DIR=$(cd "$REPLAY_DIR" && pwd)
 
 if [[ "$mode" == decision ]]; then
-  # The cases, as ReplayDriver.decisionCases picks them: the lines of a chosen fault in the split, recorded in decision
-  # or dossier mode. Counted here to bound the run, and to stop before Maven when a fault has none.
-  recordings=0
-  for fault in "${selected[@]}"; do
-    count=$(awk -F'\t' -v fault="$fault" -v want="$split" \
-      'NR > 1 && $1 == fault && ($2 == "decision" || $2 == "dossier") && $7 == want { n++ } END { print n + 0 }' \
-      "$MANIFEST")
-    (( count )) || { echo "No decision or dossier recording of $fault in split '$split' of $MANIFEST" >&2; exit 2; }
-    recordings=$((recordings + count))
-  done
+  # The cases, one line each, listed by ReplayCases, the class ReplayRunTest picks them with, run from its source by the
+  # JDK's launcher (about a second; no Maven, no docker). Counted here to bound the run. On an unknown split, a chosen
+  # fault with no case, or a manifest line the driver refuses, it says why and exits 2, and so does the run, before
+  # Maven; any other failure of the listing fails the run.
+  java_bin=${JAVA_HOME:+$JAVA_HOME/bin/}java
+  listing=$("$java_bin" "$REPO_DIR/agent/src/test/java/dev/kintsugi/agent/loop/ReplayCases.java" "$REPLAY_DIR" \
+    "$split" "$faults") || exit $(( $? == 2 ? 2 : 1 ))
+  mapfile -t cases <<<"$listing"
+  recordings=${#cases[@]}
   total=$((recordings * repeats))
   info "decision mode, split $split: $recordings recording(s) of ${selected[*]}, each replayed $repeats time(s):" \
     "$total samples"

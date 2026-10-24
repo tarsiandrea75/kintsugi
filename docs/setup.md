@@ -439,7 +439,7 @@ infra/scripts/record-replay.sh --split holdout --rounds 2,4,6,8,10 infra/scripts
 Every recording belongs to one split, the manifest's last column (`odd/tasks/decision-instrument.md`):
 - `dev`: the recordings a change is tuned and measured on;
 - `holdout`: read once, to confirm a result reached on `dev`;
-- `stress`: the six recordings of 2026-10-19, whose previous windows hold other faults (`check-recordings.sh` fails them), kept for a later robustness case;
+- `stress`: the six recordings of 2026-10-19, whose previous windows hold other faults (`check-recordings.sh` fails them), kept for a later robustness case, and the only recordings explorer and dossier replays pool;
 - `probe`: faults the prompt was never tuned on (none yet).
 
 `--split` is required. For each `<fault>-incident.json` or `<fault>-r<k>-incident.json` it reads the score file of the same name. It copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json`, or `<run dir name>-r<k>-<fault>.json` (committed: recordings are lab output, not secrets). It then adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file, the incident id and the split. `--rounds` takes only some rounds of a `--rounds` run (`1-5`, or `1,3,5,7,9`), so one run directory can feed both `dev` and `holdout`.
@@ -487,10 +487,10 @@ A sample with coverage below 1.00 made calls no recording holds, answered as `CL
 - Each manifest line of a chosen fault in the split (`--split`, default `dev`) recorded in decision or dossier mode is one case.
 - Each case replays its own recording alone, which holds every call the dossier makes, so its coverage is 1.00 with no conflict. It runs `--repeats` times (1 to 999, default 1).
 - `recordings` in `aggregate.tsv` counts the independent observations, and `samples` is recordings × repeats. On the local route, at temperature 0, repeats of a recording are near-copies.
-- A chosen fault with no recording in the split stops the script with exit 2 before Maven, and a recording without its start, symptom or window fails the run before any model call.
+- Before Maven, the script lists the cases with `ReplayCases` (`agent/src/test/java/dev/kintsugi/agent/loop/ReplayCases.java`), the class `ReplayRunTest` picks them with, run from its source by the JDK in about a second, so its count and its refusals are the driver's own. An unknown split, a chosen fault with no recording in the split, or a manifest line the driver refuses stops the script there with exit 2. A recording without its start, symptom or window fails the run before any model call.
 - `--samples` is an error in decision mode, which points to `--repeats`. On the cloud route the bound of 60 samples per run counts recordings × repeats.
 
-The default mode is `dossier`; `--samples` takes 1 to 999. Explorer and dossier samples pool every recording of the fault, whatever its split, the fault's first recording in the sample's mode first; `--split` and `--repeats` are errors there. `--mode explorer` and `--mode both` (explorer and dossier) still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. A `MISS` is a measurement; the script exits 1 only when a sample could not run. `REPLAY_DIR` names another replay directory, as for `record-replay.sh`.
+The default mode is `dossier`; `--samples` takes 1 to 999. Explorer and dossier samples pool the fault's `stress` recordings only, the ones they were measured on, its first `stress` recording in the sample's mode first: recordings imported into `dev`, `holdout` or `probe` never change them, and a `holdout` recording never reaches them. `--split` and `--repeats` are errors there. `--mode explorer` and `--mode both` (explorer and dossier) still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. A `MISS` is a measurement; the script exits 1 only when a sample could not run. `REPLAY_DIR` names another replay directory, as for `record-replay.sh`.
 
 ### Reset a volume
 

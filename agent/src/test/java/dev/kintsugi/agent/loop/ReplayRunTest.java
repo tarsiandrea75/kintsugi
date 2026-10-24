@@ -9,7 +9,6 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -36,11 +35,12 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  * explorer replay is low-coverage and not a valid measurement, see the feature document's T4 smoke check),
  * {@code replay.faults} ({@code F1,F2,F3}), {@code replay.recordings} (the committed {@code replay/} directory) and
  * {@code replay.out} ({@code infra/scripts/out/replay-<UTC time>-<route>/}). Explorer and dossier replay each fault
- * {@code replay.samples} (1) times per mode, over every recording of the fault. Decision mode replays each recording of
- * the split {@code replay.split} ({@code dev}, the default, {@code holdout}, {@code stress} or {@code probe}) made in
- * decision or dossier mode, alone, {@code replay.repeats} (1) times: the dossier's recorded calls and the report call.
- * A property of the other kind of run is refused rather than ignored, so a run is never other than the one asked for. A
- * miss is a measurement, not a failure: the test fails only when it cannot run a sample.
+ * {@code replay.samples} (1) times per mode, over the fault's {@code stress} recordings. Decision mode replays each
+ * recording of the split {@code replay.split} ({@code dev}, the default, {@code holdout}, {@code stress} or
+ * {@code probe}) made in decision or dossier mode, alone, {@code replay.repeats} (1) times: the dossier's recorded calls
+ * and the report call. {@link ReplayCases} picks the recordings. A property of the other kind of run is refused rather
+ * than ignored ({@link ReplayDriver#refuseIgnoredProperties}), so a run is never other than the one asked for. A miss
+ * is a measurement, not a failure: the test fails only when it cannot run a sample.
  *
  * <p>
  * The application context supplies what the app would run with: the route's {@code ChatModel} inside its
@@ -72,18 +72,8 @@ class ReplayRunTest {
 		String route = System.getProperty("replay.route", "cloud");
 		List<AgentMode> modes = modes(System.getProperty("replay.mode", "dossier"));
 		boolean decision = modes.equals(List.of(AgentMode.DECISION));
-		List<String> faults = Arrays.stream(System.getProperty("replay.faults", "F1,F2,F3").split(","))
-			.map(String::strip)
-			.filter(fault -> !fault.isEmpty())
-			.toList();
-		if (decision) {
-			notSet("replay.samples", "decision mode replays each recording of replay.split once; to rerun each one, "
-					+ "set replay.repeats");
-		}
-		else {
-			notSet("replay.split", "only decision mode replays a split; explorer and dossier pool every recording");
-			notSet("replay.repeats", "only decision mode takes it; explorer and dossier take replay.samples");
-		}
+		List<String> faults = ReplayCases.faults(System.getProperty("replay.faults", "F1,F2,F3"));
+		ReplayDriver.refuseIgnoredProperties(decision, System::getProperty);
 		int samples = Integer.parseInt(System.getProperty("replay.samples", "1"));
 		String split = System.getProperty("replay.split", "dev");
 		int repeats = Integer.parseInt(System.getProperty("replay.repeats", "1"));
@@ -137,11 +127,6 @@ class ReplayRunTest {
 
 	private static List<AgentMode> modes(String mode) {
 		return mode.equals("both") ? List.of(AgentMode.EXPLORER, AgentMode.DOSSIER) : List.of(AgentMode.of(mode));
-	}
-
-	/** Fails, before any model call, when {@code property} is set: the run's mode would ignore it ({@code why}). */
-	private static void notSet(String property, String why) {
-		assertThat(System.getProperty(property)).as(property + " does not apply to this mode: " + why).isNull();
 	}
 
 }

@@ -568,10 +568,10 @@ A call MUST be checked and capped exactly as `McpLabTools` does it (the same `li
 - WHEN the loop asks for the `KNOWLEDGE` phase's tools
 - THEN a `LabToolsUnavailableException` names `search_runbooks`
 
-The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST run each sample with the real `AgentLoop` in the sample's mode, the route's real `ChatModel` and settings (the application's own `ModelRouter` and `LoopSettings`), a fresh `ReplayLabTools` and the recorded tool listing. The manifest, `recordings.tsv`, has one line per recording, `fault mode route truth file incident split`. The split is one of four **(decision-instrument T3)**: `dev` to tune on, `holdout` read once, `stress` for the 2026-10-19 recordings whose windows hold other faults, and `probe` for faults never tuned on. A line with fewer columns or another split fails the driver as it reads the manifest. What a sample is served depends on its mode:
-- An explorer or dossier sample of a fault (`replay.samples` per fault and mode) MUST be served every recording of the fault, all modes and splits pooled. Its primary recording is the fault's first recording in the sample's mode, else the fault's first recording. It is handed to `ReplayLabTools` first, so when two recordings hold the same call with different outputs the primary's wins. Pooling every split, the sample has none: its split is `-`.
+The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST run each sample with the real `AgentLoop` in the sample's mode, the route's real `ChatModel` and settings (the application's own `ModelRouter` and `LoopSettings`), a fresh `ReplayLabTools` and the recorded tool listing. The manifest, `recordings.tsv`, has one line per recording, `fault mode route truth file incident split`. The split is one of four **(decision-instrument T3)**: `dev` to tune on, `holdout` read once, `stress` for the 2026-10-19 recordings whose windows hold other faults, and `probe` for faults never tuned on. A line with fewer columns or another split fails the driver as it reads the manifest. `ReplayCases` reads the manifest and picks the recordings a run replays, for the driver and for `replay-agent.sh` **(decision-instrument T3r)**: the script runs it from its source, with the JDK's launcher, to list a decision run's cases before Maven, so its count, which bounds a cloud run, and its refusals (exit 2, with the driver's reason) are the driver's own. What a sample is served depends on its mode:
+- An explorer or dossier sample of a fault (`replay.samples` per fault and mode) MUST be served the fault's `stress` recordings, all modes pooled, and no other **(decision-instrument T3r)**: the 2026-10-19 recordings these modes were measured on, so an import into `dev`, `holdout` or `probe` never changes their outputs or conflicts, and a `holdout` recording is never served outside a decision run. Its primary recording is the fault's first `stress` recording in the sample's mode, else its first `stress` recording. It is handed to `ReplayLabTools` first, so when two recordings hold the same call with different outputs the primary's wins. A fault with no `stress` recording MUST fail with an `IllegalArgumentException` before any model call. The sample is no case of a split: its split is `-`.
 - Decision mode MUST replay cases, not faults **(decision-instrument T3)**. Each manifest line of a chosen fault, in the chosen split (`replay.split`, default `dev`), recorded in decision or dossier mode, is one case, and each case runs `replay.repeats` times (default 1). A case's sample is served its own recording alone, its primary: that recording holds every call the dossier makes, so pooling would only add other incidents' outputs. The cases come in the order of the chosen faults, each fault's in manifest order. An unknown split, or a chosen fault with no case in the split, MUST fail with an `IllegalArgumentException` before any model call.
-- `replay.samples` is refused in decision mode, and `replay.split` and `replay.repeats` outside it, so a run is never other than the one asked for.
+- `replay.samples` MUST be refused in decision mode, and `replay.split` and `replay.repeats` outside it, with an `IllegalArgumentException` naming the property, before any model call, so a run is never other than the one asked for.
 
 Each recording and the tool listing are parsed once per run; only the `ReplayLabTools`, and so its counters, is new per sample. A recording without `startedAt`, without `symptom` or without a positive `sinceMinutes` MUST fail with an `IllegalArgumentException` naming the fault and the file, before any model call: in decision mode, every case of the split is checked before the first sample. The incident is opened with the primary recording's symptom and `sinceMinutes`, on a clock offset so that "now" is that recording's `startedAt`: windows and uptimes computed from the clock match the recorded timestamps, and the time budgets still run. Each sample is scored by `agent_verdict`'s rule: `MATCH` only when the incident is `COMPLETED` and its report's `rootCauseService|rootCauseCategory` equals the recorded truth of `recordings.tsv`, else `MISS`.
 
@@ -585,10 +585,16 @@ It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as
 A sample is counted in the totals even when writing its files fails. A miss is a measurement: the run fails only when a sample cannot run. The driver is tagged `replay` and left out of the default build (Maven surefire `excludedGroups`); only the `replay` profile runs it, since it calls a model and costs money on the cloud route. Dossier is its default mode: explorer replays stay available, but under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent, and are not valid measurements. `both` runs explorer and dossier. A decision sample ("Decision mode") makes only the dossier's calls, all held by its recording, and the report call, so it makes no unrecorded call.
 
 #### Scenario: A sample is served its own mode's recording first
-- GIVEN two recordings of F1, the explorer one listed first and in `holdout`, the dossier one in `stress`, holding the dossier's first call with different outputs
+- GIVEN two `stress` recordings of F1, the explorer one listed first, holding the dossier's first call with different outputs
 - WHEN one dossier-mode sample of F1 runs
 - THEN its dossier holds the dossier recording's output for that call, and one conflict is counted
 - AND its split is `-` and its recording the dossier one
+
+#### Scenario: Explorer and dossier samples pool only the stress recordings (decision-instrument T3r)
+- GIVEN F1's `stress` dossier recording, listed after a `dev` and a `holdout` recording of F1 that hold the dossier's first call with other outputs
+- WHEN one dossier-mode sample of F1 runs
+- THEN it opens on the `stress` recording and is served its output for that call, with no conflict and coverage 1.00
+- AND an explorer sample of a fault with only a `dev` recording fails with an `IllegalArgumentException` before any model call
 
 #### Scenario: A decision case replays its own recording alone (decision-instrument T3)
 - GIVEN two `dev` recordings of F1, a dossier one and a decision one, holding the dossier's first call with different outputs
@@ -612,6 +618,18 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 - WHEN the cases of the split `hold-out`, or of `holdout` for F1 and F2, are asked for, or a split's second case lacks its `startedAt`
 - THEN an `IllegalArgumentException` names the split, F1 or the file, and no model is called
 - AND a manifest line with no split, or the split `test`, fails the driver as it reads the manifest
+
+#### Scenario: replay-agent.sh lists the driver's cases (decision-instrument T3r)
+- GIVEN a manifest with `dev` recordings of F1 and F2 made in decision, dossier and explorer mode, and a `holdout` one of F1
+- WHEN `ReplayCases` lists the cases of `dev` for `F2, F1`
+- THEN it prints the driver's decision cases, in its order, one `<fault> <file>` line each, and exits 0
+- AND an unknown split, a chosen fault with no case, or a manifest line in the split `test` prints the driver's reason and exits 2, which stops `replay-agent.sh` before Maven
+
+#### Scenario: A property of the other kind of run is refused (decision-instrument T3r)
+- GIVEN `replay.samples` in decision mode, or `replay.split` or `replay.repeats` in explorer or dossier mode
+- WHEN the replay run checks its properties
+- THEN an `IllegalArgumentException` names the property, before any model call
+- AND `replay.split` and `replay.repeats` in decision mode, or `replay.samples` in explorer or dossier mode, pass
 
 #### Scenario: A recording without its start, symptom or window fails fast
 - GIVEN a recording of F1 with no `startedAt`, no `symptom` or a `sinceMinutes` of 0
