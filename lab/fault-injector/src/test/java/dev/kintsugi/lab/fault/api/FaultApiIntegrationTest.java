@@ -35,7 +35,7 @@ import dev.kintsugi.lab.fault.control.FakeLabControlConfiguration;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import({ TestcontainersConfiguration.class, FakeLabControlConfiguration.class })
+@Import({ TestcontainersConfiguration.class, FakeLabControlConfiguration.class, ComposeHostMockMvc.class })
 class FaultApiIntegrationTest {
 
 	@Autowired
@@ -228,6 +228,38 @@ class FaultApiIntegrationTest {
 
 		assertThat(lab.calls()).isEmpty();
 		assertThat(events(id)).containsExactly("ACTIVATION_STARTED", "ACTIVATION_FAILED");
+	}
+
+	/** A browser sends an Origin: the request is refused before the controller (fault-injector spec). */
+	@Test
+	void aRequestWithAnOriginIsRejectedWith403AndInjectsNothing() throws Exception {
+		mvc.perform(post("/faults").contentType(MediaType.TEXT_PLAIN)
+			.header("Origin", "https://evil.example")
+			.content("{\"fault\":\"F1\"}")).andExpect(status().isForbidden());
+
+		assertThat(lab.calls()).isEmpty();
+		assertThat(injectionCount()).isZero();
+	}
+
+	/** DNS rebinding sends the attacker's hostname as Host; the actuator is covered like the API. */
+	@ParameterizedTest
+	@ValueSource(strings = { "/faults/active", "/faults/catalog", "/actuator/health" })
+	void aHostOutsideTheAllowListIsRejectedWith421(String path) throws Exception {
+		mvc.perform(get(path).header("Host", "evil.example:18084")).andExpect(status().is(421));
+	}
+
+	@Test
+	void aBodyLessRestoreFromABrowserIsRejectedAndRestoresNothing() throws Exception {
+		UUID id = idOf(activate("F1"));
+
+		mvc.perform(post("/faults/" + id + "/restore").header("Origin", "null")).andExpect(status().isForbidden());
+
+		assertThat(lab.calls()).containsExactly("activate F1");
+	}
+
+	@Test
+	void theComposeHealthcheckHostIsAccepted() throws Exception {
+		mvc.perform(get("/actuator/health").header("Host", "localhost:8084")).andExpect(status().isOk());
 	}
 
 	private ResultActions activate(String fault) throws Exception {

@@ -30,9 +30,11 @@ import dev.kintsugi.lab.fault.control.FakeLabControlConfiguration;
 
 /**
  * Two {@code POST /faults} released at the same instant over real HTTP: the partial unique index lets exactly one
- * insert through, so exactly one answers 201, the other 409, and the lab is activated once.
+ * insert through, so exactly one answers 201, the other 409, and the lab is activated once. The test server listens on
+ * a random port, so the allow-list accepts {@code localhost} on any port.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT,
+		properties = "kintsugi.fault-injector.allowed-hosts=localhost:*")
 @Import({ TestcontainersConfiguration.class, FakeLabControlConfiguration.class })
 class ConcurrentActivationTest {
 

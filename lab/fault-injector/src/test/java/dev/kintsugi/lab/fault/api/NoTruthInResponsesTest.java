@@ -34,7 +34,7 @@ import dev.kintsugi.lab.fault.control.FakeLabControlConfiguration;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import({ TestcontainersConfiguration.class, FakeLabControlConfiguration.class })
+@Import({ TestcontainersConfiguration.class, FakeLabControlConfiguration.class, ComposeHostMockMvc.class })
 class NoTruthInResponsesTest {
 
 	@Autowired

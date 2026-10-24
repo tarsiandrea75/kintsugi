@@ -28,7 +28,7 @@ import dev.kintsugi.lab.fault.control.FakeLabControlConfiguration;
  */
 @SpringBootTest(properties = "spring.datasource.hikari.connection-timeout=1000")
 @AutoConfigureMockMvc
-@Import(FakeLabControlConfiguration.class)
+@Import({ FakeLabControlConfiguration.class, ComposeHostMockMvc.class })
 @DirtiesContext
 class DatabaseDownTest {
 
