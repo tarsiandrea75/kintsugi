@@ -91,7 +91,7 @@ If the `IncidentRunner` throws while starting the loop, the endpoint MUST end th
 
 ### Requirement: Read an incident
 
-`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer` or `dossier`, recorded when the run starts; absent when it never started, see "Dossier mode"), `route` (`local` or `cloud`) and `model` (recorded with the mode, see "Routes"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `promptTokens`, `completionTokens` (see "Token usage"), `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
+`GET /incidents/{id}` MUST answer 200 with `id`, `symptom`, `sinceMinutes`, `mode` (`explorer`, `dossier` or `decision`, recorded when the run starts; absent when it never started, see "Dossier mode"), `route` (`local` or `cloud`) and `model` (recorded with the mode, see "Routes"), `status`, `failureReason` (absent unless the run ended without `COMPLETED`), `startedAt`, `endedAt` (absent while `RUNNING`), `report` (absent unless `COMPLETED`) and `steps`, in step order. Each step carries the columns of its row in camel case (`stepNo`, `kind`, `phase`, `model`, `tokens`, `promptTokens`, `completionTokens` (see "Token usage"), `toolName`, `toolArgs` as JSON, `toolOutcome`, `summary`, `latencyMs`, `createdAt`), a null column being absent. The full texts, `toolOutput` and `modelOutput`, are added only with `?full=true`: by default a reader gets the summaries, which are what the model saw. An unknown or malformed id MUST answer 404 with `{"error": "incident not found"}`.
 
 #### Scenario: Completed incident
 - GIVEN an incident whose run completed
@@ -783,7 +783,7 @@ It MUST make no `TRIAGE`, `INVESTIGATE` or `KNOWLEDGE` call: no `ACT` step, no t
 
 The report call MUST read what a dossier-mode report call reads when no drill-down result exists: the same system message; the same dossier message, byte for byte, its first line included (`gathered by code before the first phase, in place of TRIAGE`), although no phase follows, because the feature's first measurement (M0) reads today's prompt; no evidence message; and the same report task, schema and checks, the dossier being the only citable id (`Citable toolCallIds: dossier.`). What "The report" and "Evidence is checked" say of dossier mode holds in decision mode. Only the instruction's state lines differ: they show the run's real phases and budget, `Phase: CONCLUDE (the phases run in order: CONCLUDE)` and `Tool calls left: 0 in this phase, 0 in the incident`. A gathering that gives no dossier leaves the report nothing to cite, as in dossier mode, so only a report with both causes `UNKNOWN` can then be valid.
 
-Why the dossier first: its windows end when it is gathered ("Evidence dossier gathering"); gathered before the warm-up, they end at the incident's opening, not after a model load of varying length. The incident's time budget still starts when the warm-up ends ("The warm-up"), so it does not count the gathering, which the `ACT` call deadline still bounds. Why the mode: a local dossier-mode replay sample took 1,500 to 1,900 s, 75% of it in `INVESTIGATE` and `KNOWLEDGE`, whose drill-down calls a replay mostly could not answer; one report call measures the diagnosis in about 30 s on the cloud route, and its replay makes no unrecorded call. Why the real state lines: in replay, dossier-mode report calls also carried the drill-down evidence, so they were never byte-identical to this call, and decision runs are compared with each other; a line claiming phases that never ran and 6 calls left would be false input to the model.
+Why the dossier first: its windows end when it is gathered ("Evidence dossier gathering"); gathered before the warm-up, they end at the incident's opening, not after a model load of varying length. The incident's time budget still starts when the warm-up ends ("The warm-up"), so it neither counts nor bounds the gathering: the `ACT` call deadline alone does. Why the mode: a local dossier-mode replay sample took 1,500 to 1,900 s, 75% of it in `INVESTIGATE` and `KNOWLEDGE`, whose drill-down calls a replay mostly could not answer; one report call measures the diagnosis in about 30 s on the cloud route, and its replay makes no unrecorded call. Why the real state lines: in replay, dossier-mode report calls also carried the drill-down evidence, so they were never byte-identical to this call, and decision runs are compared with each other; a line claiming phases that never ran and 6 calls left would be false input to the model.
 
 #### Scenario: No phase call
 - GIVEN `kintsugi.agent.mode` = `decision`
@@ -796,6 +796,17 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 - WHEN an incident runs
 - THEN the dossier's 33 calls are made before the warm-up request
 - AND in dossier mode the warm-up still comes before the dossier
+
+#### Scenario: A gathering that gives no dossier
+- GIVEN decision mode, and a gathering that throws or runs past the `ACT` deadline
+- WHEN an incident runs
+- THEN its `DOSSIER` step holds `The dossier was not gathered: the gathering failed: <exception>; ...` or `... took longer than <deadline>; ...` and no `tool_output`, and the run goes on to the warm-up and the report call, whose task has nothing to cite (`Citable toolCallIds: none.`)
+- AND a report citing the dossier is rejected, while a report with both causes `UNKNOWN` completes the run
+
+#### Scenario: The gathering is not the incident's time
+- GIVEN decision mode, and a gathering longer than the incident's time budget, within the `ACT` deadline, or a run that starts longer than that budget after its incident opened
+- WHEN the run then answers quickly
+- THEN it ends `COMPLETED`, with the dossier gathered
 
 #### Scenario: One report call, at most one retry
 - GIVEN decision mode, and a first report citing `toolCallId` 3
@@ -1094,7 +1105,7 @@ A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits a
 
 `CHECK` constraints keep every row consistent with the spec's values, so a bug in the loop fails its write instead of storing a state the API could not explain:
 
-- `status`, `kind`, `phase` and `tool_outcome` hold only the values listed above (`tool_outcome` may be null, for a step that is not a tool call);
+- `status`, `mode`, `kind`, `phase` and `tool_outcome` hold only the values listed above (`mode` may be null, before the run starts, and `tool_outcome`, for a step that is not a tool call); the `mode` check is named `incidents_mode_check`, the name V4's column check got, under which V7 dropped it and added it again with `decision`, so a later migration can drop it by that name;
 - `ended_at` is null exactly while `RUNNING`;
 - `failure_reason` is set exactly when the status is neither `RUNNING` nor `COMPLETED`;
 - `report` is set exactly when `COMPLETED`.
@@ -1102,8 +1113,8 @@ A partial unique index on `incidents ((true)) WHERE status = 'RUNNING'` admits a
 The migrations live in `agent/src/main/resources/db/migration` and run at startup as `agent_app`; the agent starts only when the store is reachable, and does not need Ollama to start.
 
 #### Scenario: A state outside the spec
-- WHEN a row is written with status `DONE`, a `FAILED` incident without `failure_reason`, a `RUNNING` one with an `ended_at`, or a step with `tool_outcome` `SKIPPED`
-- THEN the database rejects it with a `CHECK` violation
+- WHEN a row is written with status `DONE`, mode `triage`, a `FAILED` incident without `failure_reason`, a `RUNNING` one with an `ended_at`, or a step with `tool_outcome` `SKIPPED`
+- THEN the database rejects it with a `CHECK` violation, for the mode one of `incidents_mode_check`
 
 A step is written when it ends, before the next one starts, so a crash loses at most the step in progress.
 

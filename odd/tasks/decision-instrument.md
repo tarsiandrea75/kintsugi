@@ -120,7 +120,8 @@ Explorer and dossier replays keep today's behavior.
 
 ## Tasks
 
-- [ ] T1 Decision mode in the agent, replayable on today's recordings, with tests and the spec. Route: delegated writer (AgentMode, AgentLoop, the replay test side, the spec).
+- [x] T1 Decision mode in the agent, replayable on today's recordings, with tests and the spec. Route: delegated writer (AgentMode, AgentLoop, the replay test side, the spec).
+- [x] T1r The four review suggestions on T1. Route: delegated writer (loop, its tests, a constraint test).
 - [ ] T2 Baseline protocol and recording check. Route: delegated writer (scripts and docs). It covers:
   - in `verify-agent.sh` and `lib.sh`: `--mode decision`, the margin, the baseline phase, `--rounds` and F4;
   - `check-recordings.sh`;
@@ -144,6 +145,45 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - Part B is a per-service assessment checked against the call graph, with ADR-014.
   - Its gates and the M2 bar will be recorded in that feature's document.
 
+- 2026-10-24: T1 done (route: delegated writer; trigger: about 15 files across the loop, its tests, a migration and the spec). Commit `3830488`.
+  - What changed:
+    - `AgentMode.DECISION` has no phases, with the predicates `gathersDossier()` and `gathersBeforeWarmUp()`. T1r later replaced the second predicate with a single value.
+    - Only decision mode gathers the dossier before the warm-up.
+    - `ReportCheck` and `Schemas` key on `gathersDossier()`.
+    - Migration V7 widens `incidents_mode_check`; V4's check allowed only explorer and dossier, so every decision run would have ended `FAILED`.
+    - In replay, a decision sample uses the fault's decision recording, else its first dossier recording.
+    - `replay-agent.sh` accepts `--mode decision`.
+    - Spec: a new "Decision mode" requirement with 6 scenarios, and nine requirements updated.
+  - Choice 2B, the truthful header. The REPORT header shows the run's real phases and budget ("the phases run in order: CONCLUDE", "0 in the incident"). No prompt wording changed, and the system and dossier messages stay byte-identical.
+    - Why not a copy of dossier mode's header: in replay, dossier-mode REPORT calls always carried the failed drill-down evidence, so that identity was never real.
+    - M0 compares decision runs with each other.
+    - A header claiming phases ran and 6 calls are left would be false input to the model.
+  - RED, in two steps:
+    - with the tests written first, the build did not compile: 18 "cannot find symbol" errors;
+    - with only the bare enum constant, 11 of 98 tests failed.
+  - GREEN: 98 focused tests pass, and the full suite passes with 474 tests and 0 failures in 47 s. Parent spot check: the full suite passes again.
+  - About 630 authored lines, over the 400 heuristic because of the tests:
+    - about 125 lines of production code;
+    - about 405 lines of tests;
+    - about 100 lines of spec and docs.
+- T1 review (`3830488`, base `b1e9747`, four lenses, consent granted): approved and acknowledged (lineage `review-968c3c44ee675201`). It made four suggestions, applied in T1r:
+  - R2-dossier-placement-branches: two booleans encode a three-way order.
+  - R2-accumulated-prompt-index: a test reads the prompt at a fixed index.
+  - R3-decision-prewarmup-gather-failure-untested.
+  - R3-v7-constraint-name-coupling: no test checks the final constraint.
+
+- 2026-10-24: T1r done (route: delegated writer; trigger: 5 files across the loop, its tests and the spec).
+  - **A real bug.** In decision mode, the gathering's time check counted from the incident's opening, although the budget only starts when the warm-up ends. So a slow gathering, or a late run, ended `TIMED_OUT` before the budget had started.
+    - Fix: `Run.budgetStart` stays null until the warm-up ends, and `elapsed()` is zero before then. Before the warm-up, only the `ACT` deadline bounds the gathering.
+    - RED: `theGatheringDoesNotCountAgainstTheIncidentsTimeBudget` and `theTimeBudgetStartsWhenTheWarmUpEndsNotWhenTheIncidentOpened` both ended `TIMED_OUT`. GREEN after the fix.
+  - `AgentMode.DossierGathering` takes values `NONE`, `BEFORE_WARM_UP` or `AFTER_WARM_UP`. It replaces `gathersBeforeWarmUp()`, so `investigate()` reads as one sequence. `gathersDossier()` stays, derived from it.
+  - New tests:
+    - a gathering that throws, and one that passes its deadline, before the warm-up; both are characterization tests and passed at once;
+    - the decision report call is read with `getLast()` and an asserted prompt count;
+    - `AgentStoreTest` checks that every mode is accepted, and that `triage`, `DECISION` and an empty string are rejected by `incidents_mode_check`.
+  - Spec: two "Decision mode" scenarios, the budget sentence, and the mode check in "State tables".
+  - Full suite: 484 tests, 0 failures. Parent spot check: green.
+
 ## Next step
 
-T1.
+Review T1r, then T2.

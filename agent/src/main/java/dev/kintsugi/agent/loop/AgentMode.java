@@ -12,25 +12,28 @@ import dev.kintsugi.agent.lab.Phase;
 public enum AgentMode {
 
 	/** The ADR-010 loop: the model chooses every call, from TRIAGE on. */
-	EXPLORER(List.of(Phase.TRIAGE, Phase.INVESTIGATE, Phase.KNOWLEDGE)),
+	EXPLORER(List.of(Phase.TRIAGE, Phase.INVESTIGATE, Phase.KNOWLEDGE), DossierGathering.NONE),
 
 	/**
 	 * Code gathers the evidence dossier first and shows it to the model, which then has INVESTIGATE and KNOWLEDGE:
 	 * the dossier covers TRIAGE's tools.
 	 */
-	DOSSIER(List.of(Phase.INVESTIGATE, Phase.KNOWLEDGE)),
+	DOSSIER(List.of(Phase.INVESTIGATE, Phase.KNOWLEDGE), DossierGathering.AFTER_WARM_UP),
 
 	/**
 	 * Code gathers the evidence dossier at the incident's opening, before the warm-up, and the model writes the report
 	 * from it alone: no evidence phase and no tool call (decision-instrument T1). It measures the diagnosis, fast, and a
 	 * replay of it makes only recorded calls.
 	 */
-	DECISION(List.of());
+	DECISION(List.of(), DossierGathering.BEFORE_WARM_UP);
 
 	private final List<Phase> phases;
 
-	AgentMode(List<Phase> phases) {
+	private final DossierGathering dossierGathering;
+
+	AgentMode(List<Phase> phases, DossierGathering dossierGathering) {
 		this.phases = phases;
+		this.dossierGathering = dossierGathering;
 	}
 
 	/**
@@ -53,19 +56,19 @@ public enum AgentMode {
 	}
 
 	/**
+	 * When code gathers the evidence dossier, if at all: the run's opening, before its first phase, is the warm-up with
+	 * the dossier before it, after it or nowhere (agent spec, "Dossier mode", the table's "Before the first phase").
+	 */
+	public DossierGathering dossierGathering() {
+		return this.dossierGathering;
+	}
+
+	/**
 	 * Whether code gathers the evidence dossier, which every model call then reads after the system message and the
 	 * report may cite (T5b): every mode but explorer.
 	 */
 	public boolean gathersDossier() {
-		return this != EXPLORER;
-	}
-
-	/**
-	 * Whether the dossier is gathered before the warm-up, at the incident's opening, so that its windows end there and
-	 * not after the model's load: decision mode only. Dossier mode gathers it after the warm-up, as it always has.
-	 */
-	public boolean gathersBeforeWarmUp() {
-		return this == DECISION;
+		return this.dossierGathering != DossierGathering.NONE;
 	}
 
 	/** The evidence phases the model goes through, in order, none in decision mode; {@code CONCLUDE} follows them. */
@@ -76,6 +79,23 @@ public enum AgentMode {
 	/** The incident's tool budget: the sum of the phases' allowances. */
 	public int toolBudget() {
 		return this.phases.stream().mapToInt(LoopSettings.ALLOWANCES::get).sum();
+	}
+
+	/** When code gathers the evidence dossier, relative to the warm-up. */
+	public enum DossierGathering {
+
+		/** Never: the model gathers all its evidence (explorer mode). */
+		NONE,
+
+		/**
+		 * Before the warm-up, at the incident's opening, so that the dossier's windows end there and not after the
+		 * model's load (decision mode).
+		 */
+		BEFORE_WARM_UP,
+
+		/** After the warm-up, as dossier mode always has. */
+		AFTER_WARM_UP
+
 	}
 
 }

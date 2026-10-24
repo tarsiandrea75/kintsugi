@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,6 +35,8 @@ final class FakeLabTools implements LabTools {
 
 	private final List<String> calls = new CopyOnWriteArrayList<>();
 
+	private final Map<String, Duration> delays = new ConcurrentHashMap<>();
+
 	private volatile RuntimeException unavailable;
 
 	private volatile Error broken;
@@ -61,6 +64,15 @@ final class FakeLabTools implements LabTools {
 		return this;
 	}
 
+	/**
+	 * Makes each call of {@code tool} wait {@code delay} before it answers, as a slow mcp-tools would; an interrupt
+	 * ends the wait, and the call then answers at once.
+	 */
+	FakeLabTools slow(String tool, Duration delay) {
+		this.delays.put(tool, delay);
+		return this;
+	}
+
 	@Override
 	public ToolResult call(String tool, String jsonArgs) {
 		if (this.broken != null) {
@@ -68,6 +80,10 @@ final class FakeLabTools implements LabTools {
 		}
 		if (!Phase.isLabTool(tool)) {
 			throw new IllegalArgumentException("not an mcp-tools tool: " + tool);
+		}
+		Duration delay = this.delays.get(tool);
+		if (delay != null) {
+			sleep(delay);
 		}
 		this.calls.add(tool);
 		String output = this.outputs.get(tool);
@@ -90,6 +106,15 @@ final class FakeLabTools implements LabTools {
 
 	String output(String tool) {
 		return this.outputs.get(tool);
+	}
+
+	private static void sleep(Duration delay) {
+		try {
+			Thread.sleep(delay);
+		}
+		catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+		}
 	}
 
 	static String fixture(String name) {

@@ -137,7 +137,8 @@ class AgentLoopDecisionModeTest {
 		this.model.quiet().quiet().text(unknownReport());
 		run(AgentMode.DOSSIER, clock);
 		// The report call of a dossier run whose phases made no tool call: no drill-down result exists.
-		Prompt dossierReport = this.model.prompts().get(2);
+		Prompt dossierReport = this.model.prompts().getLast();
+		int dossierCalls = this.model.prompts().size();
 		this.loop.close();
 		this.loop = null;
 		this.id = open();
@@ -145,7 +146,9 @@ class AgentLoopDecisionModeTest {
 
 		assertThat(run(AgentMode.DECISION, clock)).isEqualTo(IncidentStatus.COMPLETED);
 
-		Prompt decisionReport = this.model.prompts().get(3);
+		// The decision run's one model call, its report, comes after the dossier run's calls.
+		assertThat(this.model.prompts()).hasSize(dossierCalls + 1);
+		Prompt decisionReport = this.model.prompts().getLast();
 		assertThat(decisionReport.getInstructions()).extracting(Message::getMessageType)
 			.containsExactly(MessageType.SYSTEM, MessageType.USER, MessageType.USER);
 		// The system message and the dossier message, byte for byte, "before the first phase" included.
@@ -206,6 +209,73 @@ class AgentLoopDecisionModeTest {
 	}
 
 	@Test
+	void aGatheringThatThrowsLeavesTheReportNothingToCiteSoOnlyAnUnknownReportIsValid() {
+		// The gatherer records a call that throws an exception as a failed call; an Error ends the gathering.
+		this.lab.breaks(new NoClassDefFoundError("dev/kintsugi/Missing"));
+		this.model.text(report("payment-service", "DEPENDENCY_REJECTING", dossierEvidence(1))).text(unknownReport());
+
+		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
+
+		String seen = Prompts.dossierNotGathered("the gathering failed: NoClassDefFoundError: dev/kintsugi/Missing");
+		assertThat(step(1)).containsEntry("kind", "DOSSIER").containsEntry("summary", seen).containsEntry("tool_output",
+				null);
+		// The run goes on to the warm-up and the report call, which reads that message and has nothing to cite.
+		assertThat(this.model.warmUps()).hasSize(1);
+		Prompt first = this.model.prompts().get(0);
+		assertThat(first.getInstructions().get(1).getText()).isEqualTo(seen);
+		assertThat(last(first)).contains("Citable toolCallIds: none.").doesNotContain("dossier");
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE", "REPORT:CONCLUDE");
+		assertThat(step(2).get("summary"))
+			.isEqualTo("invalid: evidence[0].toolCallId dossier: the dossier was not gathered");
+		JsonNode stored = storedReport();
+		assertThat(stored.get("rootCauseService").asString()).isEqualTo("UNKNOWN");
+		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo("UNKNOWN");
+	}
+
+	@Test
+	void aGatheringPastTheActDeadlineIsRecordedAndTheRunGoesOnToTheReport() {
+		this.lab.slow("service_restarts", Duration.ofSeconds(3));
+		this.model.text(unknownReport());
+		this.loop = loop(AgentMode.DECISION, Duration.ofMillis(500), Duration.ofMinutes(30), Clock.systemUTC());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		String seen = Prompts.dossierNotGathered("the gathering took longer than 500 ms");
+		assertThat(step(1)).containsEntry("kind", "DOSSIER").containsEntry("summary", seen).containsEntry("tool_output",
+				null);
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
+		assertThat(this.model.warmUps()).hasSize(1);
+		assertThat(this.model.prompts().get(0).getInstructions().get(1).getText()).isEqualTo(seen);
+	}
+
+	@Test
+	void theGatheringDoesNotCountAgainstTheIncidentsTimeBudget() {
+		// Like the warm-up: the incident's time budget starts when the warm-up ends, after the gathering, which only
+		// the ACT deadline bounds.
+		this.lab.slow("service_restarts", Duration.ofMillis(600));
+		this.model.text(unknownReport());
+		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofMillis(400), Clock.systemUTC());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat((String) step(1).get("summary")).startsWith(Prompts.DOSSIER_INTRO);
+		assertThat(this.lab.calls()).hasSize(33);
+	}
+
+	@Test
+	void theTimeBudgetStartsWhenTheWarmUpEndsNotWhenTheIncidentOpened() {
+		// By the loop's clock the incident opened a second before its run started, longer ago than its whole time
+		// budget: the check before the gathering, before the warm-up, must not end the run.
+		Clock later = Clock.offset(Clock.systemUTC(), Duration.ofSeconds(1));
+		this.model.text(unknownReport());
+		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofMillis(400), later);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
+	}
+
+	@Test
 	void decisionModeIsSelectedByItsPropertyAndHasNoPhase() throws IOException {
 		assertThat(AgentMode.of("decision")).isEqualTo(AgentMode.DECISION);
 		assertThat(AgentMode.DECISION.value()).isEqualTo("decision");
@@ -229,12 +299,17 @@ class AgentLoopDecisionModeTest {
 
 	private IncidentStatus run(AgentMode mode, Clock clock) {
 		if (this.loop == null) {
-			CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
-			this.loop = new AgentLoop(this.incidents,
-					task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
-					new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, mode);
+			this.loop = loop(mode, Duration.ofSeconds(5), Duration.ofMinutes(30), clock);
 		}
 		return this.loop.run(this.id);
+	}
+
+	/** A loop whose model calls and gathering wait at most {@code deadline}, with the incident's {@code timeBudget}. */
+	private AgentLoop loop(AgentMode mode, Duration deadline, Duration timeBudget, Clock clock) {
+		CallTimeouts timeouts = new CallTimeouts(deadline, deadline);
+		return new AgentLoop(this.incidents,
+				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
+				new LoopSettings(12, timeBudget, Duration.ofSeconds(5)), clock, mode);
 	}
 
 	/** Makes the warm-up note how many lab calls were made before it came, and answer {@code OK}. */
@@ -266,7 +341,7 @@ class AgentLoopDecisionModeTest {
 
 	private Map<String, Object> step(int stepNo) {
 		return AgentDatabase.admin()
-			.sql("SELECT kind, phase, summary FROM incident_steps WHERE incident_id = ? AND step_no = ?")
+			.sql("SELECT kind, phase, summary, tool_output FROM incident_steps WHERE incident_id = ? AND step_no = ?")
 			.params(this.id, stepNo)
 			.query()
 			.singleRow();

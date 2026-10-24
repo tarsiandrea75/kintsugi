@@ -168,6 +168,34 @@ class AgentStoreTest {
 			.isEqualTo(2);
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = { "explorer", "dossier", "decision" })
+	void everyModeIsAccepted(String mode) {
+		UUID incident = insertIncident("RUNNING", "NULL", "NULL", "NULL");
+
+		recordMode(incident, mode);
+
+		assertThat(AgentDatabase.admin().sql("SELECT mode FROM incidents").query(String.class).single())
+			.isEqualTo(mode);
+	}
+
+	/**
+	 * V7 dropped V4's constraint by the name PostgreSQL gave it and added it again under that name, so the rejection
+	 * still names it: a later migration that changes the modes again can drop it by that name.
+	 */
+	@ParameterizedTest
+	@ValueSource(strings = { "triage", "DECISION", "" })
+	void aModeOutsideTheSpecIsRejectedByTheModeCheck(String mode) {
+		UUID incident = insertIncident("RUNNING", "NULL", "NULL", "NULL");
+
+		assertThatExceptionOfType(Exception.class).isThrownBy(() -> recordMode(incident, mode))
+			.satisfies(ex -> {
+				SQLException cause = sqlCause(ex);
+				assertThat(cause.getSQLState()).isEqualTo(CHECK_VIOLATION);
+				assertThat(cause.getMessage()).contains("incidents_mode_check");
+			});
+	}
+
 	@Test
 	void stepsAcceptTheSpecValues() {
 		UUID incident = insertIncident("RUNNING", "NULL", "NULL", "NULL");
@@ -213,6 +241,11 @@ class AgentStoreTest {
 					+ ")")
 			.update();
 		return id;
+	}
+
+	/** Records the mode as the loop does when the run starts. */
+	private static void recordMode(UUID incident, String mode) {
+		AgentDatabase.asAgentApp().sql("UPDATE incidents SET mode = ? WHERE id = ?").params(mode, incident).update();
 	}
 
 	private static void insertStep(UUID incident, int stepNo, String kind, String phase, String outcome) {

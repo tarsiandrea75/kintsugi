@@ -54,6 +54,7 @@ import dev.kintsugi.agent.lab.LabTools;
 import dev.kintsugi.agent.lab.LabToolsUnavailableException;
 import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ToolResult;
+import dev.kintsugi.agent.loop.AgentMode.DossierGathering;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -197,12 +198,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		run.route = first.route();
 		run.model = first.model();
 		this.incidents.recordStart(run.incident.id(), run.mode.value(), run.route.value(), run.model);
-		boolean gatherFirst = run.mode.gathersBeforeWarmUp();
-		if (gatherFirst) {
+		DossierGathering gathering = run.mode.dossierGathering();
+		if (gathering == DossierGathering.BEFORE_WARM_UP) {
 			dossier(run);
 		}
 		warmUp(run);
-		if (run.mode.gathersDossier() && !gatherFirst) {
+		if (gathering == DossierGathering.AFTER_WARM_UP) {
 			dossier(run);
 		}
 		for (Phase phase : run.mode.phases()) {
@@ -276,14 +277,15 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * counts against the incident's time and is bounded by the {@code ACT} call deadline; a failed call is a fact in
 	 * the dossier, and a gathering that throws or runs past its bound gives a message that says so, and the run goes
 	 * on. Only the incident's own time running out ends the run. In decision mode the gathering comes before the
-	 * warm-up, whose end starts the incident's time budget, so that budget does not count it; the deadline still
-	 * bounds it.
+	 * warm-up, whose end starts the incident's time budget, so that budget neither counts nor bounds it: the deadline
+	 * alone does.
 	 */
 	private void dossier(Run run) {
 		checkTime(run);
 		Duration deadline = this.router.route(ModelTask.ACT).callTimeouts().act();
 		Duration incidentLeft = this.settings.incidentTimeout().minus(elapsed(run));
-		boolean incidentBound = incidentLeft.compareTo(deadline) < 0;
+		// Before the warm-up the incident has no time budget yet, so it cannot be what stops the gathering.
+		boolean incidentBound = run.budgetStart != null && incidentLeft.compareTo(deadline) < 0;
 		Duration limit = incidentBound ? incidentLeft : deadline;
 		long start = System.nanoTime();
 		Future<Dossier> future = this.modelCalls.submit(() -> this.gatherer.gather(run.incident.sinceMinutes()));
@@ -710,9 +712,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 				reason == null ? "-" : reason, Duration.between(run.incident.startedAt(), now()).toMillis());
 	}
 
-	/** The time the incident's budget has used: from the end of the warm-up, or from {@code started_at} before it. */
+	/**
+	 * The time the incident's budget has used: from the end of the warm-up, and none before it, so that a check before
+	 * the warm-up, as decision mode's gathering makes, never ends the run.
+	 */
 	private Duration elapsed(Run run) {
-		return Duration.between(run.budgetStart, this.clock.instant());
+		return run.budgetStart == null ? Duration.ZERO : Duration.between(run.budgetStart, this.clock.instant());
 	}
 
 	private Instant now() {
@@ -836,14 +841,16 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		String model;
 
-		/** Where the incident's time budget starts: the end of the warm-up, so the model's load is not counted. */
+		/**
+		 * Where the incident's time budget starts: the end of the warm-up, so the model's load is not counted; null
+		 * until then.
+		 */
 		Instant budgetStart;
 
 		Run(OpenIncident incident, AgentMode mode) {
 			this.incident = incident;
 			this.mode = mode;
 			this.toolsLeft = mode.toolBudget();
-			this.budgetStart = incident.startedAt();
 			this.system = new SystemMessage(Prompts.system(incident.symptom(), incident.sinceMinutes()));
 		}
 
