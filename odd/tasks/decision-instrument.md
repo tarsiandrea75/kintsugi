@@ -78,7 +78,11 @@ The rule stays: the incident window is `[at−N, at]`, the previous window `[at�
 
 ### Baseline phase
 
-The baseline phase replaces the bare wait of `space_out`. Before a fault's traffic, it waits until the previous restore (or `start_lab`) is older than 2N plus a minute. During the last N+1 minutes it places a healthy order about every 60 s.
+The baseline phase replaces the bare wait of `space_out`, in decision mode only. Before each fault's traffic, including the first after `start_lab`, it places a healthy order every 50 s for B = 2·N_max + 1 minutes.
+- N_max is the largest window the fault flow can get, derived from the script's constants: ceil((9 orders × (15 s max + 2 s gap) + 180 s injector cap + 30 s settle) / 60) + 2-minute margin = 9 minutes. So B is 19 minutes.
+- The cadence is 50 s, not 60 s, because the shortest previous window is 3 minutes and 60 s spacing can put only 2 orders in it.
+- An incident whose window is larger than N_max fails that fault, with a FAIL line and a MISS, because the baseline guarantee no longer holds.
+- A baseline order that is not PAID restarts the baseline (T2 adjustment, see Progress).
 
 The goal:
 - the previous window holds at least 3 PAID orders and no fault;
@@ -86,13 +90,15 @@ The goal:
 
 ### Rounds and faults
 
-`verify-agent.sh --rounds K` runs the fault list K times. `--faults` also accepts F4, as an untuned probe, if the generic traffic shows that fault.
+`verify-agent.sh --rounds K` (1 to 20) runs the fault list K times. With `--rounds`, files carry the round (`F<n>-r<k>-incident.json`), and `summary.tsv` has a `round` column in every mode. Faults are chosen with `--only`.
+
+F4 is left out (follow-up). Its pool exhaustion shows only under concurrent orders: `verify-f4.sh` places 6 at once. One order at a time shows only slow reservations and order-service 503s, with no exhausted pool, so it would teach the wrong symptom.
 
 ### Recordings
 
 Recordings are made with the cloud route in decision mode: one REPORT call, about 30 s per incident. Two scripts handle them:
 - `infra/scripts/check-recordings.sh <run dir>` asserts the window properties of every `F<n>-incident.json`;
-- `infra/scripts/add-recordings.sh <run dir> <split>` copies the incident files into `agent/src/test/resources/replay/F<n>/` and appends their manifest rows.
+- the existing `infra/scripts/record-replay.sh` imports run directories into the manifest. It is idempotent and refuses key-like strings. It gains `--split <name>`, and it learns the round-numbered files `F<n>-r<k>-incident.json`.
 
 ### Manifest
 
@@ -122,17 +128,17 @@ Explorer and dossier replays keep today's behavior.
 
 - [x] T1 Decision mode in the agent, replayable on today's recordings, with tests and the spec. Route: delegated writer (AgentMode, AgentLoop, the replay test side, the spec).
 - [x] T1r The four review suggestions on T1. Route: delegated writer (loop, its tests, a constraint test).
-- [ ] T2 Baseline protocol and recording check. Route: delegated writer (scripts and docs). It covers:
-  - in `verify-agent.sh` and `lib.sh`: `--mode decision`, the margin, the baseline phase, `--rounds` and F4;
+- [x] T2 Baseline protocol and recording check. Route: delegated writer (scripts and docs). It covers:
+  - in `verify-agent.sh` and `lib.sh`: `--mode decision`, the margin, the baseline phase and `--rounds` (F4 left out, see Design);
   - `check-recordings.sh`;
   - the docs.
 - [ ] T3 Replay over many recordings. Route: delegated writer. It covers:
   - the manifest splits;
   - one case per recording;
   - `--split` and `--repeats`;
-  - `add-recordings.sh`;
+  - `record-replay.sh --split` and round-numbered files;
   - the summary and aggregate.
-- [ ] T4 Recording session: K rounds on the cloud route in decision mode, checked, then imported as `dev`, `holdout` and `probe`. Route: inline. Lab time is about 6-8 h unattended; cost is about $0.10.
+- [ ] T4 Recording session: K rounds on the cloud route in decision mode, checked, then imported as `dev`, `holdout` and `probe`. Route: inline. A decision-mode fault takes about 21 minutes on the cloud route (19 of them baseline), so a round of F1-F3 takes about 65 minutes and 10 rounds about 11 h, unattended. Cost is about $0.10.
 - [ ] T5 M0: replay decision mode on `dev`, local and cloud. Route: inline; about 2 h local and $0.05 cloud. qwen3:8b only if it is installed and its thinking can be turned off without code.
 
 ## Delivery
@@ -184,6 +190,25 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - Spec: two "Decision mode" scenarios, the budget sentence, and the mode check in "State tables".
   - Full suite: 484 tests, 0 failures. Parent spot check: green.
 
+- 2026-10-24: T2 done (route: delegated writer; trigger: 5 files across the scripts, their tests and the docs).
+  - `verify-agent.sh --mode decision`:
+    - the window margin is 2 minutes in decision mode and still 10 in the other modes;
+    - a 19-minute baseline of healthy orders runs before each fault (see Design);
+    - a window larger than N_max fails the fault;
+    - `--rounds K` repeats the fault list, with round-numbered files and a `round` column.
+  - `check-recordings.sh` checks both windows of every recording. A clean decision-mode F3 fixture lives in `infra/scripts/testdata/check-recordings/clean/`.
+  - RED, in steps: `window_margin: command not found`, then `--rounds 0` answered "Unknown option", then the check script did not exist (exit 127). GREEN: 108 cases.
+  - **Evidence for the Problem section.** `check-recordings.sh` fails all three 2026-10-19 recordings:
+    - F1: "0 PAID orders" in the previous window, and restarts of all four services in the incident window;
+    - F2: "PAYMENT_PENDING 6" and F1's `HttpTimeoutException x6` in the previous window;
+    - F3: "PAYMENT_FAILED 6" and F2's `429 TooManyRequests x6` in the previous window.
+  - Adjustment, requested by the parent before commit: a baseline order that is not PAID restarts the baseline, so the order ages out of both windows. After 2 restarts, the third failure fails only that fault (a MISS with status `baseline failed`), and the run goes on. Without this, one refused order (for example right after F3's restore recreates order-service) would have ended an 11-hour unattended session.
+    - RED: the run stopped at the first refused order.
+    - GREEN: `test-lib.sh` passes 112 cases.
+  - Parent spot check: `test-lib.sh` passes 112 cases; the old run exits 1; the clean fixture passes.
+  - About 650 authored lines, over the 400 heuristic: the check script is 190 lines and the tests about 175.
+  - Not covered by a test: the `diagnose` branch of `verify-agent.sh`. It needs the lab; its loop shape is tested against the real `baseline_phase`.
+
 ## Next step
 
-Review T1r, then T2.
+Review the slice T1r and T2 (base `3830488`), then T3 and T4.

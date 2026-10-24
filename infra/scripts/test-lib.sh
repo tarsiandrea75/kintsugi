@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Tests for lib.sh's pure helpers (no lab, no docker): incident_fields and agent_verdict, which verify-agent.sh uses
-# to score an incident. Run: infra/scripts/test-lib.sh. Exits non-zero on the first failing case.
+# to score an incident, the windows and the baseline phase (sleep, the clock and the orders stubbed), and more; also
+# the options of replay-agent.sh and verify-agent.sh, and check-recordings.sh. Run: infra/scripts/test-lib.sh. Exits
+# non-zero on the first failing case.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -74,6 +76,12 @@ expect "a wrong category" \
 expect "an unreadable truth never matches" \
   "$(agent_verdict explorer explorer local local COMPLETED - "$truth" '')" \
   "MISS${tab}status COMPLETED, reported '$truth', truth 'unreadable'"
+expect "a match in decision mode" \
+  "$(agent_verdict decision decision cloud cloud COMPLETED - "$truth" "$truth")" \
+  "MATCH${tab}the report names $truth, the truth"
+expect "a dossier-mode incident is a miss when decision mode was asked" \
+  "$(agent_verdict decision dossier cloud cloud COMPLETED - "$truth" "$truth")" \
+  "MISS${tab}ran in mode 'dossier', not the requested 'decision'; status COMPLETED, reported '$truth', truth '$truth'"
 
 # env_file_has_value: reads ENV_FILE, never prints the value.
 ENV_FILE=$(mktemp)
@@ -163,6 +171,108 @@ expect "a restore just now waits the margin and a minute" \
   "$(( ${waited#slept } >= (INCIDENT_WINDOW_MARGIN_MINUTES + 1) * 60 - 1 ))" 1
 unset -f sleep
 
+# window_margin and incident_window: a window is the minutes since the fault's traffic started, rounded up, plus the
+# margin of the agent's mode: 10 in explorer and dossier mode, 2 in decision mode, which gathers its dossier as the
+# incident opens.
+expect "explorer mode keeps the 10-minute margin" "$(window_margin explorer)" 10
+expect "dossier mode keeps the 10-minute margin" "$(window_margin dossier)" 10
+expect "decision mode has a 2-minute margin" "$(window_margin decision)" 2
+expect "a window with no margin given keeps the 10 minutes" "$(incident_window $(( $(date +%s) - 50 )))" 11
+expect "a decision-mode window over 50 s of traffic" \
+  "$(incident_window $(( $(date +%s) - 50 )) "$(window_margin decision)")" 3
+expect "a decision-mode window over 61 s of traffic" "$(incident_window $(( $(date +%s) - 61 )) 2)" 4
+
+# baseline_phase, with the clock, sleep and the orders stubbed (each order's id is the second it was placed at): one
+# healthy order every BASELINE_ORDER_SECONDS from the phase's start, each expected to be PAID, then it returns $1
+# minutes after it started.
+clock=1700000000
+date() { echo "$clock"; }
+sleep() { clock=$((clock + $1)); }
+place_order() { echo "201 at-$((clock - 1700000000)) PAID 0.1"; }
+phase=$(baseline_phase 19 F1-r1; echo "ended at $((clock - 1700000000))")
+order_times=$(awk '/^PASS  baseline order at-[0-9]+ is PAID$/ { sub(/^PASS  baseline order at-/, ""); print $1 }' \
+  <<<"$phase")
+expect "one healthy order every 50 s, from the phase's start" "$(printf '%s ' $order_times)" \
+  "0 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 850 900 950 1000 1050 1100 "
+expect "the phase returns 19 minutes after it started" "$(tail -n 1 <<<"$phase")" "ended at 1140"
+# The shortest previous window in decision mode is 3 minutes, whole minutes back from the gathering, and the clock reads
+# whole seconds: any 179 s of the phase must hold 3 orders, which one order a minute would not.
+fewest=$(awk -v span=179 -v phase=1140 '{ t[NR] = $1 }
+  END {
+    fewest = NR
+    for (s = 0; s + span <= phase; s++) {
+      n = 0
+      for (i = 1; i <= NR; i++) if (t[i] >= s && t[i] < s + span) n++
+      if (n < fewest) fewest = n
+    }
+    print fewest
+  }' <<<"$order_times")
+expect "any 179 s of the phase hold at least 3 orders" "$fewest" 3
+# A baseline order that is not PAID is logged and the phase starts over from it, so that order too ages out of both
+# windows: here the order at second 100 is refused, and the phase restarts there and ends 19 minutes later.
+place_order() {
+  if (( clock - 1700000000 == 100 )); then
+    echo "503 at-100 none 3.0"
+  else
+    echo "201 at-$((clock - 1700000000)) PAID 0.1"
+  fi
+}
+clock=1700000000
+phase=$(baseline_phase 19 F3-r1 2>&1; echo "status $? ended at $((clock - 1700000000))")
+expect "a refused baseline order restarts the phase, which ends 19 minutes after it" "$(tail -n 1 <<<"$phase")" \
+  "status 0 ended at 1240"
+expect "the refused order is logged with the restart" "$(grep -F 'WARN' <<<"$phase")" \
+  "WARN  F3-r1: baseline order at-100: expected 201 PAID, got 503 none; the baseline starts over (restart 1 of 2)"
+expect "the orders resume one interval after the restart" \
+  "$(awk '/^PASS  baseline order at-[0-9]+ is PAID$/ { sub(/^PASS  baseline order at-/, ""); printf "%s ", $1 }' \
+    <<<"$phase")" \
+  "0 50 150 200 250 300 350 400 450 500 550 600 650 700 750 800 850 900 950 1000 1050 1100 1150 1200 "
+# The third refused order fails the fault, after 2 restarts. The phase then returns instead of stopping the run, so the
+# caller scores the fault a miss and goes on, and the next fault gets a fresh baseline: verify-agent.sh's loop, under
+# set -e.
+place_order() {
+  if [[ "$fault_now" == F1-r1 ]]; then
+    echo "503 at-$((clock - 1700000000)) none 3.0"
+  else
+    echo "201 at-$((clock - 1700000000)) PAID 0.1"
+  fi
+}
+run=$( {
+  set -e
+  failures=0
+  for fault_now in F1-r1 F2-r1; do
+    clock=1700000000
+    if baseline_phase 19 "$fault_now"; then echo "$fault_now: baseline clean"; else echo "$fault_now: scored a miss"; fi
+  done
+  echo "failures $failures"
+} 2>&1 )
+expect "three refused orders fail the fault, and the run goes on to the next fault" \
+  "$(grep -v -e '^PASS  ' -e '^\.\.\.\.  ' <<<"$run")" \
+  "WARN  F1-r1: baseline order at-0: expected 201 PAID, got 503 none; the baseline starts over (restart 1 of 2)
+WARN  F1-r1: baseline order at-50: expected 201 PAID, got 503 none; the baseline starts over (restart 2 of 2)
+FAIL  F1-r1: baseline order at-100: expected 201 PAID, got 503 none after 2 restarts; the baseline failed, so the\
+ fault is not injected and is scored a miss
+F1-r1: scored a miss
+F2-r1: baseline clean
+failures 1"
+expect "the next fault's baseline is whole: 23 PAID orders" "$(grep -c '^PASS  baseline order' <<<"$run")" 23
+unset -f date sleep place_order
+
+# expect_baseline_window: in decision mode a window larger than N_max fails its fault, since its previous window then
+# starts before the baseline phase.
+failures=0
+expect "a window of N_max passes, silently" \
+  "$(expect_baseline_window F2 9 9; echo "status $? failures $failures")" "status 0 failures 0"
+expect "a window larger than N_max fails the fault" \
+  "$(expect_baseline_window F2-r3 10 9; echo "status $? failures $failures")" \
+  "FAIL  F2-r3: window 10 min is larger than N_max (9 min): its previous window starts before the baseline phase, so\
+ the baseline is not clean"$'\n'"status 1 failures 1"
+
+# record_prefix: a fault's files carry the round only when the run was given --rounds.
+expect "without --rounds, the names stay as they were" "$(record_prefix F1 1 false)" F1
+expect "with --rounds, the name carries the round" "$(record_prefix F3 2 true)" F3-r2
+expect "with --rounds 1 too" "$(record_prefix F1 1 true)" F1-r1
+
 # holds_key_like_string: record-replay.sh refuses a recording that holds something shaped like an API key.
 KEY_DIR=$(mktemp -d)
 trap 'rm -f "$ENV_FILE"; rm -rf "$FAULT_END_DIR" "$KEY_DIR"' EXIT
@@ -239,5 +349,68 @@ samples_check() {
 }
 expect "a 4-digit --samples exits 2 on the option itself" "$(samples_check 1000)" "2 --samples"
 expect "a --samples that would wrap exits 2 on the option itself" "$(samples_check 30744573456182586)" "2 --samples"
+
+# verify-agent.sh checks its options before it touches the lab. Run on the local route with the failing curl stub, so a
+# run that passes its options stops at the Ollama check: never docker, never the lab.
+verify_agent() {
+  VERIFY_AGENT_RUN_DIR="$KEY_DIR/$1" PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/verify-agent.sh" \
+    --route local "${@:2}" 2>&1
+}
+rounds_check() {
+  local out
+  out=$(verify_agent rounds --rounds "$1")
+  echo "$? ${out%% *}"
+}
+expect "--rounds 0 exits 2 on the option itself" "$(rounds_check 0)" "2 --rounds"
+expect "--rounds 21 exits 2 on the option itself" "$(rounds_check 21)" "2 --rounds"
+expect "a --rounds that is not a number exits 2 on the option itself" "$(rounds_check 2x)" "2 --rounds"
+decision=$(verify_agent decision --mode decision --rounds 2)
+expect "decision mode with rounds passes the options and stops at the Ollama check" "$?" 1
+expect "the run names its rounds" "$(grep -F '....  logging to' <<<"$decision")" \
+  "....  logging to $KEY_DIR/decision; faults: F1 F2 F3; mode: decision; route: local; rounds: 2"
+expect "decision mode's margin, N_max and baseline come from the script's constants" \
+  "$(grep -F '....  decision mode:' <<<"$decision")" \
+  "....  decision mode: window margin 2 min; N_max 9 min, so a 19-min baseline phase of healthy orders before each\
+ fault"
+expect "summary.tsv's last column is the round" "$(head -n 1 "$KEY_DIR/decision/summary.tsv")" \
+  "fault${tab}mode${tab}route${tab}injection${tab}incident${tab}status${tab}truth${tab}reported${tab}steps${tab}window\
+${tab}seconds${tab}verdict${tab}round"
+expect "explorer mode logs as before: no rounds, no baseline" "$(verify_agent explorer | grep -F '....  ')" \
+  "....  logging to $KEY_DIR/explorer; faults: F1 F2 F3; mode: explorer; route: local"
+
+# check-recordings.sh: a clean decision-mode recording passes; the 2026-10-19 recordings (the committed replay copies,
+# under the names verify-agent.sh gave them) fail, each on what an earlier fault or the lab's start left in its windows.
+check_recordings="$(dirname "${BASH_SOURCE[0]}")/check-recordings.sh"
+clean_run="$(dirname "${BASH_SOURCE[0]}")/testdata/check-recordings/clean"
+expect "a clean decision-mode recording passes" "$("$check_recordings" "$clean_run" 2>&1; echo "exit $?")" \
+  "PASS  $clean_run/F3-r1-incident.json: previous window: 5 PAID orders, no other state, no client error; incident\
+ window: order-service restarted once, F3's own recreate"$'\n'"RESULT: PASS (1 recording(s) clean)"$'\n'"exit 0"
+old_run="$KEY_DIR/verify-agent-20261019T214629Z"
+mkdir -p "$old_run"
+for fault in F1 F2 F3; do
+  cp "$REPO_DIR/agent/src/test/resources/replay/$fault/verify-agent-20261019T214629Z-$fault.json" \
+    "$old_run/$fault-incident.json"
+done
+checked=$("$check_recordings" "$old_run" 2>&1; echo "exit $?")
+expect "F1: no order in its previous window, the lab's start in its incident window" \
+  "$(grep -F "/F1-incident.json:" <<<"$checked")" \
+  "FAIL  $old_run/F1-incident.json: previous window: 0 PAID orders, at least 3 needed; incident window: restarts\
+ besides the fault's own (F1 restarts nothing): gateway-mock 1, inventory-service 1, order-service 1, payment-service 1"
+expect "F2: F1's pending orders and timeouts in its previous window" "$(grep -F "/F2-incident.json:" <<<"$checked")" \
+  "FAIL  $old_run/F2-incident.json: previous window: orders not PAID: PAYMENT_PENDING 6; previous window: client\
+ errors: client order-service -> payment-service POST /payments CLIENT_ERROR UNKNOWN HttpTimeoutException x6"
+expect "F3: F2's failed payments and 429s in its previous window" "$(grep -F "/F3-incident.json:" <<<"$checked")" \
+  "FAIL  $old_run/F3-incident.json: previous window: orders not PAID: PAYMENT_FAILED 6; previous window: client\
+ errors: client payment-service -> gateway-mock POST /authorize 429 CLIENT_ERROR TooManyRequests x6, server\
+ gateway-mock POST /authorize 429 CLIENT_ERROR x6"
+expect "the 2026-10-19 recordings fail the check" "$(tail -n 2 <<<"$checked")" \
+  "RESULT: FAIL (3 of 3 recording(s) failed)"$'\n'"exit 1"
+mkdir -p "$KEY_DIR/explorer-run" "$KEY_DIR/empty-run"
+printf '{"sinceMinutes":3,"mode":"explorer","steps":[{"kind":"ACT"}]}' >"$KEY_DIR/explorer-run/F1-incident.json"
+expect "an incident with no DOSSIER step fails" "$("$check_recordings" "$KEY_DIR/explorer-run" 2>&1 | head -n 1)" \
+  "FAIL  $KEY_DIR/explorer-run/F1-incident.json: no DOSSIER step"
+expect "a run directory with no recording is a wrong argument" \
+  "$("$check_recordings" "$KEY_DIR/empty-run" 2>&1; echo "exit $?")" \
+  "No F<n>-incident.json or F<n>-r<k>-incident.json in $KEY_DIR/empty-run"$'\n'"exit 2"
 
 echo "PASS  $cases cases"

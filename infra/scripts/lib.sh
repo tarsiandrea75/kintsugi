@@ -575,7 +575,15 @@ INCIDENT_WAIT_SECONDS=$((45 * 60 + 300 + 120))
 # How long an incident's window reaches past its fault's own traffic (incident_window): the tools take the window
 # back from the time of each call, and the calls that read the lab's evidence come in the run's first minutes.
 INCIDENT_WINDOW_MARGIN_MINUTES=10
+# The same margin in decision mode, which gathers its dossier as the incident opens, before the warm-up: every window is
+# counted back from the opening, so the margin no longer absorbs the warm-up or later calls. Two minutes still start the
+# window before the fault's first order, whatever the rounding, and put healthy baseline orders before it.
+DECISION_WINDOW_MARGIN_MINUTES=2
 AGENT_WAIT_SECONDS=180
+# One healthy order every BASELINE_ORDER_SECONDS during baseline_phase, a little more often than once a minute: the
+# shortest previous window in decision mode is 3 minutes (a fault phase under a minute plus the margin), and 3 orders
+# must fit in it whatever its bounds; one order a minute could put only 2 there.
+BASELINE_ORDER_SECONDS=50
 
 # Builds and starts the agent (and what it depends on, if down) and waits for it to be healthy. On failure, prints
 # the agent's last log lines and the usual cause, and fails.
@@ -633,14 +641,25 @@ wait_incident() {
   done
 }
 
+# Prints the window margin, in minutes, of agent mode $1: DECISION_WINDOW_MARGIN_MINUTES in decision mode, else
+# INCIDENT_WINDOW_MARGIN_MINUTES. Tested by test-lib.sh.
+window_margin() {
+  if [[ "$1" == decision ]]; then
+    echo "$DECISION_WINDOW_MARGIN_MINUTES"
+  else
+    echo "$INCIDENT_WINDOW_MARGIN_MINUTES"
+  fi
+}
+
 # The window (sinceMinutes) of an incident about a fault whose own traffic started at epoch second $1: the whole
-# minutes since then, rounded up, plus INCIDENT_WINDOW_MARGIN_MINUTES, at most 360 (the API's limit). The window
-# reaches back at most one minute before $1 plus the margin; space_out keeps the previous fault's traffic older.
+# minutes since then, rounded up, plus margin $2 (window_margin; INCIDENT_WINDOW_MARGIN_MINUTES when not given), at
+# most 360 (the API's limit). The window reaches back at most one minute before $1 plus the margin; space_out, or
+# baseline_phase in decision mode, keeps the previous fault's traffic older.
 incident_window() {
   local elapsed minutes
   elapsed=$(($(date +%s) - $1))
   (( elapsed > 0 )) || elapsed=0
-  minutes=$(((elapsed + 59) / 60 + INCIDENT_WINDOW_MARGIN_MINUTES))
+  minutes=$(((elapsed + 59) / 60 + ${2:-$INCIDENT_WINDOW_MARGIN_MINUTES}))
   (( minutes <= 360 )) || minutes=360
   echo "$minutes"
 }
@@ -658,15 +677,72 @@ space_out() {
   fi
 }
 
+# How many times baseline_phase starts over for one fault before it fails that fault.
+BASELINE_RESTARTS=2
+
+# The baseline phase of decision-mode fault $2 (its file name prefix, record_prefix), run by verify-agent.sh in place of
+# space_out before the fault's traffic: for $1 minutes, one healthy order every BASELINE_ORDER_SECONDS from the start,
+# each expected to be 201 PAID. Its orders fill the incident's previous window, and the previous fault, its restore
+# and the lab's start stay older than the phase. An order that is not PAID (say the first one after a restore
+# recreated order-service) is logged, and the phase starts over from it, so that order too ages out of both windows;
+# its next order comes one interval later. After BASELINE_RESTARTS restarts, the next such order fails the fault and
+# the phase returns 1: the caller scores the fault a miss without injecting it, and goes on with the next fault, which
+# gets a baseline of its own. Otherwise it returns $1 minutes after its last start. Tested by test-lib.sh.
+baseline_phase() {
+  local start end next now code id status restarts=0
+  start=$(date +%s)
+  end=$((start + $1 * 60))
+  next=$start
+  info "baseline: one healthy order every ${BASELINE_ORDER_SECONDS}s for $1 min"
+  while (( next < end )); do
+    now=$(date +%s)
+    (( next <= now )) || sleep $((next - now))
+    read -r code id status _ <<<"$(place_order)"
+    if [[ "$code" == 201 && "$status" == PAID ]]; then
+      pass "baseline order $id is PAID"
+      next=$((next + BASELINE_ORDER_SECONDS))
+    elif (( restarts < BASELINE_RESTARTS )); then
+      restarts=$((restarts + 1))
+      echo "WARN  $2: baseline order $id: expected 201 PAID, got $code $status; the baseline starts over" \
+        "(restart $restarts of $BASELINE_RESTARTS)" >&2
+      start=$(date +%s)
+      end=$((start + $1 * 60))
+      next=$((start + BASELINE_ORDER_SECONDS))
+    else
+      fail "$2: baseline order $id: expected 201 PAID, got $code $status after $BASELINE_RESTARTS restarts; the" \
+        "baseline failed, so the fault is not injected and is scored a miss"
+      return 1
+    fi
+  done
+  now=$(date +%s)
+  (( end <= now )) || sleep $((end - now))
+}
+
+# Fails fault $1 when its decision-mode incident window, $2 minutes, is larger than $3, the largest window the baseline
+# phase covers (N_max, verify-agent.sh): the previous window then starts before the phase, where the previous fault,
+# its restore or the lab's start can be. True when the window fits. Tested by test-lib.sh.
+expect_baseline_window() {
+  (( $2 <= $3 )) && return 0
+  fail "$1: window $2 min is larger than N_max ($3 min): its previous window starts before the baseline phase, so" \
+    "the baseline is not clean"
+  return 1
+}
+
+# The name prefix of fault $1's files in round $2 of a verify-agent.sh run: "<fault>-r<round>" when the run was given
+# --rounds ($3 true), else "<fault>", the names of a run without rounds. Tested by test-lib.sh.
+record_prefix() {
+  if [[ "$3" == true ]]; then echo "$1-r$2"; else echo "$1"; fi
+}
+
 # POST /incidents with symptom $1 (no double quotes or backslashes) and the window incident_window gives for traffic
-# that started at epoch second $2, computed for each attempt. Prints "<id> <window minutes>" of the new incident;
-# prints nothing and fails on any other answer, after printing it on stderr. One incident runs at a time: on a 409
-# naming a running incident (an earlier, interrupted run), it waits for that one to end (wait_incident) and tries once
-# more, with a window recomputed after the wait.
+# that started at epoch second $2, with margin $3 when given, computed for each attempt. Prints "<id> <window minutes>"
+# of the new incident; prints nothing and fails on any other answer, after printing it on stderr. One incident runs at
+# a time: on a 409 naming a running incident (an earlier, interrupted run), it waits for that one to end
+# (wait_incident) and tries once more, with a window recomputed after the wait.
 open_incident() {
   local body code answer id attempt window
   for attempt in 1 2; do
-    window=$(incident_window "$2")
+    window=$(incident_window "$2" "${3:-}")
     body="{\"symptom\":\"$1\",\"sinceMinutes\":$window}"
     read -r code answer <<<"$(agent_call POST /incidents "$body")" || true
     id=$(json_field id "$answer")
