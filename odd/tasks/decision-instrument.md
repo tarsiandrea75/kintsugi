@@ -133,7 +133,7 @@ Explorer and dossier replays keep today's behavior.
   - `check-recordings.sh`;
   - the docs.
 - [x] T2r The slice review's findings (the label and the flaky test; the `diagnose()` tests are T2r2, after T4). Route: inline, for the label and the flaky test. The `diagnose()` tests wait for T4 to end, because they touch `verify-agent.sh`, which T4 is running.
-- [ ] T3 Replay over many recordings. Route: delegated writer. It covers:
+- [x] T3 Replay over many recordings. Route: delegated writer. It covers:
   - the manifest splits;
   - one case per recording;
   - `--split` and `--repeats`;
@@ -226,6 +226,32 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - The full agent suite is green.
   - T2r2, after T4 ends, will test decision mode's two `diagnose()` branches: the `baseline failed` row and the window-too-large MISS.
 
+- T2r review (`f3cd4c3`, base `cf005a0`, four lenses, consent granted): approved and acknowledged (lineage `review-f51735ec76bd71be`). It made one suggestion, R3-gathering-act-headroom: the 3 s gathering leaves about 2 s of real time against the 5 s ACT deadline. It goes to T2r2.
+- 2026-10-24: T3 started (delegated writer). Its surfaces exclude `verify-agent.sh` and `lib.sh`, which T4 is running.
+
+- 2026-10-24: T3 done (route: delegated writer; trigger: 9 files across the replay driver, its tests, two scripts, the docs and the spec).
+  - The manifest gains a `split` column, and the six old rows are `stress`.
+  - Decision mode replays each recording of a split as its own case, with no pooling. `--repeats M` reruns each case; `summary.tsv` gains `split` and `recording`; `aggregate.tsv` counts distinct recordings per split.
+  - `replay-agent.sh` gains `--split` and `--repeats`. `--samples` is refused in decision mode, and the cloud limit of 60 counts recordings × repeats.
+  - `record-replay.sh`:
+    - `--split` is required;
+    - it reads round files;
+    - it runs `check-recordings.sh` on each incident except in `stress`;
+    - it refuses to move a recording between splits;
+    - `--rounds LIST` lets one run feed both `dev` and `holdout`.
+  - RED and GREEN:
+    - Java RED: the new tests did not compile (40 "cannot find symbol"). Java GREEN: 14 tests.
+    - Mutation check: pooling a decision case made exactly `aDecisionCaseIsServedItsOwnRecordingAlone` fail.
+    - Shell RED, in two steps: decision mode accepted `--samples`, then ran without `--split`. Shell GREEN: 135 cases.
+    - Full suite: 488 tests.
+  - Parent spot check: `test-lib.sh` passes 135 cases; the full suite is green.
+  - About 1,090 changed lines: two scripts partly rewritten, about 350 lines of tests, about 100 of docs and spec.
+  - Follow-up: explorer and dossier replays pool every recording of a fault, so after the T4 import they will also pool the decision recordings, and their conflicts will rise.
+  - Import plan for T4: odd rounds go to `dev`, even rounds to `holdout`, so any drift over the 11-hour session spreads over both:
+    - `record-replay.sh --split dev --rounds 1,3,5,7,9 <run>`
+    - `record-replay.sh --split holdout --rounds 2,4,6,8,10 <run>`
+- 2026-10-24 16:47: the first T4 recording (`F1-r1`) passes `check-recordings.sh`. Its previous window holds 5 PAID orders, and all traffic is SUCCESS; its incident window has no restart; the window is 4 minutes. The cloud decision run took 15 s (steps DOSSIER and REPORT) and matched.
+
 ## Next step
 
-T3 while T4 records; T2r2 after T4.
+T3 review, then wait for T4. Then T2r2 (the `diagnose()` branch tests and the ACT deadline headroom), the import, and T5 (M0).

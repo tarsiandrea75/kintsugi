@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests for lib.sh's pure helpers (no lab, no docker): incident_fields and agent_verdict, which verify-agent.sh uses
 # to score an incident, the windows and the baseline phase (sleep, the clock and the orders stubbed), and more; also
-# the options of replay-agent.sh and verify-agent.sh, and check-recordings.sh. Run: infra/scripts/test-lib.sh. Exits
-# non-zero on the first failing case.
+# the options of replay-agent.sh and verify-agent.sh, check-recordings.sh, and record-replay.sh on temporary
+# directories. Run: infra/scripts/test-lib.sh. Exits non-zero on the first failing case.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -412,5 +412,127 @@ expect "an incident with no DOSSIER step fails" "$("$check_recordings" "$KEY_DIR
 expect "a run directory with no recording is a wrong argument" \
   "$("$check_recordings" "$KEY_DIR/empty-run" 2>&1; echo "exit $?")" \
   "No F<n>-incident.json or F<n>-r<k>-incident.json in $KEY_DIR/empty-run"$'\n'"exit 2"
+
+# replay-agent.sh's decision-mode options and cases, checked before Maven, over a temporary manifest (REPLAY_DIR). Run
+# on the local route with the failing curl stub, so a run that passes them stops at the Ollama check.
+manifest_dir="$KEY_DIR/replay-manifest"
+mkdir -p "$manifest_dir"
+printf '%s\n' "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split" \
+  "F1${tab}decision${tab}cloud${tab}a|B${tab}F1/r1-F1.json${tab}id-1${tab}dev" \
+  "F1${tab}dossier${tab}cloud${tab}a|B${tab}F1/r2-F1.json${tab}id-2${tab}dev" \
+  "F1${tab}explorer${tab}cloud${tab}a|B${tab}F1/r3-F1.json${tab}id-3${tab}dev" \
+  "F1${tab}decision${tab}cloud${tab}a|B${tab}F1/r4-F1.json${tab}id-4${tab}holdout" \
+  "F3${tab}decision${tab}cloud${tab}c|D${tab}F3/r1-F3.json${tab}id-5${tab}dev" >"$manifest_dir/recordings.tsv"
+replay_agent() {
+  REPLAY_DIR="$manifest_dir" PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" --route local \
+    "$@" 2>&1
+}
+option_check() {
+  local out
+  out=$(replay_agent "$@")
+  echo "$? ${out%% *}"
+}
+expect "decision mode refuses --samples, and points to --repeats" \
+  "$(replay_agent --mode decision --samples 3; echo "exit $?")" \
+  "--samples does not apply to decision mode, which replays each recording of the split once: use --repeats M to\
+ run each one M times"$'\n'"exit 2"
+expect "dossier mode refuses --split" "$(option_check --mode dossier --split dev)" "2 --split"
+expect "explorer and dossier modes refuse --repeats" "$(option_check --mode both --repeats 2)" "2 --repeats"
+expect "an unknown split exits 2" "$(option_check --mode decision --split train)" "2 Unknown"
+expect "a 4-digit --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 1000)" \
+  "2 --repeats"
+expect "a zero --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 0)" "2 --repeats"
+decision_run=$(replay_agent --mode decision --faults F1,F3 --repeats 2)
+expect "decision mode's options pass, and the run stops at the Ollama check" "$?" 2
+expect "one case per dev recording of the chosen faults made in decision or dossier mode, each run --repeats times" \
+  "$(grep -F '....  ' <<<"$decision_run")" \
+  "....  decision mode, split dev: 3 recording(s) of F1 F3, each replayed 2 time(s): 6 samples"
+expect "a chosen fault with no recording in the split stops the run before Maven" \
+  "$(replay_agent --mode decision --split holdout --faults F1,F3; echo "exit $?")" \
+  "No decision or dossier recording of F3 in split 'holdout' of $manifest_dir/recordings.tsv"$'\n'"exit 2"
+
+# record-replay.sh: a round run imported split by split into a temporary replay directory (REPLAY_DIR), never the
+# committed one. Round 1 holds a clean F3 (the check-recordings fixture) and the 2026-10-19 F2, whose windows fail the
+# check; round 2 another clean F3.
+record_replay="$(dirname "${BASH_SOURCE[0]}")/record-replay.sh"
+replay_dir="$KEY_DIR/replay"
+new_run="$KEY_DIR/runs/verify-agent-20261024T162600Z"
+stress_run="$KEY_DIR/runs/verify-agent-20261019T214629Z"
+key_run="$KEY_DIR/runs/verify-agent-key"
+mkdir -p "$new_run" "$stress_run" "$key_run"
+score_text() {
+  printf 'fault: %s\nmode (requested, recorded): %s, %s\nroute (requested, recorded): cloud, cloud\nincident: %s
+truth (service|category): %s\n' "$1" "$2" "$2" "$3" "$4"
+}
+for round in 1 2; do
+  cp "$clean_run/F3-r1-incident.json" "$new_run/F3-r$round-incident.json"
+  score_text F3 decision "id-f3-r$round" 'order-service|CONFIGURATION' >"$new_run/F3-r$round-score.txt"
+done
+cp "$REPO_DIR/agent/src/test/resources/replay/F2/verify-agent-20261019T214629Z-F2.json" "$new_run/F2-r1-incident.json"
+score_text F2 decision id-f2-r1 'gateway-mock|DEPENDENCY_REJECTING' >"$new_run/F2-r1-score.txt"
+cp "$new_run/F2-r1-incident.json" "$stress_run/F2-incident.json"
+score_text F2 dossier id-f2 'gateway-mock|DEPENDENCY_REJECTING' >"$stress_run/F2-score.txt"
+printf '{"steps":[{"toolOutput":"token sk-ant-api03-abc"}]}' >"$key_run/F1-incident.json"
+score_text F1 dossier id-f1 'gateway-mock|DEPENDENCY_LATENCY' >"$key_run/F1-score.txt"
+record() { REPLAY_DIR="$replay_dir" "$record_replay" "$@" 2>&1; }
+manifest_header="fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split"
+f3_r1="F3${tab}decision${tab}cloud${tab}order-service|CONFIGURATION${tab}F3/verify-agent-20261024T162600Z-r1-F3.json\
+${tab}id-f3-r1${tab}dev"
+expect "--split is required" "$(record "$new_run"; echo "exit $?")" \
+  "--split is required: dev, holdout, stress or probe; see --help"$'\n'"exit 2"
+expect "an unknown split exits 2" "$(record --split train "$new_run"; echo "exit $?")" \
+  "Unknown split 'train'; choose dev, holdout, stress or probe"$'\n'"exit 2"
+expect "a range of rounds that ends before it starts exits 2" \
+  "$(record --split dev --rounds 5-3 "$new_run"; echo "exit $?")" \
+  "--rounds: the range 5-3 ends before it starts"$'\n'"exit 2"
+expect "round 1 as dev: the clean F3 is recorded, and F2, whose windows fail the check, is refused" \
+  "$(record --split dev --rounds 1 "$new_run"; echo "exit $?")" \
+  "FAIL  verify-agent-20261024T162600Z F2-r1: refused, check-recordings.sh: previous window: orders not PAID:\
+ PAYMENT_PENDING 6; previous window: traffic not SUCCESS: client order-service -> payment-service POST /payments\
+ CLIENT_ERROR UNKNOWN HttpTimeoutException x6; nothing written
+PASS  verify-agent-20261024T162600Z F3-r1: F3/verify-agent-20261024T162600Z-r1-F3.json recorded in dev (decision,\
+ cloud, truth order-service|CONFIGURATION)
+1 recorded, 1 refused, manifest $replay_dir/recordings.tsv
+exit 1"
+expect "the manifest gets its header and the round's line, with its split" "$(<"$replay_dir/recordings.tsv")" \
+  "$manifest_header"$'\n'"$f3_r1"
+expect "the recording is the incident, under the run's name and round" \
+  "$(cmp -s "$new_run/F3-r1-incident.json" "$replay_dir/F3/verify-agent-20261024T162600Z-r1-F3.json" && echo same)" \
+  same
+expect "nothing is written for the refused F2" \
+  "$(if [[ -e "$replay_dir/F2" ]]; then echo written; else echo none; fi)" none
+expect "the same import again changes no line" "$(record --split dev --rounds 1 "$new_run" | grep -F 'F3-r1')" \
+  "....  verify-agent-20261024T162600Z F3-r1: F3/verify-agent-20261024T162600Z-r1-F3.json replaced, its\
+ recordings.tsv line unchanged"
+expect "a recording of dev is never moved to holdout" \
+  "$(record --split holdout --rounds 1 "$new_run" | grep -F 'F3-r1')" \
+  "FAIL  verify-agent-20261024T162600Z F3-r1: refused, F3/verify-agent-20261024T162600Z-r1-F3.json is recorded in\
+ split dev, and a recording stays in one split; nothing written"
+expect "round 2 alone, as holdout" "$(record --split holdout --rounds 2 "$new_run"; echo "exit $?")" \
+  "PASS  verify-agent-20261024T162600Z F3-r2: F3/verify-agent-20261024T162600Z-r2-F3.json recorded in holdout\
+ (decision, cloud, truth order-service|CONFIGURATION)
+1 recorded, 0 refused, manifest $replay_dir/recordings.tsv
+exit 0"
+expect "stress takes a recording whose windows fail the check, from a run without rounds" \
+  "$(record --split stress "$stress_run"; echo "exit $?")" \
+  "PASS  verify-agent-20261019T214629Z F2: F2/verify-agent-20261019T214629Z-F2.json recorded in stress (dossier,\
+ cloud, truth gateway-mock|DEPENDENCY_REJECTING)
+1 recorded, 0 refused, manifest $replay_dir/recordings.tsv
+exit 0"
+expect "a key-like string is refused, in stress too" "$(record --split stress "$key_run"; echo "exit $?")" \
+  "FAIL  verify-agent-key F1: refused, the incident holds a key-like string; nothing written
+0 recorded, 1 refused, manifest $replay_dir/recordings.tsv
+exit 1"
+expect "the manifest holds one line per recording, each with its split" \
+  "$(cut -f 5,7 "$replay_dir/recordings.tsv" | tail -n +2)" \
+  "F3/verify-agent-20261024T162600Z-r1-F3.json${tab}dev
+F3/verify-agent-20261024T162600Z-r2-F3.json${tab}holdout
+F2/verify-agent-20261019T214629Z-F2.json${tab}stress"
+mkdir -p "$KEY_DIR/replay-6-columns"
+printf 'fault\tmode\troute\ttruth\tfile\tincident\n' >"$KEY_DIR/replay-6-columns/recordings.tsv"
+expect "a manifest without the split column is refused" \
+  "$(REPLAY_DIR="$KEY_DIR/replay-6-columns" "$record_replay" --split stress "$stress_run" 2>&1; echo "exit $?")" \
+  "$KEY_DIR/replay-6-columns/recordings.tsv does not start with the header fault, mode, route, truth, file,\
+ incident, split; nothing written"$'\n'"exit 2"
 
 echo "PASS  $cases cases"

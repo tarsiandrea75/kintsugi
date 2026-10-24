@@ -429,13 +429,36 @@ It prints one `PASS` or `FAIL` line per incident, with the facts that fail it, t
 
 ### Record a run for replay
 
-The replay harness (`odd/tasks/replay-harness.md`) runs the real agent loop against tool outputs recorded from a `verify-agent.sh` run, so a prompt or loop change can be scored on many samples without the lab. `record-replay.sh` takes those recordings from run directories; it never contacts the lab:
+The replay harness (`odd/tasks/replay-harness.md`) runs the real agent loop against tool outputs recorded from a `verify-agent.sh` run, so a prompt or loop change can be scored on many recordings without the lab. `record-replay.sh` takes those recordings from run directories into a split; it never contacts the lab:
 
 ```bash
-infra/scripts/record-replay.sh infra/scripts/out/verify-agent-<UTC time>-dossier-cloud [<run dir>...]
+infra/scripts/record-replay.sh --split dev infra/scripts/out/verify-agent-<UTC time> [<run dir>...]
+infra/scripts/record-replay.sh --split holdout --rounds 2,4,6,8,10 infra/scripts/out/verify-agent-<UTC time>
 ```
 
-For each `<fault>-incident.json` it reads `<fault>-score.txt` and copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json` (committed: recordings are lab output, not secrets), and adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file and the incident id. Re-running it on the same run replaces the copy and replaces that file's manifest line with the new values (`manifest_upsert` in `lib.sh`; unchanged when they are the same), never adding a second one. A fault with no score file or no truth is skipped with a warning. An incident that holds a key-like string (`sk-ant-`, `ANTHROPIC_API_KEY=` with a value, or `x-api-key`, checked by `holds_key_like_string` in `lib.sh`) or that is not a JSON object is refused: nothing is written for it and the script exits 1. `REPLAY_DIR` names another destination, for a dry run in a temporary directory.
+Every recording belongs to one split, the manifest's last column (`odd/tasks/decision-instrument.md`):
+- `dev`: the recordings a change is tuned and measured on;
+- `holdout`: read once, to confirm a result reached on `dev`;
+- `stress`: the six recordings of 2026-10-19, whose previous windows hold other faults (`check-recordings.sh` fails them), kept for a later robustness case;
+- `probe`: faults the prompt was never tuned on (none yet).
+
+`--split` is required. For each `<fault>-incident.json` or `<fault>-r<k>-incident.json` it reads the score file of the same name. It copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json`, or `<run dir name>-r<k>-<fault>.json` (committed: recordings are lab output, not secrets). It then adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file, the incident id and the split. `--rounds` takes only some rounds of a `--rounds` run (`1-5`, or `1,3,5,7,9`), so one run directory can feed both `dev` and `holdout`.
+- Except in `stress`, an incident must first pass `check-recordings.sh`, run on that incident alone.
+- Re-running it on the same run with the same split replaces the copy and replaces that file's manifest line with the new values (`manifest_upsert` in `lib.sh`; unchanged when they are the same), never adding a second one.
+- A fault with no score file or no truth is skipped with a warning.
+- An incident is refused when it holds a key-like string (`sk-ant-`, `ANTHROPIC_API_KEY=` with a value, or `x-api-key`, checked by `holds_key_like_string` in `lib.sh`), is not a JSON object, fails `check-recordings.sh`, or is already recorded in another split. A recording stays in one split, so a second import never moves a `holdout` recording into `dev`; to move one, edit the manifest. Nothing is written for a refused incident, and the script exits 1 after the others.
+- A manifest whose first line is not the header with the `split` column stops it with exit 2.
+- `REPLAY_DIR` names another destination, for a dry run in a temporary directory.
+
+To import a recording round (`verify-agent.sh --mode decision --route cloud --rounds K`), check it, then import half of its rounds into each split. Alternating rounds spread the session's hours over both splits, so a slow drift of the lab does not separate `dev` from `holdout`:
+
+```bash
+infra/scripts/check-recordings.sh infra/scripts/out/verify-agent-<UTC time>
+infra/scripts/record-replay.sh --split dev --rounds 1,3,5,7,9 infra/scripts/out/verify-agent-<UTC time>
+infra/scripts/record-replay.sh --split holdout --rounds 2,4,6,8,10 infra/scripts/out/verify-agent-<UTC time>
+```
+
+An incident that fails the check is refused and named, and the others are imported.
 
 The tool listing is not recorded per run: the replay offers the tools of `agent/src/test/resources/mcp-outputs/tools-list.json`, a recorded `tools/list` answer holding the same eight tools `verify-mcp.sh` expects.
 
@@ -447,14 +470,27 @@ The tool listing is not recorded per run: the replay offers the tools of `agent/
 infra/scripts/replay-agent.sh                                     # 1 dossier sample of F1-F3, cloud route
 infra/scripts/replay-agent.sh --samples 5 --faults F1,F3
 infra/scripts/replay-agent.sh --route local                       # Ollama with granite4.1:8b on 127.0.0.1:11434
-infra/scripts/replay-agent.sh --mode decision                     # the dossier, then one report call
+infra/scripts/replay-agent.sh --mode decision                     # each dev recording once: the dossier, one report call
+infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
 ```
 
-**Cost:** on the cloud route every sample is paid model calls (the script prints how many samples it will run). Run it only with the human's go-ahead, and record the cost from `aggregate.tsv`. The key comes from the shell or `infra/.env` (`export_cloud_key` in `lib.sh`) and reaches Maven through its environment only; it is never printed or put on a command line.
+**Cost:** on the cloud route every sample is paid model calls (the script prints how many samples it will run, at most 60 per run). Run it only with the human's go-ahead, and record the cost from `aggregate.tsv`. The key comes from the shell or `infra/.env` (`export_cloud_key` in `lib.sh`) and reaches Maven through its environment only; it is never printed or put on a command line.
 
-It runs `ReplayRunTest` with the `replay` Maven profile (the default `./mvnw test` leaves it out) and needs Docker for the Testcontainers database. It writes `infra/scripts/out/replay-<UTC time>-<route>/`: `<fault>-<mode>-<n>.json`, the incident with its steps; `summary.tsv`, one line per sample with its status, verdict, coverage (calls answered from a recording out of all calls), conflicts, tokens and seconds; and `aggregate.tsv`, per fault and mode, matches out of samples, mean coverage, `coveredSamples` (coverage at least 0.8), `matchesCovered` (matches among them, out of them), `dossierCovered` (samples whose dossier was fully recorded, out of samples), tokens and the estimated cloud cost. A sample with coverage below 1.00 made calls no recording holds, answered as `CLIENT_ERROR`: read its verdict with that in mind. A dossier sample usually shows about 0.91, its model-chosen calls (free-text `search_runbooks` queries) being unrecorded, which is why the covered threshold is 0.8.
+It runs `ReplayRunTest` with the `replay` Maven profile (the default `./mvnw test` leaves it out) and needs Docker for the Testcontainers database. It writes `infra/scripts/out/replay-<UTC time>-<route>/`:
+- `<fault>-<mode>-<recording>-<n>.json`, the incident with its steps, where `<recording>` is the file name, without `.json`, of the recording the sample opened on;
+- `summary.tsv`, one line per sample with its status, verdict, coverage (calls answered from a recording out of all calls), conflicts, tokens and seconds, then its split and recording;
+- `aggregate.tsv`, per fault, mode and split: the distinct `recordings` the samples opened on, the `samples`, matches out of samples, mean coverage, `coveredSamples` (coverage at least 0.8), `matchesCovered` (matches among them, out of them), `dossierCovered` (samples whose dossier was fully recorded, out of samples), tokens and the estimated cloud cost.
 
-The default mode is `dossier`; `--samples` takes 1 to 999. `--mode explorer` and `--mode both` (explorer and dossier) still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. `--mode decision` runs decision mode (agent spec, "Decision mode"): the dossier, then one report call, with no evidence phase. Each sample replays the fault's decision recording, or its dossier recording when the manifest has none, which holds every call the dossier makes, so its coverage is 1.00. A `MISS` is a measurement; the script exits 1 only when a sample could not run.
+A sample with coverage below 1.00 made calls no recording holds, answered as `CLIENT_ERROR`: read its verdict with that in mind. A dossier-mode sample usually shows about 0.91, its model-chosen calls (free-text `search_runbooks` queries) being unrecorded, which is why the covered threshold is 0.8.
+
+`--mode decision` (agent spec, "Decision mode") is the measurement mode: the dossier, then one report call, with no evidence phase.
+- Each manifest line of a chosen fault in the split (`--split`, default `dev`) recorded in decision or dossier mode is one case.
+- Each case replays its own recording alone, which holds every call the dossier makes, so its coverage is 1.00 with no conflict. It runs `--repeats` times (1 to 999, default 1).
+- `recordings` in `aggregate.tsv` counts the independent observations, and `samples` is recordings × repeats. On the local route, at temperature 0, repeats of a recording are near-copies.
+- A chosen fault with no recording in the split stops the script with exit 2 before Maven, and a recording without its start, symptom or window fails the run before any model call.
+- `--samples` is an error in decision mode, which points to `--repeats`. On the cloud route the bound of 60 samples per run counts recordings × repeats.
+
+The default mode is `dossier`; `--samples` takes 1 to 999. Explorer and dossier samples pool every recording of the fault, whatever its split, the fault's first recording in the sample's mode first; `--split` and `--repeats` are errors there. `--mode explorer` and `--mode both` (explorer and dossier) still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. A `MISS` is a measurement; the script exits 1 only when a sample could not run. `REPLAY_DIR` names another replay directory, as for `record-replay.sh`.
 
 ### Reset a volume
 

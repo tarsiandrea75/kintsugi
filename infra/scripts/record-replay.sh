@@ -1,22 +1,35 @@
 #!/usr/bin/env bash
-# Copies verify-agent.sh incidents into the replay recordings (odd/tasks/replay-harness.md T3). Run with --help.
+# Copies verify-agent.sh incidents into the replay recordings (odd/tasks/replay-harness.md T3,
+# odd/tasks/decision-instrument.md T3). Run with --help.
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Records verify-agent.sh runs for the replay harness (odd/tasks/replay-harness.md).
+Records verify-agent.sh runs for the replay harness (odd/tasks/replay-harness.md, odd/tasks/decision-instrument.md).
 
-  infra/scripts/record-replay.sh infra/scripts/out/verify-agent-<UTC time>-dossier-cloud [<run dir>...]
+  infra/scripts/record-replay.sh --split dev infra/scripts/out/verify-agent-<UTC time> [<run dir>...]
+  infra/scripts/record-replay.sh --split holdout --rounds 2,4,6,8,10 infra/scripts/out/verify-agent-<UTC time>
 
-For each run directory and each <fault>-incident.json in it, it reads <fault>-score.txt and copies the incident to
-agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json, then adds a line to
-agent/src/test/resources/replay/recordings.tsv (columns: fault, mode, route, truth, file, incident; the recorded mode
-and route; file relative to the replay directory). Re-running it on the same run is idempotent: the copy is replaced
-and the file's manifest line is replaced with the new values (unchanged when they are the same), never duplicated.
+  --split NAME       required: the split every recording joins: dev (to tune on), holdout (read once), stress
+                     (windows that hold other faults) or probe (faults never tuned on)
+  --rounds LIST      only these rounds of a verify-agent.sh --rounds run: rounds or ranges, such as 1-5 or 1,3,5,7,9
+                     (default: every incident of the run)
 
-A fault with no score file, or a score file with no truth, is skipped with a warning. An incident that holds a
-key-like string ("sk-ant-", ANTHROPIC_API_KEY= with a value, or "x-api-key"), or that is not a JSON object, is refused:
-nothing is written for it and the script exits 1 after the other faults. A missing run directory exits 2.
+For each run directory and each <fault>-incident.json or <fault>-r<k>-incident.json in it, it reads the score file of
+the same name (<fault>-score.txt, <fault>-r<k>-score.txt) and copies the incident to
+agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json, or <run dir name>-r<k>-<fault>.json, then adds a
+line to agent/src/test/resources/replay/recordings.tsv (columns: fault, mode, route, truth, file, incident, split; the
+recorded mode and route; file relative to the replay directory). Re-running it on the same run with the same split is
+idempotent: the copy is replaced and the file's manifest line is replaced with the new values (unchanged when they are
+the same), never duplicated.
+
+Except with --split stress, every incident must first pass check-recordings.sh: a previous window of healthy orders
+and traffic, and no restart in the incident window but the fault's own. A fault with no score file, or a score file
+with no truth, is skipped with a warning. An incident is refused when it holds a key-like string ("sk-ant-",
+ANTHROPIC_API_KEY= with a value, or "x-api-key"), is not a JSON object, is already recorded in another split (a
+recording stays in one split; to move one, edit recordings.tsv), or fails check-recordings.sh: nothing is written for
+it, and the script exits 1 after the other faults. A wrong option, a missing run directory, or a manifest that does
+not start with the expected header exits 2.
 
 REPLAY_DIR, when set, names the replay directory instead (used to try the script on a temporary directory). The tool
 listing is not copied: the replay uses agent/src/test/resources/mcp-outputs/tools-list.json, a recorded listing of
@@ -25,18 +38,47 @@ EOF
 }
 
 (( $# )) || { usage >&2; exit 2; }
-for arg in "$@"; do
-  case "$arg" in
+split=""
+rounds=""
+run_dirs=()
+while (( $# )); do
+  case "$1" in
     -h|--help) usage; exit 0 ;;
-    -*) echo "Unknown option: $arg" >&2; exit 2 ;;
+    --split|--rounds)
+      [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
+      set -- "$1=$2" "${@:3}" ;;
+    --split=*) split=${1#*=}; shift ;;
+    --rounds=*) rounds=${1#*=}; shift ;;
+    -*) echo "Unknown option: $1" >&2; exit 2 ;;
+    *) run_dirs+=("$1"); shift ;;
   esac
 done
+case "$split" in
+  dev|holdout|stress|probe) ;;
+  "") echo "--split is required: dev, holdout, stress or probe; see --help" >&2; exit 2 ;;
+  *) echo "Unknown split '$split'; choose dev, holdout, stress or probe" >&2; exit 2 ;;
+esac
+# The rounds --rounds selects, as " 1 2 3 ": each item is a round or a range of rounds, from 1 to 999.
+selected_rounds=" "
+if [[ -n "$rounds" ]]; then
+  IFS=, read -r -a items <<<"$rounds"
+  for item in "${items[@]}"; do
+    [[ "$item" =~ ^([1-9][0-9]{0,2})(-([1-9][0-9]{0,2}))?$ ]] \
+      || { echo "--rounds needs rounds or ranges from 1 to 999, such as 1-5 or 1,3,5, not '$rounds'" >&2; exit 2; }
+    first=${BASH_REMATCH[1]}
+    last=${BASH_REMATCH[3]:-$first}
+    (( first <= last )) || { echo "--rounds: the range $item ends before it starts" >&2; exit 2; }
+    for (( k = first; k <= last; k++ )); do selected_rounds+="$k "; done
+  done
+fi
+(( ${#run_dirs[@]} )) || { echo "No run directory; see --help" >&2; exit 2; }
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 REPLAY_DIR="${REPLAY_DIR:-$REPO_DIR/agent/src/test/resources/replay}"
 MANIFEST="$REPLAY_DIR/recordings.tsv"
-HEADER=$'fault\tmode\troute\ttruth\tfile\tincident'
+HEADER=$'fault\tmode\troute\ttruth\tfile\tincident\tsplit'
+CHECK_RECORDINGS="$(dirname "${BASH_SOURCE[0]}")/check-recordings.sh"
 
 # Succeeds when file $1 holds a JSON object.
 is_json_object() { python3 -I -c 'import json, sys; sys.exit(0 if isinstance(json.load(open(sys.argv[1])), dict) else 1)' "$1" 2>/dev/null; }
@@ -44,51 +86,109 @@ is_json_object() { python3 -I -c 'import json, sys; sys.exit(0 if isinstance(jso
 # is_json_object needs python3: without it every incident would be refused as "not JSON", so say so instead.
 command -v python3 >/dev/null || { echo "python3 is required to check the incidents" >&2; exit 2; }
 # Every run directory is checked before anything is written.
-for run_dir in "$@"; do
+for run_dir in "${run_dirs[@]}"; do
   [[ -d "$run_dir" ]] || { echo "Not a directory: $run_dir" >&2; exit 2; }
 done
+# A manifest from before a column (the split) would get lines longer than its header.
+if [[ -s "$MANIFEST" ]]; then
+  IFS= read -r header <"$MANIFEST" || true
+  [[ "$header" == "$HEADER" ]] || {
+    echo "$MANIFEST does not start with the header ${HEADER//$'\t'/, }; nothing written" >&2
+    exit 2
+  }
+fi
+
+# Prints the split manifest line of file $1 (relative to REPLAY_DIR) holds; nothing when it has no line.
+recorded_split() {
+  [[ -s "$MANIFEST" ]] || return 0
+  awk -F'\t' -v file="$1" 'NR > 1 && $5 == file { print $7; exit }' "$MANIFEST"
+}
+
+# Runs check-recordings.sh on incident file $1 alone, copied into a directory of its own. On a failure, prints the
+# facts that fail it, and fails.
+CHECK_DIR=$(mktemp -d)
+trap 'rm -rf "$CHECK_DIR"' EXIT
+windows_clean() {
+  local output
+  rm -f "$CHECK_DIR"/*
+  cp "$1" "$CHECK_DIR/"
+  if output=$("$CHECK_RECORDINGS" "$CHECK_DIR" 2>&1); then
+    return 0
+  fi
+  output=${output%%$'\n'*}
+  echo "${output#*-incident.json: }"
+  return 1
+}
 
 refused=0
 recorded=0
-for run_dir in "$@"; do
+for run_dir in "${run_dirs[@]}"; do
   run_dir=${run_dir%/}
   run=$(basename "$run_dir")
+  # The run's <fault>-incident.json, or <fault>-r<k>-incident.json of the rounds selected, by fault then round.
+  incidents=()
   shopt -s nullglob
-  incidents=("$run_dir"/F?-incident.json)
+  for incident_file in "$run_dir"/F*-incident.json; do
+    [[ "$(basename "$incident_file")" =~ ^F[0-9]+(-r([0-9]+))?-incident\.json$ ]] || continue
+    [[ -z "$rounds" || "$selected_rounds" == *" ${BASH_REMATCH[2]} "* ]] || continue
+    incidents+=("$incident_file")
+  done
   shopt -u nullglob
-  (( ${#incidents[@]} )) || echo "WARN  $run: no F?-incident.json"
+  if (( ${#incidents[@]} )); then
+    mapfile -t incidents < <(printf '%s\n' "${incidents[@]}" | sort -V)
+  else
+    echo "WARN  $run: no F<n>-incident.json or F<n>-r<k>-incident.json${rounds:+ of rounds $rounds}"
+  fi
   for incident_file in "${incidents[@]}"; do
-    fault=$(basename "$incident_file" -incident.json)
-    score_file="$run_dir/$fault-score.txt"
+    [[ "$(basename "$incident_file")" =~ ^(F[0-9]+)(-r[0-9]+)?-incident\.json$ ]]
+    fault=${BASH_REMATCH[1]}
+    round=${BASH_REMATCH[2]}
+    # The name its files share: F1, or F1-r3 in a --rounds run.
+    label=$fault$round
+    score_file="$run_dir/$label-score.txt"
     if [[ ! -f "$score_file" ]]; then
-      echo "WARN  $run $fault: no $fault-score.txt, skipped"
+      echo "WARN  $run $label: no $label-score.txt, skipped"
       continue
     fi
     IFS=$'\t' read -r _ mode route truth incident <<<"$(score_fields "$(<"$score_file")")"
     if [[ ! "$truth" =~ ^[^|]+\|[^|]+$ ]]; then
-      echo "WARN  $run $fault: no truth in $fault-score.txt, skipped"
+      echo "WARN  $run $label: no truth in $label-score.txt, skipped"
       continue
     fi
     if holds_key_like_string "$incident_file"; then
-      echo "FAIL  $run $fault: refused, the incident holds a key-like string; nothing written"
+      echo "FAIL  $run $label: refused, the incident holds a key-like string; nothing written"
       refused=$((refused + 1))
       continue
     fi
     if ! is_json_object "$incident_file"; then
-      echo "FAIL  $run $fault: refused, the incident is not a JSON object; nothing written"
+      echo "FAIL  $run $label: refused, the incident is not a JSON object; nothing written"
       refused=$((refused + 1))
       continue
     fi
-    file="$fault/$run-$fault.json"
+    file="$fault/$run$round-$fault.json"
+    # A recording stays in one split: once in holdout, never moved into dev by a second import.
+    previous=$(recorded_split "$file")
+    if [[ -n "$previous" && "$previous" != "$split" ]]; then
+      echo "FAIL  $run $label: refused, $file is recorded in split $previous, and a recording stays in one split;" \
+        "nothing written"
+      refused=$((refused + 1))
+      continue
+    fi
+    if [[ "$split" != stress ]] && ! facts=$(windows_clean "$incident_file"); then
+      echo "FAIL  $run $label: refused, check-recordings.sh: $facts; nothing written"
+      refused=$((refused + 1))
+      continue
+    fi
     mkdir -p "$REPLAY_DIR/$fault"
     cp "$incident_file" "$REPLAY_DIR/$file"
     [[ -s "$MANIFEST" ]] || printf '%s\n' "$HEADER" >"$MANIFEST"
-    row=$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$fault" "$mode" "$route" "$truth" "$file" "$incident")
+    row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$fault" "$mode" "$route" "$truth" "$file" "$incident" "$split")
     case "$(manifest_upsert "$MANIFEST" "$row")" in
-      added) echo "PASS  $run $fault: $file recorded ($mode, $route, truth $truth)" ;;
-      replaced) echo "PASS  $run $fault: $file re-recorded, its recordings.tsv line updated ($mode, $route, truth $truth)" ;;
-      unchanged) echo "....  $run $fault: $file replaced, its recordings.tsv line unchanged" ;;
-      *) echo "FAIL  $run $fault: recordings.tsv not updated" >&2; exit 1 ;;
+      added) echo "PASS  $run $label: $file recorded in $split ($mode, $route, truth $truth)" ;;
+      replaced) echo "PASS  $run $label: $file re-recorded in $split, its recordings.tsv line updated ($mode, $route," \
+        "truth $truth)" ;;
+      unchanged) echo "....  $run $label: $file replaced, its recordings.tsv line unchanged" ;;
+      *) echo "FAIL  $run $label: recordings.tsv not updated" >&2; exit 1 ;;
     esac
     recorded=$((recorded + 1))
   done

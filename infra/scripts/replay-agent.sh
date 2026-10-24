@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Replays the recorded faults through the real agent loop and scores every sample (odd/tasks/replay-harness.md T4).
-# Run with --help.
+# Replays the recorded faults through the real agent loop and scores every sample (odd/tasks/replay-harness.md T4,
+# odd/tasks/decision-instrument.md T3). Run with --help.
 set -euo pipefail
 
 usage() {
@@ -11,34 +11,45 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh                       # one dossier sample of F1, F2 and F3, cloud route
   infra/scripts/replay-agent.sh --samples 5 --faults F1,F3
   infra/scripts/replay-agent.sh --route local         # the local model on Ollama, 127.0.0.1:11434
-  infra/scripts/replay-agent.sh --mode decision       # the dossier, then one report call
+  infra/scripts/replay-agent.sh --mode decision       # each dev recording once: the dossier, then one report call
+  infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
 
   --route cloud|local            the model's route (default cloud)
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
-  --samples N                    samples per fault and mode, 1 to 999 (default 1)
+  --samples N                    explorer and dossier: samples per fault and mode, 1 to 999 (default 1)
+  --split NAME                   decision: the recordings to replay, dev (default), holdout, stress or probe
+  --repeats M                    decision: runs of each recording, 1 to 999 (default 1)
   --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
 
-It runs ReplayRunTest (./mvnw test -Preplay) in agent/: for each fault, mode and sample, the real loop and the route's
-real model over the recorded tool outputs in agent/src/test/resources/replay/, scored against the recorded truth. It
-writes infra/scripts/out/replay-<UTC time>-<route>/: <fault>-<mode>-<n>.json (the incident with its steps),
-summary.tsv (one line per sample: verdict, coverage, conflicts, tokens, seconds) and aggregate.tsv (per fault and mode:
-matches out of samples, mean coverage, tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per
-million prompt and completion tokens; then the covered samples, coverage at least 0.8, and the matches among them,
-and the samples whose dossier was fully recorded). A sample with coverage below 1 had calls no recording holds: read
-it as such.
+It runs ReplayRunTest (./mvnw test -Preplay) in agent/: the real loop and the route's real model over the recorded
+tool outputs in agent/src/test/resources/replay/, each sample scored against the recorded truth. It writes
+infra/scripts/out/replay-<UTC time>-<route>/: <fault>-<mode>-<recording>-<n>.json (the incident with its steps),
+summary.tsv (one line per sample: verdict, coverage, conflicts, tokens, seconds, then its split and recording) and
+aggregate.tsv (per fault, mode and split: the distinct recordings, the samples, matches out of samples, mean coverage,
+tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens; then
+the covered samples, coverage at least 0.8, and the matches among them, and the samples whose dossier was fully
+recorded). A sample with coverage below 1 had calls no recording holds: read it as such.
+
+A decision run (agent spec, "Decision mode") has one case per recording of the split: each line of recordings.tsv
+for a chosen fault, in that split, recorded in decision or dossier mode. Each case replays its own recording alone,
+which holds every call the dossier makes, --repeats times: the dossier, then the report call, with no phase and no
+drill-down call. A chosen fault with no recording in the split stops the run before Maven. The splits: dev to tune
+on, holdout read once, stress for the 2026-10-19 recordings whose windows hold other faults, probe for faults never
+tuned on.
+
+Explorer and dossier samples pool every recording of the fault, whatever its split, the first one in the sample's mode
+served first; --split and --repeats are refused there, as --samples is in decision mode.
 
 EXPLORER REPLAYS ARE NOT VALID MEASUREMENTS: under exact matching the explorer's model-chosen calls are mostly not
 recorded (coverage 0.00-0.38 in the T4 smoke check), so its samples measure the replay's gaps, not the agent. Explorer
 and both stay available to inspect that, not to score the agent.
 
-A decision sample (agent spec, "Decision mode") replays the fault's decision recording, else its dossier recording:
-the dossier's calls, all recorded, then the report call, with no phase and no drill-down call.
-
 COST: on the cloud route every sample is paid model calls. Run it only with the human's go-ahead, and record the cost.
 The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reaches Maven through the environment only
 and is never printed. The local route needs Ollama serving granite4.1:8b. Both need docker (Testcontainers' Postgres).
-Exit codes: 0 when every sample ran (a MISS is a measurement), 1 when the run failed, 2 on
-a bad option, a missing key or a missing model.
+REPLAY_DIR, when set, names the replay directory instead (used to try the options on a temporary manifest).
+Exit codes: 0 when every sample ran (a MISS is a measurement), 1 when the run failed, 2 on a bad option, a missing
+recording, a missing key or a missing model.
 EOF
 }
 
@@ -50,17 +61,20 @@ MAX_CLOUD_SAMPLES=60
 
 route=cloud
 mode=dossier
-samples=1
 faults=F1,F2,F3
+# Unset until given: decision mode refuses --samples, and the other modes refuse --split and --repeats.
+unset samples split repeats
 while (( $# )); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --route|--mode|--samples|--faults)
+    --route|--mode|--samples|--split|--repeats|--faults)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
       set -- "$1=$2" "${@:3}" ;;
     --route=*) route=${1#*=}; shift ;;
     --mode=*) mode=${1#*=}; shift ;;
     --samples=*) samples=${1#*=}; shift ;;
+    --split=*) split=${1#*=}; shift ;;
+    --repeats=*) repeats=${1#*=}; shift ;;
     --faults=*) faults=${1#*=}; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -68,8 +82,28 @@ done
 [[ "$route" == cloud || "$route" == local ]] || { echo "Unknown route '$route'; choose cloud or local" >&2; exit 2; }
 [[ "$mode" == explorer || "$mode" == dossier || "$mode" == decision || "$mode" == both ]] \
   || { echo "Unknown mode '$mode'; choose explorer, dossier, decision or both" >&2; exit 2; }
-# At most 3 digits, so the bound on cloud samples below cannot wrap around in bash's 64-bit arithmetic.
-[[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
+# At most 3 digits for --samples and --repeats, so the bound on cloud samples below cannot wrap around in bash's 64-bit
+# arithmetic.
+if [[ "$mode" == decision ]]; then
+  [[ -z "${samples+given}" ]] || { echo "--samples does not apply to decision mode, which replays each recording of" \
+    "the split once: use --repeats M to run each one M times" >&2; exit 2; }
+  split=${split-dev}
+  repeats=${repeats-1}
+  case "$split" in
+    dev|holdout|stress|probe) ;;
+    *) echo "Unknown split '$split'; choose dev, holdout, stress or probe" >&2; exit 2 ;;
+  esac
+  [[ "$repeats" =~ ^[1-9][0-9]{0,2}$ ]] \
+    || { echo "--repeats needs an integer from 1 to 999, not '$repeats'" >&2; exit 2; }
+else
+  [[ -z "${split+given}" ]] || { echo "--split applies to decision mode only: explorer and dossier samples pool every" \
+    "recording of the fault" >&2; exit 2; }
+  [[ -z "${repeats+given}" ]] \
+    || { echo "--repeats applies to decision mode only: explorer and dossier replays take --samples" >&2; exit 2; }
+  samples=${samples-1}
+  [[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] \
+    || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
+fi
 IFS=, read -r -a selected <<<"$faults"
 (( ${#selected[@]} )) || { echo "--faults needs at least one fault" >&2; exit 2; }
 seen=" "
@@ -82,14 +116,38 @@ done
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+REPLAY_DIR="${REPLAY_DIR:-$REPO_DIR/agent/src/test/resources/replay}"
+MANIFEST="$REPLAY_DIR/recordings.tsv"
+[[ -f "$MANIFEST" ]] || { echo "No recordings manifest $MANIFEST" >&2; exit 2; }
+# Maven runs in agent/, so the test gets the directory as an absolute path.
+REPLAY_DIR=$(cd "$REPLAY_DIR" && pwd)
+
+if [[ "$mode" == decision ]]; then
+  # The cases, as ReplayDriver.decisionCases picks them: the lines of a chosen fault in the split, recorded in decision
+  # or dossier mode. Counted here to bound the run, and to stop before Maven when a fault has none.
+  recordings=0
+  for fault in "${selected[@]}"; do
+    count=$(awk -F'\t' -v fault="$fault" -v want="$split" \
+      'NR > 1 && $1 == fault && ($2 == "decision" || $2 == "dossier") && $7 == want { n++ } END { print n + 0 }' \
+      "$MANIFEST")
+    (( count )) || { echo "No decision or dossier recording of $fault in split '$split' of $MANIFEST" >&2; exit 2; }
+    recordings=$((recordings + count))
+  done
+  total=$((recordings * repeats))
+  info "decision mode, split $split: $recordings recording(s) of ${selected[*]}, each replayed $repeats time(s):" \
+    "$total samples"
+else
+  modes=$([[ "$mode" == both ]] && echo 2 || echo 1)
+  total=$(( ${#selected[@]} * modes * samples ))
+fi
+
 if [[ "$route" == cloud ]]; then
   # The key goes to Maven's environment, never to its command line, and its value is never printed.
   export_cloud_key || { echo "$CLOUD_KEY_MISSING" >&2; exit 2; }
-  modes=$([[ "$mode" == both ]] && echo 2 || echo 1)
-  total=$(( ${#selected[@]} * modes * samples ))
-  # A typo in --samples must not turn into an unbounded paid run: a larger batch is split into several runs.
+  # A typo in --samples or --repeats must not turn into an unbounded paid run: a larger batch is divided into several
+  # runs.
   (( total <= MAX_CLOUD_SAMPLES )) \
-    || { echo "$total samples exceed the $MAX_CLOUD_SAMPLES a cloud run may make; split the batch" >&2; exit 2; }
+    || { echo "$total samples exceed the $MAX_CLOUD_SAMPLES a cloud run may make; divide the batch" >&2; exit 2; }
   echo "COST WARNING: $total samples on the cloud route, each one paid model calls."
   echo "Run this only with the human's go-ahead, and record the cost from aggregate.tsv."
 else
@@ -102,11 +160,17 @@ else
 fi
 
 OUT_DIR="$REPO_DIR/infra/scripts/out/replay-$(date -u +%Y%m%dT%H%M%SZ)-$route"
-info "replaying ${selected[*]}; mode: $mode; route: $route; samples: $samples; out: $OUT_DIR"
+if [[ "$mode" == decision ]]; then
+  info "replaying ${selected[*]}; mode: decision; split: $split; repeats: $repeats; route: $route; out: $OUT_DIR"
+  options=("-Dreplay.split=$split" "-Dreplay.repeats=$repeats")
+else
+  info "replaying ${selected[*]}; mode: $mode; route: $route; samples: $samples; out: $OUT_DIR"
+  options=("-Dreplay.samples=$samples")
+fi
 status=0
 (cd "$REPO_DIR/agent" && ./mvnw -q test -Preplay -Dtest=ReplayRunTest \
-  "-Dreplay.route=$route" "-Dreplay.mode=$mode" "-Dreplay.samples=$samples" "-Dreplay.faults=$faults" \
-  "-Dreplay.out=$OUT_DIR") || status=$?
+  "-Dreplay.route=$route" "-Dreplay.mode=$mode" "-Dreplay.faults=$faults" "${options[@]}" \
+  "-Dreplay.recordings=$REPLAY_DIR" "-Dreplay.out=$OUT_DIR") || status=$?
 
 echo "out: $OUT_DIR"
 if [[ -f "$OUT_DIR/summary.tsv" ]]; then

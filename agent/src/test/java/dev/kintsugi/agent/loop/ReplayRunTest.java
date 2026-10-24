@@ -11,6 +11,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -23,19 +24,23 @@ import dev.kintsugi.agent.AgentDatabase;
 import dev.kintsugi.agent.incident.IncidentRepository;
 
 /**
- * The replay run (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md T4): every recorded fault
- * replayed N times per mode through the real loop and the route's real model, each sample scored against the recorded
- * truth. It costs model calls, so it is tagged {@code replay}, left out of the default build and run only by
- * {@code infra/scripts/replay-agent.sh} ({@code ./mvnw test -Preplay -Dtest=ReplayRunTest}).
+ * The replay run (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md T4,
+ * odd/tasks/decision-instrument.md T3): recorded faults replayed through the real loop and the route's real model, each
+ * sample scored against the recorded truth. It costs model calls, so it is tagged {@code replay}, left out of the
+ * default build and run only by {@code infra/scripts/replay-agent.sh}
+ * ({@code ./mvnw test -Preplay -Dtest=ReplayRunTest}).
  *
  * <p>
  * System properties: {@code replay.route} ({@code cloud}, the default, or {@code local}), {@code replay.mode}
  * ({@code dossier}, the default, {@code explorer}, {@code decision} or {@code both}, which is explorer and dossier; an
- * explorer replay is low-coverage and not a valid measurement, see the feature document's T4 smoke check; a decision
- * replay makes only the dossier's recorded calls and the report call), {@code replay.faults} ({@code F1,F2,F3}),
- * {@code replay.samples} (1), {@code replay.recordings} (the committed {@code replay/} directory) and {@code replay.out}
- * ({@code infra/scripts/out/replay-<UTC time>-<route>/}). A miss is a measurement, not a failure: the test fails only
- * when it cannot run a sample.
+ * explorer replay is low-coverage and not a valid measurement, see the feature document's T4 smoke check),
+ * {@code replay.faults} ({@code F1,F2,F3}), {@code replay.recordings} (the committed {@code replay/} directory) and
+ * {@code replay.out} ({@code infra/scripts/out/replay-<UTC time>-<route>/}). Explorer and dossier replay each fault
+ * {@code replay.samples} (1) times per mode, over every recording of the fault. Decision mode replays each recording of
+ * the split {@code replay.split} ({@code dev}, the default, {@code holdout}, {@code stress} or {@code probe}) made in
+ * decision or dossier mode, alone, {@code replay.repeats} (1) times: the dossier's recorded calls and the report call.
+ * A property of the other kind of run is refused rather than ignored, so a run is never other than the one asked for. A
+ * miss is a measurement, not a failure: the test fails only when it cannot run a sample.
  *
  * <p>
  * The application context supplies what the app would run with: the route's {@code ChatModel} inside its
@@ -66,32 +71,51 @@ class ReplayRunTest {
 	void replay() throws IOException {
 		String route = System.getProperty("replay.route", "cloud");
 		List<AgentMode> modes = modes(System.getProperty("replay.mode", "dossier"));
+		boolean decision = modes.equals(List.of(AgentMode.DECISION));
 		List<String> faults = Arrays.stream(System.getProperty("replay.faults", "F1,F2,F3").split(","))
 			.map(String::strip)
 			.filter(fault -> !fault.isEmpty())
 			.toList();
+		if (decision) {
+			notSet("replay.samples", "decision mode replays each recording of replay.split once; to rerun each one, "
+					+ "set replay.repeats");
+		}
+		else {
+			notSet("replay.split", "only decision mode replays a split; explorer and dossier pool every recording");
+			notSet("replay.repeats", "only decision mode takes it; explorer and dossier take replay.samples");
+		}
 		int samples = Integer.parseInt(System.getProperty("replay.samples", "1"));
+		String split = System.getProperty("replay.split", "dev");
+		int repeats = Integer.parseInt(System.getProperty("replay.repeats", "1"));
 		Path recordings = Path.of(System.getProperty("replay.recordings", ReplayDriver.DEFAULT_RECORDINGS.toString()));
 		String time = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").format(ZonedDateTime.now(ZoneOffset.UTC));
 		Path out = Path.of(System.getProperty("replay.out",
 				REPO.resolve("infra/scripts/out/replay-" + time + "-" + route).toString()));
 		assertThat(this.router.route(ModelTask.ACT).route().value()).as("the context's route").isEqualTo(route);
 		assertThat(samples).as("replay.samples").isPositive();
+		assertThat(repeats).as("replay.repeats").isPositive();
 		assertThat(faults).as("replay.faults").isNotEmpty();
 
 		AgentDatabase.empty();
 		ReplayDriver driver = new ReplayDriver(this.router, this.settings, this.incidents, AgentDatabase.admin(),
 				recordings, ReplayDriver.DEFAULT_TOOLS_LIST);
 		List<ReplayDriver.Sample> done = new ArrayList<>();
+		Consumer<ReplayDriver.Sample> record = sample -> {
+			// Counted before it is written: a paid sample stays in aggregate.tsv even when its write fails.
+			done.add(sample);
+			ReplayDriver.write(out, sample);
+			System.out.println("replay " + sample.summaryLine());
+		};
 		try {
-			for (String fault : faults) {
-				for (AgentMode mode : modes) {
-					for (int n = 1; n <= samples; n++) {
-						ReplayDriver.Sample sample = driver.sample(fault, mode, n);
-						// Counted before it is written: a paid sample stays in aggregate.tsv even when its write fails.
-						done.add(sample);
-						ReplayDriver.write(out, sample);
-						System.out.println("replay " + sample.summaryLine());
+			if (decision) {
+				driver.decisionSamples(split, faults, repeats, record);
+			}
+			else {
+				for (String fault : faults) {
+					for (AgentMode mode : modes) {
+						for (int n = 1; n <= samples; n++) {
+							record.accept(driver.sample(fault, mode, n));
+						}
 					}
 				}
 			}
@@ -113,6 +137,11 @@ class ReplayRunTest {
 
 	private static List<AgentMode> modes(String mode) {
 		return mode.equals("both") ? List.of(AgentMode.EXPLORER, AgentMode.DOSSIER) : List.of(AgentMode.of(mode));
+	}
+
+	/** Fails, before any model call, when {@code property} is set: the run's mode would ignore it ({@code why}). */
+	private static void notSet(String property, String why) {
+		assertThat(System.getProperty(property)).as(property + " does not apply to this mode: " + why).isNull();
 	}
 
 }

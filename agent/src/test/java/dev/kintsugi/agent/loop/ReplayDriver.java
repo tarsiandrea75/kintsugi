@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
@@ -35,20 +36,22 @@ import dev.kintsugi.agent.lab.ReplayLabTools;
 
 /**
  * The replay driver's per-sample pipeline (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md
- * T4): the real {@link AgentLoop} over {@link ReplayLabTools}, scored against the recorded truth.
+ * T4, odd/tasks/decision-instrument.md T3): the real {@link AgentLoop} over {@link ReplayLabTools}, scored against the
+ * recorded truth.
  *
  * <p>
- * For a fault and a mode, a sample opens an incident with the recorded symptom and window of that mode's recording (for
- * a decision sample with no decision recording, the dossier recording, which holds the same dossier; else the first
- * recording of the fault), on a clock offset so that "now" is that recording's start, and runs the loop to its end on
- * the caller's thread over every recording of the fault, all modes pooled, that recording first: when two recordings
- * hold the same call with different outputs, the sample is served that recording's. Each
- * fault's recordings and the tool listing are parsed once; every sample gets a fresh {@link ReplayLabTools}, so its
- * counters are its own. A recording without {@code startedAt}, {@code symptom} or a positive {@code sinceMinutes}
- * fails the fault before any model call. The loop is
- * built here, as {@code AgentLoopTest} builds it, rather than taken from a Spring context: one loop per sample, each
- * with its own tools and clock, needs no bean override and no production change. The model comes from the router the
- * caller passes: {@link ReplayRunTest} takes the application's own, so the route's real model and settings.
+ * A sample opens an incident with the recorded symptom and window of its primary recording, on a clock offset so that
+ * "now" is that recording's start, and runs the loop to its end on the caller's thread. An explorer or dossier sample
+ * of a fault is served every recording of the fault, all modes and splits pooled, its primary first: the fault's first
+ * recording in the sample's mode, else its first recording. When two recordings hold the same call with different
+ * outputs, the sample is served the primary's. A decision sample is one case: a recording of the chosen split made in
+ * decision or dossier mode, which holds every call the dossier makes, so it is served that recording alone. Each
+ * recording and the tool listing are parsed once; every sample gets a fresh {@link ReplayLabTools}, so its counters are
+ * its own. A recording without {@code startedAt}, {@code symptom} or a positive {@code sinceMinutes} fails before any
+ * model call: its fault's samples, or every case of its split. The loop is built here, as {@code AgentLoopTest} builds
+ * it, rather than taken from a Spring context: one loop per sample, each with its own tools and clock, needs no bean
+ * override and no production change. The model comes from the router the caller passes: {@link ReplayRunTest} takes
+ * the application's own, so the route's real model and settings.
  */
 final class ReplayDriver {
 
@@ -58,12 +61,20 @@ final class ReplayDriver {
 	/** The recorded tool listing of mcp-tools' eight tools. */
 	static final Path DEFAULT_TOOLS_LIST = Path.of("src/test/resources/mcp-outputs/tools-list.json");
 
+	/**
+	 * The splits of {@code recordings.tsv} (odd/tasks/decision-instrument.md): {@code dev} to tune on, {@code holdout}
+	 * read once, {@code stress} for recordings whose windows hold other faults, and {@code probe} for faults never
+	 * tuned on.
+	 */
+	static final List<String> SPLITS = List.of("dev", "holdout", "stress", "probe");
+
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
-			"completionTokens", "seconds");
+			"completionTokens", "seconds", "split", "recording");
 
-	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "matches", "meanCoverage",
-			"coveredSamples", "matchesCovered", "dossierCovered", "promptTokens", "completionTokens", "costUsd");
+	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "recordings",
+			"samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered", "promptTokens",
+			"completionTokens", "costUsd");
 
 	/**
 	 * The coverage from which a sample counts as covered in {@code aggregate.tsv}: a dossier sample's model-chosen calls
@@ -95,8 +106,8 @@ final class ReplayDriver {
 
 	private final List<Recording> manifest;
 
-	/** Each fault's recordings, parsed and checked once, in manifest order. */
-	private final Map<String, List<Parsed>> parsed = new HashMap<>();
+	/** Each recording, parsed and checked once. */
+	private final Map<Recording, Parsed> parsed = new HashMap<>();
 
 	private JsonNode toolsListNode;
 
@@ -117,19 +128,90 @@ final class ReplayDriver {
 	}
 
 	/**
-	 * Runs sample {@code n} of {@code fault} in {@code mode} to its end.
-	 * @throws IllegalArgumentException when no recording holds the fault
+	 * Runs explorer or dossier sample {@code n} of {@code fault} to its end, over every recording of the fault. Such a
+	 * sample pools the fault's recordings of every split, so it has none: its split is {@code -}.
+	 * @throws IllegalArgumentException when no recording holds the fault, and in decision mode, which replays one
+	 * recording per case ({@link #decisionCases})
 	 * @throws IllegalStateException when the loop did not run the incident
 	 */
 	Sample sample(String fault, AgentMode mode, int n) {
+		if (mode == AgentMode.DECISION) {
+			throw new IllegalArgumentException("a decision sample replays one recording, a case of a split, never "
+					+ "every recording of " + fault + ": see decisionCases and decisionSample");
+		}
 		List<Parsed> ofFault = parsed(fault);
-		Parsed primary = first(ofFault, mode)
-			.or(() -> mode == AgentMode.DECISION ? first(ofFault, AgentMode.DOSSIER) : Optional.empty())
-			.orElse(ofFault.get(0));
+		Parsed primary = first(ofFault, mode).orElse(ofFault.get(0));
 		// The primary recording first: ReplayLabTools keeps the first output of a call two recordings hold.
 		List<JsonNode> served = new ArrayList<>();
 		served.add(primary.incident());
 		ofFault.stream().filter(recording -> recording != primary).forEach(recording -> served.add(recording.incident()));
+		return run(primary, served, mode, NONE, n);
+	}
+
+	/**
+	 * The decision cases of {@code split} for {@code faults}: one per manifest row of a chosen fault in that split made
+	 * in decision or dossier mode, the two modes whose recordings hold the whole dossier. The faults come in the order
+	 * given, each fault's rows in manifest order.
+	 * @throws IllegalArgumentException for a split not in {@link #SPLITS}, or a chosen fault with no case in it
+	 */
+	List<Recording> decisionCases(String split, List<String> faults) {
+		if (!SPLITS.contains(split)) {
+			throw new IllegalArgumentException("unknown split '" + split + "': choose dev, holdout, stress or probe");
+		}
+		List<Recording> cases = new ArrayList<>();
+		List<String> without = new ArrayList<>();
+		for (String fault : faults) {
+			List<Recording> ofFault = this.manifest.stream()
+				.filter(recording -> recording.fault().equals(fault) && recording.split().equals(split)
+						&& (recording.mode().equals(AgentMode.DECISION.value())
+								|| recording.mode().equals(AgentMode.DOSSIER.value())))
+				.toList();
+			if (ofFault.isEmpty()) {
+				without.add(fault);
+			}
+			cases.addAll(ofFault);
+		}
+		if (!without.isEmpty()) {
+			throw new IllegalArgumentException("no decision or dossier recording of " + String.join(", ", without)
+					+ " in split " + split + " of " + this.recordings);
+		}
+		return List.copyOf(cases);
+	}
+
+	/**
+	 * Runs every decision case of {@code split} for {@code faults} {@code repeats} times, case by case, and hands each
+	 * sample to {@code each} as it ends. Every case's recording is parsed and checked before the first sample, so a
+	 * broken one fails the run before any model call.
+	 * @throws IllegalArgumentException as {@link #decisionCases} does, or for a recording that lacks its start, symptom
+	 * or window
+	 */
+	void decisionSamples(String split, List<String> faults, int repeats, Consumer<Sample> each) {
+		List<Recording> cases = decisionCases(split, faults);
+		cases.forEach(this::parsed);
+		for (Recording recording : cases) {
+			for (int n = 1; n <= repeats; n++) {
+				each.accept(decisionSample(recording, n));
+			}
+		}
+	}
+
+	/**
+	 * Runs repeat {@code n} of decision case {@code recording} to its end, over that recording alone: it holds every
+	 * call the dossier makes, so pooling it with others would only add other incidents' outputs.
+	 * @throws IllegalArgumentException when the recording lacks its start, symptom or window
+	 * @throws IllegalStateException when the loop did not run the incident
+	 */
+	Sample decisionSample(Recording recording, int n) {
+		Parsed parsed = parsed(recording);
+		return run(parsed, List.of(parsed.incident()), AgentMode.DECISION, recording.split(), n);
+	}
+
+	/**
+	 * Runs one sample in {@code mode} to its end over the {@code served} recordings, opened on {@code primary}'s
+	 * symptom and window with "now" at its start, and scores it against its truth.
+	 */
+	private Sample run(Parsed primary, List<JsonNode> served, AgentMode mode, String split, int n) {
+		String fault = primary.recording().fault();
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), served);
 		Clock clock = Clock.offset(Clock.systemUTC(), Duration.between(Instant.now(), primary.startedAt()));
 
@@ -158,9 +240,10 @@ final class ReplayDriver {
 		}
 		String route = this.router.route(ModelTask.ACT).route().value();
 		String truth = primary.recording().truth();
-		return new Sample(fault, mode, route, n, status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(), tools.unrecordedCalls(),
-				tools.coverage(), tools.conflicts(), total(incident, "promptTokens"), total(incident, "completionTokens"),
-				seconds, dossier.size(), dossierUnrecorded, incident);
+		return new Sample(fault, mode, route, split, primary.recording().stem(), n, status, truth, reported,
+				verdict(status, reported, truth), tools.recordedCalls(), tools.unrecordedCalls(), tools.coverage(),
+				tools.conflicts(), total(incident, "promptTokens"), total(incident, "completionTokens"), seconds,
+				dossier.size(), dossierUnrecorded, incident);
 	}
 
 	/** The fault's first recording made in {@code mode}, if any. */
@@ -174,11 +257,16 @@ final class ReplayDriver {
 				? "MATCH" : "MISS";
 	}
 
-	/** Writes {@code <fault>-<mode>-<n>.json} and appends the sample's line to {@code summary.tsv}, header first. */
+	/**
+	 * Writes {@code <fault>-<mode>-<recording>-<n>.json} and appends the sample's line to {@code summary.tsv}, header
+	 * first.
+	 */
 	static void write(Path out, Sample sample) {
 		try {
 			Files.createDirectories(out);
-			Files.writeString(out.resolve(sample.fault() + "-" + sample.mode().value() + "-" + sample.n() + ".json"),
+			String name = String.join("-", sample.fault(), sample.mode().value(), sample.recording(),
+					String.valueOf(sample.n()));
+			Files.writeString(out.resolve(name + ".json"),
 					JSON.writerWithDefaultPrettyPrinter().writeValueAsString(sample.incident()));
 			Path summary = out.resolve("summary.tsv");
 			if (!Files.exists(summary)) {
@@ -192,21 +280,25 @@ final class ReplayDriver {
 	}
 
 	/**
-	 * One line per fault, mode and route, in the samples' order: matches out of samples, mean coverage, the covered
-	 * samples (coverage at least {@link #COVERED_THRESHOLD}) and the matches among them, the samples whose
-	 * {@code DOSSIER} step made calls and had none unrecorded out of samples, tokens and, on the cloud route, the
-	 * estimated cost at {@link #PROMPT_USD_PER_MILLION} and {@link #COMPLETION_USD_PER_MILLION}.
+	 * One line per fault, mode, route and split, in the samples' order: the distinct recordings the samples opened on,
+	 * the samples, matches out of samples, mean coverage, the covered samples (coverage at least
+	 * {@link #COVERED_THRESHOLD}) and the matches among them, the samples whose {@code DOSSIER} step made calls and had
+	 * none unrecorded out of samples, tokens and, on the cloud route, the estimated cost at
+	 * {@link #PROMPT_USD_PER_MILLION} and {@link #COMPLETION_USD_PER_MILLION}. With repeats, the samples outnumber the
+	 * recordings, which are the independent observations.
 	 */
 	static List<String> aggregate(List<Sample> samples) {
 		Map<String, List<Sample>> groups = new LinkedHashMap<>();
 		for (Sample sample : samples) {
-			groups.computeIfAbsent(sample.fault() + "\t" + sample.mode().value() + "\t" + sample.route(),
+			groups.computeIfAbsent(
+					String.join("\t", sample.fault(), sample.mode().value(), sample.route(), sample.split()),
 					key -> new ArrayList<>())
 				.add(sample);
 		}
 		List<String> lines = new ArrayList<>();
 		lines.add(AGGREGATE_HEADER);
 		groups.forEach((key, group) -> {
+			long recordings = group.stream().map(Sample::recording).distinct().count();
 			long matches = group.stream().filter(sample -> sample.verdict().equals("MATCH")).count();
 			double coverage = group.stream().mapToDouble(Sample::coverage).average().orElse(0);
 			List<Sample> covered = group.stream().filter(sample -> sample.coverage() >= COVERED_THRESHOLD).toList();
@@ -220,53 +312,57 @@ final class ReplayDriver {
 			String cost = !cloud || (prompt == null && completion == null) ? NONE
 					: format("%.4f", (orZero(prompt) * PROMPT_USD_PER_MILLION
 							+ orZero(completion) * COMPLETION_USD_PER_MILLION) / 1_000_000);
-			lines.add(String.join("\t", key, matches + "/" + group.size(), format("%.2f", coverage),
-					String.valueOf(covered.size()), matchesCovered + "/" + covered.size(),
-					dossierCovered + "/" + group.size(), shown(prompt), shown(completion), cost));
+			lines.add(String.join("\t", key, String.valueOf(recordings), String.valueOf(group.size()),
+					matches + "/" + group.size(), format("%.2f", coverage), String.valueOf(covered.size()),
+					matchesCovered + "/" + covered.size(), dossierCovered + "/" + group.size(), shown(prompt),
+					shown(completion), cost));
 		});
 		return lines;
 	}
 
 	/**
-	 * The fault's recordings, parsed and checked on first use.
+	 * The fault's recordings in manifest order, each parsed and checked on first use.
 	 * @throws IllegalArgumentException when no recording holds the fault, or one lacks its start, symptom or window
 	 */
 	private List<Parsed> parsed(String fault) {
-		List<Parsed> cached = this.parsed.get(fault);
-		if (cached != null) {
-			return cached;
-		}
 		List<Recording> ofFault = this.manifest.stream().filter(recording -> recording.fault().equals(fault)).toList();
 		if (ofFault.isEmpty()) {
 			throw new IllegalArgumentException("no recording of " + fault + " in " + this.recordings);
 		}
-		List<Parsed> parsed = new ArrayList<>();
-		for (Recording recording : ofFault) {
-			JsonNode incident = JSON.readTree(this.recordings.resolve(recording.file()).toFile());
-			String startedAt = incident.path("startedAt").asString("");
-			String symptom = incident.path("symptom").asString("");
-			JsonNode since = incident.path("sinceMinutes");
-			String problem = startedAt.isBlank() ? "no startedAt"
-					: symptom.isBlank() ? "no symptom"
-							: !since.isIntegralNumber() || since.asInt() <= 0 ? "no positive sinceMinutes" : null;
-			Instant start = null;
-			if (problem == null) {
-				try {
-					start = Instant.parse(startedAt);
-				}
-				catch (DateTimeParseException unreadable) {
-					problem = "an unreadable startedAt '" + startedAt + "'";
-				}
+		return ofFault.stream().map(this::parsed).toList();
+	}
+
+	/** The recording, parsed and checked on first use. */
+	private Parsed parsed(Recording recording) {
+		return this.parsed.computeIfAbsent(recording, this::parse);
+	}
+
+	/**
+	 * Reads the recording's incident and the start, symptom and window a sample opens with.
+	 * @throws IllegalArgumentException when it lacks one of them
+	 */
+	private Parsed parse(Recording recording) {
+		JsonNode incident = JSON.readTree(this.recordings.resolve(recording.file()).toFile());
+		String startedAt = incident.path("startedAt").asString("");
+		String symptom = incident.path("symptom").asString("");
+		JsonNode since = incident.path("sinceMinutes");
+		String problem = startedAt.isBlank() ? "no startedAt"
+				: symptom.isBlank() ? "no symptom"
+						: !since.isIntegralNumber() || since.asInt() <= 0 ? "no positive sinceMinutes" : null;
+		Instant start = null;
+		if (problem == null) {
+			try {
+				start = Instant.parse(startedAt);
 			}
-			if (problem != null) {
-				throw new IllegalArgumentException(
-						"the recording " + recording.file() + " of " + fault + " has " + problem);
+			catch (DateTimeParseException unreadable) {
+				problem = "an unreadable startedAt '" + startedAt + "'";
 			}
-			parsed.add(new Parsed(recording, incident, start, symptom, since.asInt()));
 		}
-		List<Parsed> checked = List.copyOf(parsed);
-		this.parsed.put(fault, checked);
-		return checked;
+		if (problem != null) {
+			throw new IllegalArgumentException(
+					"the recording " + recording.file() + " of " + recording.fault() + " has " + problem);
+		}
+		return new Parsed(recording, incident, start, symptom, since.asInt());
 	}
 
 	private JsonNode toolsList() {
@@ -404,7 +500,10 @@ final class ReplayDriver {
 		}
 	}
 
-	/** The rows of {@code recordings.tsv}: fault, mode, route, truth, file, incident; the header is skipped. */
+	/**
+	 * The rows of {@code recordings.tsv}: fault, mode, route, truth, file, incident, split; the header is skipped.
+	 * @throws IllegalArgumentException for a row with fewer columns, or a split not in {@link #SPLITS}
+	 */
 	private static List<Recording> manifest(Path file) {
 		List<String> lines;
 		try {
@@ -419,10 +518,15 @@ final class ReplayDriver {
 				continue;
 			}
 			String[] columns = line.split("\t", -1);
-			if (columns.length < 6) {
-				throw new IllegalArgumentException("a manifest line needs 6 columns: " + line);
+			if (columns.length < 7) {
+				throw new IllegalArgumentException("a manifest line needs 7 columns: " + line);
 			}
-			rows.add(new Recording(columns[0], columns[1], columns[2], columns[3], columns[4], columns[5]));
+			if (!SPLITS.contains(columns[6])) {
+				throw new IllegalArgumentException("a manifest line has the split '" + columns[6]
+						+ "', not dev, holdout, stress or probe: " + line);
+			}
+			rows.add(new Recording(columns[0], columns[1], columns[2], columns[3], columns[4], columns[5],
+					columns[6]));
 		}
 		return List.copyOf(rows);
 	}
@@ -433,25 +537,36 @@ final class ReplayDriver {
 	}
 
 	/** One row of {@code recordings.tsv}; {@code file} is relative to the replay directory. */
-	record Recording(String fault, String mode, String route, String truth, String file, String incident) {
+	record Recording(String fault, String mode, String route, String truth, String file, String incident,
+			String split) {
+
+		/** The file's name without its directory and {@code .json}: what names the recording in a sample's outputs. */
+		String stem() {
+			String name = Path.of(this.file).getFileName().toString();
+			return name.endsWith(".json") ? name.substring(0, name.length() - ".json".length()) : name;
+		}
+
 	}
 
 	/**
-	 * One scored sample. {@code recorded}, {@code unrecorded}, {@code coverage} and {@code conflicts} are the sample's
-	 * {@link ReplayLabTools} counters; {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
-	 * step's calls and those no recording held; a token count is null when no step counted it.
+	 * One scored sample. {@code split} is its case's split, or {@code -} for a sample over every recording of the
+	 * fault; {@code recording} is the stem of the recording it opened on. {@code recorded}, {@code unrecorded},
+	 * {@code coverage} and {@code conflicts} are the sample's {@link ReplayLabTools} counters; {@code dossierCalls} and
+	 * {@code dossierUnrecorded} count the {@code DOSSIER} step's calls and those no recording held; a token count is
+	 * null when no step counted it.
 	 */
-	record Sample(String fault, AgentMode mode, String route, int n, IncidentStatus status, String truth,
-			String reported, String verdict, int recorded, int unrecorded, double coverage, int conflicts,
-			Integer promptTokens, Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded,
-			ObjectNode incident) {
+	record Sample(String fault, AgentMode mode, String route, String split, String recording, int n,
+			IncidentStatus status, String truth, String reported, String verdict, int recorded, int unrecorded,
+			double coverage, int conflicts, Integer promptTokens, Integer completionTokens, double seconds,
+			int dossierCalls, int dossierUnrecorded, ObjectNode incident) {
 
 		/** The sample's line of {@code summary.tsv}, in {@link #SUMMARY_HEADER}'s columns. */
 		String summaryLine() {
 			return String.join("\t", this.fault, this.mode.value(), this.route, String.valueOf(this.n),
 					this.status.name(), this.truth, this.reported, this.verdict, String.valueOf(this.recorded),
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
-					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds));
+					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
+					this.recording);
 		}
 
 	}

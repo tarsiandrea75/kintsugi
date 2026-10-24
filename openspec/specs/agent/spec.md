@@ -568,18 +568,50 @@ A call MUST be checked and capped exactly as `McpLabTools` does it (the same `li
 - WHEN the loop asks for the `KNOWLEDGE` phase's tools
 - THEN a `LabToolsUnavailableException` names `search_runbooks`
 
-The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST run, for each requested fault, mode and sample, the real `AgentLoop` in that mode with the route's real `ChatModel` and settings (the application's own `ModelRouter` and `LoopSettings`), over a fresh `ReplayLabTools` holding every recording of the fault, all modes pooled, and the recorded tool listing. The fault's first recording in the same mode as the sample is the sample's primary recording (for a decision sample with no decision recording, the first dossier recording, which holds the same dossier calls; else the fault's first recording) and is handed to `ReplayLabTools` first, so when two recordings hold the same call with different outputs the primary's wins. Each fault's recordings and the tool listing are parsed once per run; only the `ReplayLabTools`, and so its counters, is new per sample. A recording without `startedAt`, without `symptom` or without a positive `sinceMinutes` MUST fail with an `IllegalArgumentException` naming the fault and the file, before any model call. The incident is opened with the primary recording's symptom and `sinceMinutes`, on a clock offset so that "now" is that recording's `startedAt`: windows and uptimes computed from the clock match the recorded timestamps, and the time budgets still run. Each sample is scored by `agent_verdict`'s rule: `MATCH` only when the incident is `COMPLETED` and its report's `rootCauseService|rootCauseCategory` equals the recorded truth of `recordings.tsv`, else `MISS`. It writes the incident with its steps (`<fault>-<mode>-<n>.json`, as the full view shows it) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds`), then `aggregate.tsv` per fault and mode (`fault mode route matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd`: matches out of samples; mean coverage; the covered samples, those with coverage at least 0.8 (`COVERED_THRESHOLD`: a fully replayed dossier still shows about 0.91, its model-chosen calls being unrecorded); the matches among the covered samples out of them; the samples whose `DOSSIER` step made calls and had none unrecorded, out of samples; tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens). A sample is counted in the totals even when writing its files fails. A miss is a measurement: the run fails only when a sample cannot run. The driver is tagged `replay` and left out of the default build (Maven surefire `excludedGroups`); only the `replay` profile runs it, since it calls a model and costs money on the cloud route. Dossier is its default mode: explorer replays stay available, but under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent, and are not valid measurements. `both` runs explorer and dossier. A decision sample ("Decision mode") makes only the dossier's calls, all held by its primary recording, and the report call, so it makes no unrecorded call.
+The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST run each sample with the real `AgentLoop` in the sample's mode, the route's real `ChatModel` and settings (the application's own `ModelRouter` and `LoopSettings`), a fresh `ReplayLabTools` and the recorded tool listing. The manifest, `recordings.tsv`, has one line per recording, `fault mode route truth file incident split`. The split is one of four **(decision-instrument T3)**: `dev` to tune on, `holdout` read once, `stress` for the 2026-10-19 recordings whose windows hold other faults, and `probe` for faults never tuned on. A line with fewer columns or another split fails the driver as it reads the manifest. What a sample is served depends on its mode:
+- An explorer or dossier sample of a fault (`replay.samples` per fault and mode) MUST be served every recording of the fault, all modes and splits pooled. Its primary recording is the fault's first recording in the sample's mode, else the fault's first recording. It is handed to `ReplayLabTools` first, so when two recordings hold the same call with different outputs the primary's wins. Pooling every split, the sample has none: its split is `-`.
+- Decision mode MUST replay cases, not faults **(decision-instrument T3)**. Each manifest line of a chosen fault, in the chosen split (`replay.split`, default `dev`), recorded in decision or dossier mode, is one case, and each case runs `replay.repeats` times (default 1). A case's sample is served its own recording alone, its primary: that recording holds every call the dossier makes, so pooling would only add other incidents' outputs. The cases come in the order of the chosen faults, each fault's in manifest order. An unknown split, or a chosen fault with no case in the split, MUST fail with an `IllegalArgumentException` before any model call.
+- `replay.samples` is refused in decision mode, and `replay.split` and `replay.repeats` outside it, so a run is never other than the one asked for.
+
+Each recording and the tool listing are parsed once per run; only the `ReplayLabTools`, and so its counters, is new per sample. A recording without `startedAt`, without `symptom` or without a positive `sinceMinutes` MUST fail with an `IllegalArgumentException` naming the fault and the file, before any model call: in decision mode, every case of the split is checked before the first sample. The incident is opened with the primary recording's symptom and `sinceMinutes`, on a clock offset so that "now" is that recording's `startedAt`: windows and uptimes computed from the clock match the recorded timestamps, and the time budgets still run. Each sample is scored by `agent_verdict`'s rule: `MATCH` only when the incident is `COMPLETED` and its report's `rootCauseService|rootCauseCategory` equals the recorded truth of `recordings.tsv`, else `MISS`.
+
+It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as the full view shows it; `<recording>` is the primary recording's file name without `.json`) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds split recording`). Then it writes `aggregate.tsv` per fault, mode, route and split (`fault mode route split recordings samples matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd`):
+- the distinct recordings the samples opened on, which are the independent observations, and the samples, which outnumber them with repeats;
+- matches out of samples, and mean coverage;
+- the covered samples, those with coverage at least 0.8 (`COVERED_THRESHOLD`: a fully replayed dossier-mode sample still shows about 0.91, its model-chosen calls being unrecorded), and the matches among them out of them;
+- the samples whose `DOSSIER` step made calls and had none unrecorded, out of samples;
+- tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens.
+
+A sample is counted in the totals even when writing its files fails. A miss is a measurement: the run fails only when a sample cannot run. The driver is tagged `replay` and left out of the default build (Maven surefire `excludedGroups`); only the `replay` profile runs it, since it calls a model and costs money on the cloud route. Dossier is its default mode: explorer replays stay available, but under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent, and are not valid measurements. `both` runs explorer and dossier. A decision sample ("Decision mode") makes only the dossier's calls, all held by its recording, and the report call, so it makes no unrecorded call.
 
 #### Scenario: A sample is served its own mode's recording first
-- GIVEN two recordings of F1, the explorer one listed first, holding the dossier's first call with different outputs
+- GIVEN two recordings of F1, the explorer one listed first and in `holdout`, the dossier one in `stress`, holding the dossier's first call with different outputs
 - WHEN one dossier-mode sample of F1 runs
 - THEN its dossier holds the dossier recording's output for that call, and one conflict is counted
+- AND its split is `-` and its recording the dossier one
 
-#### Scenario: A decision sample replays a dossier recording
-- GIVEN the recordings of F1, the explorer one listed first, and no decision recording
-- WHEN one decision-mode sample of F1 runs
-- THEN it opens on the dossier recording's start, symptom and window, its 33 dossier calls are all recorded (coverage 1.00), and the model gets one call, the report
-- AND when the manifest also holds a decision recording of F1, a decision sample is served that one before the dossier one
+#### Scenario: A decision case replays its own recording alone (decision-instrument T3)
+- GIVEN two `dev` recordings of F1, a dossier one and a decision one, holding the dossier's first call with different outputs
+- WHEN each replays as a decision case
+- THEN each is served its own recording's output for that call, with no conflict, and its 33 dossier calls are all recorded (coverage 1.00)
+- AND a decision sample asked for by fault, which would pool the fault's recordings, is refused
+
+#### Scenario: The cases of a split (decision-instrument T3)
+- GIVEN a manifest whose lines of F1, F2 and F3 are in `dev`, `holdout` and `stress`, made in explorer, dossier and decision mode
+- WHEN the decision cases of `dev` for F2 then F1 are asked for
+- THEN they are F2's `dev` decision and dossier recordings, then F1's, each fault's in manifest order, with no explorer recording and none of F3
+
+#### Scenario: Each case repeated (decision-instrument T3)
+- GIVEN two `dev` cases of F1 and `replay.repeats` = 2
+- WHEN the decision run replays them
+- THEN it runs the first case twice, then the second twice, each sample with its own counters and its own file (`F1-decision-<recording>-<n>.json`)
+- AND `aggregate.tsv` shows 2 recordings and 4 samples
+
+#### Scenario: An unknown split, or a fault with no case, fails before any model call (decision-instrument T3)
+- GIVEN a manifest with a `dev` recording of F1 and a `holdout` recording of F2
+- WHEN the cases of the split `hold-out`, or of `holdout` for F1 and F2, are asked for, or a split's second case lacks its `startedAt`
+- THEN an `IllegalArgumentException` names the split, F1 or the file, and no model is called
+- AND a manifest line with no split, or the split `test`, fails the driver as it reads the manifest
 
 #### Scenario: A recording without its start, symptom or window fails fast
 - GIVEN a recording of F1 with no `startedAt`, no `symptom` or a `sinceMinutes` of 0
@@ -594,8 +626,8 @@ The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST
 #### Scenario: A sample is scored against the recorded truth with its coverage
 - GIVEN the recordings of F1 with the truth `gateway-mock|DEPENDENCY_LATENCY`
 - WHEN one dossier-mode sample of F1 runs and its report names `UNKNOWN|UNKNOWN`
-- THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage
-- AND its dossier makes 33 calls: the 29 the recordings hold are recorded, and the 4 `query_metric` latency calls, newer than the recordings, are unrecorded (coverage 0.88) until the recordings are replaced ([dossier-latency](../../../odd/tasks/dossier-latency.md) T3)
+- THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage, then the split `-` and the recording it opened on
+- AND its dossier makes 33 calls, all recorded (coverage 1.00): the recording holds the 4 `query_metric` latency calls too ([dossier-latency](../../../odd/tasks/dossier-latency.md) T3)
 
 #### Scenario: The replay run is excluded from the default build
 - WHEN `./mvnw test` runs without the `replay` profile
@@ -827,8 +859,8 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 - AND a `kintsugi.agent.mode` of `triage` stops the start with `kintsugi.agent.mode must be explorer, dossier or decision, got "triage"`
 
 #### Scenario: Replayed from a dossier recording
-- GIVEN the recordings of F1, and no decision recording
-- WHEN one decision-mode sample of F1 replays
+- GIVEN F1's dossier recording, a case of the `stress` split
+- WHEN it replays as a decision case
 - THEN its 33 dossier calls are all recorded, none is unrecorded, and the model gets only the report call ("Replay of recorded tool outputs")
 
 ### Requirement: Summaries built in code
