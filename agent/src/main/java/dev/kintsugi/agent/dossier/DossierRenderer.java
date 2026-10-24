@@ -18,6 +18,7 @@ import java.util.function.Predicate;
 
 import tools.jackson.databind.json.JsonMapper;
 
+import dev.kintsugi.agent.dossier.CallGraph.Edge;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.EventGroup;
@@ -41,18 +42,11 @@ import dev.kintsugi.agent.dossier.Dossier.UriLatency;
  * word that judges a value. Every section and every fixed row is written for every dossier, in a fixed order, whether
  * its values are zero, empty or missing; a failed call is one fact line in its section. The same dossier always gives
  * the same text: rows are sorted by count then label, numbers are plain integers, times are ISO-8601 UTC, and nothing
- * reads the default locale or time zone.
+ * reads the default locale or time zone. The traffic edges are {@link CallGraph#EDGES}, the first without its caller's
+ * side, since its caller is outside the lab. {@link ServiceSheets} writes the same facts per service and shares the
+ * helpers here, so both state a fact in the same words.
  */
 public final class DossierRenderer {
-
-	/**
-	 * The traffic edges written for every dossier, in the order of the call path (ADR-011, "Sections"). The first has
-	 * no caller in the lab, so only its server side is written.
-	 */
-	public static final List<Edge> EDGES = List.of(new Edge(null, "order-service", "POST", "/orders"),
-			new Edge("order-service", "inventory-service", "POST", "/reservations"),
-			new Edge("order-service", "payment-service", "POST", "/payments"),
-			new Edge("payment-service", "gateway-mock", "POST", "/authorize"));
 
 	/** The signatures written per service and level at most; the others are counted in one line. */
 	static final int SIGNATURES = 3;
@@ -87,7 +81,10 @@ public final class DossierRenderer {
 	/** The characters of a value kept in a table cell. */
 	static final int VALUE_CHARS = 40;
 
-	private static final String NO_VALUE = "-";
+	static final String NO_VALUE = "-";
+
+	/** The header's line on the text copied from the lab, the same in the tables and the sheets. */
+	static final String UNTRUSTED_TEXT_LINE = "- Text copied from the lab is quoted as untrustedText=\"...\".";
 
 	private static final String NO_ROWS = "no rows";
 
@@ -132,41 +129,16 @@ public final class DossierRenderer {
 			.findFirst();
 	}
 
-	/** The prefix of dossier line {@code n}: {@code D<n> }. */
-	private static String linePrefix(int n) {
+	/** The prefix of dossier line {@code n}: {@code D<n> }, the same in the tables and the sheets. */
+	static String linePrefix(int n) {
 		return "D" + n + " ";
 	}
 
-	/**
-	 * One traffic edge: the caller's client calls and the target's server requests with this method and uri.
-	 *
-	 * @param caller the calling lab service, or {@code null} when the caller is outside the lab
-	 */
-	public record Edge(String caller, String target, String method, String uri) {
-
-		public Edge {
-			Objects.requireNonNull(target, "target");
-			Objects.requireNonNull(method, "method");
-			Objects.requireNonNull(uri, "uri");
-		}
-
-		boolean callerRow(TrafficRow row) {
-			return this.caller != null && "client".equals(row.side()) && this.caller.equals(row.service())
-					&& this.target.equals(row.clientName()) && this.method.equals(row.method())
-					&& this.uri.equals(row.uri());
-		}
-
-		boolean serverRow(TrafficRow row) {
-			return "server".equals(row.side()) && this.target.equals(row.service()) && this.method.equals(row.method())
-					&& this.uri.equals(row.uri());
-		}
-
-		String heading() {
-			String route = this.target + " " + this.method + " " + this.uri;
-			return this.caller == null ? "external client -> " + route + " (server side only)"
-					: this.caller + " -> " + route;
-		}
-
+	/** An edge's heading in the traffic section. */
+	private static String heading(Edge edge) {
+		String route = edge.target() + " " + edge.method() + " " + edge.uri();
+		return edge.caller() == null ? CallGraph.EXTERNAL_CLIENT + " -> " + route + " (server side only)"
+				: edge.caller() + " -> " + route;
 	}
 
 	/** The dossier as Markdown, ending with a newline. */
@@ -185,18 +157,24 @@ public final class DossierRenderer {
 	}
 
 	private static void header(Out out, Dossier dossier) {
-		Dossier.Window incident = dossier.incidentWindow();
-		Dossier.Window previous = dossier.previousWindow();
 		out.heading("# Evidence dossier");
 		out.blank();
-		out.line("- Incident window: the last " + minutes(incident) + " min, " + incident.from() + " to "
-				+ incident.to() + ".");
-		out.line("- Previous window: the " + minutes(previous) + " min before it, " + previous.from() + " to "
-				+ previous.to() + ".");
-		out.line("- Gathered at " + dossier.gatheredAt() + ". All times are UTC.");
+		windowLines(dossier).forEach(out::line);
 		out.line("- Columns \"previous\" and \"incident\" hold the counts of those windows. \"" + NO_VALUE
 				+ "\" means no value.");
-		out.line("- Text copied from the lab is quoted as untrustedText=\"...\".");
+		out.line(UNTRUSTED_TEXT_LINE);
+	}
+
+	/** The header's lines on the two windows and the gathering time, the same in the tables and the sheets. */
+	static List<String> windowLines(Dossier dossier) {
+		Dossier.Window incident = dossier.incidentWindow();
+		Dossier.Window previous = dossier.previousWindow();
+		return List.of(
+				"- Incident window: the last " + minutes(incident) + " min, " + incident.from() + " to "
+						+ incident.to() + ".",
+				"- Previous window: the " + minutes(previous) + " min before it, " + previous.from() + " to "
+						+ previous.to() + ".",
+				"- Gathered at " + dossier.gatheredAt() + ". All times are UTC.");
 	}
 
 	private static void services(Out out, Gathered<List<ServiceStatus>> services) {
@@ -249,8 +227,8 @@ public final class DossierRenderer {
 		out.line("Requests per edge from traffic_counts, which leaves out rows of count 0. \"" + NO_ROWS
 				+ "\": none returned for that side in either window.");
 		List<String> sideHeaders = List.of("side", "status", "outcome", "exception");
-		for (Edge edge : EDGES) {
-			out.section("### " + edge.heading());
+		for (Edge edge : CallGraph.EDGES) {
+			out.section("### " + heading(edge));
 			List<Row> rows = new ArrayList<>();
 			int hidden = 0;
 			long[] hiddenCounts = new long[2];
@@ -272,7 +250,7 @@ public final class DossierRenderer {
 		}
 		out.section("### Other rows");
 		List<Row> others = rows(traffic, list -> list.stream()
-			.filter(row -> EDGES.stream().noneMatch(edge -> edge.callerRow(row) || edge.serverRow(row)))
+			.filter(row -> CallGraph.EDGES.stream().noneMatch(edge -> edge.callerRow(row) || edge.serverRow(row)))
 			.map(row -> Map.entry(Arrays.asList(row.side(), row.service(), row.clientName(), row.method(), row.uri(),
 					row.status(), row.outcome(), row.exception()), row.count()))
 			.toList());
@@ -347,7 +325,7 @@ public final class DossierRenderer {
 	}
 
 	/** Incident mean, then previous mean, largest first, a missing mean last, then the uri. */
-	private static final Comparator<UriLatency> URI_ORDER = Comparator
+	static final Comparator<UriLatency> URI_ORDER = Comparator
 		.comparing((UriLatency u) -> u.incident().mean(), Comparator.nullsLast(Comparator.<Double>reverseOrder()))
 		.thenComparing(u -> u.previous().mean(), Comparator.nullsLast(Comparator.<Double>reverseOrder()))
 		.thenComparing(UriLatency::uri, Comparator.nullsFirst(Comparator.<String>naturalOrder()));
@@ -368,35 +346,46 @@ public final class DossierRenderer {
 		for (ServiceLogs service : logs) {
 			out.section("### " + cell(service.service()));
 			for (LevelLogs level : service.levels()) {
-				String count = switch (level.count()) {
-					case Gathered.Ok<Long> ok -> "count_logs=" + ok.value();
-					case Gathered.Failed<Long> failed -> "count_logs failed " + outcome(failed);
-				};
-				out.line("- " + cell(level.level()) + ": " + count + "; " + switch (level.lines()) {
-					case Gathered.Ok<LogLines> ok -> "search_logs returned=" + ok.value().returned() + " truncated="
-							+ ok.value().truncated() + " signatures=" + ok.value().signatures().size();
-					case Gathered.Failed<LogLines> failed -> "search_logs failed " + outcome(failed);
-				});
-				if (level.lines() instanceof Gathered.Ok<LogLines> ok) {
-					List<LogSignature> signatures = ok.value().signatures();
-					int limit = shown.getOrDefault(level, 0);
-					signatures.stream()
-						.limit(limit)
-						.forEach(s -> out.line("  - count=" + s.count() + " newest="
-								+ (s.newest() == null ? NO_VALUE : s.newest().toString()) + " untrustedText="
-								+ quote(s.message().text(), MESSAGE_CHARS)));
-					if (signatures.size() > limit) {
-						List<LogSignature> hidden = signatures.subList(limit, signatures.size());
-						out.line("  - not shown: signatures=" + hidden.size() + " lines="
-								+ hidden.stream().mapToLong(LogSignature::count).sum());
-					}
-				}
+				levelLines(level, shown.getOrDefault(level, 0)).forEach(out::line);
 			}
 		}
 	}
 
-	/** How many signatures each level shows: rounds of one per level, within both caps. */
-	private static Map<LevelLogs, Integer> shownSignatures(List<ServiceLogs> logs) {
+	/**
+	 * The lines of one level of one service's logs: its counts, then its first {@code shown} signatures, each with its
+	 * count, newest time and newest message, then how many are not shown.
+	 */
+	static List<String> levelLines(LevelLogs level, int shown) {
+		List<String> lines = new ArrayList<>();
+		String count = switch (level.count()) {
+			case Gathered.Ok<Long> ok -> "count_logs=" + ok.value();
+			case Gathered.Failed<Long> failed -> "count_logs failed " + outcome(failed);
+		};
+		lines.add("- " + cell(level.level()) + ": " + count + "; " + switch (level.lines()) {
+			case Gathered.Ok<LogLines> ok -> "search_logs returned=" + ok.value().returned() + " truncated="
+					+ ok.value().truncated() + " signatures=" + ok.value().signatures().size();
+			case Gathered.Failed<LogLines> failed -> "search_logs failed " + outcome(failed);
+		});
+		if (level.lines() instanceof Gathered.Ok<LogLines> ok) {
+			List<LogSignature> signatures = ok.value().signatures();
+			signatures.stream()
+				.limit(shown)
+				.forEach(s -> lines.add("  - count=" + s.count() + " newest="
+						+ (s.newest() == null ? NO_VALUE : s.newest().toString()) + " untrustedText="
+						+ quote(s.message().text(), MESSAGE_CHARS)));
+			if (signatures.size() > shown) {
+				List<LogSignature> hidden = signatures.subList(shown, signatures.size());
+				lines.add("  - not shown: signatures=" + hidden.size() + " lines="
+						+ hidden.stream().mapToLong(LogSignature::count).sum());
+			}
+		}
+		return lines;
+	}
+
+	/**
+	 * How many signatures each level shows: rounds of one per level, in the order of {@code logs}, within both caps.
+	 */
+	static Map<LevelLogs, Integer> shownSignatures(List<ServiceLogs> logs) {
 		List<LevelLogs> levels = logs.stream().flatMap(service -> service.levels().stream()).toList();
 		Map<LevelLogs, Integer> shown = new IdentityHashMap<>();
 		int total = 0;
@@ -444,12 +433,13 @@ public final class DossierRenderer {
 		}
 	}
 
-	private static String failed(Gathered.Failed<?> failed, String window) {
+	/** A failed call as one fact: {@code <tool> failed[ for the <window> window]: outcome=... reason="..."}. */
+	static String failed(Gathered.Failed<?> failed, String window) {
 		return failed.tool() + " failed" + (window == null ? "" : " for the " + window + " window") + ": "
 				+ outcome(failed);
 	}
 
-	private static String outcome(Gathered.Failed<?> failed) {
+	static String outcome(Gathered.Failed<?> failed) {
 		return "outcome=" + failed.outcome() + " reason=" + quote(Objects.requireNonNullElse(failed.reason(), ""),
 				REASON_CHARS);
 	}
@@ -458,7 +448,7 @@ public final class DossierRenderer {
 	 * The rows of both windows, keyed by their labels, with the counts of equal labels summed; a window that failed
 	 * has {@code null} counts. Sorted by {@link #ROW_ORDER}.
 	 */
-	private static <T> List<Row> rows(Compared<T> windows, Function<T, List<Map.Entry<List<String>, Long>>> entries) {
+	static <T> List<Row> rows(Compared<T> windows, Function<T, List<Map.Entry<List<String>, Long>>> entries) {
 		Map<List<String>, long[]> counts = new LinkedHashMap<>();
 		add(windows.previous(), entries, counts, 0);
 		add(windows.incident(), entries, counts, 1);
@@ -479,12 +469,12 @@ public final class DossierRenderer {
 		}
 	}
 
-	private static List<Row> capped(List<Row> rows) {
+	static List<Row> capped(List<Row> rows) {
 		return rows.size() > ROWS ? rows.subList(0, ROWS) : rows;
 	}
 
 	/** Adds the counts of the rows past the cap to {@code sums}. */
-	private static void sum(List<Row> rows, long[] sums) {
+	static void sum(List<Row> rows, long[] sums) {
 		for (Row row : rows.subList(Math.min(ROWS, rows.size()), rows.size())) {
 			sums[0] += row.previousOrZero();
 			sums[1] += row.incidentOrZero();
@@ -506,7 +496,7 @@ public final class DossierRenderer {
 	}
 
 	/** The newest {@link #START_TIMES} start times, newest first, and how many earlier ones are left out. */
-	private static String startTimes(List<Instant> times) {
+	static String startTimes(List<Instant> times) {
 		if (times.isEmpty()) {
 			return NO_VALUE;
 		}
@@ -567,12 +557,12 @@ public final class DossierRenderer {
 		return inner.replace("|", "\\|") + (cut ? "(cut)" : "");
 	}
 
-	private static String count(Long count) {
+	static String count(Long count) {
 		return count == null ? NO_VALUE : String.valueOf(count);
 	}
 
 	/** A table row: its labels and its counts in the previous and incident windows, {@code null} when not read. */
-	private record Row(List<String> labels, Long previous, Long incident) {
+	record Row(List<String> labels, Long previous, Long incident) {
 
 		long previousOrZero() {
 			return this.previous == null ? 0 : this.previous;

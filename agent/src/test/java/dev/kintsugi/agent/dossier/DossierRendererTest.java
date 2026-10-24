@@ -42,12 +42,12 @@ import dev.kintsugi.agent.dossier.Dossier.UriLatency;
  */
 class DossierRendererTest {
 
-	private static final Instant NOW = Instant.parse("2026-10-16T10:00:00Z");
+	static final Instant NOW = Instant.parse("2026-10-16T10:00:00Z");
 
-	private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+	static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
 
 	/** The ceiling for the recorded fixtures, by {@link #tokens(String)}; ADR-011's target is about 1.5k. */
-	private static final int FIXTURE_TOKEN_CEILING = 2_500;
+	static final int FIXTURE_TOKEN_CEILING = 2_500;
 
 	/**
 	 * The ceiling for the stress dossier: every list far above its cap and every value at its length limit, the worst
@@ -55,17 +55,17 @@ class DossierRendererTest {
 	 * 13.4k and 4,500 before it). The ceiling is about two thirds of {@code num-ctx} 8192, no longer half: the stress
 	 * dossier's report call is a known edge (agent spec, dossier size), while the real faults' dossiers stay far below it.
 	 */
-	private static final int STRESS_TOKEN_CEILING = 5_500;
+	static final int STRESS_TOKEN_CEILING = 5_500;
 
 	/**
 	 * Words and marks that would interpret a fact (ADR-011, "Facts only"); matched as whole words, ignoring case.
 	 */
-	private static final List<String> BANNED = List.of("anomalous", "anomaly", "abnormal", "unusual", "suspicious",
+	static final List<String> BANNED = List.of("anomalous", "anomaly", "abnormal", "unusual", "suspicious",
 			"likely", "unlikely", "probably", "should", "expected", "unexpected", "because", "cause", "caused", "root",
 			"healthy", "unhealthy", "problem", "issue", "error rate high", "spike", "drop", "normal", "warning sign",
 			"fault", "degraded", "broken");
 
-	private static final List<String> BANNED_MARKS = List.of("⚠", "✅", "❌");
+	static final List<String> BANNED_MARKS = List.of("⚠", "✅", "❌");
 
 	/** A Markdown table separator row, {@code |---|---|}. */
 	private static final Pattern SEPARATOR = Pattern.compile("\\|(---\\|)+");
@@ -256,7 +256,7 @@ class DossierRendererTest {
 	}
 
 	/** A conservative token estimate: one token per 3 characters, rounded up (English text runs near 4). */
-	private static int tokens(String text) {
+	static int tokens(String text) {
 		return (text.length() + 2) / 3;
 	}
 
@@ -285,15 +285,15 @@ class DossierRendererTest {
 	}
 
 	/** The rendered dossier with every line's {@code D<n> } number removed. */
-	private static String unnumbered(String markdown) {
+	static String unnumbered(String markdown) {
 		return NUMBER.matcher(markdown).replaceAll("");
 	}
 
-	private static Dossier gather(String set) {
+	static Dossier gather(String set) {
 		return new DossierGatherer(new RecordedLab(set), CLOCK).gather(10);
 	}
 
-	private static Dossier failing() {
+	static Dossier failing() {
 		RecordedLab lab = new RecordedLab("f3").answer("traffic_counts-previous",
 				"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\"}")
 			.answer("service_restarts", "mcp-tools call failed: ResourceAccessException: Connection refused")
@@ -302,7 +302,7 @@ class DossierRendererTest {
 		return new DossierGatherer(lab, CLOCK).gather(10);
 	}
 
-	private static String golden(String name) {
+	static String golden(String name) {
 		try (InputStream in = DossierRendererTest.class.getResourceAsStream("/dossier/golden/" + name + ".md")) {
 			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
 		}
@@ -312,7 +312,7 @@ class DossierRendererTest {
 	}
 
 	/** Every list far above its cap, every text far above its length limit. */
-	private static Dossier stress() {
+	static Dossier stress() {
 		String longText = "x".repeat(1_000);
 		List<ServiceStatus> services = new ArrayList<>();
 		for (String service : DossierGatherer.SERVICES) {
@@ -329,7 +329,7 @@ class DossierRendererTest {
 		List<TableStates> states = List.of(new TableStates("orders", both(statuses)),
 				new TableStates("payments", both(statuses)));
 		List<TrafficRow> rows = new ArrayList<>();
-		for (DossierRenderer.Edge edge : DossierRenderer.EDGES) {
+		for (CallGraph.Edge edge : CallGraph.EDGES) {
 			for (int i = 0; i < 30; i++) {
 				if (edge.caller() != null) {
 					rows.add(new TrafficRow("client", edge.caller(), edge.target(), edge.method(), edge.uri(), "5" + i,
@@ -381,10 +381,19 @@ class DossierRendererTest {
 	}
 
 	/** The dossier with every value from the lab replaced by {@code v}; traffic sides and counts are kept. */
-	private static Dossier masked(Dossier d) {
+	static Dossier masked(Dossier d) {
+		return masked(d, false);
+	}
+
+	/**
+	 * The dossier with every value from the lab replaced by {@code v}; traffic sides and counts are kept, and with
+	 * {@code keepServices} the service names too, by which the sheets group the facts (service-assessment T1).
+	 */
+	static Dossier masked(Dossier d, boolean keepServices) {
 		Function<String, String> m = value -> value == null ? null : "v";
+		Function<String, String> service = keepServices ? Function.identity() : m;
 		Gathered<List<ServiceStatus>> services = map(d.services(), list -> list.stream()
-			.map(s -> new ServiceStatus(m.apply(s.service()), s.startTimes(), s.restartsInWindow(), s.uptime()))
+			.map(s -> new ServiceStatus(service.apply(s.service()), s.startTimes(), s.restartsInWindow(), s.uptime()))
 			.toList());
 		List<TableStates> states = d.states()
 			.stream()
@@ -394,12 +403,13 @@ class DossierRendererTest {
 				.toList())))
 			.toList();
 		Compared<List<TrafficRow>> traffic = compared(d.traffic(), list -> list.stream()
-			.map(r -> new TrafficRow(r.side(), m.apply(r.service()), m.apply(r.clientName()), m.apply(r.method()),
-					m.apply(r.uri()), m.apply(r.status()), m.apply(r.outcome()), m.apply(r.exception()), r.count()))
+			.map(r -> new TrafficRow(r.side(), service.apply(r.service()), service.apply(r.clientName()),
+					m.apply(r.method()), m.apply(r.uri()), m.apply(r.status()), m.apply(r.outcome()),
+					m.apply(r.exception()), r.count()))
 			.toList());
 		List<ServiceLatency> latency = d.latency()
 			.stream()
-			.map(s -> new ServiceLatency(m.apply(s.service()), map(s.latency(), series -> new LatencySeries(
+			.map(s -> new ServiceLatency(service.apply(s.service()), map(s.latency(), series -> new LatencySeries(
 					series.truncated(), series.uris()
 						.stream()
 						.map(u -> new UriLatency(m.apply(u.uri()), u.previous(), u.incident()))
@@ -407,7 +417,7 @@ class DossierRendererTest {
 			.toList();
 		List<ServiceLogs> logs = d.logs()
 			.stream()
-			.map(s -> new ServiceLogs(m.apply(s.service()), s.levels()
+			.map(s -> new ServiceLogs(service.apply(s.service()), s.levels()
 				.stream()
 				.map(l -> new LevelLogs(m.apply(l.level()), map(l.count(), c -> c),
 						map(l.lines(), lines -> new LogLines(lines.returned(), lines.truncated(), lines.signatures()
