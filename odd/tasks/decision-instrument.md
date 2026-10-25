@@ -320,11 +320,18 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - After the import, `test-lib.sh` passes 143 cases and the full suite 492 tests. `target/surefire-reports` also kept 18 tests' reports from the other branch, so a count must only read this run's files.
   - Assessed medium risk and under budget (60 lines), so no review yet: it stays in the slice from `31d2e83`.
 
+- 2026-10-25 04:34 UTC: M0 on the cloud route, `replay-agent.sh --mode decision --split dev --route cloud` (`replay-20261025T043359Z-cloud`).
+  - Matches over 5 distinct recordings per fault: F1 4/5, F2 5/5, F3 5/5. Coverage is 1.00 for every sample, each sample takes about 4 s, and the run cost $0.012.
+  - The F1 miss is r5, again `payment-service|DEPENDENCY_LATENCY`. Live, on the same incidents, r3 missed and r5 matched.
+  - So one sample per recording varies between runs on the cloud route: `AnthropicRoute` sets no temperature, because the model rejects any value but its default. A difference of one recording per fault is within that noise.
+- 2026-10-25 04:35 UTC: M0 on the local route started (`granite4.1:8b`, about 2 h). Until it ends, no build, writer or branch change: the replay reads the recordings from the worktree.
+
 ## Next step
 
-T5 (M0) on this branch, with the machine otherwise idle, because a concurrent build would slow the local route:
-- the cloud route first, `replay-agent.sh --mode decision --split dev --route cloud`: 15 samples, about $0.01;
-- then the local route, `--route local`: about 2 h.
-- `qwen3:8b` is installed. It joins M0 only if its thinking can be turned off without code; the local route sets no `think` option today.
+Wait for M0 on the local route (about 06:35 UTC) and record it here. It closes T5 unless `qwen3:8b` joins:
+- `qwen3:8b` is installed, and the local route sets no `think` option today.
+- Spring AI 2.0 documents `spring.ai.ollama.chat.think`, so its thinking may be turned off without code. Check that the property reaches the Ollama request before measuring it, which takes about 2 h more.
+
+Then the human reads M0: it is gate 1 of `odd/tasks/service-assessment.md`.
 
 Then rebase `feat/service-assessment` onto this branch's tip.
