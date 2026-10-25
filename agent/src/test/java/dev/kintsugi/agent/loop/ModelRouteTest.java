@@ -159,6 +159,38 @@ class ModelRouteTest {
 			.getOutputSchema()).isEqualTo(schema);
 	}
 
+	/**
+	 * The assessed report's schema (service-assessment T2) on both routes: the cloud route's keeps the order, the enums
+	 * and the required fields, without what Anthropic rejects and with every object closed, the assessment of each
+	 * service included; the local route's is the schema as it is.
+	 */
+	@Test
+	void theAssessedSchemaKeepsItsOrderOnBothRoutes() {
+		String schema = Schemas.ASSESSED_REPORT;
+		JsonNode sent = JsonMapper.shared().readTree(((AnthropicChatOptions) this.cloud.options(768,
+				Duration.ofSeconds(90), List.of(), schema)).getOutputSchema());
+
+		assertThat(keywords(sent)).doesNotContain("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+				"multipleOf", "minLength", "maxLength", "maxItems");
+		assertThat(objects(sent)).hasSize(6)
+			.allMatch(object -> object.path("additionalProperties").isBoolean()
+					&& !object.path("additionalProperties").booleanValue());
+		assertThat(sent.get("properties").propertyNames()).containsExactly("assessments", "summary",
+				"rootCauseService", "rootCauseCategory", "confidence");
+		JsonNode assessments = sent.at("/properties/assessments");
+		assertThat(assessments.get("properties").propertyNames()).containsExactly("gateway-mock", "inventory-service",
+				"payment-service", "order-service");
+		assertThat(assessments.get("required")).isEqualTo(JsonMapper.shared().readTree(schema)
+			.at("/properties/assessments/required"));
+		assertThat(assessments.at("/properties/payment-service/properties").propertyNames()).containsExactly("role",
+				"line", "why");
+		assertThat(assessments.at("/properties/payment-service/properties/role/enum")).extracting(JsonNode::asString)
+			.containsExactly("ORIGIN", "AFFECTED", "UNAFFECTED");
+		assertThat(assessments.at("/properties/payment-service/properties/line/type").asString()).isEqualTo("integer");
+		assertThat(((OllamaChatOptions) this.local.options(512, Duration.ofSeconds(420), List.of(), schema))
+			.getOutputSchema()).isEqualTo(schema);
+	}
+
 	private static Set<String> keywords(JsonNode node) {
 		Set<String> found = new HashSet<>();
 		walk(node, child -> child.propertyNames().forEach(found::add));

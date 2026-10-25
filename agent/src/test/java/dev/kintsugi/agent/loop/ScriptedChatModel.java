@@ -238,6 +238,21 @@ final class ScriptedChatModel implements ChatModel {
 				+ "\"confidence\":0.1,\"evidence\":[]}";
 	}
 
+	/**
+	 * An assessed report (service-assessment T2): its assessments, already JSON members, then the summary and the
+	 * cause, in the order the schema asks for them.
+	 */
+	static String assessedReport(String service, String category, String... assessments) {
+		return "{\"assessments\":{" + String.join(",", assessments) + "},\"summary\":\"what the sheets show\","
+				+ "\"rootCauseService\":\"" + service + "\",\"rootCauseCategory\":\"" + category
+				+ "\",\"confidence\":0.7}";
+	}
+
+	/** One service's assessment, the member {@code "<service>":{role, line, why}}, citing line {@code D<line>}. */
+	static String assessment(String service, String role, int line) {
+		return "\"" + service + "\":{\"role\":\"" + role + "\",\"line\":" + line + ",\"why\":\"its own facts\"}";
+	}
+
 	/** The text of every message of every prompt, for scans. */
 	String everything() {
 		List<String> texts = new ArrayList<>();

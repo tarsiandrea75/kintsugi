@@ -4,6 +4,8 @@ import static dev.kintsugi.agent.loop.PlanCheck.addIfError;
 import static dev.kintsugi.agent.loop.PlanCheck.unexpected;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,7 +15,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierRenderer;
+import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -26,6 +30,11 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  * line's text as the item's {@code quote} (evidence-by-reference, ADR-013): a small model that had to copy the text
  * rebuilt it in its own format, while a number is an exact, checkable choice, and the stored quote is then verbatim by
  * construction.
+ *
+ * <p>
+ * Decision mode may ask for the assessed report instead (service-assessment T2, {@link #checkAssessed}): the role of
+ * each lab service, each citing a line of its own sheet, which code checks against the call graph and from which it
+ * derives the evidence.
  */
 final class ReportCheck {
 
@@ -37,6 +46,18 @@ final class ReportCheck {
 			"confidence");
 
 	private static final Set<String> FIELDS = Set.copyOf(MODEL_FIELDS);
+
+	/**
+	 * The fields of the assessed report (service-assessment T2), in the order the model writes them: the assessments
+	 * first, then the plain report's fields but the evidence, which code derives from the assessments.
+	 */
+	static final List<String> ASSESSED_FIELDS = List.of("assessments", "summary", "rootCauseService",
+			"rootCauseCategory", "confidence");
+
+	/** The fields of one service's assessment, in the order the model writes them. */
+	static final List<String> ASSESSMENT_FIELDS = List.of("role", "line", "why");
+
+	private static final String NOT_AN_OBJECT = "the answer is not a JSON object";
 
 	/** The longest summary stored; a longer one is cut to it, the last character an ellipsis (report-field-order). */
 	static final int MAX_SUMMARY_LENGTH = 500;
@@ -88,6 +109,27 @@ final class ReportCheck {
 
 	}
 
+	/** A service's role in an assessed report (service-assessment T2), as the report task defines it. */
+	enum Role {
+
+		/** The service where the problem starts: its own facts show it, and the services it calls do not. */
+		ORIGIN,
+
+		/** A service that shows the problem because a service it calls, an ORIGIN or AFFECTED one, does. */
+		AFFECTED,
+
+		/** A service whose own facts show no problem. */
+		UNAFFECTED;
+
+		/** The values the schema and the check allow, in this order. */
+		static final List<String> VALUES = Arrays.stream(values()).map(Enum::name).toList();
+
+	}
+
+	/** One service's assessment, once its schema holds: its role, the line it cites and why. */
+	private record Assessment(String service, Role role, int line, JsonNode why) {
+	}
+
 	/** Every rule an explorer-mode {@code report} breaks; empty when the report is valid ({@link #check}). */
 	static List<String> errors(JsonNode report, Map<Integer, ToolStep> toolSteps) {
 		return check(report, toolSteps).errors();
@@ -116,21 +158,11 @@ final class ReportCheck {
 	 */
 	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier) {
 		if (report == null || !report.isObject()) {
-			return invalid(List.of("the answer is not a JSON object"));
+			return invalid(List.of(NOT_AN_OBJECT));
 		}
 		List<String> errors = new ArrayList<>();
 		unexpected(report, FIELDS, "", errors);
-		addIfError(errors, Causes.enumError("rootCauseService", report.get("rootCauseService"), Causes.SERVICES));
-		addIfError(errors, Causes.enumError("rootCauseCategory", report.get("rootCauseCategory"), Causes.CATEGORIES));
-		JsonNode summary = report.get("summary");
-		if (!Causes.string(summary, 1, Integer.MAX_VALUE)) {
-			errors.add("summary must be a string of 1 to " + MAX_SUMMARY_LENGTH + " characters");
-		}
-		JsonNode confidence = report.get("confidence");
-		if (confidence == null || !confidence.isNumber() || confidence.doubleValue() < 0
-				|| confidence.doubleValue() > 1) {
-			errors.add("confidence must be a number from 0 to 1");
-		}
+		causesAndConfidence(report, errors);
 		JsonNode evidence = report.get("evidence");
 		if (evidence == null || !evidence.isArray()) {
 			errors.add("evidence must be an array of at most 5 items");
@@ -164,7 +196,160 @@ final class ReportCheck {
 		if (fatal || (verified.isEmpty() && !unknown)) {
 			return invalid(errors);
 		}
-		String text = summary.asString();
+		String text = storedSummary(report, dropped);
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text);
+	}
+
+	/**
+	 * Checks an assessed report (service-assessment T2; agent spec, "Evidence is checked", the assessed report): its
+	 * schema, then the rules that check the model's own claims against the call graph, which never name a cause. Every
+	 * broken rule rejects the report, for the one retry; nothing is dropped but a summary too long, which is cut as the
+	 * plain report's is. The rules, in order: <b>Coverage</b>, every lab service is assessed once and no other name;
+	 * <b>Citation</b>, each assessment's line is a line of the sheets its own service owns, in its sheet or in its part
+	 * of the last section; then, once every service is assessed: <b>One origin</b>, at most one ORIGIN, and none only
+	 * when every service is UNAFFECTED and both causes are UNKNOWN; <b>Graph</b>, an AFFECTED service calls an ORIGIN
+	 * or AFFECTED service ({@link CallGraph#calls}); <b>Answer</b>, {@code rootCauseService} is the ORIGIN. A valid report's evidence is derived by code: the lines of the ORIGIN and AFFECTED services,
+	 * in sheet order, each an item citing the dossier with its quote filled in, as a plain report's verified dossier
+	 * item is, so that storage and scoring read it as they read a plain report. When every service is UNAFFECTED, the
+	 * report has no evidence.
+	 * @param sheets the sheets the model read, with the service that owns each numbered line
+	 */
+	static Result checkAssessed(JsonNode report, ServiceSheets.Rendered sheets) {
+		if (report == null || !report.isObject()) {
+			return invalid(List.of(NOT_AN_OBJECT));
+		}
+		List<String> errors = new ArrayList<>();
+		unexpected(report, Set.copyOf(ASSESSED_FIELDS), "", errors);
+		Map<String, Assessment> assessments = assessments(report.get("assessments"), errors);
+		causesAndConfidence(report, errors);
+		assessments.values().forEach(assessment -> cited(assessment, sheets, errors));
+		if (assessments.size() == CallGraph.SERVICES.size()) {
+			// The graph rules read every service's role, so they wait for Coverage and each assessment's schema.
+			graphRules(assessments, report, errors);
+		}
+		if (!errors.isEmpty()) {
+			return invalid(errors);
+		}
+		List<JsonNode> evidence = new ArrayList<>();
+		for (Assessment assessment : assessments.values()) {
+			if (assessment.role() != Role.UNAFFECTED) {
+				evidence.add(dossierItem(assessment.line(), DossierRenderer.line(sheets.text(), assessment.line())
+					.orElseThrow(), assessment.why()));
+			}
+		}
+		List<String> dropped = new ArrayList<>();
+		String text = storedSummary(report, dropped);
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(evidence), text);
+	}
+
+	/**
+	 * The assessments of {@code node} whose schema holds, by service in sheet order, adding to {@code errors} each rule
+	 * the object breaks: it holds every lab service once and no other name (Coverage), each {@code {role, line, why}}.
+	 */
+	private static Map<String, Assessment> assessments(JsonNode node, List<String> errors) {
+		Map<String, Assessment> assessments = new LinkedHashMap<>();
+		if (node == null || !node.isObject()) {
+			errors.add("assessments must be an object with one {role, line, why} per service: "
+					+ String.join(", ", CallGraph.SERVICES));
+			return assessments;
+		}
+		unexpected(node, Set.copyOf(CallGraph.SERVICES), "assessments.", errors);
+		for (String service : CallGraph.SERVICES) {
+			JsonNode assessment = node.get(service);
+			if (assessment == null) {
+				errors.add("assessments." + service + " is missing: assess every service once");
+			}
+			else {
+				assessment(service, assessment, errors).ifPresent(checked -> assessments.put(service, checked));
+			}
+		}
+		return assessments;
+	}
+
+	/** One service's assessment, when its schema holds; else empty, with each rule it breaks added to {@code errors}. */
+	private static Optional<Assessment> assessment(String service, JsonNode assessment, List<String> errors) {
+		String name = "assessments." + service;
+		if (!assessment.isObject()) {
+			errors.add(name + " must be an object {role, line, why}");
+			return Optional.empty();
+		}
+		int before = errors.size();
+		unexpected(assessment, Set.copyOf(ASSESSMENT_FIELDS), name + ".", errors);
+		addIfError(errors, Causes.enumError(name + ".role", assessment.get("role"), Role.VALUES));
+		JsonNode line = assessment.get("line");
+		if (line == null || !line.isIntegralNumber() || !line.canConvertToInt() || line.intValue() < 1) {
+			errors.add(name + ".line must be an integer of at least 1");
+		}
+		if (!Causes.string(assessment.get("why"), 0, 200)) {
+			errors.add(name + ".why must be a string of at most 200 characters");
+		}
+		if (errors.size() > before) {
+			return Optional.empty();
+		}
+		return Optional.of(new Assessment(service, Role.valueOf(assessment.get("role").asString()), line.intValue(),
+				assessment.get("why")));
+	}
+
+	/** Citation: adds an error when the assessment's line is not one its service owns in {@code sheets}. */
+	private static void cited(Assessment assessment, ServiceSheets.Rendered sheets, List<String> errors) {
+		Optional<String> owner = sheets.owner(assessment.line());
+		if (owner.isPresent() && owner.get().equals(assessment.service())) {
+			return;
+		}
+		String found = owner.map(name -> "is a line of " + (ServiceSheets.HEADER.equals(name) ? "the header" : name)
+				+ ", not of " + assessment.service())
+			.orElse("is not in the sheets");
+		errors.add("assessments." + assessment.service() + ".line " + assessment.line() + " " + found
+				+ "; cite a line of its own sheet or of its part of \"Seen only in the previous window\"");
+	}
+
+	/**
+	 * One origin, Graph and Answer, over the assessments of every service, in sheet order: each adds an error naming
+	 * the claims that break it. They check the report against its own roles and the call graph, never against a cause.
+	 */
+	private static void graphRules(Map<String, Assessment> assessments, JsonNode report, List<String> errors) {
+		List<String> origins = withRole(assessments, Role.ORIGIN);
+		List<String> affected = withRole(assessments, Role.AFFECTED);
+		String service = report.path("rootCauseService").asString("");
+		String category = report.path("rootCauseCategory").asString("");
+		if (origins.size() > 1) {
+			errors.add("at most one service is the ORIGIN; got " + origins.size() + ": " + String.join(", ", origins));
+		}
+		else if (origins.isEmpty() && !affected.isEmpty()) {
+			errors.add("no service is the ORIGIN, so every service must be UNAFFECTED; got AFFECTED: "
+					+ String.join(", ", affected));
+		}
+		else if (origins.isEmpty() && !(Causes.UNKNOWN.equals(service) && Causes.UNKNOWN.equals(category))) {
+			errors.add("no service is the ORIGIN, so rootCauseService and rootCauseCategory must both be UNKNOWN; got \""
+					+ service + "\" and \"" + category + "\"");
+		}
+		for (String name : affected) {
+			List<String> calls = CallGraph.calls(name);
+			if (calls.stream().noneMatch(callee -> assessments.get(callee).role() != Role.UNAFFECTED)) {
+				String called = calls.isEmpty() ? "calls no service"
+						: "calls no ORIGIN or AFFECTED service (it calls " + String.join(", ", calls.stream()
+							.map(callee -> callee + ": " + assessments.get(callee).role())
+							.toList()) + ")";
+				errors.add("assessments." + name + " is AFFECTED but " + called
+						+ "; a service is AFFECTED only through a service it calls that is ORIGIN or AFFECTED");
+			}
+		}
+		if (origins.size() == 1 && !origins.getFirst().equals(service)) {
+			errors.add("rootCauseService must be the ORIGIN, " + origins.getFirst() + "; got \"" + service + "\"");
+		}
+	}
+
+	/** The services whose role is {@code role}, in sheet order. */
+	private static List<String> withRole(Map<String, Assessment> assessments, Role role) {
+		return assessments.values().stream().filter(a -> a.role() == role).map(Assessment::service).toList();
+	}
+
+	/**
+	 * The summary as stored: cut to {@value #MAX_SUMMARY_LENGTH} characters when it is longer, the last one an
+	 * ellipsis, which {@code dropped} then records (report-field-order).
+	 */
+	private static String storedSummary(JsonNode report, List<String> dropped) {
+		String text = report.get("summary").asString();
 		int length = text.codePointCount(0, text.length());
 		if (length > MAX_SUMMARY_LENGTH) {
 			// report-field-order: the summary is the model's reasoning, not evidence, and with the reasoning first the
@@ -173,7 +358,21 @@ final class ReportCheck {
 			text = text.substring(0, text.offsetByCodePoints(0, MAX_SUMMARY_LENGTH - 1)) + "…";
 			dropped.add("summary cut from " + length + " to " + MAX_SUMMARY_LENGTH + " characters");
 		}
-		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text);
+		return text;
+	}
+
+	/** Adds to {@code errors} each rule the cause, the summary and the confidence break, as both reports write them. */
+	private static void causesAndConfidence(JsonNode report, List<String> errors) {
+		addIfError(errors, Causes.enumError("rootCauseService", report.get("rootCauseService"), Causes.SERVICES));
+		addIfError(errors, Causes.enumError("rootCauseCategory", report.get("rootCauseCategory"), Causes.CATEGORIES));
+		if (!Causes.string(report.get("summary"), 1, Integer.MAX_VALUE)) {
+			errors.add("summary must be a string of 1 to " + MAX_SUMMARY_LENGTH + " characters");
+		}
+		JsonNode confidence = report.get("confidence");
+		if (confidence == null || !confidence.isNumber() || confidence.doubleValue() < 0
+				|| confidence.doubleValue() > 1) {
+			errors.add("confidence must be a number from 0 to 1");
+		}
 	}
 
 	private static Result invalid(List<String> errors) {
@@ -275,6 +474,21 @@ final class ReportCheck {
 		stored.put("quote", capped(text));
 		stored.set("why", item.get("why"));
 		return new Item(null, stored);
+	}
+
+	/**
+	 * An evidence item citing line {@code D<line>} of the dossier, as {@link #verified} stores one:
+	 * {@code {toolCallId, tool, line, quote, why}}, with {@code "dossier"} as its id and tool and {@code text}, the
+	 * line's text, as its quote.
+	 */
+	private static JsonNode dossierItem(int line, String text, JsonNode why) {
+		ObjectNode stored = JSON.createObjectNode();
+		stored.put("toolCallId", DOSSIER);
+		stored.put("tool", DOSSIER);
+		stored.put("line", line);
+		stored.put("quote", capped(text));
+		stored.set("why", why);
+		return stored;
 	}
 
 	/** {@code text} cut to its first {@value #MAX_QUOTE_LENGTH} code points, so that no character is split. */
