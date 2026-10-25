@@ -133,6 +133,7 @@ Explorer and dossier replays keep today's behavior.
   - `check-recordings.sh`;
   - the docs.
 - [x] T2r The slice review's findings (the label and the flaky test; the `diagnose()` tests are T2r2, after T4). Route: inline, for the label and the flaky test. The `diagnose()` tests wait for T4 to end, because they touch `verify-agent.sh`, which T4 is running.
+- [ ] T2r2 After T4: tests for decision mode's two `diagnose()` branches, the ACT deadline headroom of the gathering test (R3-gathering-act-headroom) and the four T3r suggestions. Route: delegated writer (scripts, their tests, one loop test).
 - [x] T3 Replay over many recordings. Route: delegated writer. It covers:
   - the manifest splits;
   - one case per recording;
@@ -284,11 +285,20 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - an empty case listing counted as 1, probably unreachable because `--faults` with no fault is refused earlier.
 - 2026-10-24 21:40: Part B (`odd/tasks/service-assessment.md`) starts on its own branch while T4 records. It is safe because `verify-agent.sh` builds the agent once, before the fault loop, so later source edits never reach T4's container. Part B's settings default to today's behavior, so M0 still measures today's prompt.
 
+- 2026-10-25 02:35 UTC: the T4 recording session ended after 10 h 10 min (`verify-agent-20261024T162555Z`, on `cf005a0`).
+  - All 30 incidents are COMPLETED, each in two steps (DOSSIER and REPORT) of about 15 s. The windows are 4 minutes for F1 and 3 for F2 and F3.
+  - `check-recordings.sh` passes all 30:
+    - every previous window holds at least 3 PAID orders, no other state, and only SUCCESS traffic;
+    - no incident window has a restart, except F3's own recreate of order-service.
+  - Live verdicts on the cloud route: F1 8/10, F2 10/10, F3 10/10. Both F1 misses, in rounds 3 and 4, name `payment-service|DEPENDENCY_LATENCY`, one hop early. With the planned import, one miss falls in `dev` (r3) and one in `holdout` (r4).
+  - The script exits 1, because each MISS is a `fail` line.
+  - Cost: 159,390 prompt and 16,466 completion tokens, about $0.02 at the replay's prices.
+
 ## Next step
 
-Wait for T4 (about 03:00 UTC). Then, on this branch:
+On this branch:
 - T2r2: the `diagnose()` branch tests, the ACT deadline headroom and the four T3r suggestions;
-- the import, with odd rounds in `dev` and even rounds in `holdout`;
-- T5 (M0).
+- the import, with odd rounds in `dev` and even rounds in `holdout`, which closes T4;
+- T5 (M0), with the machine otherwise idle, because a concurrent build would slow the local route.
 
 Then rebase `feat/service-assessment` onto this branch's tip.
