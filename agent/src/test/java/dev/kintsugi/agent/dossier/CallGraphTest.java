@@ -1,15 +1,17 @@
 package dev.kintsugi.agent.dossier;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
 import dev.kintsugi.agent.dossier.CallGraph.Edge;
+import dev.kintsugi.agent.dossier.Dossier.SourceEvents;
+import dev.kintsugi.agent.dossier.Dossier.TableStates;
 
 /**
- * The lab's call graph as data (odd/tasks/service-assessment.md T1): the one list of edges the tables and the sheets
- * render, the services leaf first, who calls whom, and the service that owns each state table and event source.
+ * The lab's call graph as data (odd/tasks/service-assessment.md T1, T1r): the one list of edges the tables and the
+ * sheets render, the services leaf first, who calls whom, and the service that owns each state table and event source,
+ * which every table and source the gatherer reads has.
  */
 class CallGraphTest {
 
@@ -57,20 +59,34 @@ class CallGraphTest {
 	}
 
 	@Test
-	void everyGatheredTableAndEventSourceHasItsOwnerByName() {
-		assertThat(CallGraph.ownerOfTable("orders")).isEqualTo("order-service");
-		assertThat(CallGraph.ownerOfTable("payments")).isEqualTo("payment-service");
-		assertThat(CallGraph.ownerOfSource("order")).isEqualTo("order-service");
-		assertThat(CallGraph.ownerOfSource("payment")).isEqualTo("payment-service");
-		assertThat(CallGraph.ownerOfSource("reservation")).isEqualTo("inventory-service");
-		assertThat(DossierGatherer.STATUS_TABLES).allSatisfy(
-				table -> assertThat(CallGraph.SERVICES).contains(CallGraph.ownerOfTable(table)));
-		assertThat(DossierGatherer.EVENT_SOURCES).allSatisfy(
-				source -> assertThat(CallGraph.SERVICES).contains(CallGraph.ownerOfSource(source)));
-		assertThatThrownBy(() -> CallGraph.ownerOfTable("stock")).isInstanceOf(IllegalArgumentException.class)
-			.hasMessageContaining("stock");
-		assertThatThrownBy(() -> CallGraph.ownerOfSource("inventory")).isInstanceOf(IllegalArgumentException.class)
-			.hasMessageContaining("inventory");
+	void eachTableAndEventSourceHasItsOwnerByNameAndAnyOtherNameNone() {
+		assertThat(CallGraph.ownerOfTable("orders")).hasValue("order-service");
+		assertThat(CallGraph.ownerOfTable("payments")).hasValue("payment-service");
+		assertThat(CallGraph.ownerOfSource("order")).hasValue("order-service");
+		assertThat(CallGraph.ownerOfSource("payment")).hasValue("payment-service");
+		assertThat(CallGraph.ownerOfSource("reservation")).hasValue("inventory-service");
+		// No lab service owns them: the sheets keep them under "Other rows".
+		assertThat(CallGraph.ownerOfTable("stock")).isEmpty();
+		assertThat(CallGraph.ownerOfSource("inventory")).isEmpty();
+		assertThat(CallGraph.ownerOfTable(null)).isEmpty();
+		assertThat(CallGraph.ownerOfSource(null)).isEmpty();
+	}
+
+	@Test
+	void everyTableAndEventSourceTheGathererProducesHasALabServiceAsItsOwner() {
+		// The guard: a table or a source the gatherer reads with no owner here fails the build, not an incident's
+		// sheets, which would keep it under "Other rows".
+		Dossier dossier = DossierRendererTest.gather("f3");
+
+		assertThat(dossier.states()).extracting(TableStates::table)
+			.containsExactlyElementsOf(DossierGatherer.STATUS_TABLES)
+			.allSatisfy(table -> assertThat(CallGraph.ownerOfTable(table)).as(table)
+				.hasValueSatisfying(owner -> assertThat(CallGraph.SERVICES).contains(owner)));
+		assertThat(dossier.events()).extracting(SourceEvents::source)
+			.containsExactlyElementsOf(DossierGatherer.EVENT_SOURCES)
+			.allSatisfy(source -> assertThat(CallGraph.ownerOfSource(source)).as(source)
+				.hasValueSatisfying(owner -> assertThat(CallGraph.SERVICES).contains(owner)));
+		assertThat(ServiceSheets.render(dossier).text()).doesNotContain("## Other rows");
 	}
 
 }

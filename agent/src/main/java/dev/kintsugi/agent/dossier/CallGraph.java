@@ -3,6 +3,7 @@ package dev.kintsugi.agent.dossier;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
 
@@ -61,27 +62,26 @@ public final class CallGraph {
 	}
 
 	/**
-	 * The service that owns the {@code status_summary} table {@code table}.
-	 * @throws IllegalArgumentException for a table the gatherer does not read ({@link DossierGatherer#STATUS_TABLES})
+	 * The service that owns the {@code status_summary} table {@code table}; none for a name no lab service owns, which
+	 * the sheets keep under "Other rows". Every table the gatherer reads has one
+	 * ({@link DossierGatherer#STATUS_TABLES}; a test checks it).
 	 */
-	public static String ownerOfTable(String table) {
-		return owner(TABLE_OWNERS, table, "table");
+	public static Optional<String> ownerOfTable(String table) {
+		return owner(TABLE_OWNERS, table);
 	}
 
 	/**
-	 * The service that owns the {@code event_counts} source {@code source}.
-	 * @throws IllegalArgumentException for a source the gatherer does not read ({@link DossierGatherer#EVENT_SOURCES})
+	 * The service that owns the {@code event_counts} source {@code source}; none for a name no lab service owns, which
+	 * the sheets keep under "Other rows". Every source the gatherer reads has one
+	 * ({@link DossierGatherer#EVENT_SOURCES}; a test checks it).
 	 */
-	public static String ownerOfSource(String source) {
-		return owner(SOURCE_OWNERS, source, "event source");
+	public static Optional<String> ownerOfSource(String source) {
+		return owner(SOURCE_OWNERS, source);
 	}
 
-	private static String owner(Map<String, String> owners, String name, String what) {
-		String owner = name == null ? null : owners.get(name);
-		if (owner == null) {
-			throw new IllegalArgumentException("no lab service owns the " + what + " \"" + name + "\"");
-		}
-		return owner;
+	private static Optional<String> owner(Map<String, String> owners, String name) {
+		// Map.of's maps refuse a null key.
+		return name == null ? Optional.empty() : Optional.ofNullable(owners.get(name));
 	}
 
 	/**

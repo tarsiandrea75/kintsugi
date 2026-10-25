@@ -14,6 +14,13 @@ import static dev.kintsugi.agent.dossier.DossierRendererTest.tokens;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.unnumbered;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -23,15 +30,31 @@ import java.util.TimeZone;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import dev.kintsugi.agent.dossier.Dossier.Compared;
+import dev.kintsugi.agent.dossier.Dossier.EventCounts;
+import dev.kintsugi.agent.dossier.Dossier.EventGroup;
+import dev.kintsugi.agent.dossier.Dossier.SourceEvents;
+import dev.kintsugi.agent.dossier.Dossier.StatusCount;
+import dev.kintsugi.agent.dossier.Dossier.TableStates;
+import dev.kintsugi.agent.lab.ReplayLabTools;
 
 /**
  * The per-service fact sheets (agent spec, "Evidence dossier rendering", the sheets; odd/tasks/service-assessment.md
- * T1): golden files of the recorded F3, F1 and healthy outputs; one owner per numbered line, a service or the header,
- * and a service's lines only in its own sheet or under it in the last section; the sheets leaf first; no
- * {@code /actuator} row; the rows seen only in the previous window apart; no interpretive vocabulary; and a size no
- * larger than the tables'.
+ * T1, T1r): golden files of the recorded F3, F1 and healthy outputs and of a clean decision recording, gathered as a
+ * replay gathers it; one owner per numbered line, a service or the header, and a service's lines only in its own sheet
+ * or under it in the last section; the sheets leaf first; no {@code /actuator} row; the rows seen only in the previous
+ * window apart; a call on no edge of the graph in its caller's sheet; what no lab service owns under "Other rows"; no
+ * interpretive vocabulary; and a size no larger than the tables'.
  */
 class ServiceSheetsTest {
+
+	private static final JsonMapper JSON = JsonMapper.shared();
+
+	/** The clean decision recording whose sheets have a golden file: F1's first in the dev split, never in holdout. */
+	private static final String CLEAN_F1 = "F1/verify-agent-20261024T162555Z-r1-F1.json";
 
 	private static final String PREVIOUS_ONLY = "## Seen only in the previous window";
 
@@ -48,6 +71,13 @@ class ServiceSheetsTest {
 		assertThat(ServiceSheets.render(gather("healthy")).text()).isEqualTo(golden("healthy-sheets"));
 		// F1: gateway-mock answers /authorize in about 10 s; payment-service's /payments waits on it.
 		assertThat(ServiceSheets.render(f1()).text()).isEqualTo(golden("f1-sheets"));
+	}
+
+	@Test
+	void aCleanDecisionRecordingsSheetsRenderAsTheirGoldenFile() {
+		// F1's first dev recording: gateway-mock answers /authorize in up to 9.905 s, payment-service's /payments, which
+		// waits on it, in up to 9.979 s, and half of order-service's calls to payment-service time out.
+		assertThat(ServiceSheets.render(cleanF1()).text()).isEqualTo(golden("f1-dev-r1-sheets"));
 	}
 
 	@Test
@@ -121,7 +151,7 @@ class ServiceSheetsTest {
 
 	@Test
 	void theLatencyOfABusinessUriIsWrittenAndActuatorUrisAreLeftOut() {
-		for (Dossier dossier : List.of(gather("f3"), gather("healthy"), f1())) {
+		for (Dossier dossier : List.of(gather("f3"), gather("healthy"), f1(), cleanF1())) {
 			// The tables keep the /actuator/prometheus rows, so the recordings hold them.
 			assertThat(DossierRenderer.render(dossier)).contains("/actuator/prometheus");
 			ServiceSheets.Rendered sheets = ServiceSheets.render(dossier);
@@ -173,7 +203,7 @@ class ServiceSheetsTest {
 	@Test
 	void theSheetsOwnWordsHoldNoInterpretiveVocabulary() {
 		// As for the tables, every value from the lab is masked, but the service names, which group the facts.
-		for (Dossier dossier : List.of(gather("f3"), gather("healthy"), failing(), stress())) {
+		for (Dossier dossier : List.of(gather("f3"), gather("healthy"), cleanF1(), failing(), stress())) {
 			String text = ServiceSheets.render(masked(dossier, true)).text();
 			for (String banned : BANNED) {
 				assertThat(Pattern.compile("(?i)(?<![\\p{L}\\p{N}_])" + Pattern.quote(banned) + "(?![\\p{L}\\p{N}_])")
@@ -186,7 +216,8 @@ class ServiceSheetsTest {
 
 	@Test
 	void theSheetsAreNoLargerThanTheTables() {
-		for (Map.Entry<String, Dossier> recorded : Map.of("f3", gather("f3"), "healthy", gather("healthy"), "f1", f1())
+		for (Map.Entry<String, Dossier> recorded : Map
+			.of("f3", gather("f3"), "healthy", gather("healthy"), "f1", f1(), "f1-dev-r1", cleanF1())
 			.entrySet()) {
 			int sheets = tokens(ServiceSheets.render(recorded.getValue()).text());
 			assertThat(sheets).as(recorded.getKey())
@@ -249,6 +280,66 @@ class ServiceSheetsTest {
 	}
 
 	@Test
+	void aClientRowOnNoEdgeIsAnOutboundLineOfItsCallerWithItsCalleeMethodAndUri() {
+		ServiceSheets.Rendered sheets = ServiceSheets.render(offEdge());
+
+		String text = unnumbered(sheets.text());
+		// After the caller's blocks per edge, one block for its other calls, each named by callee, method and uri.
+		String onNoEdge = "- outbound to gateway-mock POST /authorize status=200 outcome=SUCCESS exception=none: "
+				+ "incident 2 (previous 1).";
+		assertThat(text.substring(text.indexOf("## order-service"), text.indexOf(PREVIOUS_ONLY)))
+			.contains("- outbound to inventory-service: no rows in the incident window.\n"
+					+ "- outbound to payment-service: no rows in the incident window.\n" + onNoEdge + "\n- WARN: ");
+		assertThat(sheets.owner(number(sheets, onNoEdge))).hasValue("order-service");
+		// A call seen only in the previous window goes to the last section, under its caller, which owns it; a service
+		// with no such call in its sheet writes no line for the block.
+		String previousOnly = "- outbound to inventory-service GET /stock status=200 outcome=SUCCESS exception=none: "
+				+ "incident 0 (previous 3).";
+		assertThat(text.substring(text.indexOf(PREVIOUS_ONLY)))
+			.contains("### payment-service\n\n" + previousOnly + "\n");
+		assertThat(sheets.owner(number(sheets, previousOnly))).hasValue("payment-service");
+		assertThat(text.substring(text.indexOf("## payment-service"), text.indexOf("## order-service")))
+			.doesNotContain("/stock")
+			.doesNotContain("- outbound:");
+		assertThat(text.substring(text.indexOf("## gateway-mock"), text.indexOf("## inventory-service")))
+			.doesNotContain("outbound");
+		assertThat(text).doesNotContain("## Other rows");
+	}
+
+	@Test
+	void aTableOrAnEventSourceNoLabServiceOwnsIsKeptUnderOtherRowsAndTheSheetsGoOn() {
+		Dossier f3 = gather("f3");
+		List<TableStates> states = new ArrayList<>(f3.states());
+		List<StatusCount> previousStock = List.of(new StatusCount("LOW", 2, List.of()),
+				new StatusCount("OUT", 1, List.of()));
+		List<StatusCount> incidentStock = List.of(new StatusCount("LOW", 3, List.of("o-1")));
+		states.add(new TableStates("stock",
+				new Compared<>(new Gathered.Ok<>(previousStock), new Gathered.Ok<>(incidentStock))));
+		List<SourceEvents> events = new ArrayList<>(f3.events());
+		EventCounts previousChecks = new EventCounts(4, List.of(new EventGroup("STOCK_CHECKED", "OK", 4)));
+		EventCounts incidentChecks = new EventCounts(1, List.of(new EventGroup("STOCK_CHECKED", "OK", 1)));
+		events.add(new SourceEvents("inventory",
+				new Compared<>(new Gathered.Ok<>(previousChecks), new Gathered.Ok<>(incidentChecks))));
+		Dossier dossier = new Dossier(f3.gatheredAt(), f3.incidentWindow(), f3.previousWindow(), f3.services(), states,
+				f3.traffic(), f3.latency(), f3.logs(), events, f3.calls());
+
+		ServiceSheets.Rendered sheets = ServiceSheets.render(dossier);
+
+		// The sheets and the last section are as without them; they follow, every row in place, since the last section
+		// is per service, as the traffic rows of no lab service are.
+		ServiceSheets.Rendered without = ServiceSheets.render(f3);
+		String text = sheets.text();
+		assertThat(text).startsWith(without.text());
+		assertThat(unnumbered(text.substring(text.indexOf("## Other rows")))).isEqualTo("## Other rows\n\n"
+				+ "- stock table status=LOW: incident 3 (previous 2).\n"
+				+ "- stock table status=OUT: incident 0 (previous 1).\n"
+				+ "- inventory events: total incident 1 (previous 4).\n"
+				+ "- inventory events type=STOCK_CHECKED outcome=OK: incident 1 (previous 4).\n");
+		assertThat(sheets.owners().subList(without.owners().size(), sheets.owners().size()))
+			.containsExactly(ServiceSheets.HEADER, ServiceSheets.HEADER, ServiceSheets.HEADER, ServiceSheets.HEADER);
+	}
+
+	@Test
 	void logTextStaysInsideAnEscapedUntrustedTextLiteral() {
 		RecordedLab lab = new RecordedLab("healthy").answer("search_logs-gateway-mock-WARN-incident",
 				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"timestamp\":"
@@ -301,8 +392,84 @@ class ServiceSheetsTest {
 		return new DossierGatherer(new RecordedLab("f1", "healthy"), CLOCK).gather(10);
 	}
 
+	/**
+	 * The dossier of a clean decision recording, gathered as a replay gathers it ({@code ReplayDriver}): its recorded
+	 * outputs served by {@link ReplayLabTools} to the same {@link DossierGatherer}, over its window, on a clock fixed
+	 * at its start, where a replay puts "now". Only a {@code dev} recording is read: {@code holdout} is read once, at
+	 * the end of the feature.
+	 */
+	private static Dossier cleanF1() {
+		assertThat(split(CLEAN_F1)).as("the split of %s", CLEAN_F1).isEqualTo("dev");
+		JsonNode recording = JSON.readTree(resource("/replay/" + CLEAN_F1));
+		ReplayLabTools tools = new ReplayLabTools(JSON.readTree(resource("/mcp-outputs/tools-list.json")),
+				List.of(recording));
+		Clock start = Clock.fixed(Instant.parse(recording.path("startedAt").asString()), ZoneOffset.UTC);
+		Dossier dossier = new DossierGatherer(tools, start).gather(recording.path("sinceMinutes").asInt());
+		// The recording answers every call the dossier makes, so the sheets are what a replay's model reads.
+		assertThat(tools.unrecordedCalls()).as("unrecorded calls").isZero();
+		return dossier;
+	}
+
+	/**
+	 * F3's outputs with traffic on no edge of the call graph: order-service called gateway-mock's
+	 * {@code POST /authorize} twice in the incident window and once in the previous one, and payment-service called
+	 * inventory-service's {@code GET /stock} 3 times in the previous window only.
+	 */
+	private static Dossier offEdge() {
+		String toGateway = "POST /authorize";
+		RecordedLab lab = new RecordedLab("f3")
+			.answer("traffic_counts-incident", traffic(clientRow("order-service", "gateway-mock", toGateway, 2)))
+			.answer("traffic_counts-previous", traffic(clientRow("order-service", "gateway-mock", toGateway, 1),
+					clientRow("payment-service", "inventory-service", "GET /stock", 3)));
+		return new DossierGatherer(lab, CLOCK).gather(10);
+	}
+
+	/** A {@code traffic_counts} output of {@code items}. */
+	private static String traffic(String... items) {
+		return "{\"outcome\":\"OK\",\"returned\":" + items.length + ",\"truncated\":false,\"items\":["
+				+ String.join(",", items) + "]}";
+	}
+
+	/** A successful client-side {@code traffic_counts} row: {@code service} called {@code route} of {@code callee}. */
+	private static String clientRow(String service, String callee, String route, int count) {
+		String[] methodAndUri = route.split(" ");
+		return "{\"side\":\"client\",\"service\":\"" + service + "\",\"clientName\":\"" + callee + "\",\"method\":\""
+				+ methodAndUri[0] + "\",\"uri\":\"" + methodAndUri[1] + "\",\"status\":\"200\",\"outcome\":\"SUCCESS\","
+				+ "\"exception\":\"none\",\"count\":" + count + "}";
+	}
+
+	/** The number of the sheets' line whose text, after its {@code D<n> }, is {@code line}; 0 when none is. */
+	private static int number(ServiceSheets.Rendered sheets, String line) {
+		for (int n = 1; n <= sheets.owners().size(); n++) {
+			if (DossierRenderer.line(sheets.text(), n).orElseThrow().equals(line)) {
+				return n;
+			}
+		}
+		return 0;
+	}
+
+	/** The split {@code recordings.tsv} gives the recording {@code file}. */
+	private static String split(String file) {
+		return resource("/replay/recordings.tsv").lines()
+			.map(line -> line.split("\t", -1))
+			.filter(columns -> columns.length == 7 && columns[4].equals(file))
+			.map(columns -> columns[6])
+			.findFirst()
+			.orElseThrow(() -> new AssertionError(file + " is not in recordings.tsv"));
+	}
+
+	private static String resource(String path) {
+		try (InputStream in = ServiceSheetsTest.class.getResourceAsStream(path)) {
+			assertThat(in).as(path).isNotNull();
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+		}
+		catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
 	private static List<Dossier> dossiers() {
-		return List.of(gather("f3"), gather("healthy"), f1(), failing(), stress());
+		return List.of(gather("f3"), gather("healthy"), f1(), cleanF1(), offEdge(), failing(), stress());
 	}
 
 	private static List<String> listWith(List<String> list, String more) {

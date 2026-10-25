@@ -44,13 +44,14 @@ import dev.kintsugi.agent.dossier.DossierRenderer.Row;
  * whose incident count is 0 while its previous count is above 0 is written in the last section, "Seen only in the
  * previous window", under its service, which still owns it. The tables' caps hold per block. A failed call that covers
  * every service ({@code service_restarts}, {@code traffic_counts}) is one fact line of the header; any other is one line
- * in its service's sheet. A traffic row of no lab service is kept under "Other rows", owned by the header.
+ * in its service's sheet. What no lab service owns, a traffic row of no lab service or a state table or an event source
+ * {@link CallGraph} names no owner for, is kept under "Other rows", owned by the header, every row in place.
  */
 public final class ServiceSheets {
 
 	/**
 	 * The owner of the numbered lines that state no lab service's fact: the header's, the line of an empty last section,
-	 * and the "Other rows".
+	 * and the "Other rows", which hold what no lab service owns.
 	 */
 	public static final String HEADER = "header";
 
@@ -94,7 +95,7 @@ public final class ServiceSheets {
 		Map<String, List<String>> later = new LinkedHashMap<>();
 		for (String service : CallGraph.SERVICES) {
 			out.section("## " + service);
-			Sheet sheet = new Sheet(service, out);
+			Sheet sheet = Sheet.of(service, out);
 			sheet.line("- calls: " + names(CallGraph.calls(service)) + "; called by: "
 					+ names(CallGraph.calledBy(service)) + ".");
 			restarts(sheet, dossier.services());
@@ -103,19 +104,19 @@ public final class ServiceSheets {
 			outbound(sheet, dossier.traffic());
 			logs(sheet, logs, shown);
 			for (TableStates table : dossier.states()) {
-				if (service.equals(CallGraph.ownerOfTable(table.table()))) {
+				if (CallGraph.ownerOfTable(table.table()).filter(service::equals).isPresent()) {
 					states(sheet, table);
 				}
 			}
 			for (SourceEvents source : dossier.events()) {
-				if (service.equals(CallGraph.ownerOfSource(source.source()))) {
+				if (CallGraph.ownerOfSource(source.source()).filter(service::equals).isPresent()) {
 					events(sheet, source);
 				}
 			}
 			later.put(service, sheet.later);
 		}
 		lastSection(out, later);
-		others(out, dossier.traffic());
+		others(out, dossier);
 		return new Rendered(out.text(), out.owners);
 	}
 
@@ -276,19 +277,23 @@ public final class ServiceSheets {
 	/**
 	 * Writes one block of count rows in the sheet: those not seen only in the previous window, at most
 	 * {@link DossierRenderer#ROWS}, then the others' number and counts; with none, and {@code empty}, one line saying
-	 * so. The rows seen only in the previous window go to the sheet's part of the last section, capped the same way.
+	 * so. The rows seen only in the previous window go to the sheet's part of the last section, capped the same way;
+	 * under "Other rows", which no service owns, they stay in place with the others.
 	 * @param text a row's labels as written after the block's label
 	 */
 	private static void block(Sheet sheet, String label, Compared<?> windows, List<Row> rows,
 			Function<List<String>, String> text, boolean empty) {
-		List<Row> current = rows.stream().filter(Predicate.not(ServiceSheets::previousOnly)).toList();
+		List<Row> current = sheet.later == null ? rows
+				: rows.stream().filter(Predicate.not(ServiceSheets::previousOnly)).toList();
 		if (current.isEmpty() && empty) {
 			boolean read = windows.incident() instanceof Gathered.Ok;
 			sheet.line("- " + label + ": " + (read ? "no rows in the incident window." : "no rows read."));
 		}
 		counted(label, windows, current, text).forEach(sheet::line);
-		sheet.later.addAll(counted(label, windows,
-				rows.stream().filter(ServiceSheets::previousOnly).toList(), text));
+		if (sheet.later != null) {
+			sheet.later.addAll(counted(label, windows,
+					rows.stream().filter(ServiceSheets::previousOnly).toList(), text));
+		}
 	}
 
 	/** Whether a row was counted in the previous window only: 0 in the incident window, above 0 in the previous one. */
@@ -331,24 +336,39 @@ public final class ServiceSheets {
 	}
 
 	/**
-	 * The traffic rows of no lab service, with all their labels, under "Other rows", written only when there is one:
-	 * {@code traffic_counts} reads the lab's four services only.
+	 * What no lab service owns, under "Other rows", written only when there is one: the traffic rows of no lab service,
+	 * with all their labels, then the state tables and the event sources {@link CallGraph} names no owner for, each as
+	 * a sheet writes it, but with every row in place, since the last section is per service. {@code traffic_counts}
+	 * reads the lab's four services only, and every table and source the gatherer reads has its owner (a test checks
+	 * it), so a name missing from the graph costs a sheet its facts, never the rendering.
 	 */
-	private static void others(Out out, Compared<List<TrafficRow>> traffic) {
+	private static void others(Out out, Dossier dossier) {
+		Compared<List<TrafficRow>> traffic = dossier.traffic();
 		List<Row> rows = trafficRows(traffic,
 				row -> !(("server".equals(row.side()) || "client".equals(row.side()))
 						&& CallGraph.SERVICES.contains(row.service())),
 				row -> Arrays.asList(row.side(), row.service(), row.clientName(), row.method(), row.uri(), row.status(),
 						row.outcome(), row.exception()));
-		if (rows.isEmpty()) {
+		List<TableStates> tables = dossier.states()
+			.stream()
+			.filter(table -> CallGraph.ownerOfTable(table.table()).isEmpty())
+			.toList();
+		List<SourceEvents> sources = dossier.events()
+			.stream()
+			.filter(source -> CallGraph.ownerOfSource(source.source()).isEmpty())
+			.toList();
+		if (rows.isEmpty() && tables.isEmpty() && sources.isEmpty()) {
 			return;
 		}
 		out.section("## Other rows");
+		Sheet others = Sheet.others(out);
 		counted("", traffic, rows,
 				labels -> words(key("side", labels.get(0)), key("service", labels.get(1)), key("client", labels.get(2)),
 						cell(labels.get(3)), cell(labels.get(4)), key("status", labels.get(5)),
 						key("outcome", labels.get(6)), key("exception", labels.get(7))))
-			.forEach(line -> out.line(HEADER, line));
+			.forEach(others::line);
+		tables.forEach(table -> states(others, table));
+		sources.forEach(source -> events(others, source));
 	}
 
 	/** The traffic rows {@code which} picks, by the labels {@code labels} gives, with both windows' counts. */
@@ -402,18 +422,32 @@ public final class ServiceSheets {
 		return items.stream().filter(item -> name.equals(service.apply(item))).findFirst();
 	}
 
-	/** One service's sheet: its lines, which it owns, and the rows it saw only in the previous window, for later. */
+	/**
+	 * One service's sheet: its lines, which it owns, and the rows it saw only in the previous window, for later; or the
+	 * "Other rows", whose lines the header owns and which keep every row in place.
+	 */
 	private static final class Sheet {
 
+		/** The service, which owns the lines; {@link #HEADER} for the "Other rows". */
 		final String service;
 
 		final Out out;
 
-		final List<String> later = new ArrayList<>();
+		/** The lines of the rows seen only in the previous window, for the last section; null under "Other rows". */
+		final List<String> later;
 
-		Sheet(String service, Out out) {
+		private Sheet(String service, Out out, List<String> later) {
 			this.service = service;
 			this.out = out;
+			this.later = later;
+		}
+
+		static Sheet of(String service, Out out) {
+			return new Sheet(service, out, new ArrayList<>());
+		}
+
+		static Sheet others(Out out) {
+			return new Sheet(HEADER, out, null);
 		}
 
 		void line(String line) {
