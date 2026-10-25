@@ -133,14 +133,14 @@ Explorer and dossier replays keep today's behavior.
   - `check-recordings.sh`;
   - the docs.
 - [x] T2r The slice review's findings (the label and the flaky test; the `diagnose()` tests are T2r2, after T4). Route: inline, for the label and the flaky test. The `diagnose()` tests wait for T4 to end, because they touch `verify-agent.sh`, which T4 is running.
-- [ ] T2r2 After T4: tests for decision mode's two `diagnose()` branches, the ACT deadline headroom of the gathering test (R3-gathering-act-headroom) and the four T3r suggestions. Route: delegated writer (scripts, their tests, one loop test).
+- [x] T2r2 After T4: tests for decision mode's two `diagnose()` branches, the ACT deadline headroom of the gathering test (R3-gathering-act-headroom) and the four T3r suggestions. Route: delegated writer (scripts, their tests, one loop test).
 - [x] T3 Replay over many recordings. Route: delegated writer. It covers:
   - the manifest splits;
   - one case per recording;
   - `--split` and `--repeats`;
   - `record-replay.sh --split` and round-numbered files;
   - the summary and aggregate.
-- [ ] T4 Recording session: K rounds on the cloud route in decision mode, checked, then imported as `dev`, `holdout` and `probe`. Route: inline. A decision-mode fault takes about 21 minutes on the cloud route (19 of them baseline), so a round of F1-F3 takes about 65 minutes and 10 rounds about 11 h, unattended. Cost is about $0.10.
+- [x] T4 Recording session: K rounds on the cloud route in decision mode, checked, then imported as `dev`, `holdout` and `probe`. Route: inline. A decision-mode fault takes about 21 minutes on the cloud route (19 of them baseline), so a round of F1-F3 takes about 65 minutes and 10 rounds about 11 h, unattended. Cost is about $0.10.
 - [ ] T5 M0: replay decision mode on `dev`, local and cloud. Route: inline; about 2 h local and $0.05 cloud. qwen3:8b only if it is installed and its thinking can be turned off without code.
 
 ## Delivery
@@ -294,11 +294,37 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - The script exits 1, because each MISS is a `fail` line.
   - Cost: 159,390 prompt and 16,466 completion tokens, about $0.02 at the replay's prices.
 
+- 2026-10-25: T2r2 done (route: delegated writer; trigger: 5 files across four scripts, their tests and one loop test). Commit `31d2e83`.
+  - `diagnose()`'s two decision branches are tested on the script's own code. `test-lib.sh` reads `cleanup()`, `place_orders()` and `diagnose()` from `verify-agent.sh` with awk, and runs them with the lab stubbed:
+    - a failed baseline writes one `baseline failed` row and no `not scored` line;
+    - a window larger than N_max scores even a right report a MISS, with both FAIL lines and the score file.
+    - Mutation checks: without the reset after a failed baseline, the test fails on an extra "not scored" line; without `verdict=MISS`, it fails on the missing FAIL line.
+  - **A real bug, found by these tests.** Under `set -e`, `cleanup()`'s `(exit "$status")` ended the exit trap before `on_exit` whenever a run failed.
+    - So a failing run left an active injection unrestored, skipped `--down` and logged no `RESULT` line. T4's log has none.
+    - The pattern dates from `1662569`. T4's recordings are unaffected, because each fault restored its own injection.
+    - Fix: `cleanup()` runs with `set +e`. The parent reproduced the defect in a two-line bash experiment before keeping the fix.
+  - The gathering test's ACT deadline is 30 s, so the 3 s gathering has 27 s of real-time headroom and still outlasts the 2 s budget. Mutation check: with the old `elapsed()`, the same two tests fail (12 run, 2 failures).
+  - `record-replay.sh` refuses an unknown split in `ReplayCases`' words. A test compares its refusal with the driver's own output, so either split list drifting fails the suite. A Java check in the import was rejected: about 0.85 s per call, and the suite makes about 10 import calls.
+  - `replay-agent.sh` counts an empty case listing as 0. No input reaches it today (`--faults ,` is refused earlier), so it has no test.
+  - Results: `test-lib.sh` 143 cases; full suite 492 tests, 0 failures. Parent spot check: `test-lib.sh` 143 cases.
+  - About 142 authored lines.
+  - Follow-up: `verify-rag.sh:42` has the same trap pattern.
+- T2r2 review (`31d2e83`, base `0f1398f`, so with the two docs commits; four lenses, 6 files, 166 lines; consent granted): approved and acknowledged (lineage `review-1bbed37fc82ddc71`). R1 and R4 found nothing. Four suggestions, kept as follow-ups:
+  - R2-awk-function-extraction-fragile and R3-function-extraction-guard: the guard counts only the three `<name>() {` lines, so a body cut short at an inner column-0 `}` would pass it. Counting the closing braces, or `declare -F` after the eval, would prove a complete extraction.
+  - R2-decision-fault-settings-copied: `decision_fault` copies the script's settings (baseline minutes, N_max, order counts), so a changed default would leave the tests on the old values.
+  - R3-empty-listing-untested: the empty-listing guard has no test.
+- 2026-10-25: the import closes T4. Commit `226b460`.
+  - `record-replay.sh --split dev --rounds 1,3,5,7,9` and `--split holdout --rounds 2,4,6,8,10` on `verify-agent-20261024T162555Z`: 15 recorded and 0 refused each, every incident checked by `check-recordings.sh` first.
+  - The manifest holds 5 `dev`, 5 `holdout` and 2 `stress` recordings per fault for F1-F3 (acceptance criterion 4). `ReplayCases` lists the 15 odd-round recordings for `dev`.
+  - The recordings add about 1.7 MB of JSON, one line per file.
+  - After the import, `test-lib.sh` passes 143 cases and the full suite 492 tests. `target/surefire-reports` also kept 18 tests' reports from the other branch, so a count must only read this run's files.
+  - Assessed medium risk and under budget (60 lines), so no review yet: it stays in the slice from `31d2e83`.
+
 ## Next step
 
-On this branch:
-- T2r2: the `diagnose()` branch tests, the ACT deadline headroom and the four T3r suggestions;
-- the import, with odd rounds in `dev` and even rounds in `holdout`, which closes T4;
-- T5 (M0), with the machine otherwise idle, because a concurrent build would slow the local route.
+T5 (M0) on this branch, with the machine otherwise idle, because a concurrent build would slow the local route:
+- the cloud route first, `replay-agent.sh --mode decision --split dev --route cloud`: 15 samples, about $0.01;
+- then the local route, `--route local`: about 2 h.
+- `qwen3:8b` is installed. It joins M0 only if its thinking can be turned off without code; the local route sets no `think` option today.
 
 Then rebase `feat/service-assessment` onto this branch's tip.
