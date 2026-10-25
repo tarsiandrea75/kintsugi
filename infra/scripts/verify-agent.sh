@@ -141,6 +141,9 @@ current_incident=""
 previous_fault_end=""
 cleanup() {
   local status=$?
+  # The trap runs to its end. Under set -e, the "(exit "$status")" below, which hands on_exit a failed run's status,
+  # would end it before on_exit: no restore of an active injection, no --down and no RESULT line.
+  set +e
   if [[ -n "$current_fault" ]]; then
     fail "$current_label: not scored, the run stopped before its score"
     printf '%s\t%s\t%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\t%s\n' "$current_fault" "$mode" "$route" \
@@ -207,7 +210,8 @@ place_orders() {
 }
 
 # Runs fault $1 in round $2: space out from the previous one (in decision mode, a baseline phase), traffic, inject,
-# traffic, incident, restore, score.
+# traffic, incident, restore, score. test-lib.sh runs it in decision mode, with place_orders and cleanup, each read from
+# this file from its "<name>() {" line to the first "}" alone on a line.
 diagnose() {
   local fault=$1 round=$2 label incident window opened traffic_start started_at seconds body status reason reported
   local truth steps verdict injection incident_mode incident_route prompt_tokens completion_tokens incident_model

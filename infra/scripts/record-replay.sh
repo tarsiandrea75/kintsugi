@@ -54,6 +54,9 @@ while (( $# )); do
   esac
 done
 # The splits a recording can join (odd/tasks/decision-instrument.md): the checks and messages below take them from here.
+# They are ReplayCases.SPLITS, in its order (agent/src/test/java/dev/kintsugi/agent/loop/ReplayCases.java), the list
+# the replay driver checks every manifest line against. They are listed again here so that the import needs no JDK;
+# test-lib.sh checks that this script refuses an unknown split in the driver's words, list included.
 SPLITS=(dev holdout stress probe)
 # Succeeds when $1 is one of SPLITS.
 is_split() {
@@ -65,7 +68,8 @@ is_split() {
 split_choices=$(printf '%s, ' "${SPLITS[@]:0:${#SPLITS[@]}-1}")
 split_choices="${split_choices%, } or ${SPLITS[-1]}"
 [[ -n "$split" ]] || { echo "--split is required: $split_choices; see --help" >&2; exit 2; }
-is_split "$split" || { echo "Unknown split '$split'; choose $split_choices" >&2; exit 2; }
+# The driver's refusal of an unknown split (ReplayCases.decisionCases), word for word, as replay-agent.sh shows it.
+is_split "$split" || { echo "unknown split '$split': choose $split_choices" >&2; exit 2; }
 # The rounds --rounds selects, as " 1 2 3 ": each item is a round or a range of rounds, from 1 to 999.
 selected_rounds=" "
 if [[ -n "$rounds" ]]; then

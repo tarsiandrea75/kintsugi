@@ -251,11 +251,12 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theGatheringDoesNotCountAgainstTheIncidentsTimeBudget() {
 		// Like the warm-up: the incident's time budget starts when the warm-up ends, after the gathering, which only
-		// the ACT deadline bounds. The gathering (3 s) outlasts the whole budget (2 s), which still leaves the report
-		// call and its writes ample real time on a loaded host.
+		// the ACT deadline bounds. The gathering (3 s) outlasts the whole budget (2 s), so a budget that counted it
+		// would end the run, and it stays far inside the ACT deadline (30 s): 27 s to spare on a loaded host. The
+		// budget still leaves the report call and its writes ample real time.
 		this.lab.slow("service_restarts", Duration.ofSeconds(3));
 		this.model.text(unknownReport());
-		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(5), Duration.ofSeconds(2), Clock.systemUTC());
+		this.loop = loop(AgentMode.DECISION, Duration.ofSeconds(30), Duration.ofSeconds(2), Clock.systemUTC());
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 

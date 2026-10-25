@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Tests for lib.sh's pure helpers (no lab, no docker): incident_fields and agent_verdict, which verify-agent.sh uses
 # to score an incident, the windows and the baseline phase (sleep, the clock and the orders stubbed), and more; also
-# the options of replay-agent.sh and verify-agent.sh, check-recordings.sh, and record-replay.sh on temporary
-# directories. Run: infra/scripts/test-lib.sh. Exits non-zero on the first failing case.
+# the options of replay-agent.sh and verify-agent.sh, verify-agent.sh's own flow for one decision-mode fault (the lab
+# stubbed), check-recordings.sh, and record-replay.sh on temporary directories. Run: infra/scripts/test-lib.sh. Exits
+# non-zero on the first failing case.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -378,6 +379,103 @@ ${tab}seconds${tab}verdict${tab}round"
 expect "explorer mode logs as before: no rounds, no baseline" "$(verify_agent explorer | grep -F '....  ')" \
   "....  logging to $KEY_DIR/explorer; faults: F1 F2 F3; mode: explorer; route: local"
 
+# verify-agent.sh's flow for one fault in decision mode: its own diagnose(), the place_orders() it calls and its exit
+# trap, cleanup(). They are read from the script, each from its "<name>() {" line to the first "}" alone on a line, and
+# defined in a subshell, so these cases run the script's code, not a copy; what they reach in the lab is stubbed there.
+verify_agent_functions=$(awk '/^(cleanup|place_orders|diagnose)\(\) \{$/, /^}$/' \
+  "$(dirname "${BASH_SOURCE[0]}")/verify-agent.sh")
+expect "diagnose, place_orders and cleanup are read from verify-agent.sh" \
+  "$(grep -cE '^(cleanup|place_orders|diagnose)\(\) \{$' <<<"$verify_agent_functions")" 3
+diagnose_injection=6f1c2a4e-0d7b-4c3e-9a51-2b8e7d9c4f10
+diagnose_incident=0b5e8d2c-7a14-4f6b-8e3d-5c9a1f2e7b64
+# Runs fault $1 of round $2 as "verify-agent.sh --mode decision --route cloud --rounds K" does, into run directory $3,
+# then ends the run as the script does after its last fault, through its exit trap; prints what the run printed. Every
+# order is answered $4, PAID or refused. Past the baseline, the fault is injected as diagnose_injection, and its
+# incident, diagnose_incident, opens with a window of $5 minutes and ends COMPLETED with a report that names the truth.
+decision_fault() {
+  (
+    set -euo pipefail
+    eval "$verify_agent_functions"
+    # The script's settings for such a run.
+    mode=decision route=cloud rounds_given=true RUN_DIR=$3
+    SYMPTOM="Customers report that checkout orders are not completing as expected"
+    HEALTHY_ORDERS=3 FAULT_ORDERS=6 ORDER_GAP_SECONDS=2 SETTLE_SECONDS=30
+    window_margin_minutes=2 DECISION_WINDOW_MAX_MINUTES=9 BASELINE_MINUTES=19
+    current_fault="" current_round="" current_label="" current_incident="" previous_fault_end="" failures=0
+    # The restore's record (record_fault_end) goes to the run directory, not the repository's out/.
+    LAST_FAULT_END_FILE="$3/.last-fault-end"
+    # The clock and sleep as above. SECONDS, once unset, is a plain variable: frozen at 0, it fixes the seconds column.
+    clock=1700000000
+    date() { echo "$clock"; }
+    sleep() { clock=$((clock + $1)); }
+    unset SECONDS
+    SECONDS=0
+    # The stubs read stub_* variables of their own: bash's scoping is dynamic, so a stub called from diagnose would see
+    # diagnose's locals (window, truth, body...) under those names.
+    stub_answer=$4 stub_window=${5:-}
+    place_order() {
+      if [[ "$stub_answer" == PAID ]]; then
+        echo "201 at-$((clock - 1700000000)) PAID 0.1"
+      else
+        echo "503 at-$((clock - 1700000000)) none 3.0"
+      fi
+    }
+    injector_call() {
+      case "$1 $2" in
+        "POST /faults") echo "201 {\"id\":\"$diagnose_injection\",\"status\":\"ACTIVE\"}" ;;
+        "POST /faults/$diagnose_injection/restore") echo '200 {"status":"RESTORED"}' ;;
+        *) echo "000 " ;;
+      esac
+    }
+    open_incident() { echo "$diagnose_incident $stub_window"; }
+    stub_body='{"status":"COMPLETED","mode":"decision","route":"cloud","model":"claude-haiku-5-5",'
+    stub_body+='"steps":[{"kind":"DOSSIER"},{"kind":"REPORT","promptTokens":5300,"completionTokens":550}],'
+    stub_body+='"report":{"rootCauseService":"gateway-mock","rootCauseCategory":"DEPENDENCY_LATENCY"}}'
+    agent_call() { echo "200 $stub_body"; }
+    # curl, which saves the incident's full record, fails: diagnose warns and goes on.
+    curl() { return 7; }
+    # The injection's truth row, read as the faults role.
+    psql_faults() { echo 'gateway-mock|DEPENDENCY_LATENCY'; }
+    : >"$RUN_DIR/summary.tsv"
+    trap cleanup EXIT
+    diagnose "$1" "$2"
+    # The script's last line.
+    (( failures == 0 ))
+  ) 2>&1
+}
+diagnose_dir="$KEY_DIR/diagnose"
+mkdir -p "$diagnose_dir/baseline-failed" "$diagnose_dir/window-too-large"
+# A failed baseline (every order refused, so the third one fails it, as above): the fault is not injected and has no
+# incident, and its one summary.tsv line is a miss. diagnose then clears the fault it was running, so the exit trap
+# finds none and writes no second line, "not scored".
+fault_run=$(decision_fault F1 2 "$diagnose_dir/baseline-failed" refused)
+expect "a failed baseline fails its fault once, and the run then ends through its exit trap with nothing more" \
+  "$(grep -v '^WARN  ' <<<"$fault_run")" \
+  "....  --- F1-r2
+....  baseline: one healthy order every 50s for 19 min
+FAIL  F1-r2: baseline order at-100: expected 201 PAID, got 503 none after 2 restarts; the baseline failed, so the\
+ fault is not injected and is scored a miss
+RESULT: FAIL (1 failed check(s), exit status 1)"
+expect "a failed baseline's summary.tsv line, the fault's only one" "$(<"$diagnose_dir/baseline-failed/summary.tsv")" \
+  "F1${tab}decision${tab}cloud${tab}-${tab}-${tab}baseline failed${tab}-${tab}-${tab}-${tab}-${tab}-${tab}MISS${tab}2"
+# An incident whose window is larger than N_max, as after a wait for another running incident: the fault fails when its
+# incident opens, and its score is a miss although the report names the truth, with the reason first.
+fault_run=$(decision_fault F2 1 "$diagnose_dir/window-too-large" PAID 10)
+expect "a window larger than N_max fails the fault, and a right report is scored a miss" \
+  "$(grep -e '^FAIL  ' -e '^RESULT' <<<"$fault_run")" \
+  "FAIL  F2-r1: window 10 min is larger than N_max (9 min): its previous window starts before the baseline phase, so\
+ the baseline is not clean
+FAIL  F2-r1: window 10 min, larger than N_max (9 min): the baseline is not clean; the report names\
+ gateway-mock|DEPENDENCY_LATENCY, the truth
+RESULT: FAIL (2 failed check(s), exit status 1)"
+expect "its summary.tsv line is a miss that keeps the incident's outcome" \
+  "$(<"$diagnose_dir/window-too-large/summary.tsv")" \
+  "F2${tab}decision${tab}cloud${tab}$diagnose_injection${tab}$diagnose_incident${tab}COMPLETED\
+${tab}gateway-mock|DEPENDENCY_LATENCY${tab}gateway-mock|DEPENDENCY_LATENCY${tab}2${tab}10${tab}0${tab}MISS${tab}1"
+expect "its score file records the window and the miss" \
+  "$(grep -e '^window' -e '^verdict' "$diagnose_dir/window-too-large/F2-r1-score.txt")" \
+  "window (minutes): 10"$'\n'"verdict: MISS"
+
 # check-recordings.sh: a clean decision-mode recording passes; the 2026-10-19 recordings (the committed replay copies,
 # under the names verify-agent.sh gave them) fail, each on what an earlier fault or the lab's start left in its windows.
 check_recordings="$(dirname "${BASH_SOURCE[0]}")/check-recordings.sh"
@@ -425,10 +523,11 @@ printf '%s\n' "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${ta
   "F1${tab}explorer${tab}cloud${tab}a|B${tab}F1/r3-F1.json${tab}id-3${tab}dev" \
   "F1${tab}decision${tab}cloud${tab}a|B${tab}F1/r4-F1.json${tab}id-4${tab}holdout" \
   "F3${tab}decision${tab}cloud${tab}c|D${tab}F3/r1-F3.json${tab}id-5${tab}dev" >"$manifest_dir/recordings.tsv"
-# replay-agent.sh over the replay directory $1, then over the temporary manifest.
+# Runs replay-agent.sh over the replay directory $1, with the other arguments as its options.
 replay_agent_over() {
   REPLAY_DIR="$1" PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" --route local "${@:2}" 2>&1
 }
+# Runs replay-agent.sh over the temporary manifest, with these arguments as its options.
 replay_agent() { replay_agent_over "$manifest_dir" "$@"; }
 option_check() {
   local out
@@ -441,8 +540,9 @@ expect "decision mode refuses --samples, and points to --repeats" \
  run each one M times"$'\n'"exit 2"
 expect "dossier mode refuses --split" "$(option_check --mode dossier --split dev)" "2 --split"
 expect "explorer and dossier modes refuse --repeats" "$(option_check --mode both --repeats 2)" "2 --repeats"
-expect "an unknown split exits 2 with the driver's reason, before Maven" \
-  "$(replay_agent --mode decision --split train; echo "exit $?")" \
+# Kept for record-replay.sh's refusal of the same split, below.
+driver_refusal=$(replay_agent --mode decision --split train; echo "exit $?")
+expect "an unknown split exits 2 with the driver's reason, before Maven" "$driver_refusal" \
   "unknown split 'train': choose dev, holdout, stress or probe"$'\n'"exit 2"
 expect "a 4-digit --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 1000)" \
   "2 --repeats"
@@ -494,10 +594,12 @@ f3_r1="F3${tab}decision${tab}cloud${tab}order-service|CONFIGURATION${tab}F3/veri
 ${tab}id-f3-r1${tab}dev"
 expect "--split is required" "$(record "$new_run"; echo "exit $?")" \
   "--split is required: dev, holdout, stress or probe; see --help"$'\n'"exit 2"
-expect "an unknown split exits 2" "$(record --split train "$new_run"; echo "exit $?")" \
-  "Unknown split 'train'; choose dev, holdout, stress or probe"$'\n'"exit 2"
+# record-replay.sh keeps its own list of the splits, so that the import needs no JDK. It refuses an unknown split in
+# the words replay-agent.sh printed above, which are ReplayCases' own, list included: the two lists cannot drift apart.
+expect "an unknown split exits 2 with the driver's reason" "$(record --split train "$new_run"; echo "exit $?")" \
+  "$driver_refusal"
 expect "two splits in one --split are no split" "$(record --split 'dev holdout' "$new_run"; echo "exit $?")" \
-  "Unknown split 'dev holdout'; choose dev, holdout, stress or probe"$'\n'"exit 2"
+  "unknown split 'dev holdout': choose dev, holdout, stress or probe"$'\n'"exit 2"
 expect "a range of rounds that ends before it starts exits 2" \
   "$(record --split dev --rounds 5-3 "$new_run"; echo "exit $?")" \
   "--rounds: the range 5-3 ends before it starts"$'\n'"exit 2"

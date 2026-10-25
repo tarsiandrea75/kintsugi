@@ -129,7 +129,10 @@ if [[ "$mode" == decision ]]; then
   java_bin=${JAVA_HOME:+$JAVA_HOME/bin/}java
   listing=$("$java_bin" "$REPO_DIR/agent/src/test/java/dev/kintsugi/agent/loop/ReplayCases.java" "$REPLAY_DIR" \
     "$split" "$faults") || exit $(( $? == 2 ? 2 : 1 ))
-  mapfile -t cases <<<"$listing"
+  # A here-string always supplies a line, so an empty listing (no fault to list, which the checks above already
+  # refuse) would count as one case: it is not read at all.
+  cases=()
+  [[ -z "$listing" ]] || mapfile -t cases <<<"$listing"
   recordings=${#cases[@]}
   total=$((recordings * repeats))
   info "decision mode, split $split: $recordings recording(s) of ${selected[*]}, each replayed $repeats time(s):" \
