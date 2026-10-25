@@ -341,6 +341,6 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
 
 ## Next step
 
-The human reads M0 (gate 1 of `odd/tasks/service-assessment.md`) and decides when `qwen3:8b` runs: it needs the machine idle for about 2 h.
+Gate 1, the human's decision (2026-10-25): Part B goes on now, and `qwen3:8b` runs later, when the machine is otherwise idle for about 2 h. T5 closes with that run.
 
 Then rebase `feat/service-assessment` onto this branch's tip.
