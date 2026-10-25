@@ -67,6 +67,12 @@ kintsugi:
     # decision, where code gathers the dossier before the warm-up and the model writes the report from it alone, with no
     # evidence phase. Recorded on every incident.
     mode: ${KINTSUGI_AGENT_MODE:explorer}
+    # How decision mode writes its dossier for the model (agent spec, "Decision mode", "Evidence dossier rendering";
+    # odd/tasks/service-assessment.md T1): tables, the default and the dossier of dossier mode, by data source; or
+    # sheets, one fact sheet per service, each after the services it calls. Read in decision mode only; any other value
+    # stops the start.
+    decision:
+      view: ${KINTSUGI_AGENT_DECISION_VIEW:tables}
     # Where the model runs (agent spec, "Routes"; ADR-012; ADR-010, "Amended in cloud-route T3"): local, the default,
     # on Ollama with kintsugi.agent.model, or cloud, on Anthropic with kintsugi.agent.cloud. Any other value stops the
     # start. Recorded on every incident with the model.

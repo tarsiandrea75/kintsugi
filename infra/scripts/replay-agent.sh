@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Replays the recorded faults through the real agent loop and scores every sample (odd/tasks/replay-harness.md T4,
-# odd/tasks/decision-instrument.md T3). Run with --help.
+# odd/tasks/decision-instrument.md T3, odd/tasks/service-assessment.md T1). Run with --help.
 set -euo pipefail
 
 usage() {
@@ -13,22 +13,25 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --route local         # the local model on Ollama, 127.0.0.1:11434
   infra/scripts/replay-agent.sh --mode decision       # each dev recording once: the dossier, then one report call
   infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
+  infra/scripts/replay-agent.sh --mode decision --view sheets   # the dossier as one fact sheet per service
 
   --route cloud|local            the model's route (default cloud)
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
   --samples N                    explorer and dossier: samples per fault and mode, 1 to 999 (default 1)
   --split NAME                   decision: the recordings to replay, dev (default), holdout, stress or probe
   --repeats M                    decision: runs of each recording, 1 to 999 (default 1)
+  --view tables|sheets           decision: how the dossier is written for the model (default tables)
   --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
 
 It runs ReplayRunTest (./mvnw test -Preplay) in agent/: the real loop and the route's real model over the recorded
 tool outputs in agent/src/test/resources/replay/, each sample scored against the recorded truth. It writes
 infra/scripts/out/replay-<UTC time>-<route>/: <fault>-<mode>-<recording>-<n>.json (the incident with its steps),
-summary.tsv (one line per sample: verdict, coverage, conflicts, tokens, seconds, then its split and recording) and
-aggregate.tsv (per fault, mode and split: the distinct recordings, the samples, matches out of samples, mean coverage,
-tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens; then
-the covered samples, coverage at least 0.8, and the matches among them, and the samples whose dossier was fully
-recorded). A sample with coverage below 1 had calls no recording holds: read it as such.
+summary.tsv (one line per sample: verdict, coverage, conflicts, tokens, seconds, then its split, recording and view)
+and aggregate.tsv (per fault, mode, split and view: the distinct recordings, the samples, matches out of samples, mean
+coverage, tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion
+tokens; then the covered samples, coverage at least 0.8, and the matches among them, and the samples whose dossier was
+fully recorded). A sample with coverage below 1 had calls no recording holds: read it as such. The view is a decision
+sample's, and - for the others.
 
 A decision run (agent spec, "Decision mode") has one case per recording of the split: each line of recordings.tsv
 for a chosen fault, in that split, recorded in decision or dossier mode. Each case replays its own recording alone,
@@ -38,9 +41,14 @@ run from its source by the JDK (about a second): an unknown split, a chosen faul
 manifest line the driver refuses stops the run there. The splits: dev to tune on, holdout read once, stress for the
 2026-10-19 recordings whose windows hold other faults, probe for faults never tuned on.
 
+--view sets kintsugi.agent.decision.view for the run (agent spec, "Decision mode"; odd/tasks/service-assessment.md):
+tables, the default, is the dossier of dossier mode, by data source; sheets writes the same facts as one sheet per
+service, each after the services it calls, with the rows seen only in the previous window apart. Every line of
+summary.tsv and aggregate.tsv names the view, so a result is attributable to its variant.
+
 Explorer and dossier samples pool the fault's stress recordings, the ones they were measured on, the first one in the
-sample's mode served first, so recordings imported into dev, holdout or probe never change them; --split and
---repeats are refused there, as --samples is in decision mode.
+sample's mode served first, so recordings imported into dev, holdout or probe never change them; --split, --repeats
+and --view are refused there, as --samples is in decision mode.
 
 EXPLORER REPLAYS ARE NOT VALID MEASUREMENTS: under exact matching the explorer's model-chosen calls are mostly not
 recorded (coverage 0.00-0.38 in the T4 smoke check), so its samples measure the replay's gaps, not the agent. Explorer
@@ -64,12 +72,12 @@ MAX_CLOUD_SAMPLES=60
 route=cloud
 mode=dossier
 faults=F1,F2,F3
-# Unset until given: decision mode refuses --samples, and the other modes refuse --split and --repeats.
-unset samples split repeats
+# Unset until given: decision mode refuses --samples, and the other modes refuse --split, --repeats and --view.
+unset samples split repeats view
 while (( $# )); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --route|--mode|--samples|--split|--repeats|--faults)
+    --route|--mode|--samples|--split|--repeats|--view|--faults)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
       set -- "$1=$2" "${@:3}" ;;
     --route=*) route=${1#*=}; shift ;;
@@ -77,6 +85,7 @@ while (( $# )); do
     --samples=*) samples=${1#*=}; shift ;;
     --split=*) split=${1#*=}; shift ;;
     --repeats=*) repeats=${1#*=}; shift ;;
+    --view=*) view=${1#*=}; shift ;;
     --faults=*) faults=${1#*=}; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -94,11 +103,15 @@ if [[ "$mode" == decision ]]; then
   repeats=${repeats-1}
   [[ "$repeats" =~ ^[1-9][0-9]{0,2}$ ]] \
     || { echo "--repeats needs an integer from 1 to 999, not '$repeats'" >&2; exit 2; }
+  view=${view-tables}
+  [[ "$view" == tables || "$view" == sheets ]] || { echo "Unknown view '$view'; choose tables or sheets" >&2; exit 2; }
 else
   [[ -z "${split+given}" ]] || { echo "--split applies to decision mode only: explorer and dossier samples pool the" \
     "fault's stress recordings" >&2; exit 2; }
   [[ -z "${repeats+given}" ]] \
     || { echo "--repeats applies to decision mode only: explorer and dossier replays take --samples" >&2; exit 2; }
+  [[ -z "${view+given}" ]] || { echo "--view applies to decision mode only: explorer has no dossier, and dossier mode" \
+    "writes the tables" >&2; exit 2; }
   samples=${samples-1}
   [[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] \
     || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
@@ -135,8 +148,8 @@ if [[ "$mode" == decision ]]; then
   [[ -z "$listing" ]] || mapfile -t cases <<<"$listing"
   recordings=${#cases[@]}
   total=$((recordings * repeats))
-  info "decision mode, split $split: $recordings recording(s) of ${selected[*]}, each replayed $repeats time(s):" \
-    "$total samples"
+  info "decision mode, split $split, view $view: $recordings recording(s) of ${selected[*]}, each replayed" \
+    "$repeats time(s): $total samples"
 else
   modes=$([[ "$mode" == both ]] && echo 2 || echo 1)
   total=$(( ${#selected[@]} * modes * samples ))
@@ -162,8 +175,10 @@ fi
 
 OUT_DIR="$REPO_DIR/infra/scripts/out/replay-$(date -u +%Y%m%dT%H%M%SZ)-$route"
 if [[ "$mode" == decision ]]; then
-  info "replaying ${selected[*]}; mode: decision; split: $split; repeats: $repeats; route: $route; out: $OUT_DIR"
-  options=("-Dreplay.split=$split" "-Dreplay.repeats=$repeats")
+  info "replaying ${selected[*]}; mode: decision; split: $split; repeats: $repeats; view: $view; route: $route;" \
+    "out: $OUT_DIR"
+  # Always passed, so the run's view is the one asked for, never one KINTSUGI_AGENT_DECISION_VIEW leaves in the shell.
+  options=("-Dreplay.split=$split" "-Dreplay.repeats=$repeats" "-Dkintsugi.agent.decision.view=$view")
 else
   info "replaying ${selected[*]}; mode: $mode; route: $route; samples: $samples; out: $OUT_DIR"
   options=("-Dreplay.samples=$samples")

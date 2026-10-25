@@ -540,6 +540,11 @@ expect "decision mode refuses --samples, and points to --repeats" \
  run each one M times"$'\n'"exit 2"
 expect "dossier mode refuses --split" "$(option_check --mode dossier --split dev)" "2 --split"
 expect "explorer and dossier modes refuse --repeats" "$(option_check --mode both --repeats 2)" "2 --repeats"
+expect "dossier mode refuses --view, which only decision mode reads" \
+  "$(replay_agent --mode dossier --view sheets; echo "exit $?")" \
+  "--view applies to decision mode only: explorer has no dossier, and dossier mode writes the tables"$'\n'"exit 2"
+expect "an unknown view exits 2 on the option itself" "$(replay_agent --mode decision --view charts; echo "exit $?")" \
+  "Unknown view 'charts'; choose tables or sheets"$'\n'"exit 2"
 # Kept for record-replay.sh's refusal of the same split, below.
 driver_refusal=$(replay_agent --mode decision --split train; echo "exit $?")
 expect "an unknown split exits 2 with the driver's reason, before Maven" "$driver_refusal" \
@@ -551,7 +556,11 @@ decision_run=$(replay_agent --mode decision --faults F1,F3 --repeats 2)
 expect "decision mode's options pass, and the run stops at the Ollama check" "$?" 2
 expect "one case per dev recording of the chosen faults made in decision or dossier mode, each run --repeats times" \
   "$(grep -F '....  ' <<<"$decision_run")" \
-  "....  decision mode, split dev: 3 recording(s) of F1 F3, each replayed 2 time(s): 6 samples"
+  "....  decision mode, split dev, view tables: 3 recording(s) of F1 F3, each replayed 2 time(s): 6 samples"
+sheets_run=$(replay_agent --mode decision --view sheets --faults F1)
+expect "decision mode takes --view sheets, and the run stops at the Ollama check" "$?" 2
+expect "the run names its view" "$(grep -F '....  ' <<<"$sheets_run")" \
+  "....  decision mode, split dev, view sheets: 2 recording(s) of F1, each replayed 1 time(s): 2 samples"
 expect "a chosen fault with no recording in the split stops the run before Maven" \
   "$(replay_agent --mode decision --split holdout --faults F1,F3; echo "exit $?")" \
   "no decision or dossier recording of F3 in split holdout of $manifest_dir/recordings.tsv"$'\n'"exit 2"

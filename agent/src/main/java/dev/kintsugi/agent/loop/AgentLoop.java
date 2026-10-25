@@ -44,7 +44,7 @@ import tools.jackson.databind.node.StringNode;
 
 import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.DossierGatherer;
-import dev.kintsugi.agent.dossier.DossierRenderer;
+import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentRunner;
 import dev.kintsugi.agent.incident.IncidentStatus;
@@ -67,7 +67,9 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  * A run starts with one warm-up request, which loads the model and counts against no budget. In dossier mode
  * ({@link AgentMode}, T5a) code then gathers the evidence dossier, which every later call reads after the system
  * message, and the run skips {@code TRIAGE}. Decision mode gathers the dossier before the warm-up and has no evidence
- * phase: the run goes from the warm-up to {@code CONCLUDE} (decision-instrument). {@code TRIAGE} (explorer mode only),
+ * phase: the run goes from the warm-up to {@code CONCLUDE} (decision-instrument), and writes its dossier in the view of
+ * {@code kintsugi.agent.decision.view}, the tables or the per-service sheets (service-assessment T1); the other modes
+ * always write the tables. {@code TRIAGE} (explorer mode only),
  * {@code INVESTIGATE} and {@code KNOWLEDGE} then let the model call the phase's tools within the phase's allowance and
  * the incident's tool budget; the first answer of each phase also writes the phase's plan in its text, which code
  * checks and records but which never ends the run. The model sees each result only as its code-built summary, in a
@@ -114,6 +116,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	private final DossierGatherer gatherer;
 
+	/** How decision mode writes its dossier; the other modes ignore it and write the tables. */
+	private final DossierView decisionView;
+
 	/** Runs each model call, so that the loop can stop waiting for it at its time budget. */
 	private final ExecutorService modelCalls;
 
@@ -123,9 +128,17 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		this(incidents, router, labTools, settings, clock, AgentMode.EXPLORER);
 	}
 
+	/** A loop in {@code mode} whose decision-mode dossier, if any, is written as the tables, the default view. */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, AgentMode mode) {
+		this(incidents, router, labTools, settings, clock, mode, DossierView.TABLES);
+	}
+
+	/** A loop in {@code mode} whose dossier, in decision mode only, is written in {@code decisionView}. */
+	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
+			Clock clock, AgentMode mode, DossierView decisionView) {
 		this.mode = mode;
+		this.decisionView = decisionView;
 		this.gatherer = new DossierGatherer(labTools, clock);
 		this.incidents = incidents;
 		this.router = router;
@@ -278,7 +291,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * the dossier, and a gathering that throws or runs past its bound gives a message that says so, and the run goes
 	 * on. Only the incident's own time running out ends the run. In decision mode the gathering comes before the
 	 * warm-up, whose end starts the incident's time budget, so that budget neither counts nor bounds it: the deadline
-	 * alone does.
+	 * alone does. Decision mode renders the dossier in its view, the other modes as tables (service-assessment T1).
 	 */
 	private void dossier(Run run) {
 		checkTime(run);
@@ -293,7 +306,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		String calls = null;
 		try {
 			Dossier dossier = future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
-			run.dossierText = DossierRenderer.render(dossier);
+			run.dossierText = (run.mode == AgentMode.DECISION ? this.decisionView : DossierView.TABLES).render(dossier);
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
 		}

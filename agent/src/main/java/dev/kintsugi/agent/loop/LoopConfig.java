@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 
+import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.lab.LabTools;
 
@@ -43,12 +44,16 @@ class LoopConfig {
 
 	/**
 	 * The loop, in the mode of {@code kintsugi.agent.mode} (T5a): {@code explorer}, the default, {@code dossier} or
-	 * {@code decision} (decision-instrument); any other value stops the agent's start with the property's name.
+	 * {@code decision} (decision-instrument). Decision mode writes its dossier in the view of
+	 * {@code kintsugi.agent.decision.view} (service-assessment T1): {@code tables}, the default, or {@code sheets}; the
+	 * other modes ignore it. Any other value of either stops the agent's start with the property's name.
 	 */
 	@Bean
 	AgentLoop agentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock, @Value("${kintsugi.agent.mode:explorer}") String mode) {
-		return new AgentLoop(incidents, router, labTools, settings, clock, AgentMode.of(mode));
+			Clock clock, @Value("${kintsugi.agent.mode:explorer}") String mode,
+			@Value("${" + DossierView.PROPERTY + ":tables}") String decisionView) {
+		return new AgentLoop(incidents, router, labTools, settings, clock, AgentMode.of(mode),
+				DossierView.of(decisionView));
 	}
 
 	/**

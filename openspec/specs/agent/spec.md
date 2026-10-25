@@ -571,11 +571,11 @@ A call MUST be checked and capped exactly as `McpLabTools` does it (the same `li
 The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST run each sample with the real `AgentLoop` in the sample's mode, the route's real `ChatModel` and settings (the application's own `ModelRouter` and `LoopSettings`), a fresh `ReplayLabTools` and the recorded tool listing. The manifest, `recordings.tsv`, has one line per recording, `fault mode route truth file incident split`. The split is one of four **(decision-instrument T3)**: `dev` to tune on, `holdout` read once, `stress` for the 2026-10-19 recordings whose windows hold other faults, and `probe` for faults never tuned on. A line with fewer columns or another split fails the driver as it reads the manifest. `ReplayCases` reads the manifest and picks the recordings a run replays, for the driver and for `replay-agent.sh` **(decision-instrument T3r)**: the script runs it from its source, with the JDK's launcher, to list a decision run's cases before Maven, so its count, which bounds a cloud run, and its refusals (exit 2, with the driver's reason) are the driver's own. What a sample is served depends on its mode:
 - An explorer or dossier sample of a fault (`replay.samples` per fault and mode) MUST be served the fault's `stress` recordings, all modes pooled, and no other **(decision-instrument T3r)**: the 2026-10-19 recordings these modes were measured on, so an import into `dev`, `holdout` or `probe` never changes their outputs or conflicts, and a `holdout` recording is never served outside a decision run. Its primary recording is the fault's first `stress` recording in the sample's mode, else its first `stress` recording. It is handed to `ReplayLabTools` first, so when two recordings hold the same call with different outputs the primary's wins. A fault with no `stress` recording MUST fail with an `IllegalArgumentException` before any model call. The sample is no case of a split: its split is `-`.
 - Decision mode MUST replay cases, not faults **(decision-instrument T3)**. Each manifest line of a chosen fault, in the chosen split (`replay.split`, default `dev`), recorded in decision or dossier mode, is one case, and each case runs `replay.repeats` times (default 1). A case's sample is served its own recording alone, its primary: that recording holds every call the dossier makes, so pooling would only add other incidents' outputs. The cases come in the order of the chosen faults, each fault's in manifest order. An unknown split, or a chosen fault with no case in the split, MUST fail with an `IllegalArgumentException` before any model call.
-- `replay.samples` MUST be refused in decision mode, and `replay.split` and `replay.repeats` outside it, with an `IllegalArgumentException` naming the property, before any model call, so a run is never other than the one asked for.
+- `replay.samples` MUST be refused in decision mode, and `replay.split`, `replay.repeats` and `kintsugi.agent.decision.view` outside it, with an `IllegalArgumentException` naming the property, before any model call, so a run is never other than the one asked for. A decision run writes its dossier in the view of `kintsugi.agent.decision.view` ("Decision mode"; **service-assessment T1**), set as a system property, `tables` when it is not.
 
 Each recording and the tool listing are parsed once per run; only the `ReplayLabTools`, and so its counters, is new per sample. A recording without `startedAt`, without `symptom` or without a positive `sinceMinutes` MUST fail with an `IllegalArgumentException` naming the fault and the file, before any model call: in decision mode, every case of the split is checked before the first sample. The incident is opened with the primary recording's symptom and `sinceMinutes`, on a clock offset so that "now" is that recording's `startedAt`: windows and uptimes computed from the clock match the recorded timestamps, and the time budgets still run. Each sample is scored by `agent_verdict`'s rule: `MATCH` only when the incident is `COMPLETED` and its report's `rootCauseService|rootCauseCategory` equals the recorded truth of `recordings.tsv`, else `MISS`.
 
-It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as the full view shows it; `<recording>` is the primary recording's file name without `.json`) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds split recording`). Then it writes `aggregate.tsv` per fault, mode, route and split (`fault mode route split recordings samples matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd`):
+It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as the full view shows it; `<recording>` is the primary recording's file name without `.json`) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds split recording view`). Then it writes `aggregate.tsv` per fault, mode, route, split and view (`fault mode route split view recordings samples matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd`); the view is a decision sample's, so a result is attributable to its variant, and `-` for an explorer or dossier sample:
 - the distinct recordings the samples opened on, which are the independent observations, and the samples, which outnumber them with repeats;
 - matches out of samples, and mean coverage;
 - the covered samples, those with coverage at least 0.8 (`COVERED_THRESHOLD`: a fully replayed dossier-mode sample still shows about 0.91, its model-chosen calls being unrecorded), and the matches among them out of them;
@@ -626,10 +626,16 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 - AND an unknown split, a chosen fault with no case, or a manifest line in the split `test` prints the driver's reason and exits 2, which stops `replay-agent.sh` before Maven
 
 #### Scenario: A property of the other kind of run is refused (decision-instrument T3r)
-- GIVEN `replay.samples` in decision mode, or `replay.split` or `replay.repeats` in explorer or dossier mode
+- GIVEN `replay.samples` in decision mode, or `replay.split`, `replay.repeats` or `kintsugi.agent.decision.view` (service-assessment T1) in explorer or dossier mode
 - WHEN the replay run checks its properties
 - THEN an `IllegalArgumentException` names the property, before any model call
-- AND `replay.split` and `replay.repeats` in decision mode, or `replay.samples` in explorer or dossier mode, pass
+- AND `replay.split`, `replay.repeats` and `kintsugi.agent.decision.view` in decision mode, or `replay.samples` in explorer or dossier mode, pass
+
+#### Scenario: A decision run records its view (service-assessment T1)
+- GIVEN a replay run with `kintsugi.agent.decision.view` = `sheets`
+- WHEN a decision case of F1 and a dossier sample of F1 run
+- THEN the decision sample's dossier message holds the sheets and its `summary.tsv` line ends with `sheets`, and its `aggregate.tsv` line's view is `sheets`
+- AND the dossier sample's dossier message holds the tables, and its view is `-`
 
 #### Scenario: A recording without its start, symptom or window fails fast
 - GIVEN a recording of F1 with no `startedAt`, no `symptom` or a `sinceMinutes` of 0
@@ -644,7 +650,7 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 #### Scenario: A sample is scored against the recorded truth with its coverage
 - GIVEN the recordings of F1 with the truth `gateway-mock|DEPENDENCY_LATENCY`
 - WHEN one dossier-mode sample of F1 runs and its report names `UNKNOWN|UNKNOWN`
-- THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage, then the split `-` and the recording it opened on
+- THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage, then the split `-`, the recording it opened on and the view `-`
 - AND its dossier makes 33 calls, all recorded (coverage 1.00): the recording holds the 4 `query_metric` latency calls too ([dossier-latency](../../../odd/tasks/dossier-latency.md) T3)
 
 #### Scenario: The replay run is excluded from the default build
@@ -718,6 +724,19 @@ Variable rows are sorted by incident count, then previous count, largest first, 
 
 Every line of the rendered dossier that a report may cite MUST start with its number, `D1`, `D2`, … in order from the top, then one space (`D7 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |`) **(evidence-by-reference)**: the bullet facts, the table rows, the log-signature lines, and every other line that is not a heading, a blank line, a table header row or a table separator row; those four are not numbered and do not take a number. A report cites a dossier line by that number ("Evidence is checked"). The numbers are written by the renderer, so the same dossier always gets the same numbers. Why (ADR-013): a small model that must copy a row rebuilds it in its own format; choosing a number is an exact choice, and code then copies the text.
 
+**The sheets (service-assessment T1).** `ServiceSheets` MUST write the same dossier a second way, for decision mode's `sheets` view ("Decision mode"; [feature document](../../../odd/tasks/service-assessment.md)): one fact sheet per lab service, leaf first, each service after the services it calls (gateway-mock, inventory-service, payment-service, order-service), then the section "Seen only in the previous window". The order and the graph come from `CallGraph`, the one call graph in code: the services in that order, the four edges the traffic section writes, `calls` and `calledBy`, and the owner of each state table and event source by name (the `orders` table and the order events: order-service; the `payments` table and the payment events: payment-service; the reservation events: inventory-service). A fact belongs to a service by the data: restarts, latency and logs carry their service; a client-side traffic row belongs to its caller (`service`), with the callee in `clientName`, and a server-side row to the callee. A sheet holds, in this order:
+1. its place in the graph, `calls: <callees, or none>; called by: <callers>`, the first edge's caller being `external client`;
+2. its restarts in the incident window, the newest 3 of their start times, and its uptime at gathering;
+3. its inbound requests, its server-side rows, by method, uri, status and outcome;
+4. the latency of its uris but `/actuator/*`, at most 3: the incident mean and max and the previous mean, in seconds;
+5. its outbound calls, its client-side rows: one block per edge it calls on, named by the callee alone (the graph has one edge per caller and callee, and the callee's inbound rows name the uri), by status, outcome and exception; a client row on no edge goes to one more block, with its callee, method and uri;
+6. its `WARN` and `ERROR` lines and log signatures, written as the tables write them;
+7. the tables and event sources it owns: each status, and each source's total and its rows by type and outcome.
+
+A count is written `incident N (previous M)`, and a label as `key=value` (`status=201 outcome=SUCCESS exception=none`), escaped as a table value; a label the row does not carry is left out. A count row whose incident count is 0 while its previous count is above 0 MUST be written in the last section instead, under its service (`### payment-service`), in the sheets' order; a source's total stays in its sheet. A block left with no row says so, `inbound: no rows in the incident window.` (`no rows read.` when the incident window failed), and a last section with no row holds `- no rows.`. The tables' caps hold per block (5 rows, 3 latency rows; 8 signatures in all, handed out in the sheets' order), with the same `not shown` facts. A failed call that covers every service (`service_restarts`, `traffic_counts`) is one fact line of the header; any other failed call is one line in its service's sheet, which keeps its fixed lines with `-` for what it could not read. A traffic row of no lab service is kept under a last `## Other rows`, written only when there is one: `traffic_counts` reads the lab's four services only. The header states the windows and the gathering time as the tables do, how counts are written, that text from the lab is quoted, the order of the sections, what inbound, outbound and latency are, and that `/actuator/*` uris are left out. The sheets state facts only, as the tables do.
+
+Every citable line of the sheets is numbered `D1`, `D2`, … exactly as in the tables, so a report cites them the same way, and the renderer also returns the **owner** of every numbered line: the service whose sheet, or whose part of the last section, holds it, or `header` for the header's lines, the line of an empty last section and the other rows. Why: one service's facts were spread over six tables of about 55 rows, 8 of the 12 latency rows `/actuator/*`, and a caller's latency contains its callee's (in F1, payment-service's `/payments` mean 1.229 s against gateway-mock's `/authorize` 1.177 s), so magnitudes cannot find the origin while the graph can. Facts grouped per service, leaf first, turn a synthesis over tables into a few local judgments, which code can check against the graph by the owners (the assessed report, T2). The sheets are no larger than the tables: the F3 sheets are about 1,600 tokens by the estimate below, against about 1,820 for its tables.
+
 #### Scenario: Citable lines numbered (evidence-by-reference)
 - WHEN the F3 dossier is rendered
 - THEN its first table row or bullet fact starts with `D1 `, and every later citable line with the next number, with no gap and no repeat
@@ -740,7 +759,7 @@ Every line of the rendered dossier that a report may cite MUST start with its nu
 
 #### Scenario: Size ceiling
 - WHEN the F3 and healthy dossiers are rendered
-- THEN each is at most 2,500 tokens by a conservative estimate of one token per 3 characters (about 1.4k for F3)
+- THEN each is at most 2,500 tokens by a conservative estimate of one token per 3 characters (about 1.8k for F3 with the latency table, 1.4k before it)
 - AND a stress dossier, every list far above its cap and every value at its length limit, is at most 5,500 by the same estimate (4,500 before the latency table)
 
 #### Scenario: A slow answer that ends in success shows its latency
@@ -758,6 +777,33 @@ Every line of the rendered dossier that a report may cite MUST start with its nu
 - GIVEN a log message holding a quote, a newline and the text "## Service status"
 - WHEN the dossier is rendered
 - THEN the message is inside one `untrustedText="..."` literal on its signature line, with the quote and newline escaped, and the heading "## Service status (incident window)" appears once
+
+#### Scenario: Sheets leaf first, every line owned (service-assessment T1)
+- WHEN the F3 dossier is rendered as sheets
+- THEN its sections are gateway-mock, inventory-service, payment-service and order-service, then "Seen only in the previous window", and order-service's sheet starts with `- calls: inventory-service, payment-service; called by: external client.`
+- AND every numbered line has one owner: `header` for the header's lines, its service for a sheet's lines and for its part of the last section
+- AND `D<n>` reads the same line through the citation of "Evidence is checked"
+
+#### Scenario: Rows seen only in the previous window (service-assessment T1)
+- GIVEN F3's payment-service answered `POST /payments` 4 times in the previous window and never in the incident window
+- WHEN the dossier is rendered as sheets
+- THEN payment-service's sheet holds `- inbound: no rows in the incident window.`, and the last section holds, under `### payment-service`, `- inbound POST /payments status=201 outcome=SUCCESS: incident 0 (previous 4).`, owned by payment-service
+- AND the healthy dossier, with no such row, has `- no rows.` as its last section, owned by `header`
+
+#### Scenario: Latency without the actuator (service-assessment T1)
+- GIVEN the F1 dossier, whose latency outputs hold `/actuator/prometheus` series
+- WHEN it is rendered as sheets
+- THEN gateway-mock's sheet holds `- latency /authorize: incident mean 8.898 s, max 10.015 s (previous mean 0.012 s).`, payment-service's `- latency /payments: incident mean 8.917 s, max 10.033 s (previous mean 0.045 s).`, and no service's line names `/actuator`
+
+#### Scenario: A failed call in the sheets (service-assessment T1)
+- GIVEN `service_restarts` cannot reach mcp-tools, `traffic_counts` fails for the previous window and `query_metric` fails for order-service
+- WHEN the dossier is rendered as sheets
+- THEN the header holds `- service_restarts failed: outcome=CLIENT_ERROR reason="..."` and `- traffic_counts failed for the previous window: ...`, every restarts line reads `-`, every traffic count of the previous window is `-`, and order-service's sheet holds `- latency: query_metric failed: outcome=UPSTREAM_ERROR reason="..."`
+
+#### Scenario: Sheets state facts only, within the tables' size (service-assessment T1)
+- WHEN the F3, F1 and healthy dossiers, a dossier with failed calls and a stress dossier are rendered as sheets with every value from the lab but the service names masked
+- THEN none of the renderer's own words is interpretive, as in "Facts only"
+- AND each recorded dossier's sheets are no larger than its tables and at most 2,500 tokens, and the stress dossier's no larger than its tables and at most 5,500
 
 ### Requirement: Dossier mode
 
@@ -831,7 +877,9 @@ In decision mode (`kintsugi.agent.mode` = `decision`, set by `KINTSUGI_AGENT_MOD
 
 It MUST make no `TRIAGE`, `INVESTIGATE` or `KNOWLEDGE` call: no `ACT` step, no tool offered to the model, and no lab call but the dossier's. Its tool budget is 0, and a run makes 1 or 2 model calls.
 
-The report call MUST read what a dossier-mode report call reads when no drill-down result exists: the same system message; the same dossier message, byte for byte, its first line included (`gathered by code before the first phase, in place of TRIAGE`), although no phase follows, because the feature's first measurement (M0) reads today's prompt; no evidence message; and the same report task, schema and checks, the dossier being the only citable id (`Citable toolCallIds: dossier.`). What "The report" and "Evidence is checked" say of dossier mode holds in decision mode. Only the instruction's state lines differ: they show the run's real phases and budget, `Phase: CONCLUDE (the phases run in order: CONCLUDE)` and `Tool calls left: 0 in this phase, 0 in the incident`. A gathering that gives no dossier leaves the report nothing to cite, as in dossier mode, so only a report with both causes `UNKNOWN` can then be valid.
+The report call MUST read what a dossier-mode report call reads when no drill-down result exists: the same system message; in the default view, `tables`, the same dossier message, byte for byte, its first line included (`gathered by code before the first phase, in place of TRIAGE`), although no phase follows, because the feature's first measurement (M0) reads today's prompt; no evidence message; and the same report task, schema and checks, the dossier being the only citable id (`Citable toolCallIds: dossier.`). What "The report" and "Evidence is checked" say of dossier mode holds in decision mode. Only the instruction's state lines differ: they show the run's real phases and budget, `Phase: CONCLUDE (the phases run in order: CONCLUDE)` and `Tool calls left: 0 in this phase, 0 in the incident`. A gathering that gives no dossier leaves the report nothing to cite, as in dossier mode, so only a report with both causes `UNKNOWN` can then be valid.
+
+The dossier's view is `kintsugi.agent.decision.view` **(service-assessment T1)**, set by `KINTSUGI_AGENT_DECISION_VIEW`: `tables`, the default, writes the tables ("Evidence dossier rendering"), so the dossier message is today's, byte for byte; `sheets` writes the per-service sheets in their place, after the same introduction, its citing sentence included, and a report cites their lines as it cites the tables'. Any other value stops the agent's start, naming the property: `kintsugi.agent.decision.view must be tables or sheets, got "<value>"`. Only decision mode reads it: explorer mode has no dossier, and dossier mode always writes the tables. A replay sets it per run (`replay-agent.sh --view`, decision mode only) and records it with each sample ("Replay of recorded tool outputs"). Why a setting whose default is today's dossier: the feature's first measurement (M0) reads today's prompt, and each variant is then measured against it on the same recordings.
 
 Why the dossier first: its windows end when it is gathered ("Evidence dossier gathering"); gathered before the warm-up, they end at the incident's opening, not after a model load of varying length. The incident's time budget still starts when the warm-up ends ("The warm-up"), so it neither counts nor bounds the gathering: the `ACT` call deadline alone does. Why the mode: a local dossier-mode replay sample took 1,500 to 1,900 s, 75% of it in `INVESTIGATE` and `KNOWLEDGE`, whose drill-down calls a replay mostly could not answer; one report call measures the diagnosis in about 30 s on the cloud route, and its replay makes no unrecorded call. Why the real state lines: in replay, dossier-mode report calls also carried the drill-down evidence, so they were never byte-identical to this call, and decision runs are compared with each other; a line claiming phases that never ran and 6 calls left would be false input to the model.
 
@@ -880,6 +928,22 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 - GIVEN F1's dossier recording, a case of the `stress` split
 - WHEN it replays as a decision case
 - THEN its 33 dossier calls are all recorded, none is unrecorded, and the model gets only the report call ("Replay of recorded tool outputs")
+
+#### Scenario: The sheets view (service-assessment T1)
+- GIVEN `kintsugi.agent.decision.view` = `sheets`
+- WHEN a decision incident runs and its report cites the first line gateway-mock owns
+- THEN its dossier message is the same introduction followed by the sheets, and the stored evidence quotes that line, `- calls: none; called by: payment-service.`
+
+#### Scenario: The tables view, today's dossier, by default (service-assessment T1)
+- GIVEN `kintsugi.agent.decision.view` not set, or set to `tables`
+- WHEN a decision incident runs
+- THEN its dossier message is the introduction and the tables, byte for byte as before the setting
+- AND `KINTSUGI_AGENT_DECISION_VIEW=sheets` selects the sheets, while a value of `charts` stops the start with `kintsugi.agent.decision.view must be tables or sheets, got "charts"`
+
+#### Scenario: The view is read in decision mode only (service-assessment T1)
+- GIVEN `kintsugi.agent.decision.view` = `sheets` and `kintsugi.agent.mode` = `dossier`
+- WHEN an incident runs
+- THEN its dossier message holds the tables
 
 ### Requirement: Summaries built in code
 
@@ -959,7 +1023,7 @@ Each model call MUST be built from the incident state (symptom, window, phase, b
 
 The messages of every model call MUST come in this order, what changes least first **(T5c)**:
 
-1. the system message (role, the components and the call path between them, symptom, window, rules, the two enums), the same for the whole incident and the same in every mode, followed in dossier and decision mode only by the dossier message (see "Dossier mode"), the same for every call of the incident **(T5a)**;
+1. the system message (role, the components and the call path between them, symptom, window, rules, the two enums), the same for the whole incident and the same in every mode, followed in dossier and decision mode only by the dossier message (see "Dossier mode"; in decision mode, in its view, "Decision mode"), the same for every call of the incident **(T5a)**;
 2. the evidence message, a user message `Evidence so far, oldest first:` followed by the summaries of the tool steps before the previous answer, refusals included, in step order; absent while there are none;
 3. within a phase after its first call, the previous answer with its tool calls, then one tool-response message with their summaries;
 4. last, the instruction, a user message: the phase, its tools, the tool calls left in the phase and the incident, this phase's plan once it has a valid one, and the task.

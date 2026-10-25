@@ -6,6 +6,7 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -39,13 +40,19 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.AgentDatabase;
+import dev.kintsugi.agent.dossier.DossierGatherer;
+import dev.kintsugi.agent.dossier.DossierRenderer;
+import dev.kintsugi.agent.dossier.DossierView;
+import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 
 /**
  * Decision mode (agent spec, "Decision mode"; odd/tasks/decision-instrument.md T1): code gathers the evidence dossier
  * before the warm-up, and the model writes the report from it alone, with no evidence phase. The report call reads what
- * a dossier-mode report call reads when no drill-down result exists, except the run's own phases and budget.
+ * a dossier-mode report call reads when no drill-down result exists, except the run's own phases and budget. The
+ * dossier is written in the view of {@code kintsugi.agent.decision.view} (odd/tasks/service-assessment.md T1): the
+ * tables by default, or the per-service sheets.
  */
 class AgentLoopDecisionModeTest {
 
@@ -59,8 +66,7 @@ class AgentLoopDecisionModeTest {
 
 	private final ScriptedChatModel model = new ScriptedChatModel();
 
-	private final FakeLabTools lab = new FakeLabTools().answer("traffic_counts", dossierFixture("traffic_counts-incident"))
-		.answer("event_counts", dossierFixture("event_counts-order-incident"));
+	private final FakeLabTools lab = lab();
 
 	private UUID id;
 
@@ -295,6 +301,73 @@ class AgentLoopDecisionModeTest {
 			.isEqualTo(AgentMode.DECISION);
 	}
 
+	@Test
+	void theSheetsViewGivesTheReportCallTheSheetsWhoseLinesAreCitedAsTheTablesAre() {
+		Clock clock = fixedClock();
+		ServiceSheets.Rendered sheets = ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15));
+		// The first line gateway-mock owns: its place in the call graph.
+		int line = sheets.owners().indexOf("gateway-mock") + 1;
+		this.model.text(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(line)));
+		this.loop = loop(AgentMode.DECISION, DossierView.SHEETS, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		// The same introduction, its citing sentence included, then the sheets in place of the tables.
+		String seen = Prompts.dossier(sheets.text());
+		assertThat(seen).startsWith(Prompts.DOSSIER_INTRO + "\n\n# Evidence dossier, by service\n");
+		assertThat(step(1)).containsEntry("summary", seen);
+		assertThat(this.model.prompts().get(0).getInstructions().get(1).getText()).isEqualTo(seen);
+		assertThat(last(this.model.prompts().get(0))).contains("Citable toolCallIds: dossier.");
+		JsonNode evidence = storedReport().get("evidence").get(0);
+		assertThat(evidence.get("quote").asString()).isEqualTo("- calls: none; called by: payment-service.")
+			.isEqualTo(DossierRenderer.line(sheets.text(), line).orElseThrow());
+	}
+
+	@Test
+	void theTablesViewIsTheDefaultAndKeepsTodaysDossierByteForByte() {
+		Clock clock = fixedClock();
+		String today = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15)));
+		this.model.text(unknownReport()).text(unknownReport());
+
+		// The loop of the constructor without a view, as every caller built it before the setting.
+		assertThat(run(AgentMode.DECISION, clock)).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(step(1)).containsEntry("summary", today);
+		this.loop.close();
+		this.id = open();
+		this.loop = loop(AgentMode.DECISION, DossierView.TABLES, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(step(1)).containsEntry("summary", today);
+		assertThat(this.model.prompts()).extracting(prompt -> prompt.getInstructions().get(1).getText())
+			.containsExactly(today, today);
+	}
+
+	@Test
+	void theViewIsReadInDecisionModeOnly() {
+		Clock clock = fixedClock();
+		String tables = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15)));
+		this.model.quiet().quiet().text(unknownReport());
+		this.loop = loop(AgentMode.DOSSIER, DossierView.SHEETS, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		// Dossier mode shows the tables whatever the setting.
+		assertThat(step(1)).containsEntry("summary", tables);
+		assertThat(this.model.everything()).doesNotContain("# Evidence dossier, by service");
+	}
+
+	@Test
+	void theViewIsSelectedByItsVariableAndIsTheTablesByDefault() throws IOException {
+		assertThat(DossierView.of("tables")).isEqualTo(DossierView.TABLES);
+		assertThat(DossierView.of("sheets")).isEqualTo(DossierView.SHEETS);
+		assertThat(List.of(DossierView.values())).extracting(DossierView::value).containsExactly("tables", "sheets");
+		assertThatThrownBy(() -> DossierView.of("charts")).isInstanceOf(IllegalArgumentException.class)
+			.hasMessage("kintsugi.agent.decision.view must be tables or sheets, got \"charts\"");
+		assertThat(boundView(Map.of())).isEqualTo("tables");
+		assertThat(boundView(Map.of("KINTSUGI_AGENT_DECISION_VIEW", "sheets"))).isEqualTo("sheets");
+	}
+
 	private IncidentStatus run(AgentMode mode) {
 		return run(mode, Clock.systemUTC());
 	}
@@ -312,6 +385,34 @@ class AgentLoopDecisionModeTest {
 		return new AgentLoop(this.incidents,
 				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
 				new LoopSettings(12, timeBudget, Duration.ofSeconds(5)), clock, mode);
+	}
+
+	/** A loop in {@code mode} whose dossier, in decision mode, is written in {@code view}. */
+	private AgentLoop loop(AgentMode mode, DossierView view, Clock clock) {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		return new AgentLoop(this.incidents,
+				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, mode, view);
+	}
+
+	/** The lab of these tests: F3's traffic and order events over the recorded mcp-tools outputs. */
+	private static FakeLabTools lab() {
+		return new FakeLabTools().answer("traffic_counts", dossierFixture("traffic_counts-incident"))
+			.answer("event_counts", dossierFixture("event_counts-order-incident"));
+	}
+
+	/** One fixed clock, so that two gatherings, windows and uptimes included, give the same dossier. */
+	private static Clock fixedClock() {
+		return Clock.fixed(Instant.now().plus(Duration.ofMinutes(1)), ZoneOffset.UTC);
+	}
+
+	/** {@code kintsugi.agent.decision.view} as {@code application.yaml} binds it over these environment variables. */
+	private static String boundView(Map<String, Object> variables) throws IOException {
+		StandardEnvironment environment = new StandardEnvironment();
+		environment.getPropertySources().addFirst(new MapPropertySource("environment", variables));
+		new YamlPropertySourceLoader().load("application.yaml", new ClassPathResource("application.yaml"))
+			.forEach(environment.getPropertySources()::addLast);
+		return Binder.get(environment).bind("kintsugi.agent.decision.view", String.class).get();
 	}
 
 	/** Makes the warm-up note how many lab calls were made before it came, and answer {@code OK}. */

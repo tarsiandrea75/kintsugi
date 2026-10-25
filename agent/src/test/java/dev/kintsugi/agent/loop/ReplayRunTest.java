@@ -15,11 +15,13 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import dev.kintsugi.agent.AgentDatabase;
+import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
 
 /**
@@ -39,8 +41,11 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  * recording of the split {@code replay.split} ({@code dev}, the default, {@code holdout}, {@code stress} or
  * {@code probe}) made in decision or dossier mode, alone, {@code replay.repeats} (1) times: the dossier's recorded calls
  * and the report call. {@link ReplayCases} picks the recordings. A property of the other kind of run is refused rather
- * than ignored ({@link ReplayDriver#refuseIgnoredProperties}), so a run is never other than the one asked for. A miss
- * is a measurement, not a failure: the test fails only when it cannot run a sample.
+ * than ignored ({@link ReplayDriver#refuseIgnoredProperties}), so a run is never other than the one asked for. A
+ * decision run writes its dossier in the view of {@code kintsugi.agent.decision.view} ({@code tables}, the default, or
+ * {@code sheets}; odd/tasks/service-assessment.md T1), set as a system property like the others, and records it with
+ * each sample; explorer and dossier runs refuse it. A miss is a measurement, not a failure: the test fails only when it
+ * cannot run a sample.
  *
  * <p>
  * The application context supplies what the app would run with: the route's {@code ChatModel} inside its
@@ -61,6 +66,10 @@ class ReplayRunTest {
 
 	@Autowired
 	IncidentRepository incidents;
+
+	/** The application's own binding of the view, so a value the agent would refuse fails here too. */
+	@Value("${" + DossierView.PROPERTY + ":tables}")
+	String decisionView;
 
 	@DynamicPropertySource
 	static void database(DynamicPropertyRegistry registry) {
@@ -88,7 +97,7 @@ class ReplayRunTest {
 
 		AgentDatabase.empty();
 		ReplayDriver driver = new ReplayDriver(this.router, this.settings, this.incidents, AgentDatabase.admin(),
-				recordings, ReplayDriver.DEFAULT_TOOLS_LIST);
+				recordings, ReplayDriver.DEFAULT_TOOLS_LIST, DossierView.of(this.decisionView));
 		List<ReplayDriver.Sample> done = new ArrayList<>();
 		Consumer<ReplayDriver.Sample> record = sample -> {
 			// Counted before it is written: a paid sample stays in aggregate.tsv even when its write fails.
