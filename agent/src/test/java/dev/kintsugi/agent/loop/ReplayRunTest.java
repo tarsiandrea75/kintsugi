@@ -68,7 +68,7 @@ class ReplayRunTest {
 	IncidentRepository incidents;
 
 	/** The application's own binding of the view, so a value the agent would refuse fails here too. */
-	@Value("${" + DossierView.PROPERTY + ":tables}")
+	@Value("${" + DossierView.PROPERTY + ":" + DossierView.DEFAULT + "}")
 	String decisionView;
 
 	@DynamicPropertySource

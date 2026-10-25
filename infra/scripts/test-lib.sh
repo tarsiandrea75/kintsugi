@@ -557,6 +557,11 @@ expect "decision mode's options pass, and the run stops at the Ollama check" "$?
 expect "one case per dev recording of the chosen faults made in decision or dossier mode, each run --repeats times" \
   "$(grep -F '....  ' <<<"$decision_run")" \
   "....  decision mode, split dev, view tables: 3 recording(s) of F1 F3, each replayed 2 time(s): 6 samples"
+# The default view is written twice, as DossierView.DEFAULT and as replay-agent.sh's literal: they must agree.
+[[ "$(<"$REPO_DIR/agent/src/main/java/dev/kintsugi/agent/dossier/DossierView.java")" \
+  =~ String\ DEFAULT\ =\ \"([a-z]*)\" ]]
+expect "replay-agent.sh's default view is the agent's own, DossierView.DEFAULT" \
+  "$(grep -o 'view [a-z]*:' <<<"$decision_run")" "view ${BASH_REMATCH[1]-missing}:"
 sheets_run=$(replay_agent --mode decision --view sheets --faults F1)
 expect "decision mode takes --view sheets, and the run stops at the Ollama check" "$?" 2
 expect "the run names its view" "$(grep -F '....  ' <<<"$sheets_run")" \

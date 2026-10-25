@@ -69,8 +69,8 @@ kintsugi:
     mode: ${KINTSUGI_AGENT_MODE:explorer}
     # How decision mode writes its dossier for the model (agent spec, "Decision mode", "Evidence dossier rendering";
     # odd/tasks/service-assessment.md T1): tables, the default and the dossier of dossier mode, by data source; or
-    # sheets, one fact sheet per service, each after the services it calls. Read in decision mode only; any other value
-    # stops the start.
+    # sheets, one fact sheet per service, each after the services it calls. Applied in decision mode only; any other
+    # value, an empty one included, stops the start in every mode. The default is DossierView.DEFAULT, written here.
     decision:
       view: ${KINTSUGI_AGENT_DECISION_VIEW:tables}
     # Where the model runs (agent spec, "Routes"; ADR-012; ADR-010, "Amended in cloud-route T3"): local, the default,

@@ -1,7 +1,9 @@
 package dev.kintsugi.agent.loop;
 
 import java.util.List;
+import java.util.Optional;
 
+import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.lab.Phase;
 
 /**
@@ -79,6 +81,16 @@ public enum AgentMode {
 	/** The incident's tool budget: the sum of the phases' allowances. */
 	public int toolBudget() {
 		return this.phases.stream().mapToInt(LoopSettings.ALLOWANCES::get).sum();
+	}
+
+	/**
+	 * The dossier view this mode takes from {@code kintsugi.agent.decision.view} set to {@code view}: that view in
+	 * decision mode, and none in the others, which never apply the setting (explorer mode has no dossier, and dossier
+	 * mode always writes the tables). The one rule of which mode applies it: the loop writes decision mode's dossier in
+	 * it, and a replay records it with each sample (service-assessment T1r).
+	 */
+	public Optional<DossierView> viewFrom(DossierView view) {
+		return this == DECISION ? Optional.of(view) : Optional.empty();
 	}
 
 	/** When code gathers the evidence dossier, relative to the warm-up. */

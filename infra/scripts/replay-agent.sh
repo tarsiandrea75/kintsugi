@@ -103,6 +103,7 @@ if [[ "$mode" == decision ]]; then
   repeats=${repeats-1}
   [[ "$repeats" =~ ^[1-9][0-9]{0,2}$ ]] \
     || { echo "--repeats needs an integer from 1 to 999, not '$repeats'" >&2; exit 2; }
+  # The agent's own default, DossierView.DEFAULT (test-lib.sh checks that they agree).
   view=${view-tables}
   [[ "$view" == tables || "$view" == sheets ]] || { echo "Unknown view '$view'; choose tables or sheets" >&2; exit 2; }
 else

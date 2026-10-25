@@ -355,6 +355,39 @@ class AgentLoopDecisionModeTest {
 		// Dossier mode shows the tables whatever the setting.
 		assertThat(step(1)).containsEntry("summary", tables);
 		assertThat(this.model.everything()).doesNotContain("# Evidence dossier, by service");
+		// The one rule of which mode reads the setting, which the loop and the replay driver both follow.
+		assertThat(AgentMode.DECISION.viewFrom(DossierView.SHEETS)).hasValue(DossierView.SHEETS);
+		assertThat(AgentMode.DOSSIER.viewFrom(DossierView.SHEETS)).isEmpty();
+		assertThat(AgentMode.EXPLORER.viewFrom(DossierView.SHEETS)).isEmpty();
+	}
+
+	@Test
+	void anyOtherViewAnEmptyOneIncludedStopsTheStartInEveryMode() throws IOException {
+		// An empty variable is a value, which the default does not replace.
+		assertThat(boundView(Map.of("KINTSUGI_AGENT_DECISION_VIEW", ""))).isEmpty();
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		LoopSettings settings = new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5));
+		// Checked in every mode, although only decision mode applies it: a typo fails at once.
+		for (AgentMode mode : AgentMode.values()) {
+			for (String view : List.of("", "charts")) {
+				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
+						fixedClock(), mode.value(), view))
+					.as("%s, \"%s\"", mode.value(), view)
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessage("kintsugi.agent.decision.view must be tables or sheets, got \"" + view + "\"");
+			}
+		}
+	}
+
+	@Test
+	void aNullViewIsRefusedWhenTheLoopIsBuiltInEveryMode() {
+		// At construction, not later in a decision run's gathering.
+		for (AgentMode mode : AgentMode.values()) {
+			assertThatThrownBy(() -> loop(mode, null, fixedClock())).as(mode.value())
+				.isInstanceOf(NullPointerException.class)
+				.hasMessage("decisionView must not be null: DossierView.TABLES is the default view");
+		}
 	}
 
 	@Test
@@ -364,7 +397,9 @@ class AgentLoopDecisionModeTest {
 		assertThat(List.of(DossierView.values())).extracting(DossierView::value).containsExactly("tables", "sheets");
 		assertThatThrownBy(() -> DossierView.of("charts")).isInstanceOf(IllegalArgumentException.class)
 			.hasMessage("kintsugi.agent.decision.view must be tables or sheets, got \"charts\"");
-		assertThat(boundView(Map.of())).isEqualTo("tables");
+		// The default of the @Value bindings, and the one application.yaml writes as a literal.
+		assertThat(DossierView.of(DossierView.DEFAULT)).isEqualTo(DossierView.TABLES);
+		assertThat(boundView(Map.of())).isEqualTo(DossierView.DEFAULT);
 		assertThat(boundView(Map.of("KINTSUGI_AGENT_DECISION_VIEW", "sheets"))).isEqualTo("sheets");
 	}
 

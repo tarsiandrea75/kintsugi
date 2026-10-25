@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -93,6 +94,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/** The phase column of the {@code DOSSIER} step, which comes before the first evidence phase. */
 	static final String DOSSIER_PHASE = "DOSSIER";
 
+	/** Why a loop, or a replay driver, is not built without a decision view. */
+	static final String NULL_VIEW = "decisionView must not be null: DossierView.TABLES is the default view";
+
 	/** A tool name that is safe to print as is in a summary header or a log line; any other is quoted. */
 	private static final Pattern PLAIN_NAME = Pattern.compile("[A-Za-z0-9_.-]{1,64}");
 
@@ -116,7 +120,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	private final DossierGatherer gatherer;
 
-	/** How decision mode writes its dossier; the other modes ignore it and write the tables. */
+	/** How decision mode writes its dossier; the other modes write the tables ({@link AgentMode#viewFrom}). */
 	private final DossierView decisionView;
 
 	/** Runs each model call, so that the loop can stop waiting for it at its time budget. */
@@ -134,11 +138,14 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		this(incidents, router, labTools, settings, clock, mode, DossierView.TABLES);
 	}
 
-	/** A loop in {@code mode} whose dossier, in decision mode only, is written in {@code decisionView}. */
+	/**
+	 * A loop in {@code mode} whose dossier, in decision mode only, is written in {@code decisionView}.
+	 * @throws NullPointerException when {@code decisionView} is null, in every mode, rather than in a later gathering
+	 */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, AgentMode mode, DossierView decisionView) {
+		this.decisionView = Objects.requireNonNull(decisionView, NULL_VIEW);
 		this.mode = mode;
-		this.decisionView = decisionView;
 		this.gatherer = new DossierGatherer(labTools, clock);
 		this.incidents = incidents;
 		this.router = router;
@@ -306,7 +313,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		String calls = null;
 		try {
 			Dossier dossier = future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
-			run.dossierText = (run.mode == AgentMode.DECISION ? this.decisionView : DossierView.TABLES).render(dossier);
+			run.dossierText = run.mode.viewFrom(this.decisionView).orElse(DossierView.TABLES).render(dossier);
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
 		}

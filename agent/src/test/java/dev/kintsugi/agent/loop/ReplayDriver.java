@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -122,11 +123,12 @@ final class ReplayDriver {
 	 * @param recordings the replay directory: {@code recordings.tsv} and the files it names
 	 * @param toolsList the recorded tool listing
 	 * @param decisionView how a decision sample writes its dossier
+	 * @throws NullPointerException when {@code decisionView} is null, before any sample, as the loop refuses it
 	 */
 	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
 			Path recordings, Path toolsList, DossierView decisionView) {
+		this.decisionView = Objects.requireNonNull(decisionView, AgentLoop.NULL_VIEW);
 		this.router = router;
-		this.decisionView = decisionView;
 		this.settings = settings;
 		this.incidents = incidents;
 		this.admin = admin;
@@ -224,8 +226,8 @@ final class ReplayDriver {
 
 	/**
 	 * Runs one sample in {@code mode} to its end over the {@code served} recordings, opened on {@code primary}'s
-	 * symptom and window with "now" at its start, and scores it against its truth. A decision sample records the run's
-	 * view; the others, which read none, record {@code -}.
+	 * symptom and window with "now" at its start, and scores it against its truth. A sample records the view its mode
+	 * applies ({@link AgentMode#viewFrom}): a decision sample the run's, the others none, written {@code -}.
 	 */
 	private Sample run(Parsed primary, List<JsonNode> served, AgentMode mode, String split, int n) {
 		String fault = primary.recording().fault();
@@ -258,11 +260,10 @@ final class ReplayDriver {
 		}
 		String route = this.router.route(ModelTask.ACT).route().value();
 		String truth = primary.recording().truth();
-		String view = mode == AgentMode.DECISION ? this.decisionView.value() : NONE;
-		return new Sample(fault, mode, route, split, view, primary.recording().stem(), n, status, truth, reported,
-				verdict(status, reported, truth), tools.recordedCalls(), tools.unrecordedCalls(), tools.coverage(),
-				tools.conflicts(), total(incident, "promptTokens"), total(incident, "completionTokens"), seconds,
-				dossier.size(), dossierUnrecorded, incident);
+		return new Sample(fault, mode, route, split, primary.recording().stem(), mode.viewFrom(this.decisionView), n,
+				status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(),
+				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), total(incident, "promptTokens"),
+				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident);
 	}
 
 	/** The fault's first recording made in {@code mode}, if any. */
@@ -311,7 +312,7 @@ final class ReplayDriver {
 		for (Sample sample : samples) {
 			groups.computeIfAbsent(
 					String.join("\t", sample.fault(), sample.mode().value(), sample.route(), sample.split(),
-							sample.view()),
+							sample.viewColumn()),
 					key -> new ArrayList<>())
 				.add(sample);
 		}
@@ -515,16 +516,16 @@ final class ReplayDriver {
 
 	/**
 	 * One scored sample. {@code split} is its case's split, or {@code -} for an explorer or dossier sample, which is no
-	 * case; {@code view} is the dossier view of a decision sample, {@code -} for the others; {@code recording} is the
-	 * stem of the recording it opened on. {@code recorded}, {@code unrecorded},
-	 * {@code coverage} and {@code conflicts} are the sample's {@link ReplayLabTools} counters; {@code dossierCalls} and
-	 * {@code dossierUnrecorded} count the {@code DOSSIER} step's calls and those no recording held; a token count is
-	 * null when no step counted it.
+	 * case; {@code recording} is the stem of the recording it opened on; {@code view} is the dossier view of a decision
+	 * sample, none for the others, which apply none. The three come in the order of their {@code summary.tsv} columns.
+	 * {@code recorded}, {@code unrecorded}, {@code coverage} and {@code conflicts} are the sample's
+	 * {@link ReplayLabTools} counters; {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
+	 * step's calls and those no recording held; a token count is null when no step counted it.
 	 */
-	record Sample(String fault, AgentMode mode, String route, String split, String view, String recording, int n,
-			IncidentStatus status, String truth, String reported, String verdict, int recorded, int unrecorded,
-			double coverage, int conflicts, Integer promptTokens, Integer completionTokens, double seconds,
-			int dossierCalls, int dossierUnrecorded, ObjectNode incident) {
+	record Sample(String fault, AgentMode mode, String route, String split, String recording,
+			Optional<DossierView> view, int n, IncidentStatus status, String truth, String reported, String verdict,
+			int recorded, int unrecorded, double coverage, int conflicts, Integer promptTokens,
+			Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded, ObjectNode incident) {
 
 		/** The sample's line of {@code summary.tsv}, in {@link #SUMMARY_HEADER}'s columns. */
 		String summaryLine() {
@@ -532,7 +533,12 @@ final class ReplayDriver {
 					this.status.name(), this.truth, this.reported, this.verdict, String.valueOf(this.recorded),
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
-					this.recording, this.view);
+					this.recording, viewColumn());
+		}
+
+		/** The view as {@code summary.tsv} and {@code aggregate.tsv} write it: its value, or {@code -} for none. */
+		String viewColumn() {
+			return this.view.map(DossierView::value).orElse(NONE);
 		}
 
 	}

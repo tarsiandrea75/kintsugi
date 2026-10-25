@@ -14,8 +14,15 @@ public enum DossierView {
 	/** {@link ServiceSheets}' fact sheets, one per service, leaf first. */
 	SHEETS;
 
-	/** The property that selects the view; only decision mode reads it. */
+	/** The property that selects the view; only decision mode applies it, though every start checks its value. */
 	public static final String PROPERTY = "kintsugi.agent.decision.view";
+
+	/**
+	 * The property's value when it is not set: the tables, today's dossier. A constant, so that the {@code @Value}
+	 * bindings of the property name it; {@code application.yaml} and {@code replay-agent.sh} write it as a literal that
+	 * names this constant.
+	 */
+	public static final String DEFAULT = "tables";
 
 	/**
 	 * The view named by the property's value.

@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -251,7 +252,7 @@ class ReplayDriverTest {
 		// The report is the sample's only model call.
 		assertThat(this.model.calls()).isEqualTo(1);
 		// The view of the run, the tables by default, is recorded with the sample.
-		assertThat(sample.view()).isEqualTo("tables");
+		assertThat(sample.view()).hasValue(DossierView.TABLES);
 		assertThat(sample.summaryLine()).startsWith("F1\tdecision\tlocal\t1\tCOMPLETED\t")
 			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables");
 	}
@@ -419,18 +420,25 @@ class ReplayDriverTest {
 		ReplayDriver.Sample decision = driver.decisionSample(driver.decisionCases("stress", List.of("F1")).get(0), 1);
 		ReplayDriver.Sample dossier = driver.sample("F1", AgentMode.DOSSIER, 1);
 
-		assertThat(decision.view()).isEqualTo("sheets");
+		assertThat(decision.view()).hasValue(DossierView.SHEETS);
 		assertThat(dossierMessage(decision)).contains("# Evidence dossier, by service\n")
 			.doesNotContain("## Service status (incident window)");
 		assertThat(decision.dossierUnrecorded()).isZero();
 		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets");
 		// Dossier mode reads no view: it shows the tables, and its sample records none.
-		assertThat(dossier.view()).isEqualTo("-");
+		assertThat(dossier.view()).isEmpty();
 		assertThat(dossierMessage(dossier)).contains("## Service status (incident window)")
 			.doesNotContain("# Evidence dossier, by service");
 		assertThat(ReplayDriver.aggregate(List.of(decision, dossier))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
 				"F1\tdecision\tlocal\tstress\tsheets\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t10\t5\t-",
 				"F1\tdossier\tlocal\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t30\t15\t-");
+	}
+
+	@Test
+	void aNullViewIsRefusedWhenTheDriverIsBuilt() {
+		assertThatThrownBy(() -> driverIn(null)).isInstanceOf(NullPointerException.class)
+			.hasMessage("decisionView must not be null: DossierView.TABLES is the default view");
+		assertThat(this.model.calls()).as("model calls").isZero();
 	}
 
 	/** The dossier message the sample's model read: its {@code DOSSIER} step's summary. */
@@ -517,9 +525,9 @@ class ReplayDriverTest {
 
 	@Test
 	void theLocalRouteHasNoCost() {
-		ReplayDriver.Sample local = new ReplayDriver.Sample("F3", AgentMode.DOSSIER, "local", "-", "-", "r", 1,
-				IncidentStatus.TIMED_OUT, "order-service|CONFIGURATION", "none", "MISS", 29, 0, 1.0, 0, null, null, 1.0,
-				29, 0, JSON.createObjectNode());
+		ReplayDriver.Sample local = new ReplayDriver.Sample("F3", AgentMode.DOSSIER, "local", "-", "r",
+				Optional.empty(), 1, IncidentStatus.TIMED_OUT, "order-service|CONFIGURATION", "none", "MISS", 29, 0,
+				1.0, 0, null, null, 1.0, 29, 0, JSON.createObjectNode());
 
 		assertThat(ReplayDriver.aggregate(List.of(local))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
 				"F3\tdossier\tlocal\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-");
@@ -529,8 +537,9 @@ class ReplayDriverTest {
 	void theAggregateCountsTheCoveredSamplesAndTheirMatches() {
 		List<ReplayDriver.Sample> samples = List.of(dossierSample("MATCH", 0.9, 0), dossierSample("MISS", 0.8, 0),
 				dossierSample("MATCH", 0.5, 2),
-				new ReplayDriver.Sample("F1", AgentMode.DOSSIER, "local", "-", "-", "r", 4, IncidentStatus.COMPLETED,
-						F1_TRUTH, F1_TRUTH, "MATCH", 4, 1, 0.8, 0, null, null, 1.0, 0, 0, JSON.createObjectNode()));
+				new ReplayDriver.Sample("F1", AgentMode.DOSSIER, "local", "-", "r", Optional.empty(), 4,
+						IncidentStatus.COMPLETED, F1_TRUTH, F1_TRUTH, "MATCH", 4, 1, 0.8, 0, null, null, 1.0, 0, 0,
+						JSON.createObjectNode()));
 
 		// Covered (coverage >= 0.8): samples 1, 2 and 4, two of them matches; a fully recorded dossier: samples 1 and 2.
 		assertThat(ReplayDriver.COVERED_THRESHOLD).isEqualTo(0.8);
@@ -550,15 +559,16 @@ class ReplayDriverTest {
 	}
 
 	private static ReplayDriver.Sample dossierSample(String verdict, double coverage, int dossierUnrecorded) {
-		return new ReplayDriver.Sample("F1", AgentMode.DOSSIER, "local", "-", "-", "r", 1, IncidentStatus.COMPLETED,
-				F1_TRUTH, verdict.equals("MATCH") ? F1_TRUTH : "UNKNOWN|UNKNOWN", verdict, 29, 3, coverage, 0, null,
-				null, 1.0, 29, dossierUnrecorded, JSON.createObjectNode());
+		return new ReplayDriver.Sample("F1", AgentMode.DOSSIER, "local", "-", "r", Optional.empty(), 1,
+				IncidentStatus.COMPLETED, F1_TRUTH, verdict.equals("MATCH") ? F1_TRUTH : "UNKNOWN|UNKNOWN", verdict, 29,
+				3, coverage, 0, null, null, 1.0, 29, dossierUnrecorded, JSON.createObjectNode());
 	}
 
 	private static ReplayDriver.Sample decisionSample(String split, String recording, String verdict) {
-		return new ReplayDriver.Sample("F1", AgentMode.DECISION, "local", split, "tables", recording, 1,
-				IncidentStatus.COMPLETED, F1_TRUTH, verdict.equals("MATCH") ? F1_TRUTH : "UNKNOWN|UNKNOWN", verdict, 33,
-				0, 1.0, 0, null, null, 1.0, 33, 0, JSON.createObjectNode());
+		return new ReplayDriver.Sample("F1", AgentMode.DECISION, "local", split, recording,
+				Optional.of(DossierView.TABLES), 1, IncidentStatus.COMPLETED, F1_TRUTH,
+				verdict.equals("MATCH") ? F1_TRUTH : "UNKNOWN|UNKNOWN", verdict, 33, 0, 1.0, 0, null, null, 1.0, 33, 0,
+				JSON.createObjectNode());
 	}
 
 	/** The output the sample's dossier holds for {@code call} (its tool, a space and its arguments). */
@@ -629,9 +639,9 @@ class ReplayDriverTest {
 	}
 
 	private static ReplayDriver.Sample sample(String verdict, double coverage, int prompt, int completion) {
-		return new ReplayDriver.Sample("F2", AgentMode.EXPLORER, "cloud", "-", "-", "r", 1, IncidentStatus.COMPLETED,
-				"gateway-mock|DEPENDENCY_REJECTING", "gateway-mock|DEPENDENCY_REJECTING", verdict, 1, 1, coverage, 0,
-				prompt, completion, 1.0, 0, 0, JSON.createObjectNode());
+		return new ReplayDriver.Sample("F2", AgentMode.EXPLORER, "cloud", "-", "r", Optional.empty(), 1,
+				IncidentStatus.COMPLETED, "gateway-mock|DEPENDENCY_REJECTING", "gateway-mock|DEPENDENCY_REJECTING",
+				verdict, 1, 1, coverage, 0, prompt, completion, 1.0, 0, 0, JSON.createObjectNode());
 	}
 
 }
