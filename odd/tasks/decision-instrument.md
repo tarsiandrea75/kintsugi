@@ -325,13 +325,22 @@ The forecast is about 800 authored changed lines (T1 ~250, T2 ~250, T3 ~300), ov
   - The F1 miss is r5, again `payment-service|DEPENDENCY_LATENCY`. Live, on the same incidents, r3 missed and r5 matched.
   - So one sample per recording varies between runs on the cloud route: `AnthropicRoute` sets no temperature, because the model rejects any value but its default. A difference of one recording per fault is within that noise.
 - 2026-10-25 04:35 UTC: M0 on the local route started (`granite4.1:8b`, about 2 h). Until it ends, no build, writer or branch change: the replay reads the recordings from the worktree.
+- 2026-10-25 06:16 UTC: M0 on the local route, `granite4.1:8b` (`replay-20261025T043535Z-local`, 1 h 41 min).
+  - Matches over 5 distinct recordings per fault: F1 0/5, F2 5/5, F3 0/5. Every sample is COMPLETED, in 369 to 435 s, with coverage 1.00 and 300 to 457 completion tokens.
+  - F1: all 5 name `payment-service|DEPENDENCY_LATENCY`, the caller of the slow leaf.
+  - F3: 4 name `payment-service|DEPENDENCY_REJECTING` and 1 `payment-service|DEPENDENCY_LATENCY`. That is the callee order-service cannot reach, not order-service's own configuration. In the earlier replays on the old recordings, it answered F2's truth in 6 of 13.
+- M0, the reading (gate 1 of `odd/tasks/service-assessment.md`):
+  - Cloud: the old protocol was F3's whole problem. F3 is 5/5 in replay and 10/10 live. F1's one-hop-early miss remains, about 1 in 5.
+  - Local: the old protocol explains none of the misses. F1 and F3 stay at 0, as before (0/3 each on the old recordings). The clean baseline changed only F3's wrong answer, from the previous fault's truth to the unreachable callee.
+  - Both local errors are hops along the call graph. On F1 the model stops one hop early, at the slow caller; on F3 it goes one hop too far, to the callee of a misconfigured caller. Part B's sheets and assessed report target exactly this.
+- `qwen3:8b`, the condition of T5, is met:
+  - it is installed;
+  - Spring AI 2.0.1 binds `spring.ai.ollama.chat.think` (its configuration metadata lists it), and maps `false` to `ThinkOption.ThinkBoolean.DISABLED` in the default options. `OllamaRoute` sets no think option per call;
+  - `kintsugi.agent.model.name` is `${spring.ai.ollama.chat.model}`, so the model changes with it.
+  - So, with no code: `SPRING_AI_OLLAMA_CHAT_MODEL=qwen3:8b SPRING_AI_OLLAMA_CHAT_THINK=false infra/scripts/replay-agent.sh --mode decision --split dev --route local`, about 2 h. The first sample's completion tokens show whether the setting reached the request: thinking would fill the answer cap.
 
 ## Next step
 
-Wait for M0 on the local route (about 06:35 UTC) and record it here. It closes T5 unless `qwen3:8b` joins:
-- `qwen3:8b` is installed, and the local route sets no `think` option today.
-- Spring AI 2.0 documents `spring.ai.ollama.chat.think`, so its thinking may be turned off without code. Check that the property reaches the Ollama request before measuring it, which takes about 2 h more.
-
-Then the human reads M0: it is gate 1 of `odd/tasks/service-assessment.md`.
+The human reads M0 (gate 1 of `odd/tasks/service-assessment.md`) and decides when `qwen3:8b` runs: it needs the machine idle for about 2 h.
 
 Then rebase `feat/service-assessment` onto this branch's tip.
