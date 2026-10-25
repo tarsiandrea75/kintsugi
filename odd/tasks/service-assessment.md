@@ -117,7 +117,7 @@ The gates; the human decides at each one:
 ## Tasks
 
 - [x] T1 `CallGraph` and the per-service sheets with line owners, behind `kintsugi.agent.decision.view`, with goldens. Route: delegated writer (dossier package, settings, tests).
-- [ ] T1r The T1 review findings (2 WARNINGs, 6 SUGGESTIONs), and acceptance criterion 1's golden from a clean decision recording, after decision-instrument's T4 import. Route: delegated writer.
+- [x] T1r The T1 review findings (2 WARNINGs, 6 SUGGESTIONs), and acceptance criterion 1's golden from a clean decision recording, after decision-instrument's T4 import. Route: delegated writer.
 - [ ] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
 - [ ] T3 ADR-014, ADR-011's status, and the spec's remaining parts. Route: inline (docs).
 - [ ] T4 Measurement on `dev`: V1 and V2, local (about 2 h each) and cloud (about $0.05 each). Pick one, then read `holdout` once. Route: inline.
@@ -174,6 +174,36 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - One conflict, in `test-lib.sh`'s context, was resolved by keeping both sides: (b)'s two `--view` cases and T2r2's `driver_refusal`.
   - After the rebase, `test-lib.sh` passes 147 cases and the full suite 514 tests, with 0 failures.
 
+- 2026-10-25: T1r done (route: delegated writer; trigger: 18 files across the dossier package, the loop, the replay driver, two scripts, the spec and the docs). It is two work-unit commits:
+  - (1) `0c9f4d1`, the dossier.
+    - `CallGraph.ownerOfTable` and `ownerOfSource` return an `Optional`. A table or event source with no owner is written under the header-owned "Other rows" instead of failing the rendering.
+    - A guard test fails the build when a table or source the gatherer reads has no owner.
+    - New tests cover the outbound block for a call on no edge.
+    - A golden renders the sheets of F1's first `dev` decision recording (`F1/verify-agent-20261024T162555Z-r1-F1.json`), gathered as a replay gathers it. All 33 calls are recorded, and the sheets take 1,538 tokens against 2,043 for its tables. This meets acceptance criterion 1.
+  - (2) `2e694e1`, the setting.
+    - `AgentMode.viewFrom` is the one rule of which mode applies the view; `AgentLoop` and the replay driver both use it.
+    - `Sample`'s view is an `Optional<DossierView>`, in the TSV's order: split, recording, view.
+    - `DossierView.DEFAULT` serves both `@Value` bindings, and `test-lib.sh` checks it against `replay-agent.sh`'s literal.
+    - A null view is refused at construction.
+    - The spec, `LoopConfig` and `setup.md` state that any other value, an empty one included, stops the start in every mode. For R4 this was decided: no behavior change.
+    - R3-view-propagation: no change, as decided. The view will be checked in `summary.tsv` at the first `--view sheets` measurement.
+  - What the F1 golden shows, in the writer's reading:
+    - payment-service's sheet has no failure: 12 inbound `201 SUCCESS`.
+    - The 6 timeouts appear only in order-service's outbound lines, with a WARN naming `payment-service:8081`.
+    - The payments table holds 12 AUTHORIZED, while the orders table holds 6 PAID and 6 PAYMENT_PENDING.
+    - gateway-mock's only signal is its latency, 1.177 s mean against 0.002 s before. payment-service's latency is larger, because it contains gateway-mock's.
+  - RED:
+    - an unknown table failed the rendering (`IllegalArgumentException: no lab service owns the table "stock"`);
+    - the missing golden failed with a NullPointerException on the resource;
+    - the null view raised nothing.
+  - GREEN after each change. The off-edge test was checked by breaking the block on purpose, and the default check by setting `DEFAULT` to `sheets`: the new case failed.
+  - Results: `test-lib.sh` 148 cases; full suite 521 tests, 0 failures. Parent checks: unit 1 alone passes with 147 cases and 518 tests; both units pass with 148 and 521.
+  - About 550 authored lines plus the 67-line golden, split as about 424 and 193.
+- T1r reviews (consent granted), both approved and acknowledged:
+  - (1) `0c9f4d1`, base `12757e7`, so with the two docs commits: one lens (medium risk), 7 files, 474 lines (lineage `review-7c8f40077c099c14`). SUGGESTION R3-unowned-failure-path-untested: two cases have no test, an unowned table or source whose window failed, and off-graph traffic mixed with unowned tables in "Other rows".
+  - (2) `2e694e1`, base `0c9f4d1`: four lenses (high risk, the scripts), 13 files, 193 lines (lineage `review-c0203fd189dff840`). R1, R3 and R4 found nothing. SUGGESTION R2-null-view-message-duplicated: two tests repeat `AgentLoop.NULL_VIEW` as a literal.
+  - Both suggestions are follow-ups; neither blocks T2.
+
 ## Next step
 
-T1r, then T2.
+T2, the assessed report.
