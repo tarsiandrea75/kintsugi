@@ -126,6 +126,28 @@ final class Prompts {
 			cite: D7 is line 7.""";
 
 	/**
+	 * The task of the assessed report (service-assessment T2): the role of each service first, from its own sheet and
+	 * the call graph, then the summary and the cause. The roles are defined for any problem, by the facts and the
+	 * calls: no cause, component or answer of the lab is named as an example, and the categories stay those of the
+	 * system message. It states the rules {@link ReportCheck} checks, so that a first answer can follow them.
+	 */
+	private static final String ASSESSED_REPORT_TASK = """
+			Task: write the final report as a JSON object with these fields, in this order: first the assessments, \
+			then the summary, then the cause they lead to. assessments: one entry per service, named as its sheet is \
+			and in the order of the sheets, each {role, line, why}. role is ORIGIN, AFFECTED or UNAFFECTED. ORIGIN: \
+			the problem starts in this service: its own facts show it failing, slow or refusing, and the services it \
+			calls do not show that problem themselves. AFFECTED: this service shows the problem because a service it \
+			calls does: it calls an ORIGIN or AFFECTED service, and its own failures or waits come from those calls. \
+			UNAFFECTED: its own facts show no problem in the incident window. At most one service is the ORIGIN; a \
+			service that calls no other service is never AFFECTED; when no service is the ORIGIN, every service is \
+			UNAFFECTED and both causes are UNKNOWN. line is the number of the line of that service's own sheet, or of \
+			its part of "Seen only in the previous window", that best supports its role: D7 is line 7. why is at most \
+			200 characters. summary: your reasoning in brief, at most 500 characters (about 80 words). \
+			rootCauseService: the ORIGIN, or UNKNOWN when no service is. rootCauseCategory: from the values listed in \
+			the system message, as your summary concludes. confidence: a number from 0 to 1. Write no evidence: code \
+			builds it from the lines of the ORIGIN and AFFECTED services.""";
+
+	/**
 	 * The warm-up's only message. It loads the model before the run; its answer is not read, and it holds nothing
 	 * about the incident.
 	 */
@@ -229,6 +251,16 @@ final class Prompts {
 	static String report(State state, List<String> errors, Collection<ToolStep> toolSteps) {
 		return state.text() + "\n\n" + REPORT_TASK + (state.dossier() ? REPORT_DOSSIER : "")
 				+ citable(toolSteps, state.dossier()) + retry("report", errors);
+	}
+
+	/**
+	 * The instruction of an assessed report call (service-assessment T2): decision mode with the sheets, when
+	 * {@code kintsugi.agent.decision.report} is {@code assessed}. An assessment cites a line of the sheets by its
+	 * number alone, so the task lists no citable id: the run has no tool call, and the sheets are its only source.
+	 * {@code errors} are those of the rejected previous report, if any, listed as for the plain report.
+	 */
+	static String assessedReport(State state, List<String> errors) {
+		return state.text() + "\n\n" + ASSESSED_REPORT_TASK + retry("report", errors);
 	}
 
 	private static String citable(Collection<ToolStep> toolSteps, boolean dossier) {

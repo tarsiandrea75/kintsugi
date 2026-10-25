@@ -93,6 +93,15 @@ public enum AgentMode {
 		return this == DECISION ? Optional.of(view) : Optional.empty();
 	}
 
+	/**
+	 * The report this mode takes from {@code kintsugi.agent.decision.report} set to {@code report}: that report in
+	 * decision mode, and none in the others, which never apply the setting and always ask for the plain report. The one
+	 * rule of which mode applies it, as {@link #viewFrom} is the view's (service-assessment T2).
+	 */
+	public Optional<DecisionReport> reportFrom(DecisionReport report) {
+		return this == DECISION ? Optional.of(report) : Optional.empty();
+	}
+
 	/** When code gathers the evidence dossier, relative to the warm-up. */
 	public enum DossierGathering {
 

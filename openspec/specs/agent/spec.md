@@ -899,6 +899,8 @@ The report call MUST read what a dossier-mode report call reads when no drill-do
 
 The dossier's view is `kintsugi.agent.decision.view` **(service-assessment T1)**, set by `KINTSUGI_AGENT_DECISION_VIEW`: `tables`, the default, writes the tables ("Evidence dossier rendering"), so the dossier message is today's, byte for byte; `sheets` writes the per-service sheets in their place, after the same introduction, its citing sentence included, and a report cites their lines as it cites the tables'. Any other value stops the agent's start, naming the property: `kintsugi.agent.decision.view must be tables or sheets, got "<value>"`. Only decision mode applies it: explorer mode has no dossier, and dossier mode always writes the tables. Its value is checked in every mode, though **(service-assessment T1r)**, so any other value, an empty one included (`KINTSUGI_AGENT_DECISION_VIEW=` binds `""`, since the default `tables` replaces only a variable that is not set), stops an explorer or dossier start too: a typo fails at once, not in a later decision run. A replay sets it per run (`replay-agent.sh --view`, decision mode only) and records it with each sample ("Replay of recorded tool outputs"). Why a setting whose default is today's dossier: the feature's first measurement (M0) reads today's prompt, and each variant is then measured against it on the same recordings.
 
+The report is `kintsugi.agent.decision.report` **(service-assessment T2)**, set by `KINTSUGI_AGENT_DECISION_REPORT`: `plain`, the default, asks for the report of "The report", so the report call's instruction and schema are today's, byte for byte, in either view; `assessed` asks for the assessed report ("The assessed report") in its place. Any other value stops the agent's start, naming the property: `kintsugi.agent.decision.report must be plain or assessed, got "<value>"`, checked in every mode as the view is, an empty value included. The assessed report needs the sheets, since its checks read the owner of each line: in decision mode, `assessed` with the view `tables` stops the start with `kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got tables: the assessed report's checks read the service that owns each line of the sheets`. Only decision mode applies it: explorer and dossier mode always ask for the plain report, and the pair does not stop their start. A gathering that gives no dossier leaves no line to assess, so such a run asks for the plain report, which can then be valid only with both causes `UNKNOWN`, as with `plain`. Why a setting whose default is today's report: as for the view, M0 reads today's prompt, and V1 (`sheets` with `plain`) and V2 (`sheets` with `assessed`) are each measured against it.
+
 Why the dossier first: its windows end when it is gathered ("Evidence dossier gathering"); gathered before the warm-up, they end at the incident's opening, not after a model load of varying length. The incident's time budget still starts when the warm-up ends ("The warm-up"), so it neither counts nor bounds the gathering: the `ACT` call deadline alone does. Why the mode: a local dossier-mode replay sample took 1,500 to 1,900 s, 75% of it in `INVESTIGATE` and `KNOWLEDGE`, whose drill-down calls a replay mostly could not answer; one report call measures the diagnosis in about 30 s on the cloud route, and its replay makes no unrecorded call. Why the real state lines: in replay, dossier-mode report calls also carried the drill-down evidence, so they were never byte-identical to this call, and decision runs are compared with each other; a line claiming phases that never ran and 6 calls left would be false input to the model.
 
 #### Scenario: No phase call
@@ -967,6 +969,33 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 - GIVEN `KINTSUGI_AGENT_DECISION_VIEW` set to `charts`, or set and empty
 - WHEN the agent starts in any mode, explorer and dossier included
 - THEN the start stops with `kintsugi.agent.decision.view must be tables or sheets, got "charts"`, or `got ""` for the empty value
+
+#### Scenario: The plain report, today's, by default (service-assessment T2)
+- GIVEN `kintsugi.agent.decision.report` not set, or set to `plain`, in either view
+- WHEN a decision incident runs
+- THEN its report call's instruction and schema are byte for byte those before the setting, and the stored report has no `assessments`
+- AND `KINTSUGI_AGENT_DECISION_REPORT=assessed` selects the assessed report
+
+#### Scenario: The assessed report needs the sheets (service-assessment T2)
+- GIVEN `kintsugi.agent.decision.report` = `assessed` and `kintsugi.agent.decision.view` = `tables`
+- WHEN the agent starts in decision mode
+- THEN the start stops with `kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got tables: ...`
+- AND an explorer or dossier start with the same pair goes on
+
+#### Scenario: The report applies in decision mode only (service-assessment T2)
+- GIVEN `kintsugi.agent.decision.report` = `assessed` and `kintsugi.agent.mode` = `dossier`
+- WHEN an incident runs
+- THEN its report call's instruction and schema are those of the plain report, and the stored report has no `assessments`
+
+#### Scenario: Any other report stops the start in every mode (service-assessment T2)
+- GIVEN `KINTSUGI_AGENT_DECISION_REPORT` set to `rich`, or set and empty
+- WHEN the agent starts in any mode
+- THEN the start stops with `kintsugi.agent.decision.report must be plain or assessed, got "rich"`, or `got ""` for the empty value
+
+#### Scenario: An assessed run without a dossier asks for the plain report (service-assessment T2)
+- GIVEN the assessed report, and a gathering that gives no dossier
+- WHEN the report call is built
+- THEN its schema and task are the plain report's, with `Citable toolCallIds: none.`, and a report with both causes `UNKNOWN` completes the run
 
 ### Requirement: Summaries built in code
 
@@ -1228,6 +1257,74 @@ An evidence item MAY instead cite the dossier **(T5b)**: `toolCallId` `"dossier"
 #### Scenario: Two invalid reports
 - WHEN the retry also fails the schema or the evidence check
 - THEN the run ends `INVALID_REPORT` and `incidents.report` is null
+
+### Requirement: The assessed report
+
+In decision mode with `kintsugi.agent.decision.report` = `assessed` and the sheets ("Decision mode"; [feature document](../../../odd/tasks/service-assessment.md), **service-assessment T2**), the report call MUST ask for the assessed report: the role of each lab service first, then the cause. The model writes these fields in this order, which the schema's properties, its `required` list and the task follow, as in "The report":
+
+| Field | Rule |
+|-------|------|
+| `assessments` | an object with exactly one property per lab service, in the sheets' order, leaf first: `gateway-mock`, `inventory-service`, `payment-service`, `order-service`; each `{role, line, why}`, all required, no other field |
+| `assessments.<service>.role` | `ORIGIN`, `AFFECTED` or `UNAFFECTED` |
+| `assessments.<service>.line` | an integer of at least 1: `D<line>` of the sheets, as an evidence item's |
+| `assessments.<service>.why` | at most 200 characters, as an evidence item's |
+| `summary`, `rootCauseService`, `rootCauseCategory`, `confidence` | as in "The report", the summary cut in the same way |
+
+The model writes no `evidence`, and a report that carries one fails the schema. The schema is sent as the plain report's is: as it is on the local route, whose grammar-constrained decoding writes the properties in the schema's order, so the order on the wire is checked in the HTTP body sent to Ollama; and on the cloud route with the keywords Anthropic rejects removed and every object closed ("Routes").
+
+The task MUST define the three roles by the facts and the calls, for any problem: `ORIGIN`, the problem starts in this service, its own facts show it, and the services it calls do not show that problem themselves; `AFFECTED`, it shows the problem because a service it calls, an `ORIGIN` or `AFFECTED` one, does; `UNAFFECTED`, its own facts show no problem in the incident window. It MUST state the rules below, say that `line` is a line of the service's own sheet or of its part of "Seen only in the previous window" (`D7 is line 7`), that `rootCauseService` is the `ORIGIN`, or `UNKNOWN` when no service is, and that code builds the evidence. It names no lab service, category or fault as an example, and the categories stay those of the system message.
+
+Code MUST check the report, then the rules below, which check the model's own claims against its roles and `CallGraph` and never name a cause. Every broken rule rejects the report with an exact error, for the one retry of "Evidence is checked", and a second invalid report ends the run `INVALID_REPORT`; nothing is dropped but a summary too long. Coverage, the schema and Citation are checked first; the other three read every role, so they are checked only once every service is assessed within the schema.
+
+| Rule | It checks | Error |
+|------|-----------|-------|
+| Coverage | every lab service is assessed once, and no other name | `assessments.<service> is missing: assess every service once`; `assessments.unexpected field "<name>"; allowed: ...` |
+| Citation | each `line` is owned by its service in the sheets ("Evidence dossier rendering"): a line of its sheet or of its part of the last section | `assessments.<service>.line <N> is a line of <owner>, not of <service>` (`the header` for a header line), or `... is not in the sheets`; then `; cite a line of its own sheet or of its part of "Seen only in the previous window"` |
+| One origin | at most one `ORIGIN`; none only when every service is `UNAFFECTED` and both causes are `UNKNOWN` | `at most one service is the ORIGIN; got <n>: <services>`; `no service is the ORIGIN, so every service must be UNAFFECTED; got AFFECTED: <services>`; `no service is the ORIGIN, so rootCauseService and rootCauseCategory must both be UNKNOWN; got "<service>" and "<category>"` |
+| Graph | an `AFFECTED` service calls an `ORIGIN` or `AFFECTED` service | `assessments.<service> is AFFECTED but calls no service` or `... but calls no ORIGIN or AFFECTED service (it calls <callee>: <role>, ...)`; then `; a service is AFFECTED only through a service it calls that is ORIGIN or AFFECTED` |
+| Answer | `rootCauseService` is the `ORIGIN` | `rootCauseService must be the ORIGIN, <service>; got "<value>"` |
+
+So a valid assessed report never names `postgres`, which has no sheet. Code then derives the **evidence** of a valid report: one item per `ORIGIN` and `AFFECTED` service, in the sheets' order, citing its assessment's line as a dossier item does, `{toolCallId: "dossier", tool: "dossier", line, quote, why}`, with the quote filled in by code from the line's text and the `why` the assessment's; a report whose every service is `UNAFFECTED` has none. The stored report is the plain report's, the checked `assessments` written first, after `model`, so that storage and scoring read its evidence as they read a plain report's. A cut assessed report's retry asks for `a shorter summary and shorter whys`, since it has no evidence items to shorten.
+
+Why: a caller's latency contains its callee's, so comparing magnitudes cannot find the origin, while the call graph can; in M0 the local model's misses on F1 and F3 were hops along the graph ("Evidence dossier rendering"). Assessing each service from its own sheet turns one synthesis over the dossier into four local judgments that code can check against the graph and the line owners: the LLM proposes, deterministic code verifies. Why the rules never name a cause: they hold for any fault, so they cannot leak an answer into the retry.
+
+#### Scenario: The assessments come first (service-assessment T2)
+- WHEN the loop builds the assessed schema, on either route
+- THEN its properties and `required` list are `assessments, summary, rootCauseService, rootCauseCategory, confidence`, and the assessments' properties are the four services leaf first, each `role, line, why`
+- AND the local route's request to Ollama carries them in that order
+
+#### Scenario: Evidence derived from the roles (service-assessment T2)
+- GIVEN sheets and a report naming gateway-mock the `ORIGIN`, payment-service and order-service `AFFECTED` and inventory-service `UNAFFECTED`, each citing a line of its own sheet
+- WHEN the report is checked
+- THEN it is valid, and its evidence is the lines of gateway-mock, payment-service and order-service, in that order, each a dossier item quoted by code
+- AND the incident's stored report holds the `assessments` and that evidence
+
+#### Scenario: Every service unaffected (service-assessment T2)
+- WHEN every service is `UNAFFECTED` and both causes are `UNKNOWN`
+- THEN the report is valid with no evidence
+- AND a report that names a cause with every service `UNAFFECTED` is rejected by One origin
+
+#### Scenario: A line of another service (service-assessment T2)
+- GIVEN payment-service's assessment cites a line of gateway-mock's sheet
+- WHEN the report is checked
+- THEN it is rejected with `assessments.payment-service.line <N> is a line of gateway-mock, not of payment-service; cite a line of its own sheet or of its part of "Seen only in the previous window"`
+- AND the retry is told exactly that, and a valid retry completes the run
+
+#### Scenario: Two origins (service-assessment T2)
+- WHEN gateway-mock and payment-service are both `ORIGIN`
+- THEN the report is rejected with `at most one service is the ORIGIN; got 2: gateway-mock, payment-service`
+
+#### Scenario: Affected through nothing (service-assessment T2)
+- WHEN inventory-service, which calls no service, is `AFFECTED`, or payment-service is `AFFECTED` while gateway-mock, the one service it calls, is `UNAFFECTED`
+- THEN the report is rejected by Graph, the error naming the service and what it calls
+
+#### Scenario: The cause is the origin (service-assessment T2)
+- WHEN gateway-mock is the `ORIGIN` and `rootCauseService` is payment-service
+- THEN the report is rejected with `rootCauseService must be the ORIGIN, gateway-mock; got "payment-service"`
+
+#### Scenario: A service left out (service-assessment T2)
+- WHEN the assessments leave out a service
+- THEN the report is rejected with `assessments.<service> is missing: assess every service once`, and One origin, Graph and Answer are not checked
 
 ### Requirement: State tables
 

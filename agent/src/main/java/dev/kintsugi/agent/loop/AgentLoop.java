@@ -46,6 +46,7 @@ import tools.jackson.databind.node.StringNode;
 import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierView;
+import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentRunner;
 import dev.kintsugi.agent.incident.IncidentStatus;
@@ -97,6 +98,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/** Why a loop, or a replay driver, is not built without a decision view. */
 	static final String NULL_VIEW = "decisionView must not be null: DossierView.TABLES is the default view";
 
+	/** Why a loop is not built without a decision report. */
+	static final String NULL_REPORT = "decisionReport must not be null: DecisionReport.PLAIN is the default report";
+
 	/** A tool name that is safe to print as is in a summary header or a log line; any other is quoted. */
 	private static final Pattern PLAIN_NAME = Pattern.compile("[A-Za-z0-9_.-]{1,64}");
 
@@ -123,6 +127,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/** How decision mode writes its dossier; the other modes write the tables ({@link AgentMode#viewFrom}). */
 	private final DossierView decisionView;
 
+	/** Which report decision mode asks for; the other modes ask for the plain one ({@link AgentMode#reportFrom}). */
+	private final DecisionReport decisionReport;
+
 	/** Runs each model call, so that the loop can stop waiting for it at its time budget. */
 	private final ExecutorService modelCalls;
 
@@ -139,12 +146,27 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * A loop in {@code mode} whose dossier, in decision mode only, is written in {@code decisionView}.
+	 * A loop in {@code mode} whose dossier, in decision mode only, is written in {@code decisionView}, and which asks for
+	 * the plain report, the default.
 	 * @throws NullPointerException when {@code decisionView} is null, in every mode, rather than in a later gathering
 	 */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, AgentMode mode, DossierView decisionView) {
+		this(incidents, router, labTools, settings, clock, mode, decisionView, DecisionReport.PLAIN);
+	}
+
+	/**
+	 * A loop in {@code mode} that, in decision mode only, writes its dossier in {@code decisionView} and asks for
+	 * {@code decisionReport} (service-assessment T2).
+	 * @throws NullPointerException when {@code decisionView} or {@code decisionReport} is null, in every mode
+	 * @throws IllegalArgumentException in decision mode, for the assessed report with any view but the sheets
+	 */
+	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
+			Clock clock, AgentMode mode, DossierView decisionView, DecisionReport decisionReport) {
 		this.decisionView = Objects.requireNonNull(decisionView, NULL_VIEW);
+		this.decisionReport = Objects.requireNonNull(decisionReport, NULL_REPORT);
+		// Checked before any thread is started: the assessed report reads the sheets' line owners.
+		mode.reportFrom(decisionReport).ifPresent(report -> report.checkView(decisionView));
 		this.mode = mode;
 		this.gatherer = new DossierGatherer(labTools, clock);
 		this.incidents = incidents;
@@ -313,7 +335,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		String calls = null;
 		try {
 			Dossier dossier = future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
-			run.dossierText = run.mode.viewFrom(this.decisionView).orElse(DossierView.TABLES).render(dossier);
+			DossierView view = run.mode.viewFrom(this.decisionView).orElse(DossierView.TABLES);
+			// The sheets are kept with the service that owns each line, which the assessed report's checks read (T2).
+			run.sheets = view == DossierView.SHEETS ? ServiceSheets.render(dossier) : null;
+			run.dossierText = run.sheets == null ? view.render(dossier) : run.sheets.text();
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
 		}
@@ -546,31 +571,42 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		return summary;
 	}
 
-	/** The report: one call without tools, constrained by the report schema, checked in code, with one retry. */
+	/**
+	 * The report: one call without tools, constrained by the report schema, checked in code, with one retry. Decision
+	 * mode asks for the assessed report when {@code kintsugi.agent.decision.report} says so and the run has the sheets
+	 * (T2); a gathering that gave no dossier leaves no line to assess, so such a run asks for the plain report, which
+	 * can then be valid only with both causes UNKNOWN, as with the plain setting.
+	 */
 	private String conclude(Run run) {
 		// The report is written from the evidence, not from the last phase's plan (T5c8).
 		run.plan = null;
+		boolean assessed = run.sheets != null
+				&& run.mode.reportFrom(this.decisionReport).orElse(DecisionReport.PLAIN) == DecisionReport.ASSESSED;
 		List<String> errors = List.of();
 		for (int attempt = 1; attempt <= 2; attempt++) {
 			List<Message> messages = run.opening(0);
-			messages.add(new UserMessage(Prompts.report(run.state(Phase.CONCLUDE, 0), errors, run.toolSteps.values())));
+			Prompts.State state = run.state(Phase.CONCLUDE, 0);
+			messages.add(new UserMessage(assessed ? Prompts.assessedReport(state, errors)
+					: Prompts.report(state, errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(),
-					Schemas.report(run.mode));
+					assessed ? Schemas.ASSESSED_REPORT : Schemas.report(run.mode));
 			JsonNode report = Answers.json(answer.text());
-			ReportCheck.Result checked = ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);
+			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets)
+					: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);
 			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
-				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one.
+				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one. The
+				// assessed report has no evidence items to shorten, only its whys.
 				errors = new ArrayList<>(errors);
 				errors.addFirst("the answer was cut at " + answer.cap()
-						+ " tokens before it ended; write a shorter report, with a shorter summary and fewer or shorter "
-						+ "evidence items");
+						+ " tokens before it ended; write a shorter report, with a shorter summary and "
+						+ (assessed ? "shorter whys" : "fewer or shorter evidence items"));
 			}
 			write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), answer.model(), answer.tokens(),
 					answer.promptTokens(), answer.completionTokens(), null, null, null, null,
 					verdict(errors, checked.dropped()), answer.text(), answer.latencyMs(), now()));
 			if (errors.isEmpty()) {
-				return stored(run, report, checked);
+				return stored(run, report, checked, assessed);
 			}
 		}
 		throw new RunEnd(IncidentStatus.INVALID_REPORT, REPORT_INVALID);
@@ -582,14 +618,20 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * only the verified evidence items (T5c11): what is stored and scored has been checked. Each is
 	 * {@code {toolCallId, tool, line, quote, why}}, its quote the cited line's text, filled in by {@link ReportCheck}
 	 * (evidence-by-reference). The dropped items stay in the {@code REPORT} step's answer, and its summary names them.
-	 * The summary is stored as {@link ReportCheck} kept it, cut when it was too long (report-field-order).
+	 * The summary is stored as {@link ReportCheck} kept it, cut when it was too long (report-field-order). An assessed
+	 * report (T2) also keeps its checked assessments, first, and its evidence is the one code derived from them, so
+	 * that storage and scoring read it as they read a plain report.
 	 */
-	private String stored(Run run, JsonNode report, ReportCheck.Result checked) {
+	private String stored(Run run, JsonNode report, ReportCheck.Result checked, boolean assessed) {
 		ObjectNode stored = JSON.createObjectNode();
 		stored.put("incidentId", run.incident.id().toString());
 		stored.put("mode", run.mode.value());
 		stored.put("route", run.route.value());
 		stored.put("model", run.model);
+		if (assessed) {
+			stored.set("assessments", report.get("assessments"));
+		}
+		// An assessed report has no evidence of its own: its place is kept for the derived one, set below.
 		ReportCheck.MODEL_FIELDS.forEach(field -> stored.set(field, report.get(field)));
 		stored.put("summary", checked.summary());
 		stored.putArray("evidence").addAll(checked.evidence());
@@ -835,6 +877,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		 * (T5b); null in explorer mode and when the gathering gave no dossier.
 		 */
 		String dossierText;
+
+		/**
+		 * The sheets with the owner of each numbered line, when the run's dossier is written in the sheets: what an
+		 * assessed report is checked against (service-assessment T2); null otherwise.
+		 */
+		ServiceSheets.Rendered sheets;
 
 		/** Every tool step, refusals included, by step number: what the evidence check reads. */
 		final Map<Integer, ToolStep> toolSteps = new LinkedHashMap<>();

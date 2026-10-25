@@ -228,6 +228,50 @@ class PromptsTest {
 		assertThat(Prompts.act(new Prompts.State(Phase.INVESTIGATE, 4, 6, null), true)).doesNotContain("dossier");
 	}
 
+	@Test
+	void theAssessedReportTaskExplainsTheThreeRolesFromTheGraphAndNamesNoService() {
+		// service-assessment T2: the model assesses each service before it names the cause, and code checks the roles.
+		Prompts.State state = new Prompts.State(Phase.CONCLUDE, 0, 0, null, AgentMode.DECISION.phases(), true);
+
+		String task = Prompts.assessedReport(state, List.of());
+
+		assertThat(task).startsWith(state.text() + "\n\nTask: write the final report as a JSON object")
+			.containsSubsequence("assessments:", "summary:", "rootCauseService", "rootCauseCategory", "confidence:")
+			.contains("ORIGIN: the problem starts in this service")
+			.contains("AFFECTED: this service shows the problem because a service it calls does")
+			.contains("UNAFFECTED: its own facts show no problem in the incident window")
+			.contains("At most one service is the ORIGIN")
+			.contains("a service that calls no other service is never AFFECTED")
+			.contains("when no service is the ORIGIN, every service is UNAFFECTED and both causes are UNKNOWN")
+			.contains("rootCauseService: the ORIGIN, or UNKNOWN when no service is")
+			.contains("line is the number of the line of that service's own sheet")
+			.contains("D7 is line 7")
+			.contains("from the values listed in the system message")
+			.contains("Write no evidence: code builds it from the lines of the ORIGIN and AFFECTED services.")
+			// No citation id: an assessment cites its line by its number alone.
+			.doesNotContain("toolCallId")
+			.doesNotContain("Citable");
+		// Fault-agnostic: no lab component, cause or fault named as an example.
+		for (String name : List.of("gateway-mock", "payment-service", "order-service", "inventory-service", "postgres",
+				"DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION", "RESOURCE_EXHAUSTION")) {
+			assertThat(task).as(name).doesNotContain(name);
+		}
+		assertThat(task).doesNotContainPattern("(?i)\\b(F[1-8]\\b|fault|inject)");
+	}
+
+	@Test
+	void theAssessedReportsRetryListsTheErrorsAsThePlainReportsDoes() {
+		Prompts.State state = new Prompts.State(Phase.CONCLUDE, 0, 0, null, AgentMode.DECISION.phases(), true);
+		List<String> errors = List.of("at most one service is the ORIGIN", "summary must be a string");
+
+		assertThat(Prompts.assessedReport(state, errors)).endsWith("\n\nYour previous report was rejected:\n"
+				+ "- at most one service is the ORIGIN\n- summary must be a string\nWrite the report again, fixing every "
+				+ "error.");
+		assertThat(Prompts.report(state, errors, List.of())).endsWith("\n\nYour previous report was rejected:\n"
+				+ "- at most one service is the ORIGIN\n- summary must be a string\nWrite the report again, fixing every "
+				+ "error.");
+	}
+
 	private static Prompts.State dossierState(Phase phase, boolean dossier) {
 		return new Prompts.State(phase, 2, 4, null, AgentMode.DOSSIER.phases(), dossier);
 	}

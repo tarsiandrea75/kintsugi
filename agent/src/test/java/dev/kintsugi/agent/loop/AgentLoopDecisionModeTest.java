@@ -1,6 +1,8 @@
 package dev.kintsugi.agent.loop;
 
 import static dev.kintsugi.agent.loop.AgentLoopDossierModeTest.dossierFixture;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.assessedReport;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
@@ -40,19 +42,22 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.AgentDatabase;
+import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
+import dev.kintsugi.agent.lab.Phase;
 
 /**
  * Decision mode (agent spec, "Decision mode"; odd/tasks/decision-instrument.md T1): code gathers the evidence dossier
  * before the warm-up, and the model writes the report from it alone, with no evidence phase. The report call reads what
  * a dossier-mode report call reads when no drill-down result exists, except the run's own phases and budget. The
  * dossier is written in the view of {@code kintsugi.agent.decision.view} (odd/tasks/service-assessment.md T1): the
- * tables by default, or the per-service sheets.
+ * tables by default, or the per-service sheets. The report is that of {@code kintsugi.agent.decision.report} (T2): the
+ * plain report by default, today's byte for byte, or the assessed report, which needs the sheets.
  */
 class AgentLoopDecisionModeTest {
 
@@ -61,6 +66,39 @@ class AgentLoopDecisionModeTest {
 	private static final String SYMPTOM = "Checkout orders stay pending for a long time";
 
 	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
+
+	/**
+	 * The instruction of a decision run's report call with the plain report, as the commit before the assessed report
+	 * wrote it (service-assessment T2): the plain report stays today's, byte for byte.
+	 */
+	private static final String PLAIN_INSTRUCTION = """
+			Phase: CONCLUDE (the phases run in order: CONCLUDE)
+			Tools in this phase: none
+			Tool calls left: 0 in this phase, 0 in the incident
+
+			Task: write the final report as a JSON object with these fields, in this order: summary first, then the \
+			evidence, then the cause they lead to. summary: your reasoning in brief, at most 500 characters (about 80 \
+			words). evidence: 1 to 5 items {toolCallId, tool, line, why}, or none when both causes are UNKNOWN; each \
+			item cites a step and the number of one line of its summary: toolCallId and tool come from the summary's \
+			header, line is the number at the start of one line of that summary (2 for the line that starts with \
+			"2: "), and why is at most 200 characters. rootCauseService and rootCauseCategory, from the values listed \
+			in the system message, as your summary concludes. confidence: a number from 0 to 1. To cite the dossier, \
+			write toolCallId "dossier" and tool "dossier", with the number of the line you cite: D7 is line 7. \
+			Citable toolCallIds: dossier.""";
+
+	/** The schema of the same call, as the same commit sent it. */
+	private static final String PLAIN_SCHEMA = "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\","
+			+ "\"minLength\":1,\"maxLength\":500},\"evidence\":{\"type\":\"array\",\"minItems\":0,\"maxItems\":5,"
+			+ "\"items\":{\"type\":\"object\",\"properties\":{\"toolCallId\":{\"anyOf\":[{\"type\":\"integer\","
+			+ "\"minimum\":1},{\"type\":\"string\",\"enum\":[\"dossier\"]}]},\"tool\":{\"type\":\"string\"},"
+			+ "\"line\":{\"type\":\"integer\",\"minimum\":1},\"why\":{\"type\":\"string\",\"minLength\":0,"
+			+ "\"maxLength\":200}},\"required\":[\"toolCallId\",\"tool\",\"line\",\"why\"],"
+			+ "\"additionalProperties\":false}},\"rootCauseService\":{\"type\":\"string\",\"enum\":[\"gateway-mock\","
+			+ "\"payment-service\",\"order-service\",\"inventory-service\",\"postgres\",\"UNKNOWN\"]},"
+			+ "\"rootCauseCategory\":{\"type\":\"string\",\"enum\":[\"DEPENDENCY_LATENCY\",\"DEPENDENCY_REJECTING\","
+			+ "\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\",\"UNKNOWN\"]},\"confidence\":{\"type\":\"number\","
+			+ "\"minimum\":0,\"maximum\":1}},\"required\":[\"summary\",\"evidence\",\"rootCauseService\","
+			+ "\"rootCauseCategory\",\"confidence\"],\"additionalProperties\":false}";
 
 	private final IncidentRepository incidents = new IncidentRepository(AgentDatabase.asAgentApp(), JSON);
 
@@ -344,6 +382,210 @@ class AgentLoopDecisionModeTest {
 	}
 
 	@Test
+	void thePlainReportIsTodaysByteForByteInBothViews() {
+		// The default loop, the tables and the plain report, then the sheets with the plain report named: V1 changes only
+		// the dossier, never the report call's instruction or schema.
+		this.model.text(unknownReport()).text(unknownReport());
+		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
+		this.loop.close();
+		this.id = open();
+		this.loop = loop(AgentMode.DECISION, DossierView.SHEETS, DecisionReport.PLAIN, fixedClock());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.model.prompts()).hasSize(2).allSatisfy(prompt -> {
+			assertThat(last(prompt)).isEqualTo(PLAIN_INSTRUCTION);
+			assertThat(schema(prompt)).isEqualTo(PLAIN_SCHEMA);
+		});
+		assertThat(storedReport().has("assessments")).isFalse();
+	}
+
+	@Test
+	void anAssessedRunAsksForTheAssessmentsAndStoresTheEvidenceCodeDerivesFromThem() {
+		Clock clock = fixedClock();
+		ServiceSheets.Rendered sheets = sheets(clock);
+		this.model.text(assessedReport("order-service", "CONFIGURATION", originAt(sheets, "order-service")));
+		this.loop = loop(AgentMode.DECISION, DossierView.SHEETS, DecisionReport.ASSESSED, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		// One report call: the sheets after the same introduction, then the assessed task, with its own schema.
+		assertThat(this.model.prompts()).hasSize(1);
+		Prompt prompt = this.model.prompts().get(0);
+		assertThat(prompt.getInstructions().get(1).getText()).isEqualTo(Prompts.dossier(sheets.text()));
+		assertThat(last(prompt)).isEqualTo(Prompts.assessedReport(
+				new Prompts.State(Phase.CONCLUDE, 0, 0, null, AgentMode.DECISION.phases(), true), List.of()));
+		assertThat(schema(prompt)).isEqualTo(Schemas.ASSESSED_REPORT);
+		assertThat(step(2)).containsEntry("kind", "REPORT").containsEntry("summary", "valid");
+		// The stored report keeps the checked assessments and the evidence code derived from them: the ORIGIN's line,
+		// quoted by code, cited as the dossier is, so that storage and scoring read it as a plain report's.
+		JsonNode stored = storedReport();
+		assertThat(stored.get("mode").asString()).isEqualTo("decision");
+		assertThat(stored.get("rootCauseService").asString()).isEqualTo("order-service");
+		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo("CONFIGURATION");
+		assertThat(stored.get("summary").asString()).isEqualTo("what the sheets show");
+		assertThat(stored.get("stepsUsed").asInt()).isEqualTo(2);
+		assertThat(stored.get("assessments").propertyNames()).containsExactlyInAnyOrderElementsOf(CallGraph.SERVICES);
+		assertThat(stored.at("/assessments/order-service/role").asString()).isEqualTo("ORIGIN");
+		int line = firstLine(sheets, "order-service");
+		JsonNode evidence = stored.get("evidence");
+		assertThat(evidence).hasSize(1);
+		assertThat(evidence.get(0).get("toolCallId").asString()).isEqualTo("dossier");
+		assertThat(evidence.get(0).get("tool").asString()).isEqualTo("dossier");
+		assertThat(evidence.get(0).get("line").asInt()).isEqualTo(line);
+		assertThat(evidence.get(0).get("quote").asString())
+			.isEqualTo(DossierRenderer.line(sheets.text(), line).orElseThrow())
+			.isEqualTo("- calls: inventory-service, payment-service; called by: external client.");
+		assertThat(evidence.get(0).get("why").asString()).isEqualTo("its own facts");
+	}
+
+	@Test
+	void anAssessedReportThatBreaksARuleIsRetriedOnceWithTheExactError() {
+		Clock clock = fixedClock();
+		ServiceSheets.Rendered sheets = sheets(clock);
+		int gatewayLine = firstLine(sheets, "gateway-mock");
+		// payment-service cites a line of gateway-mock's sheet.
+		String[] wrong = originAt(sheets, "order-service");
+		wrong[2] = assessment("payment-service", "UNAFFECTED", gatewayLine);
+		this.model.text(assessedReport("order-service", "CONFIGURATION", wrong))
+			.text(assessedReport("order-service", "CONFIGURATION", originAt(sheets, "order-service")));
+		this.loop = loop(AgentMode.DECISION, DossierView.SHEETS, DecisionReport.ASSESSED, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		String error = "assessments.payment-service.line " + gatewayLine + " is a line of gateway-mock, not of "
+				+ "payment-service; cite a line of its own sheet or of its part of \"Seen only in the previous window\"";
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE", "REPORT:CONCLUDE");
+		assertThat(step(2)).containsEntry("summary", "invalid: " + error);
+		assertThat(last(this.model.prompts().get(0))).doesNotContain("Your previous report was rejected");
+		assertThat(last(this.model.prompts().get(1))).contains("\n\nYour previous report was rejected:\n- " + error
+				+ "\nWrite the report again, fixing every error.");
+		assertThat(schema(this.model.prompts().get(1))).isEqualTo(Schemas.ASSESSED_REPORT);
+		assertThat(step(3)).containsEntry("summary", "valid");
+	}
+
+	@Test
+	void aCutAssessedReportIsRetriedAskingForShorterWhysAndASecondInvalidOneEndsTheRun() {
+		this.model.cut("{\"assessments\":{\"gateway-mock\":{\"role\":\"UNAFF").text("not a report");
+		this.loop = loop(AgentMode.DECISION, DossierView.SHEETS, DecisionReport.ASSESSED, fixedClock());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.INVALID_REPORT);
+
+		// The model writes no evidence items, so it is asked for shorter whys instead.
+		String cut = "the answer was cut at 512 tokens before it ended; write a shorter report, with a shorter summary "
+				+ "and shorter whys";
+		assertThat(step(2)).containsEntry("summary", "invalid: " + cut + "; the answer is not a JSON object");
+		assertThat(last(this.model.prompts().get(1))).contains("- " + cut + "\n");
+		assertThat(failureReason()).isEqualTo(AgentLoop.REPORT_INVALID);
+		assertThat(this.model.calls()).isEqualTo(2);
+	}
+
+	@Test
+	void anAssessedRunWhoseGatheringGaveNoDossierAsksForThePlainReport() {
+		// No sheets, so no line to assess: the plain report, with nothing to cite, as with the plain setting.
+		this.lab.breaks(new NoClassDefFoundError("dev/kintsugi/Missing"));
+		this.model.text(unknownReport());
+		this.loop = loop(AgentMode.DECISION, DossierView.SHEETS, DecisionReport.ASSESSED, fixedClock());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		Prompt prompt = this.model.prompts().get(0);
+		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DECISION));
+		assertThat(last(prompt)).contains("Citable toolCallIds: none.").doesNotContain("assessments");
+		assertThat(storedReport().get("rootCauseService").asString()).isEqualTo("UNKNOWN");
+		assertThat(storedReport().has("assessments")).isFalse();
+	}
+
+	@Test
+	void theAssessedReportNeedsTheSheetsInDecisionMode() {
+		String needsSheets = "kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got "
+				+ "tables: the assessed report's checks read the service that owns each line of the sheets";
+		assertThatThrownBy(() -> loop(AgentMode.DECISION, DossierView.TABLES, DecisionReport.ASSESSED, fixedClock()))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessage(needsSheets);
+		// The start stops with it.
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		LoopSettings settings = new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5));
+		assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(),
+				"decision", "tables", "assessed"))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessage(needsSheets);
+		// Explorer and dossier mode apply neither setting, so the pair does not stop them.
+		for (AgentMode mode : List.of(AgentMode.EXPLORER, AgentMode.DOSSIER)) {
+			new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(), mode.value(), "tables",
+					"assessed")
+				.close();
+		}
+	}
+
+	@Test
+	void theReportIsReadInDecisionModeOnly() {
+		// Dossier mode asks for the plain report whatever the setting: its report call is the default loop's, byte for
+		// byte.
+		Clock clock = fixedClock();
+		this.model.quiet().quiet().text(unknownReport()).quiet().quiet().text(unknownReport());
+		this.loop = loop(AgentMode.DOSSIER, DossierView.SHEETS, clock);
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+		Prompt plain = this.model.prompts().getLast();
+		this.loop.close();
+		this.id = open();
+		this.loop = loop(AgentMode.DOSSIER, DossierView.SHEETS, DecisionReport.ASSESSED, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		Prompt assessed = this.model.prompts().getLast();
+		assertThat(last(assessed)).isEqualTo(last(plain)).doesNotContain("assessments");
+		assertThat(schema(assessed)).isEqualTo(schema(plain)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+		assertThat(storedReport().has("assessments")).isFalse();
+		// The one rule of which mode reads the setting, as for the view.
+		assertThat(AgentMode.DECISION.reportFrom(DecisionReport.ASSESSED)).hasValue(DecisionReport.ASSESSED);
+		assertThat(AgentMode.DOSSIER.reportFrom(DecisionReport.ASSESSED)).isEmpty();
+		assertThat(AgentMode.EXPLORER.reportFrom(DecisionReport.ASSESSED)).isEmpty();
+	}
+
+	@Test
+	void anyOtherReportAnEmptyOneIncludedStopsTheStartInEveryMode() throws IOException {
+		assertThat(boundReport(Map.of("KINTSUGI_AGENT_DECISION_REPORT", ""))).isEmpty();
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		LoopSettings settings = new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5));
+		// Checked in every mode, as the view is, although only decision mode applies it.
+		for (AgentMode mode : AgentMode.values()) {
+			for (String report : List.of("", "rich")) {
+				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
+						fixedClock(), mode.value(), "sheets", report))
+					.as("%s, \"%s\"", mode.value(), report)
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessage("kintsugi.agent.decision.report must be plain or assessed, got \"" + report + "\"");
+			}
+		}
+	}
+
+	@Test
+	void theReportIsSelectedByItsVariableAndIsPlainByDefault() throws IOException {
+		assertThat(DecisionReport.of("plain")).isEqualTo(DecisionReport.PLAIN);
+		assertThat(DecisionReport.of("assessed")).isEqualTo(DecisionReport.ASSESSED);
+		assertThat(List.of(DecisionReport.values())).extracting(DecisionReport::value)
+			.containsExactly("plain", "assessed");
+		assertThatThrownBy(() -> DecisionReport.of("rich")).isInstanceOf(IllegalArgumentException.class)
+			.hasMessage("kintsugi.agent.decision.report must be plain or assessed, got \"rich\"");
+		// The default of the @Value bindings, and the one application.yaml writes as a literal.
+		assertThat(DecisionReport.of(DecisionReport.DEFAULT)).isEqualTo(DecisionReport.PLAIN);
+		assertThat(boundReport(Map.of())).isEqualTo(DecisionReport.DEFAULT);
+		assertThat(boundReport(Map.of("KINTSUGI_AGENT_DECISION_REPORT", "assessed"))).isEqualTo("assessed");
+	}
+
+	@Test
+	void aNullReportIsRefusedWhenTheLoopIsBuiltInEveryMode() {
+		for (AgentMode mode : AgentMode.values()) {
+			assertThatThrownBy(() -> loop(mode, DossierView.SHEETS, null, fixedClock())).as(mode.value())
+				.isInstanceOf(NullPointerException.class)
+				.hasMessage(AgentLoop.NULL_REPORT);
+		}
+	}
+
+	@Test
 	void theViewIsReadInDecisionModeOnly() {
 		Clock clock = fixedClock();
 		String tables = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15)));
@@ -372,7 +614,7 @@ class AgentLoopDecisionModeTest {
 		for (AgentMode mode : AgentMode.values()) {
 			for (String view : List.of("", "charts")) {
 				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
-						fixedClock(), mode.value(), view))
+						fixedClock(), mode.value(), view, DecisionReport.DEFAULT))
 					.as("%s, \"%s\"", mode.value(), view)
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessage("kintsugi.agent.decision.view must be tables or sheets, got \"" + view + "\"");
@@ -430,6 +672,35 @@ class AgentLoopDecisionModeTest {
 				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, mode, view);
 	}
 
+	/** A loop in {@code mode} that, in decision mode, writes its dossier in {@code view} and asks for {@code report}. */
+	private AgentLoop loop(AgentMode mode, DossierView view, DecisionReport report, Clock clock) {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		return new AgentLoop(this.incidents,
+				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, mode, view, report);
+	}
+
+	/** The sheets a decision run of this test's lab writes on {@code clock}, with the owner of each line. */
+	private static ServiceSheets.Rendered sheets(Clock clock) {
+		return ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15));
+	}
+
+	/** The number of the first line {@code service} owns in {@code sheets}: its place in the call graph. */
+	private static int firstLine(ServiceSheets.Rendered sheets, String service) {
+		return sheets.owners().indexOf(service) + 1;
+	}
+
+	/**
+	 * The four assessments, in sheet order, each citing its service's first line: {@code origin} the ORIGIN and the
+	 * others UNAFFECTED, which every rule of the assessed report allows.
+	 */
+	private static String[] originAt(ServiceSheets.Rendered sheets, String origin) {
+		return CallGraph.SERVICES.stream()
+			.map(service -> assessment(service, service.equals(origin) ? "ORIGIN" : "UNAFFECTED",
+					firstLine(sheets, service)))
+			.toArray(String[]::new);
+	}
+
 	/** The lab of these tests: F3's traffic and order events over the recorded mcp-tools outputs. */
 	private static FakeLabTools lab() {
 		return new FakeLabTools().answer("traffic_counts", dossierFixture("traffic_counts-incident"))
@@ -443,11 +714,20 @@ class AgentLoopDecisionModeTest {
 
 	/** {@code kintsugi.agent.decision.view} as {@code application.yaml} binds it over these environment variables. */
 	private static String boundView(Map<String, Object> variables) throws IOException {
+		return bound(DossierView.PROPERTY, variables);
+	}
+
+	/** {@code kintsugi.agent.decision.report} as {@code application.yaml} binds it over these environment variables. */
+	private static String boundReport(Map<String, Object> variables) throws IOException {
+		return bound(DecisionReport.PROPERTY, variables);
+	}
+
+	private static String bound(String property, Map<String, Object> variables) throws IOException {
 		StandardEnvironment environment = new StandardEnvironment();
 		environment.getPropertySources().addFirst(new MapPropertySource("environment", variables));
 		new YamlPropertySourceLoader().load("application.yaml", new ClassPathResource("application.yaml"))
 			.forEach(environment.getPropertySources()::addLast);
-		return Binder.get(environment).bind("kintsugi.agent.decision.view", String.class).get();
+		return Binder.get(environment).bind(property, String.class).get();
 	}
 
 	/** Makes the warm-up note how many lab calls were made before it came, and answer {@code OK}. */
