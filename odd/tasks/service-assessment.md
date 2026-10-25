@@ -217,6 +217,10 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - RED: before the fix the tree did not compile (`Run.sheets`). Then Coverage and Citation failed (2 tests), and the five new rule tests failed (6 failures and 1 error). GREEN after the rules. The no-origin test now expects the Graph error as well, since payment-service's only callee is UNAFFECTED there.
   - Results: unit (1) alone, with (2) stashed, passes the full suite with 535 tests. With both, `./mvnw test` passes 548 tests with 0 failures.
   - Not done, needed before T4's V2: replays cannot ask for the assessed report yet. `ReplayDriver` builds its loops with the plain report, and `replay-agent.sh` has no `--report`. This needs `ReplayDriver`, `ReplayRunTest`, `replay-agent.sh` and `test-lib.sh`, as `--view` did in T1 (b); the scripts were outside this task's edit surfaces.
+- T2 reviews (consent granted), both approved and acknowledged:
+  - (1) `a1f94c7`, base `ea73507`, reviewed in a detached worktree: one lens (medium risk), 5 files, 605 lines (lineage `review-9ce19c09f0f80d3c`). WARNING R3-quote-orElseThrow: evidence derivation calls `DossierRenderer.line(...).orElseThrow()` after Citation checked only `sheets.owner(line)`, so an owner with no matching line in the text would throw instead of returning an invalid result for the retry. SUGGESTION R3-line-edge-tests: a non-integral number, a numeric string and a value outside the int range have no narrow test.
+  - (2) `8e15a90`, base `a1f94c7`, so with the docs commit: one lens (medium risk), 11 files, 809 lines (lineage `review-548facc4d0bc935c`). No findings.
+  - Both findings are follow-ups for a T2r; neither blocks the replay `--report` work.
 
 ## Next step
 
