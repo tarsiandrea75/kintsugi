@@ -127,7 +127,7 @@ The gates; the human decides at each one:
 
 The forecast is about 900 authored changed lines (T1 ~400, T2 ~400, T3 ~100), over the 400-line budget. Strategy: `feature-branch-chain` on one branch, `feat/service-assessment`, with one work-unit commit per code task. The branch starts from `feat/decision-instrument` at `8de4a5a`. Once that feature's last tasks are committed after T4, it is rebased onto that branch's tip: local and unpushed.
 
-T1 alone came to about 1,870 authored lines, so it is two work-unit commits, each reviewed on its own: `db5f736` and `4556024`.
+T1 alone came to about 1,870 authored lines, so it is two work-unit commits, each reviewed on its own: `db5f736` and `4556024`. After the rebase of 2026-10-25 they are `58969bb` and `12757e7`.
 
 ## Progress
 
@@ -147,10 +147,10 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
     - The sheets leave out the sample order ids, the latency point counts, the previous-window max and the `/actuator/*` rows.
     - An event source's total line stays in its sheet even when its incident count is 0. Only rows move to the last section.
     - The view's value is checked at start in every mode, so a typo fails the start. It is applied in decision mode only.
-  - RED: the new tests stopped at `testCompile`, with 100 "cannot find symbol" errors for `CallGraph`, `ServiceSheets`, `DossierView` and `Edge`. GREEN: the hand-written F3 golden matched at the first run, and the full suite passes with 515 tests.
+  - RED: the new tests stopped at `testCompile`, with 100 "cannot find symbol" errors for `CallGraph`, `ServiceSheets`, `DossierView` and `Edge`. GREEN: the hand-written F3 golden matched at the first run, and the full suite passes with 514 tests. The writer counted 515, including its temporary golden-dump test, which it then deleted.
   - Parent checks:
     - (a) alone, with (b) stashed, passes the full suite.
-    - With (b), the full suite passes with 515 tests and 0 failures, and `test-lib.sh` with 141 cases.
+    - With (b), the full suite passes with 514 tests and 0 failures, and `test-lib.sh` with 141 cases. (The count first read 515, because `target/surefire-reports` still held the deleted dump test's report.)
     - After a javadoc rewrap, the two touched loop test classes pass again.
   - Still open, in T1r: acceptance criterion 1's golden from a clean decision recording, which waits for the T4 import.
   - For T5: `infra/compose.yaml` passes only `KINTSUGI_AGENT_MODE` and `KINTSUGI_AGENT_ROUTE` to the agent container, so the live agent writes the tables.
@@ -166,6 +166,14 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
     - SUGGESTION R3-null-view: the new `AgentLoop` constructor accepts a null view.
     - SUGGESTION R3-view-propagation: no test shows that `-Dkintsugi.agent.decision.view` reaches the forked `ReplayRunTest` JVM. `replay.split` and `replay.repeats` already rely on the same mechanism, and `summary.tsv` records the view the JVM used.
 
+- 2026-10-25, gate 1, the human's decision after M0: Part B goes on now, and `qwen3:8b` runs later (decision-instrument T5).
+  - M0 on `dev`, today's prompt, tables: cloud F1 4/5, F2 5/5, F3 5/5; local `granite4.1:8b` F1 0/5, F2 5/5, F3 0/5.
+  - The local misses are hops along the call graph. On F1 it names payment-service, one hop early. On F3 it names payment-service too: one hop too far, the callee that misconfigured order-service cannot reach.
+- 2026-10-25: rebased onto `feat/decision-instrument` (`2ad9c6b`), which brings T4's 30 recordings, T2r2 and M0. (a) is now `58969bb` and (b) `12757e7`.
+  - The reviews of (a) and (b) were made on their old identities. The commits' own changes are unchanged.
+  - One conflict, in `test-lib.sh`'s context, was resolved by keeping both sides: (b)'s two `--view` cases and T2r2's `driver_refusal`.
+  - After the rebase, `test-lib.sh` passes 147 cases and the full suite 514 tests, with 0 failures.
+
 ## Next step
 
-Part A first, on `feat/decision-instrument`: T2r2, the import, then M0. Then rebase this branch onto that branch's tip, then T1r and T2.
+T1r, then T2.
