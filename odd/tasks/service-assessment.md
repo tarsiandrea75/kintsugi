@@ -116,20 +116,56 @@ The gates; the human decides at each one:
 
 ## Tasks
 
-- [ ] T1 `CallGraph` and the per-service sheets with line owners, behind `kintsugi.agent.decision.view`, with goldens. Route: delegated writer (dossier package, settings, tests).
+- [x] T1 `CallGraph` and the per-service sheets with line owners, behind `kintsugi.agent.decision.view`, with goldens. Route: delegated writer (dossier package, settings, tests).
+- [ ] T1r The T1 review findings (2 WARNINGs, 6 SUGGESTIONs), and acceptance criterion 1's golden from a clean decision recording, after decision-instrument's T4 import. Route: delegated writer.
 - [ ] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
 - [ ] T3 ADR-014, ADR-011's status, and the spec's remaining parts. Route: inline (docs).
 - [ ] T4 Measurement on `dev`: V1 and V2, local (about 2 h each) and cloud (about $0.05 each). Pick one, then read `holdout` once. Route: inline.
-- [ ] T5 The live local round for the M2 check. Route: inline (lab, about 70 minutes).
+- [ ] T5 The live local round for the M2 check. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
 
 ## Delivery
 
 The forecast is about 900 authored changed lines (T1 ~400, T2 ~400, T3 ~100), over the 400-line budget. Strategy: `feature-branch-chain` on one branch, `feat/service-assessment`, with one work-unit commit per code task. The branch starts from `feat/decision-instrument` at `8de4a5a`. Once that feature's last tasks are committed after T4, it is rebased onto that branch's tip: local and unpushed.
 
+T1 alone came to about 1,870 authored lines, so it is two work-unit commits, each reviewed on its own: `db5f736` and `4556024`.
+
 ## Progress
 
 - 2026-10-24 21:45: branch `feat/service-assessment`, from `feat/decision-instrument` (`8de4a5a`), while T4 of that feature records. Its settings default to today's behavior, so the decision-instrument measurements (M0) are not affected.
 
+- 2026-10-25: T1 done (route: delegated writer; trigger: about 20 files across the dossier package, the loop, the replay driver, two scripts, the spec and the docs). It came to about 1,870 authored lines, so it is two work-unit commits:
+  - (a) `db5f736`: `CallGraph` holds the services leaf first, the edges, `calls`, `calledBy` and the owner of each table and event source. `ServiceSheets` renders the same `Dossier` and returns the owner of every numbered line. Goldens cover f3, f1 and healthy. `DossierRenderer` takes its edges from `CallGraph`, and its output is unchanged.
+  - (b) `4556024`: `kintsugi.agent.decision.view` (`KINTSUGI_AGENT_DECISION_VIEW`) is `tables` by default, today's dossier byte for byte, or `sheets`; it is applied in decision mode only. Replays take `--view` and record it in `summary.tsv` and `aggregate.tsv`. The spec gains the sheets rendering and the view.
+  - Sizes, sheets against tables, by the tests' estimate of (characters + 2) / 3:
+    - F3: 1,595 against 1,817 tokens;
+    - healthy: 1,300 against 1,690;
+    - stress: 5,412 against 5,463.
+    - The tests assert that the sheets are never larger.
+  - Choices made while writing:
+    - An outbound line names only the callee, not the method and uri. Restating the edge took the stress sheets to 5,512 tokens, over the 5,500 ceiling. The callee's inbound line still names the uri.
+    - The dossier introduction and `Prompts.java` are unchanged. Header lines D6-D8 explain the sheets' layout, so the two views differ only in the rendering.
+    - The sheets leave out the sample order ids, the latency point counts, the previous-window max and the `/actuator/*` rows.
+    - An event source's total line stays in its sheet even when its incident count is 0. Only rows move to the last section.
+    - The view's value is checked at start in every mode, so a typo fails the start. It is applied in decision mode only.
+  - RED: the new tests stopped at `testCompile`, with 100 "cannot find symbol" errors for `CallGraph`, `ServiceSheets`, `DossierView` and `Edge`. GREEN: the hand-written F3 golden matched at the first run, and the full suite passes with 515 tests.
+  - Parent checks:
+    - (a) alone, with (b) stashed, passes the full suite.
+    - With (b), the full suite passes with 515 tests and 0 failures, and `test-lib.sh` with 141 cases.
+    - After a javadoc rewrap, the two touched loop test classes pass again.
+  - Still open, in T1r: acceptance criterion 1's golden from a clean decision recording, which waits for the T4 import.
+  - For T5: `infra/compose.yaml` passes only `KINTSUGI_AGENT_MODE` and `KINTSUGI_AGENT_ROUTE` to the agent container, so the live agent writes the tables.
+- T1 reviews (consent granted), both approved and acknowledged. All findings go to T1r.
+  - (a) `db5f736`, base `0f1398f`, so it includes the two docs commits: one lens (medium risk), 11 files, 1,535 lines (lineage `review-43b85ca6617e4ab0`).
+    - WARNING R3-unknown-owner-throws: `CallGraph.ownerOfTable` and `ownerOfSource` throw for a name outside their maps. So one unknown table or event source fails the whole rendering, while an unknown service's traffic goes to "Other rows". No test pins it.
+    - SUGGESTION R3-generic-outbound-untested: the outbound block for a client row on no edge has no test and no golden.
+  - (b) `4556024`, base `db5f736`: four lenses (high risk, because of the shell scripts), 12 files, 488 lines (lineage `review-e8a9d3f0054320be`). R1 found nothing.
+    - WARNING R2-sample-adjacent-string-params: `Sample` now has three adjacent `String` components (`split`, `view`, `recording`), so a swap compiles. Their order also differs from the TSV's, where `recording` comes before `view`.
+    - SUGGESTION R4-view-validated-in-every-mode: a stray or empty `KINTSUGI_AGENT_DECISION_VIEW` stops an explorer or dossier start, where the setting does nothing. Failing fast is the spec's choice.
+    - SUGGESTION R2-decision-only-view-rule-duplicated: `ReplayDriver` re-derives "only decision mode reads the view" with its own ternary, as `AgentLoop` does.
+    - SUGGESTION R2-default-view-literal-repeated: the default `tables` is a literal in `LoopConfig`, `ReplayRunTest`, `application.yaml` and `replay-agent.sh`.
+    - SUGGESTION R3-null-view: the new `AgentLoop` constructor accepts a null view.
+    - SUGGESTION R3-view-propagation: no test shows that `-Dkintsugi.agent.decision.view` reaches the forked `ReplayRunTest` JVM. `replay.split` and `replay.repeats` already rely on the same mechanism, and `summary.tsv` records the view the JVM used.
+
 ## Next step
 
-T1.
+Part A first, on `feat/decision-instrument`: T2r2, the import, then M0. Then rebase this branch onto that branch's tip, then T1r and T2.
