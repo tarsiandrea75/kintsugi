@@ -118,7 +118,7 @@ The gates; the human decides at each one:
 
 - [x] T1 `CallGraph` and the per-service sheets with line owners, behind `kintsugi.agent.decision.view`, with goldens. Route: delegated writer (dossier package, settings, tests).
 - [x] T1r The T1 review findings (2 WARNINGs, 6 SUGGESTIONs), and acceptance criterion 1's golden from a clean decision recording, after decision-instrument's T4 import. Route: delegated writer.
-- [ ] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
+- [x] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
 - [ ] T3 ADR-014, ADR-011's status, and the spec's remaining parts. Route: inline (docs).
 - [ ] T4 Measurement on `dev`: V1 and V2, local (about 2 h each) and cloud (about $0.05 each). Pick one, then read `holdout` once. Route: inline.
 - [ ] T5 The live local round for the M2 check. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
@@ -204,6 +204,20 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - (2) `2e694e1`, base `0c9f4d1`: four lenses (high risk, the scripts), 13 files, 193 lines (lineage `review-c0203fd189dff840`). R1, R3 and R4 found nothing. SUGGESTION R2-null-view-message-duplicated: two tests repeat `AgentLoop.NULL_VIEW` as a literal.
   - Both suggestions are follow-ups; neither blocks T2.
 
+- 2026-10-25: T2 done (route: delegated writer; trigger: 11 files across the loop package, its tests and the spec). A first writer had left it uncommitted and not compiling: the schema, the prompt task, the setting, the wiring and most tests were written, while `Run.sheets` was missing, Citation was an empty stub, Coverage reported no missing service, and One origin, Graph and Answer did not exist. It is two work-unit commits:
+  - (1) `a1f94c7`, the check: `ReportCheck.checkAssessed` checks the schema, then Coverage, Citation, One origin, Graph and Answer, each with an exact, fault-agnostic error, and derives the evidence from the ORIGIN and AFFECTED lines as dossier items quoted by code. `Schemas.ASSESSED_REPORT` lists `assessments` first, the services leaf first; `ModelRouteTest` checks the order on both routes. About 605 authored lines.
+  - (2) `8e15a90`, the wiring: `DecisionReport` and `kintsugi.agent.decision.report` (`KINTSUGI_AGENT_DECISION_REPORT`), `plain` by default, today's report call byte for byte, or `assessed`. `AgentMode.reportFrom` is the one rule of which mode applies it. The assessed task in `Prompts`, the loop's retry and storage, `AssessedReportRequestTest` (the order in the HTTP body Ollama receives), and the spec: the setting under "Decision mode" and a new requirement, "The assessed report". About 791 authored lines.
+  - Choices made while writing:
+    - Coverage, the schema and Citation come first. One origin, Graph and Answer read every role, so they run only once all four services are assessed within the schema; otherwise a missing callee would raise false Graph errors.
+    - One origin with no ORIGIN asks for every service UNAFFECTED and both causes UNKNOWN, as the prompt says, not only `rootCauseService`.
+    - Every error that holds is listed. An AFFECTED service with no ORIGIN can break One origin and Graph at once, and the retry gets both.
+    - Answer means a valid assessed report never names `postgres`, which has no sheet. No fault in the catalog has postgres as its cause.
+    - `assessed` with `tables` stops a decision start, since the checks read the sheets' line owners. A gathering that gave no dossier falls back to the plain report, which is valid only with both causes UNKNOWN.
+    - The stored report writes `assessments` after `model`, then the plain report's fields, with the derived evidence in the evidence's place.
+  - RED: before the fix the tree did not compile (`Run.sheets`). Then Coverage and Citation failed (2 tests), and the five new rule tests failed (6 failures and 1 error). GREEN after the rules. The no-origin test now expects the Graph error as well, since payment-service's only callee is UNAFFECTED there.
+  - Results: unit (1) alone, with (2) stashed, passes the full suite with 535 tests. With both, `./mvnw test` passes 548 tests with 0 failures.
+  - Not done, needed before T4's V2: replays cannot ask for the assessed report yet. `ReplayDriver` builds its loops with the plain report, and `replay-agent.sh` has no `--report`. This needs `ReplayDriver`, `ReplayRunTest`, `replay-agent.sh` and `test-lib.sh`, as `--view` did in T1 (b); the scripts were outside this task's edit surfaces.
+
 ## Next step
 
-T2, the assessed report.
+Replays: `--report` for V2, before T4. Then T3: ADR-014, ADR-011's status, and the spec's remaining parts.
