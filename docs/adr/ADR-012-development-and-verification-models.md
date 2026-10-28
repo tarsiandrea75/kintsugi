@@ -4,6 +4,8 @@
 
 Accepted by the human on 2026-10-18, with `claude-haiku-5-5` as the development model. No standing budget: each batch of cloud runs still needs the human's go-ahead.
 
+Amended 2026-10-25 by the vision revision: local is measured, not gated (vision §5, §7). The local route no longer has to pass a milestone check; see `odd/tasks/vision-revision.md`.
+
 ## Date
 
 2026-10-18

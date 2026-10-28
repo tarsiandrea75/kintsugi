@@ -297,7 +297,7 @@ The database schema MUST be created by Flyway migrations. The status column MUST
 
 ## Known limitations
 
-- **No amount.** Orders have no prices yet; prices come with the product catalog in `inventory-service` (fault F6). A payment carries only the order id.
+- **No amount.** Orders have no prices. Prices were to come with the product catalog in `inventory-service` for fault F6, which was cut on 2026-10-25 with F5 and F7 (`docs/vision.md` §2). A payment carries only the order id.
 - **No idempotency.** Calling `POST /payments` twice for the same order creates two payments. There is no idempotency key and no unique constraint on the order id; retries are out of scope. Each attempt leaves its own `payment_events` row, so the duplicate is visible.
 - **Attempts during a database outage are only logged.** They cannot be written to `payment_events`; the structured `WARN` line is their only record.
 - **No retry on 429.** A rate-limited payment is stored as `FAILED` at once; there is no retry, backoff or `Retry-After` handling.

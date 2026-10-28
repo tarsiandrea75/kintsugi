@@ -37,7 +37,9 @@ End of session, or when the human says "chiudiamo":
   - Why: ODD keeps the workflow light; the living specs keep the contracts the evals depend on (fault catalog, fault-injector, service APIs) readable and reviewable.
 - Explain the "why" of each AI-engineering concept and step, not only the "how".
 - Before choosing a library or model, check its current version and record the decision in an ADR (copy the headings of `docs/adr/ADR-001-java-spring-system-python-evals.md`).
-- Core rule: the LLM proposes, deterministic code verifies, policy authorizes.
+- Every measurement starts from a plan committed before the run, reports Wilson 95% CIs and commits its results under `evals/results/`.
+- A holdout is read once; Config 0 runs alongside every measurement.
+- Core rule: the LLM proposes, deterministic code verifies at a stated level, the policy authorizes. A rules-only configuration diagnoses from the same facts, so the LLM's contribution is a number.
 
 ## Language
 

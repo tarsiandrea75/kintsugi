@@ -331,4 +331,4 @@ Every request to the injector, its API and the actuator alike, MUST pass two che
 
 - **Root-equivalent socket.** The injector mounts the Docker socket ([ADR-009](../../../docs/adr/ADR-009-fault-injector-docker-control.md)). Acceptable only because every lab port is bound to `127.0.0.1`.
 - **No authentication.** The API has no auth; it is published on loopback only.
-- **Fixed catalog.** F1–F4 only; F5–F8 and injection campaigns come later.
+- **Fixed catalog.** F1–F4 only. F5–F7 were cut on 2026-10-25 (`docs/vision.md` §2); F8, fault parameters drawn from declared ranges and injection campaigns come later.
