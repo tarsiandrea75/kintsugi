@@ -60,6 +60,7 @@ Out:
 - [x] T5 M0 end-to-end run, committed as `evals/results/2026-10-25-m0-dev/` with a retrospective plan. Route: delegated writer.
 - [x] T6 Living spec `openspec/specs/evals/spec.md`. Route: delegated writer.
 - [x] T7 `docs/concepts.md` and `docs/setup.md` sections. Route: delegated writer.
+- [x] T1r Review follow-ups, tests first: input validation in the bootstrap and `--iterations`, label and copy-name collisions, errors as messages instead of tracebacks, n/a discordant counts with repeated cases, and tests pinning the remaining guards. Route: delegated writer.
 
 Route trigger: 2+ non-trivial files, so one delegated writer for the whole feature.
 
@@ -87,8 +88,14 @@ Then a docs commit recording progress here.
   - M0 end to end: A (local) pooled 5/15, AC@1 33% [15%, 58%]; D (cloud) pooled 14/15, 93% [70%, 99%]; D − A: 9 vs 0, exact McNemar p = 0.0039, +60 points, cluster bootstrap 95% [+33, +87] (seed 1). Rerunning on the committed input copies gives an identical `report.txt`.
   - `git check-ignore -v evals/.venv` matches `.venv/`; `evals/results/` is not ignored.
   - Commits: `4e4848c` stats, ADR-015, template (413 lines); `dd11d62` TSV reader, CLI, spec, setup (715 lines, over the 400 heuristic: the tests and the spec are about half, and splitting reader from CLI would leave a reader with no user); `a933b34` M0 result, retrospective plan, concepts (126 lines, about 60 of them the generated result).
-  - Review: not run by the writer; the parent runs the per-commit native review.
+  - Review: native, per commit, all approved and acknowledged: `4e4848c` lineage `review-68afb5aef96f33a9`, `dd11d62` lineage `review-24925580e54c233e`, `a303244` lineage `review-7583e6006ffc5e56`.
+    - Follow-ups, fixed in T1r: R3-bootstrap-iterations-unvalidated and R3-iterations-unvalidated, R3-label-collision, R3-uncaught-valueerror, R3-repeated-discordant-zero, plus suggestions to pin the untested guards and add CLI tests for Holm, the healthy line and the error exits.
+    - Dismissed by the parent after checking: R3-ragged-pooled-row (every `scores.tsv` row has 14 fields) and R3-cli-referenced-not-present (the CLI landed in the next commit).
+- 2026-10-28: T1r done.
+  - RED: 19 new tests, 13 of them failing before the fix (the Holm, healthy-line and guard tests pinned behaviour that already held).
+  - GREEN: `evals/.venv/bin/python -m pytest evals -q`: 55 passed.
+  - The M0 output format did not change: a rerun to a scratch dir is byte-identical to every committed file of `evals/results/2026-10-25-m0-dev/`, so it was not regenerated.
 
 ## Next step
 
-The parent's per-commit review, then follow-up 2 (service-assessment close).
+The parent's review of the T1r commit, then follow-up 2 (service-assessment close).

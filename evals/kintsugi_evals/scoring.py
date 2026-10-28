@@ -76,6 +76,8 @@ def read_summary(path, label=None):
     The config is the label when given, else route-mode-view; a missing view column reads as "-".
     """
     path = summary_path(path)
+    if not path.is_file():
+        raise ValueError(f"{path} does not exist: expected a replay summary.tsv or its run directory")
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         missing = [column for column in REQUIRED if column not in (reader.fieldnames or [])]
@@ -194,9 +196,12 @@ def paired(first_rows, second_rows, seed, iterations=10000):
         raise ValueError("the two configs share no fault case")
     cases = {key: (first[key], second[key]) for key in common}
     single = all(len(a) == 1 and len(b) == 1 for a, b in cases.values())
-    only_first = sum(1 for a, b in cases.values() if single and a[0] == 1 and b[0] == 0)
-    only_second = sum(1 for a, b in cases.values() if single and a[0] == 0 and b[0] == 1)
-    p = mcnemar_exact(only_second, only_first) if single else None
+    # Discordant counts exist only with one outcome per case and config; with repetitions they are None.
+    only_first = only_second = p = None
+    if single:
+        only_first = sum(1 for a, b in cases.values() if a[0] == 1 and b[0] == 0)
+        only_second = sum(1 for a, b in cases.values() if a[0] == 0 and b[0] == 1)
+        p = mcnemar_exact(only_second, only_first)
     diff, low, high = cluster_bootstrap_diff(cases, seed=seed, iterations=iterations)
     name = lambda rows: rows[0].config
     return Paired(name(first_rows), name(second_rows), len(common), only_first, only_second, p, diff, low, high)

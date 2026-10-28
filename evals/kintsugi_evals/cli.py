@@ -27,6 +27,21 @@ def _points(x):
     return f"{round(100 * x):+d}"
 
 
+def _na(value):
+    return "n/a" if value is None else value
+
+
+def _positive(text):
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
+def _copy_name(label):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", label) + "-summary.tsv"
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="python -m kintsugi_evals")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -36,7 +51,7 @@ def _parser():
     score.add_argument("dirs", nargs="*", help="unlabelled dirs, labelled route-mode-view from their columns")
     score.add_argument("--out", help="write the result files to this directory")
     score.add_argument("--seed", type=int, default=DEFAULT_SEED, help="cluster bootstrap seed")
-    score.add_argument("--iterations", type=int, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
+    score.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
     return parser
 
 
@@ -68,8 +83,8 @@ def _report(inputs, scores, pairs, holm_p, seed, iterations):
             test = f"exact McNemar p = {pair.mcnemar_p:.2g}"
             if len(pairs) > 1:
                 test += f" (Holm {adjusted:.2g})"
-        lines.append(f"{pair.second} - {pair.first}: {pair.cases} cases, {pair.second} only {pair.only_second}, "
-                     f"{pair.first} only {pair.only_first}, {test}; difference {_points(pair.diff)} points, "
+        lines.append(f"{pair.second} - {pair.first}: {pair.cases} cases, {pair.second} only {_na(pair.only_second)}, "
+                     f"{pair.first} only {_na(pair.only_first)}, {test}; difference {_points(pair.diff)} points, "
                      f"cluster bootstrap 95% [{_points(pair.boot_low)}, {_points(pair.boot_high)}] "
                      f"(seed {seed}, {iterations} resamples)")
     return "\n".join(lines) + "\n"
@@ -102,7 +117,8 @@ def _write(out, inputs, scores, pairs, holm_p, report):
                                     "fa_wilson_low", "fa_wilson_high"], score_rows)
     _write_tsv(out / "paired.tsv", ["first", "second", "cases", "only_first", "only_second", "mcnemar_p", "holm_p",
                                     "diff", "boot_low", "boot_high"],
-               [[p.first, p.second, p.cases, p.only_first, p.only_second,
+               [[p.first, p.second, p.cases, "" if p.only_first is None else p.only_first,
+                 "" if p.only_second is None else p.only_second,
                  "" if p.mcnemar_p is None else repr(p.mcnemar_p), "" if adjusted is None else repr(adjusted),
                  f"{p.diff:.4f}", f"{p.boot_low:.4f}", f"{p.boot_high:.4f}"] for p, adjusted in zip(pairs, holm_p)])
     copies = out / "inputs"
@@ -110,13 +126,33 @@ def _write(out, inputs, scores, pairs, holm_p, report):
     provenance = []
     for label, source, rows in inputs:
         path = summary_path(source)
-        name = re.sub(r"[^A-Za-z0-9._-]", "_", label) + "-summary.tsv"
+        name = _copy_name(label)
         shutil.copyfile(path, copies / name)
         provenance.append([label, source, hashlib.sha256(path.read_bytes()).hexdigest(), len(rows)])
     _write_tsv(out / "inputs.tsv", ["label", "source", "sha256", "rows"], provenance)
 
 
+def _check_names(inputs):
+    """Two inputs with one label, or one copy name, would merge or overwrite each other."""
+    labels, copies = {}, {}
+    for label, path, _ in inputs:
+        if label in labels:
+            raise SystemExit(f"two inputs have the label {label}: {labels[label]} and {path}; give each its own --label")
+        labels[label] = path
+        name = _copy_name(label)
+        if name in copies:
+            raise SystemExit(f"labels {copies[name]} and {label} share the copy name {name}; rename one")
+        copies[name] = label
+
+
 def score(args):
+    try:
+        return _score(args)
+    except ValueError as error:
+        raise SystemExit(f"score: {error}") from None
+
+
+def _score(args):
     sources = [(name, path) for name, path in args.label] + [(None, path) for path in args.dirs]
     if not sources:
         raise SystemExit("score needs at least one replay dir")
@@ -126,6 +162,7 @@ def score(args):
         if not rows:
             raise SystemExit(f"{path} holds no rows")
         inputs.append((rows[0].config, path, rows))
+    _check_names(inputs)
     scores = [summarize(rows)[0] if len({r.config for r in rows}) == 1 else None for _, _, rows in inputs]
     if any(s is None for s in scores):
         raise SystemExit("an unlabelled summary.tsv mixes configs; label it with --label")

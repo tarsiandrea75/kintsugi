@@ -2,6 +2,8 @@
 
 import csv
 
+import pytest
+
 from kintsugi_evals.cli import main
 from test_scoring import TRUTH, write_tsv
 
@@ -90,3 +92,92 @@ def test_report_regenerates_from_the_committed_input_copies(tmp_path, capsys):
     inputs = out_dir / "inputs"
     main(["score", "--label", "A", str(inputs / "A-summary.tsv"), "--label", "D", str(inputs / "D-summary.tsv")])
     assert capsys.readouterr().out == (out_dir / "report.txt").read_text()
+
+
+def test_score_prints_na_discordant_counts_for_repeated_cases(tmp_path, capsys):
+    local, cloud = two_runs(tmp_path)
+    summary = local / "summary.tsv"
+    lines = summary.read_text().splitlines()
+    summary.write_text("\n".join(lines + lines[1:]) + "\n")
+    out_dir = tmp_path / "out"
+    main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(out_dir)])
+    out = capsys.readouterr().out
+    assert "D - A: 15 cases, D only n/a, A only n/a, exact McNemar n/a (repeated cases)" in out
+    with (out_dir / "paired.tsv").open() as handle:
+        [pair] = list(csv.DictReader(handle, delimiter="\t"))
+    assert (pair["only_first"], pair["only_second"], pair["mcnemar_p"]) == ("", "", "")
+
+
+def test_score_applies_holm_across_three_configs(tmp_path, capsys):
+    local, cloud = two_runs(tmp_path)
+    out_dir = tmp_path / "out"
+    main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--label", "E", str(cloud),
+          "--out", str(out_dir)])
+    out = capsys.readouterr().out
+    assert "D - A: 15 cases, D only 9, A only 0, exact McNemar p = 0.0039 (Holm 0.012)" in out
+    assert "E - D: 15 cases, E only 0, D only 0, exact McNemar p = 1 (Holm 1)" in out
+    with (out_dir / "paired.tsv").open() as handle:
+        pairs = list(csv.DictReader(handle, delimiter="\t"))
+    assert [(p["first"], p["second"]) for p in pairs] == [("A", "D"), ("A", "E"), ("D", "E")]
+    assert float(pairs[0]["holm_p"]) == pytest.approx(3 * 0.00390625)
+
+
+def test_score_prints_the_healthy_false_alarm_line(tmp_path, capsys):
+    run = tmp_path / "run"
+    run.mkdir()
+    write_tsv(run / "summary.tsv", [
+        ("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1"),
+        ("H", "COMPLETED", "NONE|NONE", "UNKNOWN|UNKNOWN", "r1-H"),
+        ("H", "COMPLETED", "NONE|NONE", TRUTH, "r2-H"),
+    ])
+    main(["score", "--label", "A", str(run)])
+    out = capsys.readouterr().out
+    assert "1 fault cases, 2 healthy" in out
+    assert "A  healthy  1/2   false alarms 50%  [9%, 91%]" in out
+
+
+def error_of(argv, capsys):
+    with pytest.raises(SystemExit) as raised:
+        main(argv)
+    return raised.value
+
+
+def test_score_refuses_two_inputs_with_the_same_label(tmp_path, capsys):
+    local, cloud = two_runs(tmp_path)
+    error = error_of(["score", "--label", "A", str(local), "--label", "A", str(cloud)], capsys)
+    assert "label A" in str(error.code)
+
+
+def test_score_refuses_labels_with_the_same_copy_name(tmp_path, capsys):
+    local, cloud = two_runs(tmp_path)
+    error = error_of(["score", "--label", "A/B", str(local), "--label", "A B", str(cloud), "--out",
+                      str(tmp_path / "out")], capsys)
+    assert "A_B-summary.tsv" in str(error.code)
+
+
+def test_score_reports_a_missing_summary_without_a_traceback(tmp_path, capsys):
+    error = error_of(["score", "--label", "A", str(tmp_path / "nowhere")], capsys)
+    assert "summary.tsv" in str(error.code)
+
+
+def test_score_reports_a_bad_tsv_without_a_traceback(tmp_path, capsys):
+    (tmp_path / "summary.tsv").write_text("fault\tmode\nF1\tdecision\n")
+    error = error_of(["score", str(tmp_path)], capsys)
+    assert "truth" in str(error.code)
+
+
+def test_score_reports_configs_without_a_shared_case(tmp_path, capsys):
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    write_tsv(first / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1")])
+    write_tsv(second / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r2-F1")])
+    error = error_of(["score", "--label", "A", str(first), "--label", "D", str(second)], capsys)
+    assert "share no fault case" in str(error.code)
+
+
+def test_score_rejects_iterations_below_one_at_parse_time(tmp_path, capsys):
+    local, _ = two_runs(tmp_path)
+    error = error_of(["score", str(local), "--iterations", "0"], capsys)
+    assert error.code == 2
+    assert "--iterations" in capsys.readouterr().err

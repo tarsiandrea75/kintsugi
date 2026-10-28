@@ -144,4 +144,5 @@ def test_paired_skips_mcnemar_when_cases_have_repetitions(tmp_path):
     rows_a, rows_d = m0_like(tmp_path)
     result = paired(rows_a + rows_a, rows_d, seed=1, iterations=200)
     assert result.mcnemar_p is None
+    assert (result.only_first, result.only_second) == (None, None)
     assert result.diff == pytest.approx(0.6)

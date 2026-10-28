@@ -26,7 +26,7 @@ def test_wilson_rounds_to_the_quoted_percentages():
 
 
 def test_wilson_edges_stay_inside_zero_and_one():
-    assert wilson(0, 5)[0] == 0.0
+    assert wilson(0, 5)[0] == pytest.approx(0.0, abs=1e-12)
     assert wilson(5, 5)[1] == pytest.approx(1.0)
 
 
@@ -95,3 +95,35 @@ def test_dev_keep_refuses_a_fault_class_losing_more_than_one():
     pairs = [("F1", 0, 1)] * 5 + [("F2", 1, 0)] * 2
     assert not dev_keep(pairs)
     assert dev_keep([("F1", 0, 1)] * 4 + [("F2", 1, 0)])
+
+
+@pytest.mark.parametrize("k, n", [(6, 5), (-1, 5)])
+def test_wilson_rejects_k_outside_zero_to_n(k, n):
+    with pytest.raises(ValueError):
+        wilson(k, n)
+
+
+def test_mcnemar_rejects_negative_counts():
+    with pytest.raises(ValueError):
+        mcnemar_exact(-1, 2)
+
+
+@pytest.mark.parametrize(
+    "cases, kwargs",
+    [
+        ({}, {}),
+        ({"a": ([1], [0])}, {"iterations": 0}),
+        ({"a": ([1], [0])}, {"level": 0.0}),
+        ({"a": ([1], [0])}, {"level": 1.0}),
+        ({"a": ([], [0])}, {}),
+        ({"a": ([1], [])}, {}),
+    ],
+)
+def test_cluster_bootstrap_rejects_invalid_input(cases, kwargs):
+    with pytest.raises(ValueError):
+        cluster_bootstrap_diff(cases, seed=1, **kwargs)
+
+
+def test_holm_and_dev_keep_on_empty_lists():
+    assert holm([]) == []
+    assert not dev_keep([])

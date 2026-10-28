@@ -30,10 +30,10 @@ A paired comparison MUST use the exact two-sided McNemar test: twice the binomia
 #### Scenario: Repeated cases
 - Given a case with more than one row under a config
 - When the paired comparison runs
-- Then the McNemar p-value is reported as not applicable and the cluster bootstrap still runs
+- Then the McNemar p-value and both discordant counts are reported as n/a (empty in `paired.tsv`), never 0, and the cluster bootstrap still runs
 
 ### REQ-4 Cluster bootstrap
-The paired difference, second minus first, MUST be the mean over cases of each case's mean accuracy, so each case weighs once. Its 95% interval MUST come from resampling whole cases with an explicit seed, recorded in the report.
+The paired difference, second minus first, MUST be the mean over cases of each case's mean accuracy, so each case weighs once. Its 95% interval MUST come from resampling whole cases with an explicit seed, recorded in the report. No case, fewer than 1 resample, a level outside (0, 1), or a case with no repetition under a config MUST be an error.
 
 #### Scenario: Deterministic
 - Given the same cases, seed and number of resamples
@@ -74,7 +74,7 @@ AC@1 MUST count an abstention as not correct. Coverage MUST be the share of faul
 - Then it is a false alarm
 
 ### REQ-8 TSV input
-The scorer MUST read the replay driver's `summary.tsv`, given as the file or its run directory. A case MUST be keyed by (`split`, `recording`). The config MUST be the `--label` given for that input, else `route-mode-view`. A missing `view` column MUST read as `-`. A file lacking any of `fault`, `mode`, `route`, `status`, `truth`, `reported`, `split`, `recording` MUST be an error naming the columns.
+The scorer MUST read the replay driver's `summary.tsv`, given as the file or its run directory. A case MUST be keyed by (`split`, `recording`). The config MUST be the `--label` given for that input, else `route-mode-view`. A missing `view` column MUST read as `-`. A file lacking any of `fault`, `mode`, `route`, `status`, `truth`, `reported`, `split`, `recording` MUST be an error naming the columns. A path holding no `summary.tsv` MUST be an error naming it.
 
 #### Scenario: An older TSV without view
 - Given a `summary.tsv` with 17 columns and no `view`
@@ -83,6 +83,13 @@ The scorer MUST read the replay driver's `summary.tsv`, given as the file or its
 
 ### REQ-9 Output
 The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`.
+
+The CLI MUST exit with a one-line message, not a traceback, when an input is missing or malformed, when two configs share no fault case, when two inputs resolve to the same label or the same copy name, and, at parse time, when `--iterations` is below 1.
+
+#### Scenario: Two inputs, one label
+- Given `--label A` on two different dirs
+- When `score` runs
+- Then it exits naming the label, and writes nothing
 
 #### Scenario: M0 on dev
 - Given `--label A` on the local M0 replay dir and `--label D` on the cloud one

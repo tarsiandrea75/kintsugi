@@ -56,6 +56,13 @@ def cluster_bootstrap_diff(cases, seed, iterations=10000, level=0.95):
     """
     if not cases:
         raise ValueError("the bootstrap needs at least one case")
+    if iterations < 1:
+        raise ValueError("the bootstrap needs at least one resample")
+    if not 0 < level < 1:
+        raise ValueError("level must lie strictly between 0 and 1")
+    empty = [key for key, (first, second) in cases.items() if not first or not second]
+    if empty:
+        raise ValueError(f"cases without repetitions under a config: {empty}")
     diffs = [second - first for first, second in _case_means(cases)]
     n = len(diffs)
     point = sum(diffs) / n
