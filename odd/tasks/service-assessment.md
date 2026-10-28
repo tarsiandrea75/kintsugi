@@ -31,12 +31,13 @@ In:
 - settings that select the variant;
 - tests, with goldens;
 - the spec;
-- ADR-014, which amends ADR-011's "facts only" rule and records the M2 bar.
+- ADR-014, which amends ADR-011's "facts only" rule and records the stop rule (re-scoped on 2026-10-25: it no longer records an M2 bar).
 
 Out:
 - the explorer and dossier modes, whose rendering and report stay as they are;
 - judgments, thresholds or anomaly markers in the facts;
-- rule-generated hypotheses (Part C, only if this feature misses the bar, and only with the human's decision).
+- rule-generated hypotheses. On 2026-10-25 they became Config 0, the rules-only baseline of the revised vision, built in its own follow-up feature (`odd/tasks/vision-revision.md`, follow-up 3).
+- reading `holdout` (re-scoped on 2026-10-25): holdout-1 is read in follow-up feature 4, next to Config 0.
 
 ## Design
 
@@ -87,9 +88,26 @@ Facts from the code map (2026-10-24):
    - `kintsugi.agent.decision.view`: `tables`, today's dossier and the default, or `sheets`.
    - `kintsugi.agent.decision.report`: `plain`, today's report and the default, or `assessed`.
    - V1 is `sheets` with `plain`; V2 is `sheets` with `assessed`. An optional V3 adds one worked example on a fictional topology, which teaches the method and not an answer.
-   - Measured on `dev` only. Keep the best, delete the others before the feature closes, then read `holdout` once.
+   - Measured on `dev` only. Keep the best, delete the others before the feature closes, then read `holdout` once. (Re-scoped on 2026-10-25: `holdout` is not read in this feature; see "The M2 bar and its gates".)
 
 ## The M2 bar and its gates
+
+Re-scoped on 2026-10-25 by the vision revision (`odd/tasks/vision-revision.md`). The M2 check is now the revised vision's (`docs/vision.md` §7): `docs/benchmark.md` v0 holds the lab holdout-1 table for Configs 0, A and D, with AC@1, Wilson CIs and paired differences, from committed results and a plan committed before the run. It passes whatever the local model scores.
+
+The bar of at least 4 of 5 per fault is dropped. With 5 cases, 4/5 has a Wilson 95% CI of [38%, 96%], and a bar of at least 4 of 5 on each of three faults fails a model that is truly 80% accurate 60% of the time. The data in hand already shows the gap it was meant to judge: M0 on `dev`, local 5/15 [15%, 58%] against cloud 14/15 [70%, 99%] on the same recordings, exact McNemar p ≈ 0.004.
+
+What this feature still delivers:
+- V1 and V2 measured on `dev`, local and cloud, under a measurement plan committed before the run (T4); the best is kept;
+- the stop rule (vision §5), recorded in ADR-014: local-only adaptations end with this feature. After it, a change must be track-agnostic and win a paired comparison on RCAEval dev;
+- one descriptive live round (T5).
+
+The old gate-3 options map to the revised vision:
+- another local model: `qwen3:8b` runs once on `dev`, which closes decision-instrument T5;
+- a 14B model overnight: Config B (follow-up 15, cuttable);
+- (C) rule-generated candidate hypotheses: Config 0, a baseline that is never the agent's answer (follow-up 3);
+- documenting the limit: a local miss on the lab is documented, not chased (the stop rule).
+
+The original bar and gates, kept as history:
 
 The bar turns the vision's check ("F1-F3 correctly diagnosed with a local model") into numbers without changing its wording. ADR-014 records it:
 - on `holdout`, the local route scores at least 4 of 5 per fault on F1-F3, at temperature 0 with one sample per recording;
@@ -111,17 +129,18 @@ The gates; the human decides at each one:
 2. The assessed schema lists `assessments` first, in fixed order. The order holds in the local route's schema, and `evidence` is derived from the assessments.
 3. Each consistency rule has a test that fails before the rule exists. A violation triggers the existing single retry with the exact error.
 4. The settings default to today's behavior. The explorer and dossier modes are unchanged, and every existing test stays green.
-5. V1 and V2 are measured on `dev`, local and cloud, against M0. The best variant is kept and the others deleted; `holdout` is read once; the results are in this document.
-6. Living docs: the spec (decision mode, rendering, report, checks), ADR-014, and ADR-011's status line ("amended by ADR-014").
+5. V1 and V2 are measured on `dev`, local and cloud, against M0, under a measurement plan committed before the run. The best variant is kept and the others deleted; the results are in this document. `holdout` is not read in this feature (re-scoped on 2026-10-25; it was "read once").
+6. Living docs: the spec (decision mode, rendering, report, checks), ADR-014 with the stop rule and no bar, and ADR-011's status line ("amended by ADR-014").
 
 ## Tasks
 
 - [x] T1 `CallGraph` and the per-service sheets with line owners, behind `kintsugi.agent.decision.view`, with goldens. Route: delegated writer (dossier package, settings, tests).
 - [x] T1r The T1 review findings (2 WARNINGs, 6 SUGGESTIONs), and acceptance criterion 1's golden from a clean decision recording, after decision-instrument's T4 import. Route: delegated writer.
 - [x] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
-- [ ] T3 ADR-014, ADR-011's status, and the spec's remaining parts. Route: inline (docs).
-- [ ] T4 Measurement on `dev`: V1 and V2, local (about 2 h each) and cloud (about $0.05 each). Pick one, then read `holdout` once. Route: inline.
-- [ ] T5 The live local round for the M2 check. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
+- [ ] T2r Replays ask for the assessed report: `replay-agent.sh --report`, as `--view` in T1 (b) (`ReplayDriver`, `ReplayRunTest`, `replay-agent.sh`, `test-lib.sh`). Plus the T2 review's WARNING R3-quote-orElseThrow at `ReportCheck.java:236-237`: an owned line with no match in the text must give an invalid result for the retry, not throw. Route: to be set when it starts.
+- [ ] T3 ADR-014 without the bar, plus the stop rule (vision §5); ADR-011's status; the spec's remaining parts. Route: inline (docs).
+- [ ] T4 Measurement on `dev` under a measurement plan committed before the run: V1 and V2, local (about 2 h each) and cloud (about $0.05 each). Pick one. `holdout` is not read in this feature: holdout-1 is read in follow-up feature 4 (`odd/tasks/vision-revision.md`), next to Config 0. Route: inline.
+- [ ] T5 A descriptive live local round, `verify-agent.sh --mode decision --route local`: it is reported, not a pass or fail gate. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
 
 ## Delivery
 
@@ -222,6 +241,11 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - (2) `8e15a90`, base `a1f94c7`, so with the docs commit: one lens (medium risk), 11 files, 809 lines (lineage `review-548facc4d0bc935c`). No findings.
   - Both findings are follow-ups for a T2r; neither blocks the replay `--report` work.
 
+- 2026-10-25: re-scoped by the vision revision (`odd/tasks/vision-revision.md`).
+  - The M2 bar of at least 4 of 5 per fault is dropped, and the gates are mapped to the revised vision (see "The M2 bar and its gates").
+  - New T2r: the replay `--report` flag and the T2 WARNING.
+  - T3: ADR-014 without the bar, plus the stop rule. T4: V1 and V2 on `dev` under a committed measurement plan, with no holdout read. T5: a descriptive live round.
+
 ## Next step
 
-Replays: `--report` for V2, before T4. Then T3: ADR-014, ADR-011's status, and the spec's remaining parts.
+T2r: `--report` for V2 and the T2 WARNING, before T4. Then T3: ADR-014 with the stop rule, ADR-011's status, and the spec's remaining parts.
