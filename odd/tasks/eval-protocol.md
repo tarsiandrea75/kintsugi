@@ -53,13 +53,13 @@ Out:
 
 ## Tasks
 
-- [ ] T1 Bootstrap: venv, `requirements-dev.txt` (pytest==9.1.1), `pytest.ini`. Route: inline in the delegated writer.
-- [ ] T2 Stats with tests first: Wilson, exact McNemar, cluster bootstrap, Holm, dev keep rule. Route: delegated writer.
-- [ ] T3 ADR-015 and `evals/plans/TEMPLATE.md`. Route: delegated writer.
-- [ ] T4 TSV reading, outcome rule and CLI, tests first. Route: delegated writer.
-- [ ] T5 M0 end-to-end run, committed as `evals/results/2026-10-25-m0-dev/` with a retrospective plan. Route: delegated writer.
-- [ ] T6 Living spec `openspec/specs/evals/spec.md`. Route: delegated writer.
-- [ ] T7 `docs/concepts.md` and `docs/setup.md` sections. Route: delegated writer.
+- [x] T1 Bootstrap: venv, `requirements-dev.txt` (pytest==9.1.1), `pytest.ini`. Route: inline in the delegated writer.
+- [x] T2 Stats with tests first: Wilson, exact McNemar, cluster bootstrap, Holm, dev keep rule. Route: delegated writer.
+- [x] T3 ADR-015 and `evals/plans/TEMPLATE.md`. Route: delegated writer.
+- [x] T4 TSV reading, outcome rule and CLI, tests first. Route: delegated writer.
+- [x] T5 M0 end-to-end run, committed as `evals/results/2026-10-25-m0-dev/` with a retrospective plan. Route: delegated writer.
+- [x] T6 Living spec `openspec/specs/evals/spec.md`. Route: delegated writer.
+- [x] T7 `docs/concepts.md` and `docs/setup.md` sections. Route: delegated writer.
 
 Route trigger: 2+ non-trivial files, so one delegated writer for the whole feature.
 
@@ -81,6 +81,14 @@ Then a docs commit recording progress here.
 
 - 2026-10-28: the first attempt stopped because `python3.12-venv` was missing; the human installed it. Decisions from the human: pin pytest==9.1.1 (9.2.0 is one day old); a missing `view` column reads as `-`; healthy truth token `NONE|NONE`, provisional until follow-up 10.
 
+- 2026-10-28: T1–T7 done by one delegated writer, tests first.
+  - RED: each test module failed at collection (`ModuleNotFoundError`) before its code existed; one pinned constant was wrong (5/15 upper bound 0.5829, not 0.5830) and was corrected against the formula.
+  - GREEN: `evals/.venv/bin/python -m pytest evals -q`: 36 passed. The stdlib-only test and the regenerate-from-copies test were added after the code, so not observed RED.
+  - M0 end to end: A (local) pooled 5/15, AC@1 33% [15%, 58%]; D (cloud) pooled 14/15, 93% [70%, 99%]; D − A: 9 vs 0, exact McNemar p = 0.0039, +60 points, cluster bootstrap 95% [+33, +87] (seed 1). Rerunning on the committed input copies gives an identical `report.txt`.
+  - `git check-ignore -v evals/.venv` matches `.venv/`; `evals/results/` is not ignored.
+  - Commits: `4e4848c` stats, ADR-015, template (413 lines); `dd11d62` TSV reader, CLI, spec, setup (715 lines, over the 400 heuristic: the tests and the spec are about half, and splitting reader from CLI would leave a reader with no user); `a933b34` M0 result, retrospective plan, concepts (126 lines, about 60 of them the generated result).
+  - Review: not run by the writer; the parent runs the per-commit native review.
+
 ## Next step
 
-T1.
+The parent's per-commit review, then follow-up 2 (service-assessment close).
