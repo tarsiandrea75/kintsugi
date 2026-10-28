@@ -386,9 +386,9 @@ The API has no cancel. To end an incident left `RUNNING` (for example by an inte
 bash -c 'source infra/scripts/lib.sh && restart_agent'
 ```
 
-### Check that the agent diagnoses F1, F2 and F3
+### Run a live F1–F3 round
 
-This script runs a live round of F1, F2 and F3 on either route. It is no longer the M2 check: since the vision revision of 2026-10-25, M2's check is `docs/benchmark.md` v0, the lab holdout-1 table for Configs 0, A and D with AC@1, Wilson CIs and paired differences, from committed results and a plan committed before the run ([vision](vision.md) §7). It passes whatever the local model scores, and a live local round is descriptive. The cloud route (`--route cloud`, `claude-haiku-5-5` through Anthropic's API) is the development route of [ADR-012](adr/ADR-012-development-and-verification-models.md) and Config D of the vision.
+This script runs a live round of F1, F2 and F3 on either route. It is no longer the M2 check: since the vision revision of 2026-10-25, M2's check is `docs/benchmark.md` v0, the lab holdout-1 table for Configs 0, A and D with AC@1, Wilson CIs and paired differences, from committed results and a plan committed before the run ([vision](vision.md) §7). That check passes whatever the local model scores; this script still reports each fault as MATCH or MISS, and a live local round is descriptive. The cloud route (`--route cloud`, `claude-haiku-5-5` through Anthropic's API) is the development route of [ADR-012](adr/ADR-012-development-and-verification-models.md) and Config D of the vision.
 
 ```bash
 infra/scripts/verify-agent.sh                 # F1, F2 and F3 in turn, leave the lab running
