@@ -6,6 +6,7 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
+import static java.util.stream.Collectors.joining;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -616,6 +617,40 @@ class ReportCheckTest {
 				"assessments.gateway-mock.why must be a string of at most 200 characters",
 				"assessments.inventory-service.unexpected field \"quote\"; allowed: line, role, why",
 				"assessments.payment-service must be an object {role, line, why}");
+	}
+
+	@Test
+	void anAssessmentLineMustBeAnIntegerInTheIntRange() {
+		// A non-integral number, a numeric string and a value past the int range are each refused by the schema rule,
+		// never truncated, parsed or wrapped into a line (service-assessment T2r, R3-line-edge-tests).
+		for (String line : List.of("3.5", "\"3\"", "2147483648")) {
+			String answer = assessedReport("gateway-mock", "DEPENDENCY_LATENCY",
+					"\"gateway-mock\":{\"role\":\"ORIGIN\",\"line\":" + line + ",\"why\":\"its own facts\"}",
+					SLOW_LEAF[1], SLOW_LEAF[2], SLOW_LEAF[3]);
+
+			ReportCheck.Result result = checkAssessed(answer);
+
+			assertThat(result.errors()).as(line)
+				.containsExactly("assessments.gateway-mock.line must be an integer of at least 1");
+			assertThat(result.evidence()).as(line).isNull();
+		}
+	}
+
+	@Test
+	void anOwnedLineWhoseTextIsNotInTheSheetsIsAnInvalidReportNotAFailure() {
+		// The owners list D3 as gateway-mock's, but the text has no D3: the evidence cannot quote it, so the report is
+		// rejected for the retry, with an exact error, instead of failing the run (service-assessment T2r,
+		// R3-quote-orElseThrow).
+		String text = SHEETS.text().lines().filter(line -> !line.startsWith("D3 ")).collect(joining("\n", "", "\n"));
+		ServiceSheets.Rendered gap = new ServiceSheets.Rendered(text, SHEETS.owners());
+
+		ReportCheck.Result result = ReportCheck.checkAssessed(
+				Answers.json(assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF)), gap);
+
+		assertThat(result.errors()).containsExactly("assessments.gateway-mock.line 3 is a line of gateway-mock whose "
+				+ "text is not in the sheets; cite another line of its own sheet or of its part of \"Seen only in the "
+				+ "previous window\"");
+		assertThat(result.evidence()).isNull();
 	}
 
 	@Test

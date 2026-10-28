@@ -1285,7 +1285,7 @@ Code MUST check the report, then the rules below, which check the model's own cl
 | Rule | It checks | Error |
 |------|-----------|-------|
 | Coverage | every lab service is assessed once, and no other name | `assessments.<service> is missing: assess every service once`; `assessments.unexpected field "<name>"; allowed: ...` |
-| Citation | each `line` is owned by its service in the sheets ("Evidence dossier rendering"): a line of its sheet or of its part of the last section | `assessments.<service>.line <N> is a line of <owner>, not of <service>` (`the header` for a header line), or `... is not in the sheets`; then `; cite a line of its own sheet or of its part of "Seen only in the previous window"` |
+| Citation | each `line` is owned by its service in the sheets ("Evidence dossier rendering"): a line of its sheet or of its part of the last section, whose text the sheets hold, so that its evidence can be quoted **(service-assessment T2r)** | `assessments.<service>.line <N> is a line of <owner>, not of <service>` (`the header` for a header line), or `... is not in the sheets`, then `; cite a line`; or, for an owned line with no text, `assessments.<service>.line <N> is a line of <service> whose text is not in the sheets; cite another line`; then ` of its own sheet or of its part of "Seen only in the previous window"` |
 | One origin | at most one `ORIGIN`; none only when every service is `UNAFFECTED` and both causes are `UNKNOWN` | `at most one service is the ORIGIN; got <n>: <services>`; `no service is the ORIGIN, so every service must be UNAFFECTED; got AFFECTED: <services>`; `no service is the ORIGIN, so rootCauseService and rootCauseCategory must both be UNKNOWN; got "<service>" and "<category>"` |
 | Graph | an `AFFECTED` service calls an `ORIGIN` or `AFFECTED` service | `assessments.<service> is AFFECTED but calls no service` or `... but calls no ORIGIN or AFFECTED service (it calls <callee>: <role>, ...)`; then `; a service is AFFECTED only through a service it calls that is ORIGIN or AFFECTED` |
 | Answer | `rootCauseService` is the `ORIGIN` | `rootCauseService must be the ORIGIN, <service>; got "<value>"` |
@@ -1304,6 +1304,15 @@ Why: a caller's latency contains its callee's, so comparing magnitudes cannot fi
 - WHEN the report is checked
 - THEN it is valid, and its evidence is the lines of gateway-mock, payment-service and order-service, in that order, each a dossier item quoted by code
 - AND the incident's stored report holds the `assessments` and that evidence
+
+#### Scenario: An owned line with no text goes to the retry (service-assessment T2r)
+- GIVEN sheets whose owners give line D3 to gateway-mock while their text has no D3
+- WHEN a report citing D3 for gateway-mock is checked
+- THEN it is invalid with `assessments.gateway-mock.line 3 is a line of gateway-mock whose text is not in the sheets; cite another line of its own sheet or of its part of "Seen only in the previous window"`, for the one retry, and nothing throws
+
+#### Scenario: An assessment's line is an integer in the int range (service-assessment T2r)
+- WHEN an assessment's `line` is `3.5`, `"3"` or `2147483648`
+- THEN the report is invalid with `assessments.<service>.line must be an integer of at least 1`
 
 #### Scenario: Every service unaffected (service-assessment T2)
 - WHEN every service is `UNAFFECTED` and both causes are `UNKNOWN`

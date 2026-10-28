@@ -222,7 +222,12 @@ final class ReportCheck {
 		unexpected(report, Set.copyOf(ASSESSED_FIELDS), "", errors);
 		Map<String, Assessment> assessments = assessments(report.get("assessments"), errors);
 		causesAndConfidence(report, errors);
-		assessments.values().forEach(assessment -> cited(assessment, sheets, errors));
+		// Each cited line's text, by service, for the derived evidence: a line that is owned but not in the text is a
+		// Citation error, never a lookup that fails later.
+		Map<String, String> quotes = new LinkedHashMap<>();
+		assessments.values()
+			.forEach(assessment -> cited(assessment, sheets, errors)
+				.ifPresent(quote -> quotes.put(assessment.service(), quote)));
 		if (assessments.size() == CallGraph.SERVICES.size()) {
 			// The graph rules read every service's role, so they wait for Coverage and each assessment's schema.
 			graphRules(assessments, report, errors);
@@ -233,8 +238,7 @@ final class ReportCheck {
 		List<JsonNode> evidence = new ArrayList<>();
 		for (Assessment assessment : assessments.values()) {
 			if (assessment.role() != Role.UNAFFECTED) {
-				evidence.add(dossierItem(assessment.line(), DossierRenderer.line(sheets.text(), assessment.line())
-					.orElseThrow(), assessment.why()));
+				evidence.add(dossierItem(assessment.line(), quotes.get(assessment.service()), assessment.why()));
 			}
 		}
 		List<String> dropped = new ArrayList<>();
@@ -290,17 +294,30 @@ final class ReportCheck {
 				assessment.get("why")));
 	}
 
-	/** Citation: adds an error when the assessment's line is not one its service owns in {@code sheets}. */
-	private static void cited(Assessment assessment, ServiceSheets.Rendered sheets, List<String> errors) {
+	/**
+	 * Citation: the text of the assessment's line, without its number, when it is a line its service owns in
+	 * {@code sheets}; else empty, with an error added. An owned line whose text the sheets do not hold is refused as
+	 * well (service-assessment T2r): its evidence could not be quoted, so the report goes to the retry instead of
+	 * failing the run.
+	 */
+	private static Optional<String> cited(Assessment assessment, ServiceSheets.Rendered sheets, List<String> errors) {
 		Optional<String> owner = sheets.owner(assessment.line());
+		String found;
 		if (owner.isPresent() && owner.get().equals(assessment.service())) {
-			return;
+			Optional<String> quote = DossierRenderer.line(sheets.text(), assessment.line());
+			if (quote.isPresent()) {
+				return quote;
+			}
+			found = "is a line of " + assessment.service() + " whose text is not in the sheets; cite another line";
 		}
-		String found = owner.map(name -> "is a line of " + (ServiceSheets.HEADER.equals(name) ? "the header" : name)
-				+ ", not of " + assessment.service())
-			.orElse("is not in the sheets");
+		else {
+			found = owner.map(name -> "is a line of " + (ServiceSheets.HEADER.equals(name) ? "the header" : name)
+					+ ", not of " + assessment.service())
+				.orElse("is not in the sheets") + "; cite a line";
+		}
 		errors.add("assessments." + assessment.service() + ".line " + assessment.line() + " " + found
-				+ "; cite a line of its own sheet or of its part of \"Seen only in the previous window\"");
+				+ " of its own sheet or of its part of \"Seen only in the previous window\"");
+		return Optional.empty();
 	}
 
 	/**
