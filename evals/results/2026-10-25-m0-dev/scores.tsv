@@ -1,0 +1,9 @@
+config	fault	n	correct	abstained	ac1	wilson_low	wilson_high	coverage	selective	false_alarms	false_alarm_rate	fa_wilson_low	fa_wilson_high
+A	F1	5	0	0	0.0000	0.0000	0.4345	1.0000	0.0000				
+A	F2	5	5	0	1.0000	0.5655	1.0000	1.0000	1.0000				
+A	F3	5	0	0	0.0000	0.0000	0.4345	1.0000	0.0000				
+A	pooled	15	5	0	0.3333	0.1518	0.5829	1.0000	0.3333				
+D	F1	5	4	0	0.8000	0.3755	0.9638	1.0000	0.8000				
+D	F2	5	5	0	1.0000	0.5655	1.0000	1.0000	1.0000				
+D	F3	5	5	0	1.0000	0.5655	1.0000	1.0000	1.0000				
+D	pooled	15	14	0	0.9333	0.7018	0.9881	1.0000	0.9333				

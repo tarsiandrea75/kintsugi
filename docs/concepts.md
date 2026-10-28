@@ -85,6 +85,22 @@ GOAL -> PERCEIVE -> CONTEXT -> REASON (<- knowledge, memory) -> PLAN -> POLICY -
 
 **Observability and evaluation** — record every run (LLM calls, tokens, latency, tool calls, errors, retrieval results, decisions, final answer), then measure against a dataset: correct diagnosis, tool-selection accuracy, retrieval precision, citation correctness, hallucination rate, latency, cost. Without this, you cannot tell whether a change made the agent better or worse.
 
+## Measuring an agent honestly
+
+An eval only helps if its number can say "no". These habits keep it able to. *Kintsugi: ADR-015 and the scorer in `evals/`.*
+
+**Baseline** — a score means little without something to beat. If plain rules over the same facts already get 90%, an agent at 92% adds almost nothing. *Kintsugi: Config 0, rules only, runs over the same dossier as the models.*
+
+**Confidence intervals** — 4 right out of 5 is not "80%"; it is "somewhere between 38% and 96%". The interval says how much the next run could move the number, and on small samples that is a lot. *Kintsugi: a Wilson 95% interval on every rate.*
+
+**Paired comparison** — when two configs run the same cases, compare them case by case. Only the cases where they disagree carry information; the easy and the impossible cases cancel out. *Kintsugi: exact McNemar on the discordant cases, and a cluster bootstrap when a case is repeated, so repeats do not pose as new evidence.*
+
+**Pre-registration and holdout** — decide the hypothesis, the cases and the decision rule before seeing the numbers. Tuning on a set and then reporting that set measures the tuning, not the agent. A holdout is read once, at the end; a second look makes it exploratory. *Kintsugi: a plan committed before every run; H1–H3 written before any holdout is read.*
+
+**Leakage** — the answer reaching the agent through a side door: a prompt that names the discriminating symptom, a taxonomy that is exactly the test catalog, a test case the designer looked at while tuning. The score then measures recognition, not diagnosis. *Kintsugi: RCAEval cases on systems nobody tuned for, and decoy categories in the lab.*
+
+**Calibration and abstention** — an agent that says "I don't know" when it does not know is more useful than one that always guesses. So abstaining is scored apart from being wrong, healthy cases test whether it cries wolf, and its stated confidence is checked against how often it is right. *Kintsugi: UNKNOWN on a fault is an abstention, any cause on a healthy case is a false alarm, plus coverage, selective accuracy and the Brier score.*
+
 ## Suggested learning chain
 
 ```

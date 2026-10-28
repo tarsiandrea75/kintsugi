@@ -1,0 +1,11 @@
+A: route local, mode decision, view -; 15 fault cases, 0 healthy
+A  F1       0/5   AC@1   0%  [0%, 43%]
+A  F2       5/5   AC@1 100%  [57%, 100%]
+A  F3       0/5   AC@1   0%  [0%, 43%]
+A  pooled   5/15  AC@1  33%  [15%, 58%]  coverage 100%  selective 33%
+D: route cloud, mode decision, view -; 15 fault cases, 0 healthy
+D  F1       4/5   AC@1  80%  [38%, 96%]
+D  F2       5/5   AC@1 100%  [57%, 100%]
+D  F3       5/5   AC@1 100%  [57%, 100%]
+D  pooled  14/15  AC@1  93%  [70%, 99%]  coverage 100%  selective 93%
+D - A: 15 cases, D only 9, A only 0, exact McNemar p = 0.0039; difference +60 points, cluster bootstrap 95% [+33, +87] (seed 1, 10000 resamples)
