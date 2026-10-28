@@ -56,7 +56,8 @@ import dev.kintsugi.agent.loop.ReplayCases.Recording;
  * each with its own tools and clock, needs no bean override and no production change. The model comes from the router
  * the caller passes: {@link ReplayRunTest} takes the application's own, so the route's real model and settings. A
  * decision sample writes its dossier in the run's view ({@code kintsugi.agent.decision.view}, the tables by default;
- * odd/tasks/service-assessment.md T1), which its lines record, so a result is attributable to its variant.
+ * odd/tasks/service-assessment.md T1) and asks for the run's report ({@code kintsugi.agent.decision.report}, the plain
+ * one by default; T2r), which its lines record, so a result is attributable to its variant.
  */
 final class ReplayDriver {
 
@@ -68,11 +69,11 @@ final class ReplayDriver {
 
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
-			"completionTokens", "seconds", "split", "recording", "view");
+			"completionTokens", "seconds", "split", "recording", "view", "report");
 
-	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "recordings",
-			"samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered", "promptTokens",
-			"completionTokens", "costUsd");
+	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
+			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
+			"promptTokens", "completionTokens", "costUsd");
 
 	/**
 	 * The coverage from which a sample counts as covered in {@code aggregate.tsv}: a dossier sample's model-chosen calls
@@ -107,6 +108,9 @@ final class ReplayDriver {
 	/** How a decision sample writes its dossier; explorer and dossier samples ignore it. */
 	private final DossierView decisionView;
 
+	/** Which report a decision sample asks for; explorer and dossier samples ignore it. */
+	private final DecisionReport decisionReport;
+
 	/** Each recording, parsed and checked once. */
 	private final Map<Recording, Parsed> parsed = new HashMap<>();
 
@@ -118,16 +122,29 @@ final class ReplayDriver {
 		this(router, settings, incidents, admin, recordings, toolsList, DossierView.TABLES);
 	}
 
+	/** A driver whose decision samples write their dossier in {@code decisionView} and ask for the plain report. */
+	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
+			Path recordings, Path toolsList, DossierView decisionView) {
+		this(router, settings, incidents, admin, recordings, toolsList, decisionView, DecisionReport.PLAIN);
+	}
+
 	/**
 	 * @param admin the agent database, to open the incident and read it back as the full view does
 	 * @param recordings the replay directory: {@code recordings.tsv} and the files it names
 	 * @param toolsList the recorded tool listing
 	 * @param decisionView how a decision sample writes its dossier
-	 * @throws NullPointerException when {@code decisionView} is null, before any sample, as the loop refuses it
+	 * @param decisionReport which report a decision sample asks for
+	 * @throws NullPointerException when {@code decisionView} or {@code decisionReport} is null, before any sample, as
+	 * the loop refuses them
+	 * @throws IllegalArgumentException for the assessed report with any view but the sheets, before any sample, as a
+	 * decision loop refuses it ({@link DecisionReport#checkView})
 	 */
 	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
-			Path recordings, Path toolsList, DossierView decisionView) {
+			Path recordings, Path toolsList, DossierView decisionView, DecisionReport decisionReport) {
 		this.decisionView = Objects.requireNonNull(decisionView, AgentLoop.NULL_VIEW);
+		this.decisionReport = Objects.requireNonNull(decisionReport, AgentLoop.NULL_REPORT);
+		// Checked here, not at the first decision sample: a run that cannot ask for its report fails before any call.
+		decisionReport.checkView(decisionView);
 		this.router = router;
 		this.settings = settings;
 		this.incidents = incidents;
@@ -141,7 +158,8 @@ final class ReplayDriver {
 	 * Refuses, before any model call, a property of the other kind of run, so a run is never other than the one asked
 	 * for: decision mode replays the cases of {@code replay.split}, each {@code replay.repeats} times, and takes no
 	 * {@code replay.samples}; explorer and dossier mode take {@code replay.samples} per fault, and neither of the other
-	 * two, nor the dossier view ({@link DossierView#PROPERTY}), which only decision mode reads.
+	 * two, nor the dossier view ({@link DossierView#PROPERTY}) or the report ({@link DecisionReport#PROPERTY}), which
+	 * only decision mode reads.
 	 * @param property a property's value, null when it is not set: {@link ReplayRunTest} passes
 	 * {@code System::getProperty}
 	 * @throws IllegalArgumentException naming the first such property and why it does not apply
@@ -158,6 +176,8 @@ final class ReplayDriver {
 					"only decision mode takes it; explorer and dossier take replay.samples");
 			refuseIfSet(property, DossierView.PROPERTY,
 					"only decision mode reads it; explorer has no dossier, and dossier mode writes the tables");
+			refuseIfSet(property, DecisionReport.PROPERTY,
+					"only decision mode reads it; explorer and dossier mode always ask for the plain report");
 		}
 	}
 
@@ -226,8 +246,9 @@ final class ReplayDriver {
 
 	/**
 	 * Runs one sample in {@code mode} to its end over the {@code served} recordings, opened on {@code primary}'s
-	 * symptom and window with "now" at its start, and scores it against its truth. A sample records the view its mode
-	 * applies ({@link AgentMode#viewFrom}): a decision sample the run's, the others none, written {@code -}.
+	 * symptom and window with "now" at its start, and scores it against its truth. A sample records the view and the
+	 * report its mode applies ({@link AgentMode#viewFrom}, {@link AgentMode#reportFrom}): a decision sample the run's,
+	 * the others none, written {@code -}.
 	 */
 	private Sample run(Parsed primary, List<JsonNode> served, AgentMode mode, String split, int n) {
 		String fault = primary.recording().fault();
@@ -238,7 +259,7 @@ final class ReplayDriver {
 		IncidentStatus status;
 		long start = System.nanoTime();
 		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, mode,
-				this.decisionView)) {
+				this.decisionView, this.decisionReport)) {
 			status = loop.run(id);
 		}
 		double seconds = (System.nanoTime() - start) / 1e9;
@@ -260,7 +281,8 @@ final class ReplayDriver {
 		}
 		String route = this.router.route(ModelTask.ACT).route().value();
 		String truth = primary.recording().truth();
-		return new Sample(fault, mode, route, split, primary.recording().stem(), mode.viewFrom(this.decisionView), n,
+		return new Sample(fault, mode, route, split, primary.recording().stem(), mode.viewFrom(this.decisionView),
+				mode.reportFrom(this.decisionReport), n,
 				status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(),
 				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), total(incident, "promptTokens"),
 				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident);
@@ -300,7 +322,7 @@ final class ReplayDriver {
 	}
 
 	/**
-	 * One line per fault, mode, route, split and view, in the samples' order: the distinct recordings the samples
+	 * One line per fault, mode, route, split, view and report, in the samples' order: the distinct recordings the samples
 	 * opened on, the samples, matches out of samples, mean coverage, the covered samples (coverage at least
 	 * {@link #COVERED_THRESHOLD}) and the matches among them, the samples whose {@code DOSSIER} step made calls and had
 	 * none unrecorded out of samples, tokens and, on the cloud route, the estimated cost at
@@ -312,7 +334,7 @@ final class ReplayDriver {
 		for (Sample sample : samples) {
 			groups.computeIfAbsent(
 					String.join("\t", sample.fault(), sample.mode().value(), sample.route(), sample.split(),
-							sample.viewColumn()),
+							sample.viewColumn(), sample.reportColumn()),
 					key -> new ArrayList<>())
 				.add(sample);
 		}
@@ -517,13 +539,14 @@ final class ReplayDriver {
 	/**
 	 * One scored sample. {@code split} is its case's split, or {@code -} for an explorer or dossier sample, which is no
 	 * case; {@code recording} is the stem of the recording it opened on; {@code view} is the dossier view of a decision
-	 * sample, none for the others, which apply none. The three come in the order of their {@code summary.tsv} columns.
+	 * sample, none for the others, which apply none; {@code report} is likewise the report a decision sample asked for.
+	 * The four come in the order of their {@code summary.tsv} columns.
 	 * {@code recorded}, {@code unrecorded}, {@code coverage} and {@code conflicts} are the sample's
 	 * {@link ReplayLabTools} counters; {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
 	 * step's calls and those no recording held; a token count is null when no step counted it.
 	 */
 	record Sample(String fault, AgentMode mode, String route, String split, String recording,
-			Optional<DossierView> view, int n, IncidentStatus status, String truth, String reported, String verdict,
+			Optional<DossierView> view, Optional<DecisionReport> report, int n, IncidentStatus status, String truth, String reported, String verdict,
 			int recorded, int unrecorded, double coverage, int conflicts, Integer promptTokens,
 			Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded, ObjectNode incident) {
 
@@ -533,12 +556,17 @@ final class ReplayDriver {
 					this.status.name(), this.truth, this.reported, this.verdict, String.valueOf(this.recorded),
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
-					this.recording, viewColumn());
+					this.recording, viewColumn(), reportColumn());
 		}
 
 		/** The view as {@code summary.tsv} and {@code aggregate.tsv} write it: its value, or {@code -} for none. */
 		String viewColumn() {
 			return this.view.map(DossierView::value).orElse(NONE);
+		}
+
+		/** The report as {@code summary.tsv} and {@code aggregate.tsv} write it: its value, or {@code -} for none. */
+		String reportColumn() {
+			return this.report.map(DecisionReport::value).orElse(NONE);
 		}
 
 	}

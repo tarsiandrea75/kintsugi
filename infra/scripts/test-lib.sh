@@ -545,6 +545,16 @@ expect "dossier mode refuses --view, which only decision mode reads" \
   "--view applies to decision mode only: explorer has no dossier, and dossier mode writes the tables"$'\n'"exit 2"
 expect "an unknown view exits 2 on the option itself" "$(replay_agent --mode decision --view charts; echo "exit $?")" \
   "Unknown view 'charts'; choose tables or sheets"$'\n'"exit 2"
+expect "dossier mode refuses --report, which only decision mode reads" \
+  "$(replay_agent --mode dossier --report assessed; echo "exit $?")" \
+  "--report applies to decision mode only: explorer and dossier mode always ask for the plain report"$'\n'"exit 2"
+expect "an unknown report exits 2 on the option itself" \
+  "$(replay_agent --mode decision --view sheets --report rich; echo "exit $?")" \
+  "Unknown report 'rich'; choose plain or assessed"$'\n'"exit 2"
+expect "the assessed report with the tables, the default view, stops the run before Maven" \
+  "$(replay_agent --mode decision --report assessed; echo "exit $?")" \
+  "--report assessed needs --view sheets, got tables: the assessed report's checks read the service that owns each\
+ line of the sheets"$'\n'"exit 2"
 # Kept for record-replay.sh's refusal of the same split, below.
 driver_refusal=$(replay_agent --mode decision --split train; echo "exit $?")
 expect "an unknown split exits 2 with the driver's reason, before Maven" "$driver_refusal" \
@@ -556,16 +566,27 @@ decision_run=$(replay_agent --mode decision --faults F1,F3 --repeats 2)
 expect "decision mode's options pass, and the run stops at the Ollama check" "$?" 2
 expect "one case per dev recording of the chosen faults made in decision or dossier mode, each run --repeats times" \
   "$(grep -F '....  ' <<<"$decision_run")" \
-  "....  decision mode, split dev, view tables: 3 recording(s) of F1 F3, each replayed 2 time(s): 6 samples"
+  "....  decision mode, split dev, view tables, report plain: 3 recording(s) of F1 F3, each replayed 2 time(s): 6\
+ samples"
 # The default view is written twice, as DossierView.DEFAULT and as replay-agent.sh's literal: they must agree.
 [[ "$(<"$REPO_DIR/agent/src/main/java/dev/kintsugi/agent/dossier/DossierView.java")" \
   =~ String\ DEFAULT\ =\ \"([a-z]*)\" ]]
 expect "replay-agent.sh's default view is the agent's own, DossierView.DEFAULT" \
-  "$(grep -o 'view [a-z]*:' <<<"$decision_run")" "view ${BASH_REMATCH[1]-missing}:"
+  "$(grep -o 'view [a-z]*,' <<<"$decision_run")" "view ${BASH_REMATCH[1]-missing},"
+# So is the default report, as DecisionReport.DEFAULT and as replay-agent.sh's literal.
+[[ "$(<"$REPO_DIR/agent/src/main/java/dev/kintsugi/agent/loop/DecisionReport.java")" \
+  =~ String\ DEFAULT\ =\ \"([a-z]*)\" ]]
+expect "replay-agent.sh's default report is the agent's own, DecisionReport.DEFAULT" \
+  "$(grep -o 'report [a-z]*:' <<<"$decision_run")" "report ${BASH_REMATCH[1]-missing}:"
 sheets_run=$(replay_agent --mode decision --view sheets --faults F1)
 expect "decision mode takes --view sheets, and the run stops at the Ollama check" "$?" 2
 expect "the run names its view" "$(grep -F '....  ' <<<"$sheets_run")" \
-  "....  decision mode, split dev, view sheets: 2 recording(s) of F1, each replayed 1 time(s): 2 samples"
+  "....  decision mode, split dev, view sheets, report plain: 2 recording(s) of F1, each replayed 1 time(s): 2 samples"
+assessed_run=$(replay_agent --mode decision --view sheets --report assessed --faults F1)
+expect "decision mode takes --report assessed with the sheets, and the run stops at the Ollama check" "$?" 2
+expect "the run names its report" "$(grep -F '....  ' <<<"$assessed_run")" \
+  "....  decision mode, split dev, view sheets, report assessed: 2 recording(s) of F1, each replayed 1 time(s): 2\
+ samples"
 expect "a chosen fault with no recording in the split stops the run before Maven" \
   "$(replay_agent --mode decision --split holdout --faults F1,F3; echo "exit $?")" \
   "no decision or dossier recording of F3 in split holdout of $manifest_dir/recordings.tsv"$'\n'"exit 2"

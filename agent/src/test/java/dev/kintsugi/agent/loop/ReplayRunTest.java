@@ -43,8 +43,10 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  * and the report call. {@link ReplayCases} picks the recordings. A property of the other kind of run is refused rather
  * than ignored ({@link ReplayDriver#refuseIgnoredProperties}), so a run is never other than the one asked for. A
  * decision run writes its dossier in the view of {@code kintsugi.agent.decision.view} ({@code tables}, the default, or
- * {@code sheets}; odd/tasks/service-assessment.md T1), set as a system property like the others, and records it with
- * each sample; explorer and dossier runs refuse it. A miss is a measurement, not a failure: the test fails only when it
+ * {@code sheets}; odd/tasks/service-assessment.md T1) and asks for the report of
+ * {@code kintsugi.agent.decision.report} ({@code plain}, the default, or {@code assessed}, which needs the sheets; T2r),
+ * each set as a system property like the others, and records both with each sample; explorer and dossier runs refuse
+ * them. A miss is a measurement, not a failure: the test fails only when it
  * cannot run a sample.
  *
  * <p>
@@ -70,6 +72,10 @@ class ReplayRunTest {
 	/** The application's own binding of the view, so a value the agent would refuse fails here too. */
 	@Value("${" + DossierView.PROPERTY + ":" + DossierView.DEFAULT + "}")
 	String decisionView;
+
+	/** The application's own binding of the report, likewise. */
+	@Value("${" + DecisionReport.PROPERTY + ":" + DecisionReport.DEFAULT + "}")
+	String decisionReport;
 
 	@DynamicPropertySource
 	static void database(DynamicPropertyRegistry registry) {
@@ -97,7 +103,8 @@ class ReplayRunTest {
 
 		AgentDatabase.empty();
 		ReplayDriver driver = new ReplayDriver(this.router, this.settings, this.incidents, AgentDatabase.admin(),
-				recordings, ReplayDriver.DEFAULT_TOOLS_LIST, DossierView.of(this.decisionView));
+				recordings, ReplayDriver.DEFAULT_TOOLS_LIST, DossierView.of(this.decisionView),
+				DecisionReport.of(this.decisionReport));
 		List<ReplayDriver.Sample> done = new ArrayList<>();
 		Consumer<ReplayDriver.Sample> record = sample -> {
 			// Counted before it is written: a paid sample stays in aggregate.tsv even when its write fails.

@@ -21,14 +21,16 @@ HEADER = [
 TRUTH = "gateway-mock|DEPENDENCY_LATENCY"
 
 
-def write_tsv(path, rows, view=None):
-    header = HEADER + (["view"] if view is not None else [])
+def write_tsv(path, rows, view=None, report=None):
+    header = HEADER + (["view"] if view is not None else []) + (["report"] if report is not None else [])
     lines = ["\t".join(header)]
     for fault, status, truth, reported, recording in rows:
         values = [fault, "decision", "cloud", "1", status, truth, reported, "-", "33", "0", "1.00", "0", "1", "1",
                   "1.0", "dev", recording]
         if view is not None:
             values.append(view)
+        if report is not None:
+            values.append(report)
         lines.append("\t".join(values))
     path.write_text("\n".join(lines) + "\n")
     return path
@@ -78,6 +80,27 @@ def test_reader_treats_a_missing_view_column_as_dash(tmp_path):
     [row] = read_summary(tmp_path)
     assert row.view == "-"
     assert row.config == "cloud-decision--"
+
+
+def test_reader_reads_a_report_column_after_the_view(tmp_path):
+    # The replay's summary.tsv gained "report" after "view" (service-assessment T2r): the row is scored as before,
+    # and the default config tells V1 (sheets, plain) from V2 (sheets, assessed).
+    write_tsv(tmp_path / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1")], view="sheets",
+              report="assessed")
+    [row] = read_summary(tmp_path)
+    assert row.view == "sheets"
+    assert row.report == "assessed"
+    assert row.config == "cloud-decision-sheets-assessed"
+    assert row.case == ("dev", "r1-F1")
+    assert row.outcome == CORRECT
+
+
+def test_reader_treats_a_missing_report_column_as_dash(tmp_path):
+    write_tsv(tmp_path / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1")], view="tables")
+    [row] = read_summary(tmp_path)
+    assert row.report == "-"
+    # A TSV from before the report column keeps its config name, so committed results stay comparable.
+    assert row.config == "cloud-decision-tables"
 
 
 def test_reader_uses_the_given_label(tmp_path):

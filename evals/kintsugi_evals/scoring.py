@@ -55,6 +55,7 @@ class Row:
     truth: str
     reported: str
     outcome: str
+    report: str = "-"
 
     @property
     def case(self):
@@ -73,7 +74,9 @@ def summary_path(path):
 def read_summary(path, label=None):
     """Rows of one summary.tsv (a file or the run directory holding it).
 
-    The config is the label when given, else route-mode-view; a missing view column reads as "-".
+    The config is the label when given, else route-mode-view, with -report appended when the file has a report
+    column (added after view in service-assessment T2r). A missing view or report column reads as "-", so a file
+    from before either column keeps its config name.
     """
     path = summary_path(path)
     if not path.is_file():
@@ -86,10 +89,11 @@ def read_summary(path, label=None):
         rows = []
         for raw in reader:
             view = raw.get("view") or "-"
-            config = label or f"{raw['route']}-{raw['mode']}-{view}"
+            report = raw.get("report") or "-"
+            config = label or f"{raw['route']}-{raw['mode']}-{view}" + (f"-{report}" if "report" in raw else "")
             rows.append(Row(config, raw["fault"], raw["mode"], raw["route"], view, raw["split"], raw["recording"],
                             raw["status"], raw["truth"], raw["reported"],
-                            outcome(raw["status"], raw["truth"], raw["reported"])))
+                            outcome(raw["status"], raw["truth"], raw["reported"]), report))
     return rows
 
 
