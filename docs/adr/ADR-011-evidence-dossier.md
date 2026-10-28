@@ -4,6 +4,8 @@
 
 Accepted (2026-10-16), with the windows defined below.
 
+Amended by ADR-014 (2026-10-28): the "facts only" rule allows the per-service sheets, arranged by the call graph, and the assessed report's roles, checked by code against the graph.
+
 ## Date
 
 2026-10-16
