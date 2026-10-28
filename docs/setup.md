@@ -494,6 +494,33 @@ A sample with coverage below 1.00 made calls no recording holds, answered as `CL
 
 The default mode is `dossier`; `--samples` takes 1 to 999. Explorer and dossier samples pool the fault's `stress` recordings only, the ones they were measured on, its first `stress` recording in the sample's mode first: recordings imported into `dev`, `holdout` or `probe` never change them, and a `holdout` recording never reaches them. `--split`, `--repeats` and `--view` are errors there. `--mode explorer` and `--mode both` (explorer and dossier) still run, but explorer replays are not valid measurements: under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent. A `MISS` is a measurement; the script exits 1 only when a sample could not run. `REPLAY_DIR` names another replay directory, as for `record-replay.sh`.
 
+### Score replay results
+
+The scorer in `evals/` ([ADR-015](adr/ADR-015-evaluation-protocol.md), `openspec/specs/evals/spec.md`) reads one or more `summary.tsv` and prints AC@1 per fault and pooled, with Wilson 95% CIs, and the paired difference of every two configs, with exact McNemar and a seeded cluster bootstrap. It uses the Python standard library only, so a bare `python3` runs it.
+
+The tests need pytest, installed once in a git-ignored venv (on WSL, `python3 -m venv` needs the `python3.12-venv` package):
+
+```bash
+python3 -m venv evals/.venv
+evals/.venv/bin/pip install -r evals/requirements-dev.txt     # pytest==9.1.1
+evals/.venv/bin/python -m pytest evals -q
+```
+
+Score from `evals/`, one `--label` per config:
+
+```bash
+cd evals
+python3 -m kintsugi_evals score \
+  --label A ../infra/scripts/out/replay-<time>-local \
+  --label D ../infra/scripts/out/replay-<time>-cloud \
+  --out results/<date>-<name>
+```
+
+- An unlabelled dir is labelled `route-mode-view` from its columns.
+- `--out` writes `report.txt` (the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (source, sha256, rows) and `inputs/<label>-summary.tsv`, a copy of each input, so the result regenerates from committed files.
+- `--seed` (default 1) and `--iterations` (default 10000) set the bootstrap.
+- Commit the plan to `evals/plans/` before the run (template `evals/plans/TEMPLATE.md`) and the result to `evals/results/<date>-<name>/` after it.
+
 ### Reset a volume
 
 Init scripts (`infra/postgres/init/`, `infra/knowledge-db/init/`) run only when their volume is empty. When one changes after the volume was created (for example when the `agent` database was added to `knowledge-db`), or when a volume's state is broken, delete that one volume and start the lab again:
