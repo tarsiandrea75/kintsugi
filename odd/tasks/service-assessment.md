@@ -272,6 +272,22 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
     - (b): `ReportCheckTest` 61 tests; the full suite 552 tests, 0 failures.
   - Not changed: `docs/setup.md` names `--view`, not `--report`. It was outside this task's edit surfaces.
   - The T4 measurement plan is committed with this entry: `evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`.
+- T2r and T3 reviews (consent granted), all four approved and acknowledged:
+  - (a) `6542239`, lineage `review-f94b2c0842476c7e`; (b) `f1bb20a`, lineage `review-6e662fef562afb8c`; (c) `4d68ce0`, lineage `review-a029d6f78aeaf2d4`; the docs commit `6d6984b`, lineage `review-7d60958d4939ff25`.
+  - Fixed in one follow-up commit (see the next entry):
+    - WARNING R4-assessed-check-ignores-mode / R3-mode-blind-checkview: `ReplayDriver` checked the assessed report against the view in every mode, at construction, so a dossier or explorer driver with `assessed` and `tables` was refused although neither mode applies the report.
+    - SUGGESTION R2-spec-error-reference: the replay requirement and its scenario named the same error two ways.
+    - SUGGESTION R3-001: ADR-014's status line read as if the ADR itself were re-scoped on 2026-10-25.
+    - SUGGESTION R2-sample-record-long-line: the `Sample` record's parameters had one line over the width of their neighbours.
+  - Recorded as follow-ups, not fixed:
+    - WARNING R2-config-name-asymmetry, with the R4 and R3 scorer-naming SUGGESTIONs: the scorer's default config name gains `-<report>` only when the TSV has the column, so a tables+plain run is `cloud-decision-tables-plain` today and `cloud-decision-tables` in M0. T4 is not affected: its plan labels every input with `--label`.
+    - SUGGESTION R3-quote-null-fallback: the derived evidence reads its quote from the Citation map without a fallback; Citation fills it for every valid assessment, so a missing entry cannot reach the derivation today.
+- 2026-10-28: the review follow-ups (route: delegated writer; trigger: the review's four items across the replay driver, its test, the spec and ADR-014).
+  - `ReplayDriver` no longer checks the pair at construction. `checkReport(mode)` applies `AgentMode.reportFrom` and `viewFrom`, the one rule of which mode applies them, before a decision run's first model call (`decisionSamples`, `decisionSample`). A dossier or explorer sample ignores the pair, as the loop does.
+  - The spec names the error once, as the error of the scenario "The assessed report needs the sheets" ("Decision mode"), in the requirement and in the replay scenario, which now states the decision-only refusal.
+  - ADR-014's status says the feature's plan was re-scoped on 2026-10-25 by the vision revision; the ADR's date stays 2026-10-28.
+  - The `Sample` record's parameters are wrapped like their neighbours.
+  - RED: `theAssessedReportWithTheTablesIsRefusedBeforeAnyDecisionSample` and `explorerAndDossierSamplesIgnoreTheAssessedReportWithTheTables` both failed with the `IllegalArgumentException` thrown when the driver was built. GREEN: `ReplayDriverTest` 23 tests; the full suite 553 tests, 0 failures; `test-lib.sh` 154 cases; the scorer 57 tests.
 
 ## Next step
 

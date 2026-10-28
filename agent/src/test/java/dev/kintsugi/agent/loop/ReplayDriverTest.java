@@ -478,14 +478,36 @@ class ReplayDriverTest {
 	}
 
 	@Test
-	void theAssessedReportWithTheTablesIsRefusedWhenTheDriverIsBuilt() {
-		assertThatThrownBy(() -> driverIn(DossierView.TABLES, DecisionReport.ASSESSED))
-			.isInstanceOf(IllegalArgumentException.class)
-			.hasMessage("kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got "
-					+ "tables: the assessed report's checks read the service that owns each line of the sheets");
+	void theAssessedReportWithTheTablesIsRefusedBeforeAnyDecisionSample() {
+		// Only decision mode applies the report (AgentMode.reportFrom), so the driver is built and the pair is refused
+		// when a decision run starts, before its first model call.
+		ReplayDriver driver = driverIn(DossierView.TABLES, DecisionReport.ASSESSED);
+		String needsSheets = "kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got "
+				+ "tables: the assessed report's checks read the service that owns each line of the sheets";
+		assertThatThrownBy(() -> driver.decisionSamples("stress", List.of("F1"), 1, sample -> {
+		})).isInstanceOf(IllegalArgumentException.class).hasMessage(needsSheets);
+		ReplayCases.Recording recording = driver.decisionCases("stress", List.of("F1")).get(0);
+		assertThatThrownBy(() -> driver.decisionSample(recording, 1)).isInstanceOf(IllegalArgumentException.class)
+			.hasMessage(needsSheets);
 		assertThatThrownBy(() -> driverIn(DossierView.SHEETS, null)).isInstanceOf(NullPointerException.class)
 			.hasMessage(AgentLoop.NULL_REPORT);
 		assertThat(this.model.calls()).as("model calls").isZero();
+	}
+
+	@Test
+	void explorerAndDossierSamplesIgnoreTheAssessedReportWithTheTables() {
+		// Neither mode applies the report, so the pair refuses nothing there: the sample asks for the plain report.
+		this.model.quiet().quiet().text(unknownReport());
+		ReplayDriver driver = driverIn(DossierView.TABLES, DecisionReport.ASSESSED);
+
+		ReplayDriver.Sample dossier = driver.sample("F1", AgentMode.DOSSIER, 1);
+
+		assertThat(dossier.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(dossier.view()).isEmpty();
+		assertThat(dossier.report()).isEmpty();
+		assertThat(this.model.prompts().getLast().getOptions()).isInstanceOfSatisfying(
+				StructuredOutputChatOptions.class,
+				options -> assertThat(options.getOutputSchema()).isEqualTo(Schemas.report(AgentMode.DOSSIER)));
 	}
 
 	/** The dossier message the sample's model read: its {@code DOSSIER} step's summary. */

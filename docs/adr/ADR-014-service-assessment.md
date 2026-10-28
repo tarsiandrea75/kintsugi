@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amends ADR-011's "facts only" rule for the per-service sheets and the assessed report. Re-scoped on 2026-10-25 by the vision revision (`odd/tasks/vision-revision.md`): it records no M2 bar.
+Accepted. Amends ADR-011's "facts only" rule for the per-service sheets and the assessed report. It records no M2 bar: the feature's plan for this ADR, which had included one, was re-scoped on 2026-10-25 by the vision revision (`odd/tasks/vision-revision.md`). The ADR itself was written on 2026-10-28.
 
 ## Date
 

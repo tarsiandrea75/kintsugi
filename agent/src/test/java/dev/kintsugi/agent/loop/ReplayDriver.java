@@ -129,6 +129,10 @@ final class ReplayDriver {
 	}
 
 	/**
+	 * A driver whose decision samples write their dossier in {@code decisionView} and ask for {@code decisionReport}.
+	 * The assessed report with any view but the sheets is refused only where decision mode applies them, before a
+	 * decision run's first model call ({@link #decisionSamples}, {@link #decisionSample}); explorer and dossier samples
+	 * ignore the pair, as the loop does.
 	 * @param admin the agent database, to open the incident and read it back as the full view does
 	 * @param recordings the replay directory: {@code recordings.tsv} and the files it names
 	 * @param toolsList the recorded tool listing
@@ -136,15 +140,11 @@ final class ReplayDriver {
 	 * @param decisionReport which report a decision sample asks for
 	 * @throws NullPointerException when {@code decisionView} or {@code decisionReport} is null, before any sample, as
 	 * the loop refuses them
-	 * @throws IllegalArgumentException for the assessed report with any view but the sheets, before any sample, as a
-	 * decision loop refuses it ({@link DecisionReport#checkView})
 	 */
 	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
 			Path recordings, Path toolsList, DossierView decisionView, DecisionReport decisionReport) {
 		this.decisionView = Objects.requireNonNull(decisionView, AgentLoop.NULL_VIEW);
 		this.decisionReport = Objects.requireNonNull(decisionReport, AgentLoop.NULL_REPORT);
-		// Checked here, not at the first decision sample: a run that cannot ask for its report fails before any call.
-		decisionReport.checkView(decisionView);
 		this.router = router;
 		this.settings = settings;
 		this.incidents = incidents;
@@ -224,6 +224,7 @@ final class ReplayDriver {
 	 * or window
 	 */
 	void decisionSamples(String split, List<String> faults, int repeats, Consumer<Sample> each) {
+		checkReport(AgentMode.DECISION);
 		List<Recording> cases = decisionCases(split, faults);
 		cases.forEach(this::parsed);
 		for (Recording recording : cases) {
@@ -240,6 +241,7 @@ final class ReplayDriver {
 	 * @throws IllegalStateException when the loop did not run the incident
 	 */
 	Sample decisionSample(Recording recording, int n) {
+		checkReport(AgentMode.DECISION);
 		Parsed parsed = parsed(recording);
 		return run(parsed, List.of(parsed.incident()), AgentMode.DECISION, recording.split(), n);
 	}
@@ -250,6 +252,17 @@ final class ReplayDriver {
 	 * report its mode applies ({@link AgentMode#viewFrom}, {@link AgentMode#reportFrom}): a decision sample the run's,
 	 * the others none, written {@code -}.
 	 */
+	/**
+	 * Checks, before any model call, that {@code mode} can ask for its report in its view, by the loop's own rule: only
+	 * a mode that applies the report ({@link AgentMode#reportFrom}), decision mode, checks it, so an explorer or dossier
+	 * run ignores the pair as the loop does.
+	 * @throws IllegalArgumentException for the assessed report with any view but the sheets, in decision mode
+	 */
+	private void checkReport(AgentMode mode) {
+		mode.reportFrom(this.decisionReport)
+			.ifPresent(report -> report.checkView(mode.viewFrom(this.decisionView).orElse(DossierView.TABLES)));
+	}
+
 	private Sample run(Parsed primary, List<JsonNode> served, AgentMode mode, String split, int n) {
 		String fault = primary.recording().fault();
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), served);
@@ -546,9 +559,10 @@ final class ReplayDriver {
 	 * step's calls and those no recording held; a token count is null when no step counted it.
 	 */
 	record Sample(String fault, AgentMode mode, String route, String split, String recording,
-			Optional<DossierView> view, Optional<DecisionReport> report, int n, IncidentStatus status, String truth, String reported, String verdict,
-			int recorded, int unrecorded, double coverage, int conflicts, Integer promptTokens,
-			Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded, ObjectNode incident) {
+			Optional<DossierView> view, Optional<DecisionReport> report, int n, IncidentStatus status, String truth,
+			String reported, String verdict, int recorded, int unrecorded, double coverage, int conflicts,
+			Integer promptTokens, Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded,
+			ObjectNode incident) {
 
 		/** The sample's line of {@code summary.tsv}, in {@link #SUMMARY_HEADER}'s columns. */
 		String summaryLine() {
