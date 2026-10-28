@@ -1,0 +1,2 @@
+# Dev-only dependencies. The scorer itself uses the standard library only (ADR-015).
+pytest==9.1.1
