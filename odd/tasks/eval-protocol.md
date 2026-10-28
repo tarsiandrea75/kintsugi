@@ -99,3 +99,8 @@ Then a docs commit recording progress here.
 ## Next step
 
 The parent's review of the T1r commit, then follow-up 2 (service-assessment close).
+
+- 2026-10-28: T1r review (`6ea67fc`, base `a303244`, one lens, lineage `review-154b110f8a333c4f`): approved and acknowledged. Follow-ups, not fixed:
+  - WARNING R3-copy-name-case-collision: the copy-name guard is case-sensitive, so labels `a` and `A` overwrite each other on a case-insensitive filesystem (a Windows mount under WSL). Compare names case-folded.
+  - SUGGESTION R3-writes-nothing-unproved: no test asserts that the out dir is absent after a name collision.
+  - SUGGESTION R3-positive-type-name: a non-numeric `--iterations` shows argparse's "invalid _positive value".
