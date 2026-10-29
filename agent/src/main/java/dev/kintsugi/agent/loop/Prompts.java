@@ -12,8 +12,10 @@ import dev.kintsugi.agent.lab.Phase;
  * The texts the model reads (agent spec, "Untrusted text is data", "Summaries built in code", "What one call sees").
  * Each call is rebuilt from the incident's state, never from an accumulated chat history, in an order that keeps what
  * changes last: the system message, the evidence of earlier calls (which only grows), the previous answer and its
- * tool results, then the instruction with the budgets left and the task. Nothing here names a cause the lab may be put
- * through, or maps a symptom to a cause: the model has to find the cause in the evidence.
+ * tool results, then the instruction with the budgets left and the task. The system message does map symptoms to
+ * causes: it gives the lab's call graph and two diagnostic rules, follow the calls down to the last slow or refusing
+ * component, and an unreachable but healthy callee is a CONFIGURATION of its caller. Config 0 runs the same rules
+ * without a model (ADR-016, dev.kintsugi.agent.rules.RulesDiagnosis), so what the model adds over them is measured.
  */
 final class Prompts {
 
