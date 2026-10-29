@@ -4,27 +4,26 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-24 (session 01; the session ran from 2026-10-20)
+2026-10-29 (session 01; covers the work since 2026-10-25)
 
 ## Milestone
 
-**M2 — First agent: in progress.** Open: the M2 check, "F1–F3 correctly diagnosed with a local model" (`agent-loop` T5c3). The cloud route diagnoses F1–F3 in dossier mode (replay: F1 5/5, F2 5/5, F3 15/15). The local route (`granite4.1:8b`) no longer times out and its reports are valid (9/9), but it diagnoses only F2 (3/3); F1 and F3 stay 0/3.
+**M2 — Measured honestly (Oct 26 – Nov 15): in progress.** The vision was revised on 2026-10-28 (two tracks, a rules baseline, pre-registered claims H1–H3). The M2 check is now `docs/benchmark.md` v0 with the lab holdout-1 table for Configs 0, A and D (vision §7), and it passes whatever the local model scores.
+- Done: the protocol and the scorer (`eval-protocol`); M0 on dev (local A 5/15, cloud D 14/15).
+- Open: `service-assessment` T4 (local runs) and T5; `rules-baseline` (Config 0) T5; topology as data; the RCAEval converter; the benchmark table.
 
 ## Last action
 
-This session (journal `docs/journal/2026-10-24-01.md`), all on local branches, nothing pushed:
-- `local-dossier-timing` / `local-deadlines`: 600 s local deadlines; no more timeouts on this CPU.
-- `evidence-by-reference` (ADR-013): the model cites a numbered line (`D<n>` or `n:`) and code fills in the quote; local invalid reports 5/9 → 1/9.
-- `report-field-order`: the report's reasoning (`summary`, `evidence`) comes before the cause; a summary over 500 characters is cut, not rejected. Cloud F3 10/15 → 15/15.
-- `dossier-change-column`: a `change` column (incident minus previous) in the dossier's count tables; no local gain (F1 0/3, F2 3/3, F3 0/3), so reverted (`7b8a4cf`).
-- Cloud spend so far about $1.41 of the human's $5. Current branch `feat/dossier-change-column`, clean; its last code commit is the revert `7b8a4cf`, followed by docs commits.
+This session (journal `docs/journal/2026-10-29-01.md`), all on local branches, nothing pushed:
+- `service-assessment` T4, the cloud route, committed at `bf016f4`: D-M0 14/15, D-V1 15/15, D-V2 9/15. V2 is not eligible (F1 −2, F3 −3), so only V1 can be kept.
+- The first local incumbent run stopped at 14 of 15 samples and was discarded. The three local replays (tables+plain, sheets+plain, sheets+assessed) were relaunched at 23:19 UTC on 2026-10-29, one after the other, about 6 h in all. Their log is in the session scratchpad, and their outputs land in `infra/scripts/out/replay-<UTC>-local/`.
+- Current branch `feat/service-assessment-close`. `feat/rules-baseline` (Config 0, T1–T4 done) branches from its `b30ae74`.
 
 ## Next action
 
-1. The human decides what follows. Candidates:
-   - a larger local model for the M2 check: `granite4.1:8b` reads the previous window's rows as the incident's even when the change is written out (`odd/tasks/dossier-change-column.md`), and stops at payment-service on F1;
-   - accept local F1 and F3 as a known limit and run the local lab round for M2 (`verify-agent.sh --mode dossier --route local`);
-   - whether to raise the 500-character summary limit (12 of 15 cloud summaries were cut).
+1. When the local replays end: check that each `summary.tsv` has 15 lines, score them into `evals/results/2026-10-28-service-assessment-v1-v2-dev/local`, run the rerun check against M0, and apply the plan's decision rule (`evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`). If a run did not finish, rerun that config only.
+2. Then `service-assessment` T5 (the live local round, descriptive).
+3. Then `rules-baseline` T5: its measurement plan, then Config 0 on dev. It waits for the local replays to end, because both share one CPU.
 
 ## Local branch chains (not pushed)
 
@@ -44,7 +43,8 @@ This session (journal `docs/journal/2026-10-24-01.md`), all on local branches, n
 - `feat/agent-loop` → `-01-state` → `-02-tools` → `-03-loop` → `-04-check`
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
-- `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column` (current, clean)
+- `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close` (current), `feat/rules-baseline` (from `b30ae74` on the current branch).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -66,6 +66,10 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 ## Follow-ups
 
 This session (details in each feature document):
+- service-assessment: WARNING R2-config-name-asymmetry (the scorer's default config name gains `-<report>` only when the TSV has the column; T4 is not affected, since it labels every input); SUGGESTION R3-quote-null-fallback; `docs/setup.md` names `--view` but not `--report`.
+- Untracked files in the repository root (`export_bundle.sh`, `project_bundle.*`, `scan_deep_project.sh`, `project_deep_overview.txt`) are not part of any feature; the human decides whether to keep them.
+
+Session of 2026-10-24:
 - evidence-by-reference: ReportCheck checks that a cited line exists, not that it supports the item's `why` (local F3 cited D17, a success row, for a `ConnectException`); the T2 SUGGESTION R3-runbook-budget-untested.
 - report-field-order: a non-string summary gets no length in its error (SUGGESTION); 12 of 15 cloud summaries are cut at 500.
 
