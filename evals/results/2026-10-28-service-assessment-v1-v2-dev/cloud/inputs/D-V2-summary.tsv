@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5020	549	6.4	dev	verify-agent-20261024T162555Z-r1-F1	sheets	assessed
+F1	decision	cloud	1	INVALID_REPORT	gateway-mock|DEPENDENCY_LATENCY	none	MISS	33	0	1.00	0	10213	1224	7.7	dev	verify-agent-20261024T162555Z-r3-F1	sheets	assessed
+F1	decision	cloud	1	INVALID_REPORT	gateway-mock|DEPENDENCY_LATENCY	none	MISS	33	0	1.00	0	10249	1178	7.2	dev	verify-agent-20261024T162555Z-r5-F1	sheets	assessed
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	10142	1175	6.9	dev	verify-agent-20261024T162555Z-r7-F1	sheets	assessed
+F1	decision	cloud	1	INVALID_REPORT	gateway-mock|DEPENDENCY_LATENCY	none	MISS	33	0	1.00	0	10635	1235	8.0	dev	verify-agent-20261024T162555Z-r9-F1	sheets	assessed
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5017	544	3.2	dev	verify-agent-20261024T162555Z-r1-F2	sheets	assessed
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5029	515	3.5	dev	verify-agent-20261024T162555Z-r3-F2	sheets	assessed
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5030	607	3.4	dev	verify-agent-20261024T162555Z-r5-F2	sheets	assessed
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5033	573	3.2	dev	verify-agent-20261024T162555Z-r7-F2	sheets	assessed
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5033	564	3.1	dev	verify-agent-20261024T162555Z-r9-F2	sheets	assessed
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	9854	1107	6.3	dev	verify-agent-20261024T162555Z-r1-F3	sheets	assessed
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	10254	1132	6.4	dev	verify-agent-20261024T162555Z-r3-F3	sheets	assessed
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	10137	1098	7.2	dev	verify-agent-20261024T162555Z-r5-F3	sheets	assessed
+F3	decision	cloud	1	INVALID_REPORT	order-service|CONFIGURATION	none	MISS	33	0	1.00	0	10250	1169	6.8	dev	verify-agent-20261024T162555Z-r7-F3	sheets	assessed
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	10151	1192	7.2	dev	verify-agent-20261024T162555Z-r9-F3	sheets	assessed

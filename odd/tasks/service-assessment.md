@@ -288,7 +288,15 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - ADR-014's status says the feature's plan was re-scoped on 2026-10-25 by the vision revision; the ADR's date stays 2026-10-28.
   - The `Sample` record's parameters are wrapped like their neighbours.
   - RED: `theAssessedReportWithTheTablesIsRefusedBeforeAnyDecisionSample` and `explorerAndDossierSamplesIgnoreTheAssessedReportWithTheTables` both failed with the `IllegalArgumentException` thrown when the driver was built. GREEN: `ReplayDriverTest` 23 tests; the full suite 553 tests, 0 failures; `test-lib.sh` 154 cases; the scorer 57 tests.
+- 2026-10-29: T4, the cloud route (route: inline). The three cloud replays ran at `b30ae74` on 2026-10-29, 15 samples each, and are scored in `evals/results/2026-10-28-service-assessment-v1-v2-dev/cloud/`.
+  - D-M0 (tables+plain) 14/15; D-V1 (sheets+plain) 15/15; D-V2 (sheets+assessed) 9/15, coverage 87%.
+  - Per-fault nets against D-M0, case by case from `inputs/*-summary.tsv`:
+    - D-V1: F1 +1, F2 0, F3 0, pooled +1. No fault class loses a case, so V1 meets the cloud clause of the plan's eligibility rule.
+    - D-V2: F1 -2, F2 0, F3 -3, pooled -5. F1 and F3 each lose more than 1 case, so V2 is not eligible, whatever the local result.
+  - D-V2's six misses: four `INVALID_REPORT` (F1 r3, r5, r9; F3 r7) and two `UNKNOWN|UNKNOWN` abstentions (F3 r1, r3).
+  - Paired (descriptive): D-V1 - D-M0 McNemar p = 1, +7 points, bootstrap [+0, +20]; D-V2 - D-M0 McNemar p = 0.062 (Holm 0.12), -33 points, bootstrap [-60, -13].
+  - The first local incumbent run (`replay-20261029T011031Z-local`) stopped at 14 of 15 samples with no process left, so it is discarded. The three local runs are rerun from the start.
 
 ## Next step
 
-T4: run V1 and V2 on `dev` under the committed plan `evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`: tables+plain (the incumbent), sheets+plain and sheets+assessed, on the local route (about 2 h each) and the cloud route (about $0.05 each, with the human's go-ahead). Score each route with `kintsugi_evals score` and decide with the plan's rule (ADR-015's dev keep rule). `holdout` is not read.
+T4, the local route: the three local replays (tables+plain, sheets+plain, sheets+assessed, about 2 h each), then score them into `.../local`, run the rerun check against M0, and apply the plan's decision rule. Only V1 can still be kept. `holdout` is not read.

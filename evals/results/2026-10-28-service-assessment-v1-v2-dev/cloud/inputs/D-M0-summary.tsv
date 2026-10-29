@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5299	558	5.8	dev	verify-agent-20261024T162555Z-r1-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5290	546	3.5	dev	verify-agent-20261024T162555Z-r3-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5298	581	3.2	dev	verify-agent-20261024T162555Z-r5-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5316	512	3.0	dev	verify-agent-20261024T162555Z-r7-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	5502	498	3.6	dev	verify-agent-20261024T162555Z-r9-F1	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5337	535	3.4	dev	verify-agent-20261024T162555Z-r1-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5325	545	3.4	dev	verify-agent-20261024T162555Z-r3-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5328	537	3.1	dev	verify-agent-20261024T162555Z-r5-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5361	586	3.7	dev	verify-agent-20261024T162555Z-r7-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5363	564	3.5	dev	verify-agent-20261024T162555Z-r9-F2	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5110	547	3.2	dev	verify-agent-20261024T162555Z-r1-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5309	551	3.3	dev	verify-agent-20261024T162555Z-r3-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5309	463	3.0	dev	verify-agent-20261024T162555Z-r5-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5299	519	4.1	dev	verify-agent-20261024T162555Z-r7-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5320	534	3.1	dev	verify-agent-20261024T162555Z-r9-F3	tables	plain
