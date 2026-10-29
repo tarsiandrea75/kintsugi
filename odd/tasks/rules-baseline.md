@@ -51,7 +51,7 @@ Out of scope:
 
 **Thresholds.** These are the only free parameters. ADR-016 fixes them before any dev run, and they are not tuned on dev results:
 - Slow: incident-window mean latency ≥ 2× the previous window's mean, and ≥ 0.5 s.
-- Refusing: server rows for that service with 4xx or 5xx answers, or an error outcome, ≥ 20% of its incident-window answers and ≥ 3 answers.
+- Refusing: answers with a numeric status ≥ 400 make up ≥ 20% of the service's incident-window answers, and there are ≥ 3 of them (ADR-016 holds the full definitions).
 - Any later change gets a new ADR revision, and its dev result is labelled exploratory.
 
 **Topology.** Config 0 reuses `CallGraph` (`calls`, `calledBy`). The package-private `Edge.callerRow` and `serverRow` matchers get a public read-only accessor, or the rules live behind a small public helper in `dossier`. The writer picks the smaller change; neither adds a topology copy.
@@ -97,6 +97,8 @@ Out of scope:
 ## Progress
 
 - 2026-10-29: worktree and branch created. Exploration mapped Prompts rules, Dossier, CallGraph, routes and the replay seam (`ReplayDriver.run()` :266-307). This document was written.
+
+- 2026-10-29: T1 committed as `dca9d2f`; assessment medium, under budget, so it stays pending in slice 1. The first T2 writer stopped before writing code: ADR-016 compared log counts against the previous window, but the dossier holds incident-window counts only (`DossierGatherer.java:116-128`). ADR-016 was clarified before any run: incident-window logs, a timeout matcher, missing baselines, entry services, non-numeric statuses.
 
 ## Next step
 
