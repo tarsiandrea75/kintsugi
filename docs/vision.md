@@ -121,7 +121,7 @@ L2 and L3 are annotations, not retries, so a check never steers the model toward
 
 **Leakage principle.** A rule derived from the lab catalog may stay in the prompt only if Config 0 runs it too. Its transfer is then tested on RCAEval, and a generic-prompt ablation runs on the cloud route. Otherwise the prompt teaches the test, and the LLM gets the credit for the designer's knowledge.
 
-Config 0 is the code diagnosing with rules that ADR-011 rejected for the agent: "the LLM would become redundant". It stays a baseline that measures exactly that redundancy, never the agent's answer; ADR-016 will record it.
+Config 0 is the code diagnosing with rules that ADR-011 rejected for the agent: "the LLM would become redundant". It stays a baseline that measures exactly that redundancy, never the agent's answer; ADR-016 records it.
 
 ### Modules
 

@@ -1,0 +1,103 @@
+# Feature: rules-baseline (Config 0)
+
+- Branch: `feat/rules-baseline`, from `b30ae74` (chained on `feat/service-assessment-close`)
+- Worktree: `../kintsugi-worktrees/rules-baseline`. The main checkout runs the service-assessment T4 local replays, which rebuild `agent/` on each run, so no file there changes until they end.
+- Milestone: M2 (vision §7). Follow-up #3 of `odd/tasks/vision-revision.md`.
+- Delivery: `feature-branch-chain`. The forecast is about 550 authored lines, so there are two slices: PR 1 covers T1 and T2, PR 2 covers T3 to T5.
+
+## Objective
+
+Build a deterministic Config 0. It diagnoses from the same typed `Dossier` and call graph the LLM sees, using the rules the prompt already gives the model, and replay scores it like the `local` and `cloud` routes. The LLM's contribution then becomes a number: the paired difference A − 0 and D − 0 (vision §1, H1).
+
+## Problem and why
+
+- Nothing measures whether the model adds anything over its own prompt. `Prompts.java:60-67` encodes the F1/F2 rule ("follow the calls down to the last slow or refusing component") and the F3 rule ("unreachable but healthy callee means a CONFIGURATION of the caller").
+- The doc comment at `Prompts.java:15-16` claims the prompt "maps no symptom to a cause". That claim is false and must be corrected.
+- Leakage principle (vision §3): a rule derived from the lab catalog stays in the prompt only if Config 0 runs it too.
+
+## Scope
+
+In scope:
+- ADR-016.
+- `RulesDiagnosis`: a pure function from `Dossier` to diagnosis.
+- A replay-only `rules` route.
+- The corrected Prompts doc comment.
+- Living-spec updates.
+- One Config 0 measurement on `dev` under a committed plan.
+
+Out of scope:
+- The holdout read: follow-up #4, m2-measurement.
+- Topology as data: follow-up #5. This feature uses `CallGraph` as it is.
+- The ranked report.
+- RCAEval.
+- Any production route. Config 0 is a baseline, never the agent's answer.
+
+## Design
+
+**Package and shape.**
+- New package `dev.kintsugi.agent.rules`, holding `RulesDiagnosis.diagnose(Dossier) -> RulesVerdict`.
+- `RulesVerdict` holds `service`, `category`, `rule` (the id of the rule that fired, or `NONE`) and `facts`. The facts are short strings naming the dossier rows that fired the rule, so every verdict can be explained.
+- The class has no Spring, no I/O and no model.
+- It reads the typed `Dossier`, not the rendered text, so the `tables` and `sheets` views cannot change its answer.
+
+**Rules.** They are the prompt's rules in their order, nothing more:
+- **R-REACH**, the F3 rule. A caller's client traffic to a callee carries a connection failure (connection refused or closed, unknown host; a timeout does not count). The callee shows no failure of its own: no WARN or ERROR rise, no restarts, no error answers in its server rows. The verdict is `<caller>|CONFIGURATION`.
+- **R-DOWN**, the F1/F2 rule. Start from the entry service and follow `CallGraph.calls` down while the next callee is abnormal.
+  - Abnormal means slow, which gives `DEPENDENCY_LATENCY`, or refusing, which gives `DEPENDENCY_REJECTING`.
+  - The answer is the last abnormal component on the path, with its category.
+  - "An answer that takes long is that component's own failure even when it ends in success", so slow is judged on latency and does not need errors.
+- **R-NONE.** No rule fires: `UNKNOWN|UNKNOWN`. The prompt says "prefer UNKNOWN to a guess".
+- `RESOURCE_EXHAUSTION` has a definition in the prompt but no discriminator, so Config 0 never returns it. That is a recorded limit, not a gap to fill.
+
+**Thresholds.** These are the only free parameters. ADR-016 fixes them before any dev run, and they are not tuned on dev results:
+- Slow: incident-window mean latency ≥ 2× the previous window's mean, and ≥ 0.5 s.
+- Refusing: server rows for that service with 4xx or 5xx answers, or an error outcome, ≥ 20% of its incident-window answers and ≥ 3 answers.
+- Any later change gets a new ADR revision, and its dev result is labelled exploratory.
+
+**Topology.** Config 0 reuses `CallGraph` (`calls`, `calledBy`). The package-private `Edge.callerRow` and `serverRow` matchers get a public read-only accessor, or the rules live behind a small public helper in `dossier`. The writer picks the smaller change; neither adds a topology copy.
+
+**Replay route.**
+- `rules` is a branch in `ReplayDriver.run()`. It gathers the dossier with `new DossierGatherer(tools, clock).gather(...)` over the same `ReplayLabTools` and diagnoses with `RulesDiagnosis`.
+- It writes the same incident JSON shape and `summary.tsv` row, with route `rules`, model `rules-v1`, tokens 0 and cost 0.
+- `AgentRoute`, `ModelRoute`, `RouteEnvironmentPostProcessor` and `LoopConfig` stay closed: production cannot select Config 0.
+- `infra/scripts/replay-agent.sh` accepts `--route rules`, with no key, no Ollama and no cost warning.
+- The Spring context for a rules replay comes from a dedicated test entry or the local profile, without a model call. The writer picks the smaller change and documents it.
+
+## Acceptance criteria
+
+- AC1: ADR-016 exists, with the headings of ADR-001. It states the rules, the thresholds, the leakage principle, the RESOURCE_EXHAUSTION limit, and that Config 0 is never the agent's answer.
+- AC2: `RulesDiagnosis` gives:
+  - `gateway-mock|DEPENDENCY_LATENCY` on the F1 golden dossier;
+  - `order-service|CONFIGURATION` on the F3 golden dossier;
+  - `UNKNOWN|UNKNOWN` on the healthy golden dossier.
+
+  Every verdict names its rule and at least one fact. Unit tests prove all of this.
+- AC3: the same verdict comes back for one dossier whatever its rendered view, because the rules read only the record.
+- AC4: `infra/scripts/replay-agent.sh --route rules --mode decision --split dev` writes 15 `summary.tsv` rows with route `rules`, 0 tokens and cost 0. It uses no network and no Ollama, and the scorer reads it as its own config.
+- AC5: no production class can select the `rules` route. A test proves `AgentRoute.of("rules")` still throws.
+- AC6: the `Prompts.java:15-16` doc comment says which rules the prompt encodes and points at ADR-016. The prompt text sent to the model is byte-identical, which the `PromptsTest` golden proves.
+- AC7: `openspec/specs/agent/spec.md` gets a "Rules-only diagnosis (Config 0)" requirement and the `rules` replay route, both with GIVEN/WHEN/THEN scenarios.
+- AC8: a measurement plan is committed before the Config 0 dev run. The result, under `evals/results/`, has Wilson 95% CIs and paired comparisons against the M0 A and D dev inputs. No holdout recording is read.
+
+## Tasks
+
+- [x] T1: ADR-016 plus the design above. Docs. Route: inline (one file, design already settled here).
+- [ ] T2: `RulesDiagnosis` and `RulesVerdict`, with unit tests over the `dossier/` golden fixtures, RED first (AC2, AC3). Route: delegated writer (2+ non-trivial files).
+- [ ] T3: the `rules` replay route: the `ReplayDriver` branch, `replay-agent.sh`, the cost-0 aggregate, tests (AC4, AC5), and the agent spec requirement (AC7). Route: delegated writer.
+- [ ] T4: correct the `Prompts.java:15-16` comment, with a byte-identical prompt golden (AC6). Route: inline (mechanical).
+- [ ] T5: the measurement plan, the Config 0 run on dev, the score against M0 A and D, and the committed result (AC8). Route: inline commands. The run starts only after the T4 local replays of service-assessment finish, because both rebuild under `nice` and share one CPU.
+
+## Checks
+
+- `cd agent && nice -n 19 ./mvnw -q test` runs the default suite. It holds 553 tests at the base.
+- `infra/scripts/test-lib.sh` runs the bash lib. It holds 154 cases at the base.
+- `cd evals && .venv/bin/python -m pytest -q` runs 57 tests at the base.
+- Native review runs per work-unit commit (standing consent).
+
+## Progress
+
+- 2026-10-29: worktree and branch created. Exploration mapped Prompts rules, Dossier, CallGraph, routes and the replay seam (`ReplayDriver.run()` :266-307). This document was written.
+
+## Next step
+
+T2: `RulesDiagnosis` with RED-first unit tests over the golden dossiers.
