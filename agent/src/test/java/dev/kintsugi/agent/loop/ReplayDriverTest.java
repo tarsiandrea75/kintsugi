@@ -592,6 +592,102 @@ class ReplayDriverTest {
 				"F2\texplorer\tcloud\t-\t-\t-\t1\t2\t1/2\t0.75\t1\t1/1\t0/2\t2000000\t200000\t0.3000");
 	}
 
+	/**
+	 * Config 0 (ADR-016; odd/tasks/rules-baseline.md T3): a rules sample gathers the dossier from the recording, as a
+	 * decision sample's loop does, and diagnoses it with {@code RulesDiagnosis}, with no router, no model and no
+	 * database. F1 r1 is the first dev case of F1.
+	 */
+	@Test
+	void aRulesSampleDiagnosesTheRecordedDossierWithNoModel() throws IOException {
+		ReplayDriver driver = ReplayDriver.rulesOnly(ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST,
+				DossierView.TABLES, DecisionReport.PLAIN);
+		ReplayCases.Recording r1 = driver.decisionCases("dev", List.of("F1")).get(0);
+		assertThat(r1.stem()).isEqualTo("verify-agent-20261024T162555Z-r1-F1");
+
+		ReplayDriver.Sample sample = driver.rulesSample(r1, 1);
+		ReplayDriver.write(this.out, sample);
+
+		assertThat(this.model.calls()).as("model calls").isZero();
+		assertThat(sample.route()).isEqualTo(ReplayDriver.RULES_ROUTE).isEqualTo("rules");
+		assertThat(sample.mode()).isEqualTo(AgentMode.DECISION);
+		assertThat(sample.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(sample.truth()).isEqualTo(F1_TRUTH);
+		assertThat(sample.reported()).isEqualTo(F1_TRUTH);
+		assertThat(sample.verdict()).isEqualTo("MATCH");
+		assertThat(sample.promptTokens()).isZero();
+		assertThat(sample.completionTokens()).isZero();
+		// The gatherer's calls are the only calls, so they are the dossier's, and the recording holds every one.
+		assertThat(sample.unrecorded()).isZero();
+		assertThat(sample.coverage()).isEqualTo(1.0);
+		assertThat(sample.dossierCalls()).isEqualTo(sample.recorded()).isPositive();
+		assertThat(sample.dossierUnrecorded()).isZero();
+
+		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
+		assertThat(line).hasSize(19);
+		assertThat(List.of(line).subList(0, 8)).containsExactly("F1", "decision", "rules", "1", "COMPLETED", F1_TRUTH,
+				F1_TRUTH, "MATCH");
+		assertThat(List.of(line).subList(12, 14)).containsExactly("0", "0");
+		assertThat(List.of(line).subList(15, 19)).containsExactly("dev", r1.stem(), "tables", "plain");
+
+		JsonNode incident = JSON
+			.readTree(this.out.resolve("F1-decision-verify-agent-20261024T162555Z-r1-F1-1.json").toFile());
+		assertThat(incident.path("id").asString()).isNotBlank();
+		assertThat(incident.path("mode").asString()).isEqualTo("decision");
+		assertThat(incident.path("route").asString()).isEqualTo("rules");
+		assertThat(incident.path("model").asString()).isEqualTo(ReplayDriver.RULES_MODEL).isEqualTo("rules-v1");
+		assertThat(incident.path("status").asString()).isEqualTo("COMPLETED");
+		assertThat(incident.path("report").path("rootCauseService").asString()).isEqualTo("gateway-mock");
+		assertThat(incident.path("report").path("rootCauseCategory").asString()).isEqualTo("DEPENDENCY_LATENCY");
+		assertThat(incident.path("rule").asString()).isEqualTo("R-DOWN");
+		assertThat(incident.path("facts").isArray()).isTrue();
+		assertThat(incident.path("facts").size()).isPositive();
+		assertThat(incident.path("view").asString()).isEqualTo("tables");
+		assertThat(incident.path("decisionReport").asString()).isEqualTo("plain");
+	}
+
+	@Test
+	void aRulesRunReplaysEveryCaseOfTheSplitAndRecordsItsView() {
+		ReplayDriver driver = ReplayDriver.rulesOnly(ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST,
+				DossierView.SHEETS, DecisionReport.PLAIN);
+		List<ReplayDriver.Sample> samples = new ArrayList<>();
+
+		driver.rulesSamples("dev", List.of("F1", "F3"), 2, samples::add);
+
+		// 5 dev cases of F1 and 5 of F3, each twice; the rules read the record, so the view only labels the sample.
+		assertThat(samples).hasSize(20).allSatisfy(sample -> {
+			assertThat(sample.route()).isEqualTo("rules");
+			assertThat(sample.split()).isEqualTo("dev");
+			assertThat(sample.view()).hasValue(DossierView.SHEETS);
+			assertThat(sample.promptTokens()).isZero();
+			assertThat(sample.completionTokens()).isZero();
+		});
+		assertThat(samples.get(0).reported()).isEqualTo(samples.get(1).reported());
+		assertThat(this.model.calls()).as("model calls").isZero();
+	}
+
+	@Test
+	void aRulesOnlyDriverRunsNoModelSample() {
+		ReplayDriver driver = ReplayDriver.rulesOnly(ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST,
+				DossierView.TABLES, DecisionReport.PLAIN);
+		ReplayCases.Recording r1 = driver.decisionCases("dev", List.of("F1")).get(0);
+
+		assertThatThrownBy(() -> driver.sample("F1", AgentMode.DOSSIER, 1)).isInstanceOf(IllegalStateException.class)
+			.hasMessageContaining("rules-only");
+		assertThatThrownBy(() -> driver.decisionSample(r1, 1)).isInstanceOf(IllegalStateException.class)
+			.hasMessageContaining("rules-only");
+		assertThat(AgentDatabase.admin().sql("SELECT count(*) FROM incidents").query(Long.class).single()).isZero();
+	}
+
+	@Test
+	void theRulesRouteCostsNothingAndSaysSo() {
+		ReplayDriver.Sample rules = new ReplayDriver.Sample("F1", AgentMode.DECISION, ReplayDriver.RULES_ROUTE, "dev",
+				"r", Optional.of(DossierView.TABLES), Optional.of(DecisionReport.PLAIN), 1, IncidentStatus.COMPLETED,
+				F1_TRUTH, F1_TRUTH, "MATCH", 33, 0, 1.0, 0, 0, 0, 0.1, 33, 0, JSON.createObjectNode());
+
+		assertThat(ReplayDriver.aggregate(List.of(rules))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
+				"F1\tdecision\trules\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t0\t0\t0.0000");
+	}
+
 	@Test
 	void theLocalRouteHasNoCost() {
 		ReplayDriver.Sample local = new ReplayDriver.Sample("F3", AgentMode.DOSSIER, "local", "-", "r",

@@ -473,7 +473,10 @@ infra/scripts/replay-agent.sh --route local                       # Ollama with 
 infra/scripts/replay-agent.sh --mode decision                     # each dev recording once: the dossier, one report call
 infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
 infra/scripts/replay-agent.sh --mode decision --view sheets       # the dossier as one fact sheet per service
+infra/scripts/replay-agent.sh --route rules --mode decision       # Config 0: the rules alone, no model (ADR-016)
 ```
+
+`--route rules` is Config 0 (agent spec, "Rules-only diagnosis (Config 0)"), decision mode only: it runs `RulesReplayTest`, with no Spring context, no model, no key, no Ollama and no Docker, and writes the same files with route `rules`, 0 tokens and a cost of `0.0000`, so the scorer reads it as one more config. Production has no such route.
 
 **Cost:** on the cloud route every sample is paid model calls (the script prints how many samples it will run, at most 60 per run). Run it only with the human's go-ahead, and record the cost from `aggregate.tsv`. The key comes from the shell or `infra/.env` (`export_cloud_key` in `lib.sh`) and reaches Maven through its environment only; it is never printed or put on a command line.
 

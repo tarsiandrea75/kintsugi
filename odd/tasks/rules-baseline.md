@@ -83,7 +83,7 @@ Out of scope:
 
 - [x] T1: ADR-016 plus the design above. Docs. Route: inline (one file, design already settled here).
 - [x] T2: `RulesDiagnosis` and `RulesVerdict`, with unit tests over the `dossier/` golden fixtures, RED first (AC2, AC3). Route: delegated writer (2+ non-trivial files).
-- [ ] T3: the `rules` replay route: the `ReplayDriver` branch, `replay-agent.sh`, the cost-0 aggregate, tests (AC4, AC5), and the agent spec requirement (AC7). Route: delegated writer.
+- [x] T3: the `rules` replay route: the `ReplayDriver` branch, `replay-agent.sh`, the cost-0 aggregate, tests (AC4, AC5), and the agent spec requirement (AC7). Route: delegated writer.
 - [ ] T4: correct the `Prompts.java:15-16` comment, with a byte-identical prompt golden (AC6). Route: inline (mechanical).
 - [ ] T5: the measurement plan, the Config 0 run on dev, the score against M0 A and D, and the committed result (AC8). Route: inline commands. The run starts only after the T4 local replays of service-assessment finish, because both rebuild under `nice` and share one CPU.
 
@@ -104,6 +104,8 @@ Out of scope:
 
 - 2026-10-29: slice 1 (T1, T2; `dca9d2f`, `4323f3c`, `8647359`) reviewed: approved, lineage review-adf5f4937bf15329, acknowledged. Its WARNING (connection-failure rows counted as fallback answers) and SUGGESTION (a non-refusing callee's share in the walk tie-break) were fixed RED-first in the next commit, with ADR-016 aligned before any run; 574 tests green.
 
+- 2026-10-29: T3 implemented (uncommitted). Spring-context choice: a dedicated `RulesReplayTest` (tagged `replay`) with no Spring context at all, over `ReplayDriver.rulesOnly(...)`, which needs no router, settings, loop or database; `replay-agent.sh --route rules` runs it instead of `ReplayRunTest`, so no context ever sees `rules` and `AgentRoute`, `ModelRoute`, `RouteEnvironmentPostProcessor` and `LoopConfig` are unchanged. The rules sample writes an incident JSON built in code (`id`, mode, route `rules`, model `rules-v1`, `report`, `rule`, `facts`, `view`, `decisionReport`, no steps); `aggregate.tsv` cost is `0.0000`. RED: `ReplayDriverTest` failed to compile (no `rulesOnly`, `rulesSample`, `rulesSamples`, `RULES_ROUTE`, `RULES_MODEL`); the base `replay-agent.sh` answered `Unknown route 'rules'; choose cloud or local` to the two new `test-lib.sh` cases. `RouteSelectionTest`'s `AgentRoute.of("rules")` guard was green from the start, as expected for a closed route. GREEN: default suite 579 tests (574 + 5), 0 failures; `test-lib.sh` 156 cases; F1 r1 dev on the rules route is `MATCH` (`R-DOWN`), as ADR-016 predicts; the dev smoke run wrote 15 rows, all route `rules`, 0 tokens, exit 0 (not scored, not committed).
+
 ## Next step
 
-T3: the `rules` replay route and the agent spec requirement.
+T4: correct the `Prompts.java:15-16` doc comment, prompt byte-identical.

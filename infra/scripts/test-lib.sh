@@ -559,6 +559,13 @@ expect "the assessed report with the tables, the default view, stops the run bef
 driver_refusal=$(replay_agent --mode decision --split train; echo "exit $?")
 expect "an unknown split exits 2 with the driver's reason, before Maven" "$driver_refusal" \
   "unknown split 'train': choose dev, holdout, stress or probe"$'\n'"exit 2"
+# Config 0 (ADR-016) replays decision mode only, and the route is refused on the option itself before the manifest.
+expect "the rules route refuses explorer and dossier mode before Maven" \
+  "$(replay_agent --route rules --mode dossier; echo "exit $?")" \
+  "--route rules replays decision mode only, not dossier: Config 0 diagnoses the gathered dossier and has no explorer\
+ or dossier loop"$'\n'"exit 2"
+expect "an unknown route exits 2 and names the three routes" "$(replay_agent --route gpu; echo "exit $?")" \
+  "Unknown route 'gpu'; choose cloud, local or rules"$'\n'"exit 2"
 expect "a 4-digit --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 1000)" \
   "2 --repeats"
 expect "a zero --repeats exits 2 on the option itself" "$(option_check --mode decision --repeats 0)" "2 --repeats"

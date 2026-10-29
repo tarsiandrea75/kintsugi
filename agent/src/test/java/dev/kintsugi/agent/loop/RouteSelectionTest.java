@@ -71,6 +71,18 @@ class RouteSelectionTest {
 			.hasStackTraceContaining("kintsugi.agent.route must be local or cloud, got \"gpu\"");
 	}
 
+	/**
+	 * Config 0 is a replay-only baseline, never the agent's answer (ADR-016): production knows no {@code rules} route,
+	 * so neither the property's parser nor the application's start accepts it.
+	 */
+	@Test
+	void theRulesRouteIsReplayOnlyAndProductionRefusesIt() {
+		assertThatThrownBy(() -> AgentRoute.of("rules")).isInstanceOf(IllegalArgumentException.class)
+			.hasMessage("kintsugi.agent.route must be local or cloud, got \"rules\"");
+		assertThatThrownBy(() -> start("--kintsugi.agent.route=rules"))
+			.hasStackTraceContaining("kintsugi.agent.route must be local or cloud, got \"rules\"");
+	}
+
 	@Test
 	void theCloudRouteWithoutAKeyStopsTheStartNamingTheVariable() {
 		assertThatThrownBy(() -> start("--kintsugi.agent.route=cloud", "--spring.ai.anthropic.api-key="))

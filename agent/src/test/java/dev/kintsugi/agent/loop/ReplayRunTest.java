@@ -32,7 +32,8 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  * ({@code ./mvnw test -Preplay -Dtest=ReplayRunTest}).
  *
  * <p>
- * System properties: {@code replay.route} ({@code cloud}, the default, or {@code local}), {@code replay.mode}
+ * System properties: {@code replay.route} ({@code cloud}, the default, or {@code local}; Config 0's {@code rules}
+ * route is {@link RulesReplayTest}, which has no Spring context, so this context never sees it), {@code replay.mode}
  * ({@code dossier}, the default, {@code explorer}, {@code decision} or {@code both}, which is explorer and dossier; an
  * explorer replay is low-coverage and not a valid measurement, see the feature document's T4 smoke check),
  * {@code replay.faults} ({@code F1,F2,F3}), {@code replay.recordings} (the committed {@code replay/} directory) and

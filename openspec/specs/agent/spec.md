@@ -582,6 +582,8 @@ It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as
 - the samples whose `DOSSIER` step made calls and had none unrecorded, out of samples;
 - tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens.
 
+A decision run MAY instead run on the `rules` route, Config 0 ("Rules-only diagnosis (Config 0)"; **rules-baseline T3**, ADR-016): `RulesReplayTest`, run by `replay-agent.sh --route rules`, replays the same decision cases with the same properties, and a case's sample gathers its dossier with `DossierGatherer` over the same fresh `ReplayLabTools`, the same offset clock and the recording's `sinceMinutes` as a decision sample's loop, then diagnoses it with `RulesDiagnosis`. It has no Spring context, no `ModelRouter`, no `AgentLoop` and no database row, so nothing selects a production route; a driver built for it refuses model samples with an `IllegalStateException`. Its sample is always `COMPLETED`, its `reported` is the verdict's `service|category`, scored by the same rule, with 0 prompt and 0 completion tokens and the gatherer's counters, which are the dossier's calls. Its `summary.tsv` line has the same columns, with route `rules`; its `aggregate.tsv` cost is `0.0000`, never `-`; its incident file holds `id`, `symptom`, `sinceMinutes`, mode `decision`, route `rules`, model `rules-v1`, status `COMPLETED`, `startedAt`, the `report`'s `rootCauseService` and `rootCauseCategory`, the verdict's `rule` and `facts`, the run's `view` and `decisionReport`, and no steps. The rules read the typed dossier, so the view and the report only label the sample. Any mode but decision MUST be refused: `RulesReplayTest` with an `IllegalArgumentException`, `replay-agent.sh` with exit 2 before Maven. The script needs no key, no Ollama and no docker for it, prints no cost warning, and keeps `ANTHROPIC_API_KEY` out of the test JVM.
+
 A sample is counted in the totals even when writing its files fails. A miss is a measurement: the run fails only when a sample cannot run. The driver is tagged `replay` and left out of the default build (Maven surefire `excludedGroups`); only the `replay` profile runs it, since it calls a model and costs money on the cloud route. Dossier is its default mode: explorer replays stay available, but under exact matching most of the explorer's model-chosen calls are unrecorded (coverage 0.00-0.38 in the T4 smoke check), so they measure the replay's gaps, not the agent, and are not valid measurements. `both` runs explorer and dossier. A decision sample ("Decision mode") makes only the dossier's calls, all held by its recording, and the report call, so it makes no unrecorded call.
 
 #### Scenario: A sample is served its own mode's recording first
@@ -662,6 +664,58 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 #### Scenario: The replay run is excluded from the default build
 - WHEN `./mvnw test` runs without the `replay` profile
 - THEN `ReplayRunTest` does not run and no model is called
+- AND neither does `RulesReplayTest`, which writes a run directory
+
+#### Scenario: A rules sample diagnoses the recorded dossier with no model (rules-baseline T3)
+- GIVEN the first `dev` decision case of F1, `verify-agent-20261024T162555Z-r1-F1`, whose truth is `gateway-mock|DEPENDENCY_LATENCY`
+- WHEN it replays on the `rules` route
+- THEN no model is called, and its `summary.tsv` line holds `F1 decision rules 1 COMPLETED`, the truth, `gateway-mock|DEPENDENCY_LATENCY` and `MATCH`, 0 prompt and 0 completion tokens, coverage 1.00, then `dev`, the recording, `tables` and `plain`
+- AND its incident file holds route `rules`, model `rules-v1`, the rule `R-DOWN` and at least one fact
+
+#### Scenario: A rules run replays every case of the split (rules-baseline T3)
+- GIVEN the `dev` split, faults F1 and F3, `replay.repeats` = 2 and the view `sheets`
+- WHEN the rules run replays them
+- THEN it makes 20 samples, each with route `rules`, split `dev`, view `sheets` and 0 tokens, and no model call
+
+#### Scenario: The rules route costs nothing and says so (rules-baseline T3)
+- GIVEN one rules sample
+- WHEN the aggregate is computed
+- THEN its line ends with `0`, `0` and the cost `0.0000`, where the local route writes `-`
+
+#### Scenario: The rules route replays decision mode only (rules-baseline T3)
+- GIVEN `replay-agent.sh --route rules --mode dossier`
+- WHEN it checks its options
+- THEN it exits 2 before Maven with `--route rules replays decision mode only, not dossier: ...`
+- AND a driver built for the rules route refuses an explorer, dossier or decision model sample with an `IllegalStateException`, before any incident is opened
+
+### Requirement: Rules-only diagnosis (Config 0)
+
+`RulesDiagnosis.diagnose(Dossier)` MUST give Config 0's verdict for one typed `Dossier` ([ADR-016](../../../docs/adr/ADR-016-rules-baseline.md); [feature document](../../../odd/tasks/rules-baseline.md)): a `RulesVerdict` of `service`, `category`, `rule` and `facts`, the facts naming the dossier rows that fired the rule, at least one. It is a pure function: no Spring, no I/O, no model and no clock. It reads the record, never the rendered text, so the `tables` and the `sheets` views cannot change its answer. It uses the rules the prompt already gives the model ("What one call sees"), in their order, the first that fires giving the verdict, and the thresholds ADR-016 fixed before any dev run:
+1. **R-REACH**, the F3 rule: a caller's client rows to a callee carry a connection failure (a refusal or close, or an unknown host; never a timeout), and the callee is healthy (no restart, no WARN or ERROR line, neither refusing nor slow, in the incident window). The verdict is `<caller>|CONFIGURATION`.
+2. **R-DOWN**, the F1 and F2 rule: from the entry service, follow `CallGraph.calls` down while the next callee is slow (incident mean latency at least 2× the previous window's and at least 0.5 s, or at least 3 timeouts in its callers' rows) or refusing (answers with a numeric status of at least 400 are at least 20% of its answers, and at least 3). The verdict is the last such component, `DEPENDENCY_REJECTING` when it is refusing, else `DEPENDENCY_LATENCY`.
+3. **R-NONE**: no rule fires. The verdict is `UNKNOWN|UNKNOWN`.
+
+It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a discriminator: a recorded limit. Config 0 is a baseline, never the agent's answer: only replay's `rules` route runs it ("Replay of recorded tool outputs"), and `AgentRoute`, `ModelRoute`, `RouteEnvironmentPostProcessor` and `LoopConfig` stay closed to it, so `kintsugi.agent.route=rules` stops the start as any unknown route does ("Routes"). A threshold change needs a new ADR revision, and its dev result is exploratory.
+
+#### Scenario: The golden dossiers (rules-baseline T2)
+- GIVEN the F1, F3 and healthy golden dossiers of the `dossier/` fixtures
+- WHEN each is diagnosed
+- THEN the verdicts are `gateway-mock|DEPENDENCY_LATENCY` by `R-DOWN`, `order-service|CONFIGURATION` by `R-REACH` and `UNKNOWN|UNKNOWN` by `R-NONE`, each with at least one fact
+
+#### Scenario: The view does not change the verdict (rules-baseline T2)
+- GIVEN one dossier
+- WHEN it is rendered as the tables and as the sheets
+- THEN its verdict is the same, since the rules read only the record
+
+#### Scenario: A timeout is no connection failure (rules-baseline T2)
+- GIVEN a caller whose client rows to a healthy callee carry only `HttpTimeoutException`
+- WHEN the dossier is diagnosed
+- THEN `R-REACH` does not fire
+
+#### Scenario: Production cannot select Config 0 (rules-baseline T3)
+- GIVEN `kintsugi.agent.route=rules`
+- WHEN `AgentRoute.of` reads it, or the agent starts
+- THEN both fail with `kintsugi.agent.route must be local or cloud, got "rules"`
 
 ### Requirement: Evidence dossier gathering
 

@@ -15,8 +15,9 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
   infra/scripts/replay-agent.sh --mode decision --view sheets   # the dossier as one fact sheet per service
   infra/scripts/replay-agent.sh --mode decision --view sheets --report assessed   # each service's role first
+  infra/scripts/replay-agent.sh --route rules --mode decision   # Config 0: the rules alone, no model (ADR-016)
 
-  --route cloud|local            the model's route (default cloud)
+  --route cloud|local|rules      the model's route (default cloud), or rules: Config 0, decision mode only
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
   --samples N                    explorer and dossier: samples per fault and mode, 1 to 999 (default 1)
   --split NAME                   decision: the recordings to replay, dev (default), holdout, stress or probe
@@ -34,6 +35,12 @@ of samples, mean coverage, tokens and, on the cloud route, the estimated cost at
 completion tokens; then the covered samples, coverage at least 0.8, and the matches among them, and the samples whose
 dossier was fully recorded). A sample with coverage below 1 had calls no recording holds: read it as such. The view and
 the report are a decision sample's, and - for the others.
+
+--route rules is Config 0 (ADR-016; agent spec, "Rules-only diagnosis (Config 0)"): it runs RulesReplayTest instead,
+with no Spring context, no model and no database. Each decision case's dossier is gathered from its recording as the
+loop gathers it and diagnosed by RulesDiagnosis; its lines are those of a model's run, with route rules, 0 tokens and,
+in aggregate.tsv, a cost of 0, so the scorer reads it as one more config. It needs no key, no Ollama and no docker, and
+takes decision mode only. Production has no such route: Config 0 is a baseline, never the agent's answer.
 
 A decision run (agent spec, "Decision mode") has one case per recording of the split: each line of recordings.tsv
 for a chosen fault, in that split, recorded in decision or dossier mode. Each case replays its own recording alone,
@@ -98,9 +105,12 @@ while (( $# )); do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
-[[ "$route" == cloud || "$route" == local ]] || { echo "Unknown route '$route'; choose cloud or local" >&2; exit 2; }
+[[ "$route" == cloud || "$route" == local || "$route" == rules ]] \
+  || { echo "Unknown route '$route'; choose cloud, local or rules" >&2; exit 2; }
 [[ "$mode" == explorer || "$mode" == dossier || "$mode" == decision || "$mode" == both ]] \
   || { echo "Unknown mode '$mode'; choose explorer, dossier, decision or both" >&2; exit 2; }
+[[ "$route" != rules || "$mode" == decision ]] || { echo "--route rules replays decision mode only, not $mode:" \
+  "Config 0 diagnoses the gathered dossier and has no explorer or dossier loop" >&2; exit 2; }
 # At most 3 digits for --samples and --repeats, so the bound on cloud samples below cannot wrap around in bash's 64-bit
 # arithmetic.
 if [[ "$mode" == decision ]]; then
@@ -182,6 +192,9 @@ if [[ "$route" == cloud ]]; then
     || { echo "$total samples exceed the $MAX_CLOUD_SAMPLES a cloud run may make; divide the batch" >&2; exit 2; }
   echo "COST WARNING: $total samples on the cloud route, each one paid model calls."
   echo "Run this only with the human's go-ahead, and record the cost from aggregate.tsv."
+elif [[ "$route" == rules ]]; then
+  # Config 0 calls no model: no key, no Ollama, no cost.
+  unset ANTHROPIC_API_KEY
 else
   # The local route never needs the key: keep it out of the test JVM.
   unset ANTHROPIC_API_KEY
@@ -203,8 +216,10 @@ else
   info "replaying ${selected[*]}; mode: $mode; route: $route; samples: $samples; out: $OUT_DIR"
   options=("-Dreplay.samples=$samples")
 fi
+# Config 0 runs its own entry, with no Spring context, so no context ever selects the rules route.
+replay_test=$([[ "$route" == rules ]] && echo RulesReplayTest || echo ReplayRunTest)
 status=0
-(cd "$REPO_DIR/agent" && ./mvnw -q test -Preplay -Dtest=ReplayRunTest \
+(cd "$REPO_DIR/agent" && ./mvnw -q test -Preplay "-Dtest=$replay_test" \
   "-Dreplay.route=$route" "-Dreplay.mode=$mode" "-Dreplay.faults=$faults" "${options[@]}" \
   "-Dreplay.recordings=$REPLAY_DIR" "-Dreplay.out=$OUT_DIR") || status=$?
 

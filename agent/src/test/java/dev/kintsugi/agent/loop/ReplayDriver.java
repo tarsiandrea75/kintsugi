@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -31,11 +32,14 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
+import dev.kintsugi.agent.rules.RulesDiagnosis;
+import dev.kintsugi.agent.rules.RulesVerdict;
 
 /**
  * The replay driver's per-sample pipeline (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md
@@ -58,6 +62,12 @@ import dev.kintsugi.agent.loop.ReplayCases.Recording;
  * decision sample writes its dossier in the run's view ({@code kintsugi.agent.decision.view}, the tables by default;
  * odd/tasks/service-assessment.md T1) and asks for the run's report ({@code kintsugi.agent.decision.report}, the plain
  * one by default; T2r), which its lines record, so a result is attributable to its variant.
+ *
+ * <p>
+ * The {@code rules} route is Config 0 (ADR-016; odd/tasks/rules-baseline.md T3), decision mode only: a rules sample
+ * gathers the same dossier over the same tools and clock, diagnoses it with {@link RulesDiagnosis} and is scored by the
+ * same rule. It needs no router, no loop and no database ({@link #rulesOnly}), and production knows no such route: it
+ * exists here only, as a baseline, never as the agent's answer.
  */
 final class ReplayDriver {
 
@@ -86,6 +96,14 @@ final class ReplayDriver {
 	static final double PROMPT_USD_PER_MILLION = 0.10;
 
 	static final double COMPLETION_USD_PER_MILLION = 0.50;
+
+	/** Config 0's route in {@code summary.tsv}: replay-only, so no {@link AgentRoute} (ADR-016). */
+	static final String RULES_ROUTE = "rules";
+
+	/** Config 0's model in a rules sample's incident: the rules of ADR-016, version 1. */
+	static final String RULES_MODEL = "rules-v1";
+
+	private static final String RULES_ONLY = "a rules-only driver runs no model sample: use rulesSamples";
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -152,6 +170,15 @@ final class ReplayDriver {
 		this.recordings = recordings;
 		this.toolsList = toolsList;
 		this.cases = ReplayCases.read(recordings);
+	}
+
+	/**
+	 * A driver for the {@code rules} route only: no router, no loop settings and no database, since a rules sample
+	 * calls no model and opens no incident. Its model samples refuse to run ({@link #sample}, {@link #decisionSample}).
+	 */
+	static ReplayDriver rulesOnly(Path recordings, Path toolsList, DossierView decisionView,
+			DecisionReport decisionReport) {
+		return new ReplayDriver(null, null, null, null, recordings, toolsList, decisionView, decisionReport);
 	}
 
 	/**
@@ -224,14 +251,78 @@ final class ReplayDriver {
 	 * or window
 	 */
 	void decisionSamples(String split, List<String> faults, int repeats, Consumer<Sample> each) {
+		eachCase(split, faults, repeats, each, this::decisionSample);
+	}
+
+	/**
+	 * Runs every decision case of {@code split} for {@code faults} {@code repeats} times on the {@code rules} route, as
+	 * {@link #decisionSamples} runs them on a model's.
+	 * @throws IllegalArgumentException as {@link #decisionSamples} does
+	 */
+	void rulesSamples(String split, List<String> faults, int repeats, Consumer<Sample> each) {
+		eachCase(split, faults, repeats, each, this::rulesSample);
+	}
+
+	private void eachCase(String split, List<String> faults, int repeats, Consumer<Sample> each,
+			BiFunction<Recording, Integer, Sample> sample) {
 		checkReport(AgentMode.DECISION);
 		List<Recording> cases = decisionCases(split, faults);
 		cases.forEach(this::parsed);
 		for (Recording recording : cases) {
 			for (int n = 1; n <= repeats; n++) {
-				each.accept(decisionSample(recording, n));
+				each.accept(sample.apply(recording, n));
 			}
 		}
+	}
+
+	/**
+	 * Runs repeat {@code n} of decision case {@code recording} on the {@code rules} route: the dossier a decision sample's
+	 * loop gathers, over the same {@link ReplayLabTools} and clock and with the recording's window, diagnosed by
+	 * {@link RulesDiagnosis}. It always completes, with 0 tokens, and its counters are the gatherer's calls, which are
+	 * the dossier's. Its incident holds the verdict, its rule and its facts; no database row is written.
+	 * @throws IllegalArgumentException when the recording lacks its start, symptom or window
+	 */
+	Sample rulesSample(Recording recording, int n) {
+		checkReport(AgentMode.DECISION);
+		Parsed parsed = parsed(recording);
+		ReplayLabTools tools = new ReplayLabTools(toolsList(), List.of(parsed.incident()));
+		Clock clock = clockAt(parsed.startedAt());
+		long start = System.nanoTime();
+		RulesVerdict verdict = RulesDiagnosis.diagnose(new DossierGatherer(tools, clock).gather(parsed.sinceMinutes()));
+		double seconds = (System.nanoTime() - start) / 1e9;
+
+		AgentMode mode = AgentMode.DECISION;
+		String reported = verdict.service() + "|" + verdict.category();
+		ObjectNode incident = JSON.createObjectNode();
+		incident.put("id", UUID.randomUUID().toString());
+		incident.put("symptom", parsed.symptom());
+		incident.put("sinceMinutes", parsed.sinceMinutes());
+		incident.put("mode", mode.value());
+		incident.put("route", RULES_ROUTE);
+		incident.put("model", RULES_MODEL);
+		incident.put("status", IncidentStatus.COMPLETED.name());
+		incident.put("startedAt", clock.instant().toString());
+		incident.putObject("report")
+			.put("rootCauseService", verdict.service())
+			.put("rootCauseCategory", verdict.category());
+		incident.put("rule", verdict.rule());
+		ArrayNode facts = incident.putArray("facts");
+		verdict.facts().forEach(facts::add);
+		incident.put("view", this.decisionView.value());
+		incident.put("decisionReport", this.decisionReport.value());
+		incident.putArray("steps");
+
+		String truth = recording.truth();
+		return new Sample(recording.fault(), mode, RULES_ROUTE, recording.split(), recording.stem(),
+				mode.viewFrom(this.decisionView), mode.reportFrom(this.decisionReport), n, IncidentStatus.COMPLETED,
+				truth, reported, verdict(IncidentStatus.COMPLETED, reported, truth), tools.recordedCalls(),
+				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), 0, 0, seconds,
+				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident);
+	}
+
+	/** A clock whose "now" is {@code startedAt}, then running: the recording's start, as the sample sees it. */
+	private static Clock clockAt(Instant startedAt) {
+		return Clock.offset(Clock.systemUTC(), Duration.between(Instant.now(), startedAt));
 	}
 
 	/**
@@ -264,9 +355,12 @@ final class ReplayDriver {
 	}
 
 	private Sample run(Parsed primary, List<JsonNode> served, AgentMode mode, String split, int n) {
+		if (this.router == null) {
+			throw new IllegalStateException(RULES_ONLY);
+		}
 		String fault = primary.recording().fault();
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), served);
-		Clock clock = Clock.offset(Clock.systemUTC(), Duration.between(Instant.now(), primary.startedAt()));
+		Clock clock = clockAt(primary.startedAt());
 
 		UUID id = open(primary.symptom(), primary.sinceMinutes(), clock.instant());
 		IncidentStatus status;
@@ -339,7 +433,7 @@ final class ReplayDriver {
 	 * opened on, the samples, matches out of samples, mean coverage, the covered samples (coverage at least
 	 * {@link #COVERED_THRESHOLD}) and the matches among them, the samples whose {@code DOSSIER} step made calls and had
 	 * none unrecorded out of samples, tokens and, on the cloud route, the estimated cost at
-	 * {@link #PROMPT_USD_PER_MILLION} and {@link #COMPLETION_USD_PER_MILLION}. With repeats, the samples outnumber the
+	 * {@link #PROMPT_USD_PER_MILLION} and {@link #COMPLETION_USD_PER_MILLION}; on the {@code rules} route, 0. With repeats, the samples outnumber the
 	 * recordings, which are the independent observations.
 	 */
 	static List<String> aggregate(List<Sample> samples) {
@@ -364,10 +458,13 @@ final class ReplayDriver {
 				.count();
 			Long prompt = sum(group.stream().map(Sample::promptTokens).toList());
 			Long completion = sum(group.stream().map(Sample::completionTokens).toList());
-			boolean cloud = group.get(0).route().equals(AgentRoute.CLOUD.value());
-			String cost = !cloud || (prompt == null && completion == null) ? NONE
-					: format("%.4f", (orZero(prompt) * PROMPT_USD_PER_MILLION
-							+ orZero(completion) * COMPLETION_USD_PER_MILLION) / 1_000_000);
+			String route = group.get(0).route();
+			boolean cloud = route.equals(AgentRoute.CLOUD.value());
+			// Config 0 calls no model, so it costs nothing, and says so; the local route's cost is not estimated.
+			String cost = route.equals(RULES_ROUTE) ? format("%.4f", 0)
+					: !cloud || (prompt == null && completion == null) ? NONE
+							: format("%.4f", (orZero(prompt) * PROMPT_USD_PER_MILLION
+									+ orZero(completion) * COMPLETION_USD_PER_MILLION) / 1_000_000);
 			lines.add(String.join("\t", key, String.valueOf(recordings), String.valueOf(group.size()),
 					matches + "/" + group.size(), format("%.2f", coverage), String.valueOf(covered.size()),
 					matchesCovered + "/" + covered.size(), dossierCovered + "/" + group.size(), shown(prompt),
