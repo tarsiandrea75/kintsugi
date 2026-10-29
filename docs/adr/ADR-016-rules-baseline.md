@@ -30,7 +30,7 @@ The vision (§1, H1) asks what the LLM adds over the rules that feed it. Nothing
 
 Only the incident window is judged against the previous window. Actuator URIs (`/actuator/**`) are ignored. A dossier section that failed to gather (`Gathered.Failed`) counts as no evidence.
 
-- **Answers of a service:** its server traffic rows in the incident window. A service with no server rows in the incident window uses its callers' client rows to it in that window instead. An answer is an error answer only when its status is numeric and ≥ 400. A non-numeric status such as `CLIENT_ERROR` never is.
+- **Answers of a service:** its server traffic rows in the incident window. A service with no server rows in the incident window uses its callers' client rows to it in that window instead, leaving out connection failures: those calls never reached it. An answer is an error answer only when its status is numeric and ≥ 400. A non-numeric status such as `CLIENT_ERROR` never is.
 - **Timeout:** an exception whose class name contains `Timeout`, such as `HttpTimeoutException`. It is checked before the connection-failure match.
 - **Slow:** a service is slow when either holds:
   - one of its non-actuator URIs has an incident mean latency ≥ 2× its previous mean and ≥ 0.5 s. A URI with no previous mean, or a previous mean of 0, cannot be slow by latency. The service's latency ratio is the largest incident-to-previous ratio over its non-actuator URIs, and 0 when no URI has a baseline;
@@ -49,7 +49,7 @@ The first rule that fires gives the verdict.
 
 1. **R-REACH (the F3 rule).** Some caller A has ≥ 1 connection failure to a callee B, and B is healthy. The verdict is `A|CONFIGURATION`. If several callers qualify, the one with the most connection failures wins, and ties go to `CallGraph.SERVICES` order.
 2. **R-DOWN (the F1 and F2 rule).**
-   - Start from the entry services, the ones whose `CallGraph.calledBy` contains `CallGraph.EXTERNAL_CLIENT` (today only order-service), in `CallGraph.SERVICES` order. The first entry whose walk ends on a slow or refusing component gives the verdict. Move to a callee of the current service while that callee is slow or refusing. If several callees qualify, take the one with the larger refusing share, then the larger latency ratio, then `CallGraph.SERVICES` order.
+   - Start from the entry services, the ones whose `CallGraph.calledBy` contains `CallGraph.EXTERNAL_CLIENT` (today only order-service), in `CallGraph.SERVICES` order. The first entry whose walk ends on a slow or refusing component gives the verdict. Move to a callee of the current service while that callee is slow or refusing. If several callees qualify, take the one with the larger refusing share (0 for a callee that is not refusing), then the larger latency ratio, then `CallGraph.SERVICES` order.
    - The answer is the last slow or refusing component reached, including the entry service when it is the only one.
    - The category is `DEPENDENCY_REJECTING` when that component is refusing and `DEPENDENCY_LATENCY` otherwise. An error answer is the more specific fact.
    - "An answer that takes long is that component's own failure even when it ends in success" (`Prompts.java:63`), so slow needs no error.

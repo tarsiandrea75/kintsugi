@@ -245,6 +245,27 @@ class RulesDiagnosisTest {
 	}
 
 	@Test
+	void aCalleeThatIsNotRefusingHasNoRefusingShareInTheWalk() {
+		// payment-service is slow with 2 of 3 error answers (not refusing); inventory-service refuses at 3 of 15.
+		assertThat(RulesDiagnosis.diagnose(new Lab().serverRow("payment-service", "/payments", "503", 2)
+			.serverRow("payment-service", "/payments", "201", 1)
+			.latency("payment-service", "/payments", 0.05, 9.0)
+			.serverRow("inventory-service", "/reservations", "503", 3)
+			.serverRow("inventory-service", "/reservations", "201", 12)
+			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category)
+			.containsExactly("inventory-service", "DEPENDENCY_REJECTING");
+	}
+
+	@Test
+	void aConnectionFailureIsNotAnAnswerOfTheCalleeItNeverReached() {
+		// The callee has no server rows, and the only client rows to it are connection failures with a numeric status.
+		assertThat(RulesDiagnosis.diagnose(new Lab()
+			.clientRow("order-service", "payment-service", "/payments", "503", "ConnectException", 3)
+			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
+			.containsExactly("order-service", "CONFIGURATION", "R-REACH");
+	}
+
+	@Test
 	void theWalkGoesDownToTheLastSlowComponentAndStopsAtTheEntryWhenOnlyItIsSlow() {
 		assertThat(RulesDiagnosis.diagnose(new Lab().latency("payment-service", "/payments", 0.05, 9.0)
 			.latency("gateway-mock", "/authorize", 0.01, 8.9)

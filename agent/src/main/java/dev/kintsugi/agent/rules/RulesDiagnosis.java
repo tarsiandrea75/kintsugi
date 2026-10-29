@@ -147,7 +147,7 @@ public final class RulesDiagnosis {
 					.filter(callee -> !visited.contains(callee))
 					.map(this::assess)
 					.filter(Assessment::abnormal)
-					.min(Comparator.comparingDouble((Assessment a) -> -a.share())
+					.min(Comparator.comparingDouble((Assessment a) -> a.refusing() ? -a.share() : 0)
 						.thenComparingDouble(a -> -a.ratio())
 						.thenComparing(a -> order(a.service())))
 					.orElse(null);
@@ -202,7 +202,9 @@ public final class RulesDiagnosis {
 		List<TrafficRow> server = this.rows.stream()
 			.filter(row -> "server".equals(row.side()) && service.equals(row.service()))
 			.toList();
-		List<TrafficRow> answers = server.isEmpty() ? toIt : server;
+		List<TrafficRow> answers = server.isEmpty()
+			? toIt.stream().filter(row -> !connectionFailure(row.exception())).toList()
+			: server;
 		long total = sum(answers);
 		long errors = sum(answers.stream().filter(RulesDiagnosis::errorAnswer).toList());
 		double share = total == 0 ? 0 : (double) errors / total;

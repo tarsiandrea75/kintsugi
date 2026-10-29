@@ -102,6 +102,8 @@ Out of scope:
 
 - 2026-10-29: T2 implemented against ADR-016 at `4323f3c`: `RulesDiagnosis` and `RulesVerdict` in `dev.kintsugi.agent.rules`. RED: `RulesDiagnosisTest` failed to compile (no `RulesDiagnosis`, `RulesVerdict`). GREEN: `RulesDiagnosisTest` 19/19 and `CallGraphTest` 5/5; the full default suite holds 572 tests (553 + 19), 0 failures. The golden dossiers give F1 `gateway-mock|DEPENDENCY_LATENCY` (R-DOWN), F3 `order-service|CONFIGURATION` (R-REACH) and healthy `UNKNOWN|UNKNOWN` (R-NONE), with no threshold changed. `CallGraph.Edge.callerRow`/`serverRow` and the test `RecordedLab` became public; no topology copy.
 
+- 2026-10-29: slice 1 (T1, T2; `dca9d2f`, `4323f3c`, `8647359`) reviewed: approved, lineage review-adf5f4937bf15329, acknowledged. Its WARNING (connection-failure rows counted as fallback answers) and SUGGESTION (a non-refusing callee's share in the walk tie-break) were fixed RED-first in the next commit, with ADR-016 aligned before any run; 574 tests green.
+
 ## Next step
 
 T3: the `rules` replay route and the agent spec requirement.
