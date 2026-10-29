@@ -9,7 +9,7 @@ Pre-registered: committed before any of the runs below.
 ## Date and commit
 
 - Written: 2026-10-28
-- Run on commit: the commit that adds this plan, or a later one on `feat/service-assessment-close` that changes nothing under `agent/src/main/`, `agent/src/test/java/dev/kintsugi/agent/loop/Replay*.java` or `infra/scripts/replay-agent.sh`. Each run records `git rev-parse HEAD` next to its output directory in the feature document.
+- Run on commit: `ca2e555`, which fixes the assessed-report check in decision mode after this plan was written and before any run, or a later one on `feat/service-assessment-close` that changes nothing under `agent/src/main/`, `agent/src/test/java/dev/kintsugi/agent/loop/Replay*.java` or `infra/scripts/replay-agent.sh`. Each run records `git rev-parse HEAD` next to its output directory in the feature document.
 
 ## Hypothesis
 
