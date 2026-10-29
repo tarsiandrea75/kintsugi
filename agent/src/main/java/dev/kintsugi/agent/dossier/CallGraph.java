@@ -98,14 +98,14 @@ public final class CallGraph {
 		}
 
 		/** Whether {@code row} is this edge's caller-side row: the caller's client call to the target. */
-		boolean callerRow(TrafficRow row) {
+		public boolean callerRow(TrafficRow row) {
 			return this.caller != null && "client".equals(row.side()) && this.caller.equals(row.service())
 					&& this.target.equals(row.clientName()) && this.method.equals(row.method())
 					&& this.uri.equals(row.uri());
 		}
 
 		/** Whether {@code row} is this edge's server-side row: the target's answer to this method and uri. */
-		boolean serverRow(TrafficRow row) {
+		public boolean serverRow(TrafficRow row) {
 			return "server".equals(row.side()) && this.target.equals(row.service()) && this.method.equals(row.method())
 					&& this.uri.equals(row.uri());
 		}

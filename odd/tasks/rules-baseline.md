@@ -82,7 +82,7 @@ Out of scope:
 ## Tasks
 
 - [x] T1: ADR-016 plus the design above. Docs. Route: inline (one file, design already settled here).
-- [ ] T2: `RulesDiagnosis` and `RulesVerdict`, with unit tests over the `dossier/` golden fixtures, RED first (AC2, AC3). Route: delegated writer (2+ non-trivial files).
+- [x] T2: `RulesDiagnosis` and `RulesVerdict`, with unit tests over the `dossier/` golden fixtures, RED first (AC2, AC3). Route: delegated writer (2+ non-trivial files).
 - [ ] T3: the `rules` replay route: the `ReplayDriver` branch, `replay-agent.sh`, the cost-0 aggregate, tests (AC4, AC5), and the agent spec requirement (AC7). Route: delegated writer.
 - [ ] T4: correct the `Prompts.java:15-16` comment, with a byte-identical prompt golden (AC6). Route: inline (mechanical).
 - [ ] T5: the measurement plan, the Config 0 run on dev, the score against M0 A and D, and the committed result (AC8). Route: inline commands. The run starts only after the T4 local replays of service-assessment finish, because both rebuild under `nice` and share one CPU.
@@ -100,6 +100,8 @@ Out of scope:
 
 - 2026-10-29: T1 committed as `dca9d2f`; assessment medium, under budget, so it stays pending in slice 1. The first T2 writer stopped before writing code: ADR-016 compared log counts against the previous window, but the dossier holds incident-window counts only (`DossierGatherer.java:116-128`). ADR-016 was clarified before any run: incident-window logs, a timeout matcher, missing baselines, entry services, non-numeric statuses.
 
+- 2026-10-29: T2 implemented against ADR-016 at `4323f3c`: `RulesDiagnosis` and `RulesVerdict` in `dev.kintsugi.agent.rules`. RED: `RulesDiagnosisTest` failed to compile (no `RulesDiagnosis`, `RulesVerdict`). GREEN: `RulesDiagnosisTest` 19/19 and `CallGraphTest` 5/5; the full default suite holds 572 tests (553 + 19), 0 failures. The golden dossiers give F1 `gateway-mock|DEPENDENCY_LATENCY` (R-DOWN), F3 `order-service|CONFIGURATION` (R-REACH) and healthy `UNKNOWN|UNKNOWN` (R-NONE), with no threshold changed. `CallGraph.Edge.callerRow`/`serverRow` and the test `RecordedLab` became public; no topology copy.
+
 ## Next step
 
-T2: `RulesDiagnosis` with RED-first unit tests over the golden dossiers.
+T3: the `rules` replay route and the agent spec requirement.

@@ -25,7 +25,7 @@ import dev.kintsugi.agent.lab.ToolResult;
  * {@code untilMinutesAgo}; none for {@code service_restarts} and {@code query_metric}, whose one call covers what it
  * covers). A log call without a fixture answers an empty window. Every call is kept, in order.
  */
-final class RecordedLab implements LabTools {
+public final class RecordedLab implements LabTools {
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -38,7 +38,7 @@ final class RecordedLab implements LabTools {
 	private final List<ToolResult> calls = new ArrayList<>();
 
 	/** The lab of {@code set}, then of each of {@code fallbacks} for a key {@code set} does not hold. */
-	RecordedLab(String set, String... fallbacks) {
+	public RecordedLab(String set, String... fallbacks) {
 		this.sets = new ArrayList<>(List.of(set));
 		this.sets.addAll(List.of(fallbacks));
 	}
