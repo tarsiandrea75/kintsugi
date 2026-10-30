@@ -48,7 +48,7 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 ## Checks
 
 - `cd evals && .venv/bin/python -m pytest -q`
-- The agent's Gradle tests for the route and the replay.
+- `cd agent && ./mvnw -q test` (excludes the `live` and `replay` tags).
 
 ## Delivery
 
@@ -64,6 +64,12 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
 
 - 2026-10-30: T3 done. Route: delegated writer (agent, script, spec: 2+ non-trivial files). Spring AI 2.0.1 `OllamaChatOptions.thinkOption` carries `think`; unset sends no field (AC1). Env vars by relaxed binding: `KINTSUGI_AGENT_MODEL_NAME`, `_THINK`, `_NUM_PREDICT_REPORT`, `_CALL_TIMEOUT_REPORT`; the HTTP read timeout and the warm-up follow them. Replay options `--model`, `--think on|off`, `--report-cap`, `--report-timeout` (local only, else exit 2; capped at 2700 s, the incident budget). `summary.tsv`/`aggregate.tsv` gain last columns `model think reportCap reportTimeout`. Thinking text is not read into the report (test). RED: ModelRouteTest, LocalRouteOverridesTest and 13 ReplayDriverTest failures; GREEN: `./mvnw -q test` 591 tests, 0 failures; evals 66 passed; `test-lib.sh` 156 PASS. Parent spot check: `--route cloud --think on` exit 2; ModelRouteTest, LocalRouteSettingsTest, ReplayDriverTest green.
   - Open: the 45 min incident budget still bounds a second report attempt after a slow invalid first one; the calibration (T4) shows whether it matters. T6 labels every input, since unlabelled configs would share a name.
+
+- 2026-10-30: native review of `1f09df9..79d5bdd` (high risk): consent granted, four lenses, approved and acknowledged (lineage `review-a98bc8bcdba329de`). Informational findings kept as follow-ups:
+  - WARNING R3-think-in-act-modes / R4-think-act-caps-unbounded: `--think` is accepted in explorer and dossier modes, where the ACT caps (384, 160) would be eaten by thinking. This experiment runs decision mode only; restricting `--think` to decision mode is a follow-up.
+  - WARNING R3-script-overrides-untested: the four script options have no script-level test (validated by hand).
+  - WARNING R2-coverage-mixed-definitions: results committed before `d4de651` use the old coverage; this document says so in T2.
+  - SUGGESTIONs: R2-aggregate-positional-key, R2-report-timeout-ms-branch, R2-task-check-names-gradle (the agent's check is `cd agent && ./mvnw -q test`, not Gradle), R2-think-vs-thinking-names, R3-completed-no-report-branch, R3-thinking-cut-path-unproved.
 
 ## Next step
 
