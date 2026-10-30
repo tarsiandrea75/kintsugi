@@ -1,0 +1,18 @@
+A-M0: route local, mode decision, view tables; 15 fault cases, 0 healthy
+A-M0  F1       0/5   AC@1   0%  [0%, 43%]
+A-M0  F2       5/5   AC@1 100%  [57%, 100%]
+A-M0  F3       0/5   AC@1   0%  [0%, 43%]
+A-M0  pooled   5/15  AC@1  33%  [15%, 58%]  coverage 100%  selective 33%
+A-V1: route local, mode decision, view sheets; 15 fault cases, 0 healthy
+A-V1  F1       0/5   AC@1   0%  [0%, 43%]
+A-V1  F2       5/5   AC@1 100%  [57%, 100%]
+A-V1  F3       0/5   AC@1   0%  [0%, 43%]
+A-V1  pooled   5/15  AC@1  33%  [15%, 58%]  coverage 100%  selective 33%
+A-V2: route local, mode decision, view sheets; 15 fault cases, 0 healthy
+A-V2  F1       0/5   AC@1   0%  [0%, 43%]
+A-V2  F2       5/5   AC@1 100%  [57%, 100%]
+A-V2  F3       0/5   AC@1   0%  [0%, 43%]
+A-V2  pooled   5/15  AC@1  33%  [15%, 58%]  coverage 100%  selective 33%
+A-V1 - A-M0: 15 cases, A-V1 only 0, A-M0 only 0, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [+0, +0] (seed 1, 10000 resamples)
+A-V2 - A-M0: 15 cases, A-V2 only 0, A-M0 only 0, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [+0, +0] (seed 1, 10000 resamples)
+A-V2 - A-V1: 15 cases, A-V2 only 0, A-V1 only 0, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [+0, +0] (seed 1, 10000 resamples)

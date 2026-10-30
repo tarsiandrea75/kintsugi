@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3230	368	426.3	dev	verify-agent-20261024T162555Z-r1-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3223	430	414.5	dev	verify-agent-20261024T162555Z-r3-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3230	428	422.7	dev	verify-agent-20261024T162555Z-r5-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3231	421	407.7	dev	verify-agent-20261024T162555Z-r7-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3349	383	408.7	dev	verify-agent-20261024T162555Z-r9-F1	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3282	435	416.3	dev	verify-agent-20261024T162555Z-r1-F2	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3267	342	383.3	dev	verify-agent-20261024T162555Z-r3-F2	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3282	441	425.1	dev	verify-agent-20261024T162555Z-r5-F2	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3289	438	421.4	dev	verify-agent-20261024T162555Z-r7-F2	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3303	409	412.7	dev	verify-agent-20261024T162555Z-r9-F2	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3110	361	388.7	dev	verify-agent-20261024T162555Z-r1-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3248	349	398.5	dev	verify-agent-20261024T162555Z-r3-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3234	360	391.5	dev	verify-agent-20261024T162555Z-r5-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3227	330	382.8	dev	verify-agent-20261024T162555Z-r7-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3259	387	404.7	dev	verify-agent-20261024T162555Z-r9-F3	tables	plain

@@ -139,7 +139,7 @@ The gates; the human decides at each one:
 - [x] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
 - [x] T2r Replays ask for the assessed report: `replay-agent.sh --report`, as `--view` in T1 (b) (`ReplayDriver`, `ReplayRunTest`, `replay-agent.sh`, `test-lib.sh`). Plus the T2 review's WARNING R3-quote-orElseThrow at `ReportCheck.java:236-237`: an owned line with no match in the text must give an invalid result for the retry, not throw. Route: delegated writer.
 - [x] T3 ADR-014 without the bar, plus the stop rule (vision §5); ADR-011's status; the spec's remaining parts. Route: delegated writer, with T2r (the plan had said inline).
-- [ ] T4 Measurement on `dev` under a measurement plan committed before the run (`evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`): V1 and V2, local (about 2 h each) and cloud (about $0.05 each), each against a re-run of the incumbent. Pick one. `holdout` is not read in this feature: holdout-1 is read in follow-up feature 4 (`odd/tasks/vision-revision.md`), next to Config 0. Route: inline.
+- [x] T4 Measurement on `dev` under a measurement plan committed before the run (`evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`): V1 and V2, local (about 2 h each) and cloud (about $0.05 each), each against a re-run of the incumbent. Pick one. `holdout` is not read in this feature: holdout-1 is read in follow-up feature 4 (`odd/tasks/vision-revision.md`), next to Config 0. Route: inline.
 - [ ] T5 A descriptive live local round, `verify-agent.sh --mode decision --route local`: it is reported, not a pass or fail gate. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
 
 ## Delivery
@@ -296,7 +296,19 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - D-V2's six misses: four `INVALID_REPORT` (F1 r3, r5, r9; F3 r7) and two `UNKNOWN|UNKNOWN` abstentions (F3 r1, r3).
   - Paired (descriptive): D-V1 - D-M0 McNemar p = 1, +7 points, bootstrap [+0, +20]; D-V2 - D-M0 McNemar p = 0.062 (Holm 0.12), -33 points, bootstrap [-60, -13].
   - The first local incumbent run (`replay-20261029T011031Z-local`) stopped at 14 of 15 samples with no process left, so it is discarded. The three local runs are rerun from the start.
+- 2026-10-30: T4 done, the local route (route: inline). The three local replays ran one after the other at `bf016f4` (the code is that of `b30ae74`), from 2026-10-29 23:19 UTC to 2026-10-30 about 03:30 UTC, 15 samples each. They are scored in `evals/results/2026-10-28-service-assessment-v1-v2-dev/local/`.
+  - A-M0, A-V1 and A-V2 are each 5/15: F1 0/5, F2 5/5, F3 0/5, and they match on the same cases. Per-fault nets against A-M0 are 0, 0, 0 for both variants. McNemar p = 1, and the bootstrap is [+0, +0].
+  - The misses differ in kind:
+    - A-M0: payment-service, five times `DEPENDENCY_LATENCY` and five times `DEPENDENCY_REJECTING`.
+    - A-V1: payment-service eight times and order-service twice, every one `DEPENDENCY_REJECTING` or `DEPENDENCY_LATENCY`.
+    - A-V2: all ten F1 and F3 samples are `INVALID_REPORT`, after the one retry. They used about twice A-V1's prompt tokens on F1 and F3.
+  - Rerun check (descriptive): A-M0 against M0 of 2026-10-25 (`results/2026-10-25-m0-dev/inputs/A-summary.tsv`) is 5/15 against 5/15, with no discordant case.
+  - Decision under the plan's rule:
+    - V1 does not pass on the local route: its pooled net gain is 0, and the rule needs at least 3.
+    - V2 is not eligible: it fails on both routes.
+    - So no variant is eligible. The defaults stay `tables` and `plain`. Under the stop rule (ADR-014, vision §5), the local miss is documented, not chased. The human decides which variant code is deleted.
+  - What it shows: arranging the dossier per service does not change how `granite4.1:8b` reads F1 and F3. This is the same limit `dossier-change-column` met. On the local model, the assessed schema turns wrong answers into invalid ones. On the cloud route, V1's 15/15 is reported and is not kept by this rule.
 
 ## Next step
 
-T4, the local route: the three local replays (tables+plain, sheets+plain, sheets+assessed, about 2 h each), then score them into `.../local`, run the rerun check against M0, and apply the plan's decision rule. Only V1 can still be kept. `holdout` is not read.
+T5 runs on the defaults (`tables`, `plain`), so `infra/compose.yaml` needs no variant settings. First the human decides whether the V1 and V2 code is deleted or kept behind its settings. `rules-baseline` T5 can now start, because the local replays are over.
