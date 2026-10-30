@@ -58,7 +58,7 @@ def test_benchmark_renders_a_config_by_fault_table(tmp_path, monkeypatch):
 
 def test_benchmark_renders_the_paired_rows(tmp_path, monkeypatch):
     text = render(tmp_path, monkeypatch, "2026-10-30-lab")
-    assert "| Pair | Cases | Second only | First only | McNemar p | Holm p | Difference (points) | Bootstrap 95% |" in text
+    assert "| Pair | Cases | Left only | Right only | McNemar p | Holm p | Difference (points) | Bootstrap 95% |" in text
     assert "| D - 0 | 15 | 5 | 1 | 0.22 | 0.22 | +27 | [+0, +53] |" in text
     assert "Cluster bootstrap: seed 1, 10000 resamples." in text
 

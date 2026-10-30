@@ -65,7 +65,7 @@ def _scores(rows):
 def _paired(rows, report):
     if not rows:
         return ["No paired comparison."]
-    header = ["Pair", "Cases", "Second only", "First only", "McNemar p", "Holm p", "Difference (points)",
+    header = ["Pair", "Cases", "Left only", "Right only", "McNemar p", "Holm p", "Difference (points)",
               "Bootstrap 95%"]
     lines = [_row(header), _row(["---"] * len(header))]
     for row in rows:
