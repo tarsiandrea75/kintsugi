@@ -46,10 +46,10 @@ class CallTimeoutsTest {
 	@Test
 	void aRouteWithoutDeadlinesOrCapsIsRejectedNamingTheProperty() {
 		assertThatIllegalArgumentException()
-			.isThrownBy(() -> new ModelRouteProperties("granite4.1:8b", 0, 8192, null, new NumPredict(384, 160, 512)))
+			.isThrownBy(() -> new ModelRouteProperties("granite4.1:8b", 0, 8192, null, new NumPredict(384, 160, 512), null))
 			.withMessageContaining("kintsugi.agent.model.call-timeout");
 		assertThatIllegalArgumentException()
-			.isThrownBy(() -> new ModelRouteProperties("granite4.1:8b", 0, 8192, DEADLINES, null))
+			.isThrownBy(() -> new ModelRouteProperties("granite4.1:8b", 0, 8192, DEADLINES, null, null))
 			.withMessageContaining("kintsugi.agent.model.num-predict");
 	}
 

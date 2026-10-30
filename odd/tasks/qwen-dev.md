@@ -32,7 +32,7 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 
 - [x] T1 ADR-017: `qwen3.5:9b` as the experiment's second local model (version, quantization, licence, why this one). Route: inline (one doc).
 - [x] T2 Scorer: a `TIMED_OUT` sample is a miss and not covered; tests first; evals spec. Route: delegated writer.
-- [ ] T3 Replay overrides (`--model`, `--think`, `--report-cap`, `--report-timeout`), recorded per sample; tests first; agent spec "Routes"/"Answer caps". Route: delegated writer.
+- [x] T3 Replay overrides (`--model`, `--think`, `--report-cap`, `--report-timeout`), recorded per sample; tests first; agent spec "Routes"/"Answer caps". Route: delegated writer.
 - [ ] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
 - [ ] T5 The dev plan, committed before the dev runs. Route: inline.
 - [ ] T6 The dev runs and the scored result; reading; STATE. Route: inline commands.
@@ -62,6 +62,9 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
 
 - 2026-10-30: T2 done. Route: inline, against the declared delegated route: three small, understood edits (about 35 lines), cheaper than a writer's handoff. ADR-015 defines coverage as the share of fault cases with an answer; the spec and `scoring.py` counted only abstentions, so a `TIMED_OUT`, `FAILED` or `INVALID_REPORT` row counted as covered. `FaultScore.unanswered` now counts them; AC@1 and the paired rows are unchanged. RED: the new test failed; GREEN: 66 passed. The lab holdout-1 was rescored from the same run directories (same sha256) and `docs/benchmark.md` regenerated: only A changes, coverage 100% → 73%, selective 13% → 18% (F2: 2 of 2 answered right). Earlier committed results keep the old coverage; they have no timeouts except V2 cloud's 4 `INVALID_REPORT` (coverage 87% there would read 60%).
 
+- 2026-10-30: T3 done. Route: delegated writer (agent, script, spec: 2+ non-trivial files). Spring AI 2.0.1 `OllamaChatOptions.thinkOption` carries `think`; unset sends no field (AC1). Env vars by relaxed binding: `KINTSUGI_AGENT_MODEL_NAME`, `_THINK`, `_NUM_PREDICT_REPORT`, `_CALL_TIMEOUT_REPORT`; the HTTP read timeout and the warm-up follow them. Replay options `--model`, `--think on|off`, `--report-cap`, `--report-timeout` (local only, else exit 2; capped at 2700 s, the incident budget). `summary.tsv`/`aggregate.tsv` gain last columns `model think reportCap reportTimeout`. Thinking text is not read into the report (test). RED: ModelRouteTest, LocalRouteOverridesTest and 13 ReplayDriverTest failures; GREEN: `./mvnw -q test` 591 tests, 0 failures; evals 66 passed; `test-lib.sh` 156 PASS. Parent spot check: `--route cloud --think on` exit 2; ModelRouteTest, LocalRouteSettingsTest, ReplayDriverTest green.
+  - Open: the 45 min incident budget still bounds a second report attempt after a slow invalid first one; the calibration (T4) shows whether it matters. T6 labels every input, since unlabelled configs would share a name.
+
 ## Next step
 
-T3.
+T4.

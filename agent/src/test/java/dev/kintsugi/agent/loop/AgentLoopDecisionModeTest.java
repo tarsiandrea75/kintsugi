@@ -151,6 +151,28 @@ class AgentLoopDecisionModeTest {
 		assertThat(stored.get("evidence").get(0).get("quote").asString()).isEqualTo(first.substring("D1 ".length()));
 	}
 
+	/**
+	 * A thinking model's answer (qwen-dev T3; agent spec, "Routes"): the report is read from the answer's content alone,
+	 * so the thinking, here naming another cause, never reaches the parsed report or the stored step.
+	 */
+	@Test
+	void aThinkingModelsReportIsReadFromItsContentNotItsThinking() {
+		String thinking = "The pool looks exhausted, so " + report("postgres", "RESOURCE_EXHAUSTION", dossierEvidence(1));
+		this.model.thinking(thinking, report("payment-service", "DEPENDENCY_REJECTING", dossierEvidence(1)));
+
+		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
+
+		JsonNode stored = storedReport();
+		assertThat(stored.get("rootCauseService").asString()).isEqualTo("payment-service");
+		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo("DEPENDENCY_REJECTING");
+		assertThat(AgentDatabase.admin()
+			.sql("SELECT count(*) FROM incident_steps WHERE incident_id = ? AND (model_output LIKE '%postgres%' "
+					+ "OR summary LIKE '%pool looks exhausted%')")
+			.param(this.id)
+			.query(Long.class)
+			.single()).isZero();
+	}
+
 	@Test
 	void theDossierIsGatheredBeforeTheWarmUp() {
 		AtomicInteger callsAtWarmUp = callsAtWarmUp();

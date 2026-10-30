@@ -47,7 +47,10 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  * {@code sheets}; odd/tasks/service-assessment.md T1) and asks for the report of
  * {@code kintsugi.agent.decision.report} ({@code plain}, the default, or {@code assessed}, which needs the sheets; T2r),
  * each set as a system property like the others, and records both with each sample; explorer and dossier runs refuse
- * them. A miss is a measurement, not a failure: the test fails only when it
+ * them. The local route's model, thinking, report cap and report deadline come from the context's own
+ * {@code kintsugi.agent.model}, which {@code replay-agent.sh} overrides through the {@code KINTSUGI_AGENT_MODEL_*}
+ * variables (odd/tasks/qwen-dev.md T3); every line records the values the route ran with. A miss is a measurement, not
+ * a failure: the test fails only when it
  * cannot run a sample.
  *
  * <p>

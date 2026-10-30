@@ -24,6 +24,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.model.tool.StructuredOutputChatOptions;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.ollama.api.ThinkOption;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -46,6 +48,13 @@ class ReplayDriverTest {
 	private static final JsonMapper JSON = JsonMapper.shared();
 
 	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
+
+	/** The settings columns of the tests' local route: granite, no think field, a 512-token report in 5 s. */
+	private static final String LOCAL_COLUMNS = "\tgranite4.1:8b\tdefault\t512\t5s";
+
+	/** The settings of a hand-made local sample, as the route of application.yaml would record them. */
+	private static final ReplayDriver.Settings LOCAL = new ReplayDriver.Settings("granite4.1:8b", "default", "512",
+			"600s");
 
 	private static final Path F1_DOSSIER = ReplayDriver.DEFAULT_RECORDINGS
 		.resolve("F1/verify-agent-20261019T214629Z-F1.json");
@@ -129,7 +138,7 @@ class ReplayDriverTest {
 		assertThat(summary).hasSize(2);
 		assertThat(summary.get(0)).isEqualTo(ReplayDriver.SUMMARY_HEADER);
 		String[] line = summary.get(1).split("\t", -1);
-		assertThat(line).hasSize(19);
+		assertThat(line).hasSize(23);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
 				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "0", "1.00");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
@@ -140,6 +149,9 @@ class ReplayDriverTest {
 		assertThat(List.of(line).subList(15, 17)).containsExactly("-", F1_DOSSIER_STEM);
 		// Only decision mode reads the dossier view: a dossier sample has none.
 		assertThat(line[17]).isEqualTo("-");
+		// The route's settings come last (qwen-dev T3): the model, its thinking, the report's cap and its deadline.
+		assertThat(List.of(line).subList(19, 23)).containsExactly("granite4.1:8b", "default", "512", "5s");
+		assertThat(summary.get(0)).endsWith("\tview\treport\tmodel\tthink\treportCap\treportTimeout");
 
 		JsonNode incident = JSON.readTree(this.out.resolve("F1-dossier-" + F1_DOSSIER_STEM + "-1.json").toFile());
 		assertThat(incident.path("status").asString()).isEqualTo("COMPLETED");
@@ -265,7 +277,7 @@ class ReplayDriverTest {
 		// So is its report, the plain one by default (service-assessment T2r).
 		assertThat(sample.report()).hasValue(DecisionReport.PLAIN);
 		assertThat(sample.summaryLine()).startsWith("F1\tdecision\tlocal\t1\tCOMPLETED\t")
-			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain");
+			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain" + LOCAL_COLUMNS);
 	}
 
 	@Test
@@ -442,15 +454,15 @@ class ReplayDriverTest {
 		assertThat(dossierMessage(decision)).contains("# Evidence dossier, by service\n")
 			.doesNotContain("## Service status (incident window)");
 		assertThat(decision.dossierUnrecorded()).isZero();
-		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tplain");
+		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tplain" + LOCAL_COLUMNS);
 		// Dossier mode reads no view: it shows the tables, and its sample records none.
 		assertThat(dossier.view()).isEmpty();
 		assertThat(dossier.report()).isEmpty();
 		assertThat(dossierMessage(dossier)).contains("## Service status (incident window)")
 			.doesNotContain("# Evidence dossier, by service");
 		assertThat(ReplayDriver.aggregate(List.of(decision, dossier))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdecision\tlocal\tstress\tsheets\tplain\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t10\t5\t-",
-				"F1\tdossier\tlocal\t-\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t30\t15\t-");
+				"F1\tdecision\tlocal\tstress\tsheets\tplain\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t10\t5\t-" + LOCAL_COLUMNS,
+				"F1\tdossier\tlocal\t-\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t30\t15\t-" + LOCAL_COLUMNS);
 	}
 
 	@Test
@@ -472,7 +484,7 @@ class ReplayDriverTest {
 		assertThat(this.model.prompts()).hasSize(2)
 			.allSatisfy(prompt -> assertThat(((StructuredOutputChatOptions) prompt.getOptions()).getOutputSchema())
 				.isEqualTo(Schemas.ASSESSED_REPORT));
-		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tassessed");
+		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tassessed" + LOCAL_COLUMNS);
 		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1))
 			.startsWith("F1\tdecision\tlocal\tstress\tsheets\tassessed\t1\t1\t0/1\t");
 	}
@@ -543,7 +555,7 @@ class ReplayDriverTest {
 		}
 		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
 		assertThat(summary).hasSize(5);
-		assertThat(summary.get(4)).startsWith("F1\tdecision\tlocal\t2\t").endsWith("\tdev\tb\ttables\tplain");
+		assertThat(summary.get(4)).startsWith("F1\tdecision\tlocal\t2\t").endsWith("\tdev\tb\ttables\tplain" + LOCAL_COLUMNS);
 		// The aggregate tells the 2 distinct recordings from the 4 samples.
 		List<String> aggregate = ReplayDriver.aggregate(samples);
 		assertThat(aggregate).hasSize(2);
@@ -589,7 +601,8 @@ class ReplayDriverTest {
 
 		assertThat(lines).containsExactly(ReplayDriver.AGGREGATE_HEADER,
 				// 2 M prompt tokens at $0.10 and 0.2 M completion tokens at $0.50 per million.
-				"F2\texplorer\tcloud\t-\t-\t-\t1\t2\t1/2\t0.75\t1\t1/1\t0/2\t2000000\t200000\t0.3000");
+				"F2\texplorer\tcloud\t-\t-\t-\t1\t2\t1/2\t0.75\t1\t1/1\t0/2\t2000000\t200000\t0.3000"
+						+ "\tclaude-haiku-5-5\toff\t768\t90s");
 	}
 
 	/**
@@ -623,11 +636,13 @@ class ReplayDriverTest {
 		assertThat(sample.dossierUnrecorded()).isZero();
 
 		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
-		assertThat(line).hasSize(19);
+		assertThat(line).hasSize(23);
 		assertThat(List.of(line).subList(0, 8)).containsExactly("F1", "decision", "rules", "1", "COMPLETED", F1_TRUTH,
 				F1_TRUTH, "MATCH");
 		assertThat(List.of(line).subList(12, 14)).containsExactly("0", "0");
 		assertThat(List.of(line).subList(15, 19)).containsExactly("dev", r1.stem(), "tables", "plain");
+		// Config 0 calls no model: its model is the rules' version, and it has no thinking, cap or deadline.
+		assertThat(List.of(line).subList(19, 23)).containsExactly("rules-v1", "-", "-", "-");
 
 		JsonNode incident = JSON
 			.readTree(this.out.resolve("F1-decision-verify-agent-20261024T162555Z-r1-F1-1.json").toFile());
@@ -678,24 +693,63 @@ class ReplayDriverTest {
 		assertThat(AgentDatabase.admin().sql("SELECT count(*) FROM incidents").query(Long.class).single()).isZero();
 	}
 
+	/**
+	 * A run on an overridden local route (qwen-dev T3, AC2) records the settings its report call ran with on every
+	 * line: the model, the thinking setting, the report's cap and its deadline, after the columns of every run before.
+	 */
+	@Test
+	void aSampleRecordsTheOverriddenRouteSettingsItRanWith() {
+		this.model.text(unknownReport());
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(1800));
+		ReplayDriver driver = driver(task -> new OllamaRoute("qwen3.5:9b", this.model, 0.0, 8192, timeouts,
+				new NumPredict(384, 160, 2048), true), ReplayDriver.DEFAULT_RECORDINGS);
+
+		ReplayDriver.Sample decision = driver.decisionSample(driver.decisionCases("stress", List.of("F1")).get(0), 1);
+
+		assertThat(decision.settings()).isEqualTo(new ReplayDriver.Settings("qwen3.5:9b", "on", "2048", "1800s"));
+		assertThat(decision.summaryLine())
+			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain\tqwen3.5:9b\ton\t2048\t1800s");
+		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1)).endsWith("\tqwen3.5:9b\ton\t2048\t1800s");
+		// The report call carried the thinking setting and the cap the line names.
+		OllamaChatOptions sent = (OllamaChatOptions) this.model.prompts().get(0).getOptions();
+		assertThat(sent.getThinkOption()).isEqualTo(ThinkOption.ThinkBoolean.ENABLED);
+		assertThat(sent.getNumPredict()).isEqualTo(2048);
+	}
+
+	/** Samples of the same fault and split under different route settings are separate aggregate lines. */
+	@Test
+	void theAggregateKeepsEachRouteSettingApart() {
+		ReplayDriver.Sample granite = decisionSample("dev", "a", "MATCH");
+		ReplayDriver.Sample qwen = new ReplayDriver.Sample("F1", AgentMode.DECISION, "local", "dev", "a",
+				Optional.of(DossierView.TABLES), Optional.of(DecisionReport.PLAIN), 1, IncidentStatus.TIMED_OUT,
+				F1_TRUTH, "none", "MISS", 33, 0, 1.0, 0, null, null, 1.0, 33, 0, JSON.createObjectNode(),
+				new ReplayDriver.Settings("qwen3.5:9b", "off", "1024", "900s"));
+
+		assertThat(ReplayDriver.aggregate(List.of(granite, qwen))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
+				"F1\tdecision\tlocal\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s",
+				"F1\tdecision\tlocal\tdev\ttables\tplain\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-\tqwen3.5:9b\toff\t1024\t900s");
+		assertThat(ReplayDriver.AGGREGATE_HEADER).endsWith("\tcostUsd\tmodel\tthink\treportCap\treportTimeout");
+	}
+
 	@Test
 	void theRulesRouteCostsNothingAndSaysSo() {
 		ReplayDriver.Sample rules = new ReplayDriver.Sample("F1", AgentMode.DECISION, ReplayDriver.RULES_ROUTE, "dev",
 				"r", Optional.of(DossierView.TABLES), Optional.of(DecisionReport.PLAIN), 1, IncidentStatus.COMPLETED,
-				F1_TRUTH, F1_TRUTH, "MATCH", 33, 0, 1.0, 0, 0, 0, 0.1, 33, 0, JSON.createObjectNode());
+				F1_TRUTH, F1_TRUTH, "MATCH", 33, 0, 1.0, 0, 0, 0, 0.1, 33, 0, JSON.createObjectNode(),
+				ReplayDriver.Settings.RULES);
 
 		assertThat(ReplayDriver.aggregate(List.of(rules))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdecision\trules\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t0\t0\t0.0000");
+				"F1\tdecision\trules\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t0\t0\t0.0000\trules-v1\t-\t-\t-");
 	}
 
 	@Test
 	void theLocalRouteHasNoCost() {
 		ReplayDriver.Sample local = new ReplayDriver.Sample("F3", AgentMode.DOSSIER, "local", "-", "r",
 				Optional.empty(), Optional.empty(), 1, IncidentStatus.TIMED_OUT, "order-service|CONFIGURATION", "none", "MISS", 29, 0,
-				1.0, 0, null, null, 1.0, 29, 0, JSON.createObjectNode());
+				1.0, 0, null, null, 1.0, 29, 0, JSON.createObjectNode(), LOCAL);
 
 		assertThat(ReplayDriver.aggregate(List.of(local))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F3\tdossier\tlocal\t-\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-");
+				"F3\tdossier\tlocal\t-\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
 	}
 
 	@Test
@@ -704,12 +758,12 @@ class ReplayDriverTest {
 				dossierSample("MATCH", 0.5, 2),
 				new ReplayDriver.Sample("F1", AgentMode.DOSSIER, "local", "-", "r", Optional.empty(), Optional.empty(), 4,
 						IncidentStatus.COMPLETED, F1_TRUTH, F1_TRUTH, "MATCH", 4, 1, 0.8, 0, null, null, 1.0, 0, 0,
-						JSON.createObjectNode()));
+						JSON.createObjectNode(), LOCAL));
 
 		// Covered (coverage >= 0.8): samples 1, 2 and 4, two of them matches; a fully recorded dossier: samples 1 and 2.
 		assertThat(ReplayDriver.COVERED_THRESHOLD).isEqualTo(0.8);
 		assertThat(ReplayDriver.aggregate(samples)).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdossier\tlocal\t-\t-\t-\t1\t4\t3/4\t0.75\t3\t2/3\t2/4\t-\t-\t-");
+				"F1\tdossier\tlocal\t-\t-\t-\t1\t4\t3/4\t0.75\t3\t2/3\t2/4\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
 	}
 
 	@Test
@@ -719,21 +773,21 @@ class ReplayDriverTest {
 				decisionSample("holdout", "c", "MATCH"));
 
 		assertThat(ReplayDriver.aggregate(samples)).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdecision\tlocal\tdev\ttables\tplain\t2\t3\t2/3\t1.00\t3\t2/3\t3/3\t-\t-\t-",
-				"F1\tdecision\tlocal\tholdout\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-");
+				"F1\tdecision\tlocal\tdev\ttables\tplain\t2\t3\t2/3\t1.00\t3\t2/3\t3/3\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s",
+				"F1\tdecision\tlocal\tholdout\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
 	}
 
 	private static ReplayDriver.Sample dossierSample(String verdict, double coverage, int dossierUnrecorded) {
 		return new ReplayDriver.Sample("F1", AgentMode.DOSSIER, "local", "-", "r", Optional.empty(), Optional.empty(), 1,
 				IncidentStatus.COMPLETED, F1_TRUTH, verdict.equals("MATCH") ? F1_TRUTH : "UNKNOWN|UNKNOWN", verdict, 29,
-				3, coverage, 0, null, null, 1.0, 29, dossierUnrecorded, JSON.createObjectNode());
+				3, coverage, 0, null, null, 1.0, 29, dossierUnrecorded, JSON.createObjectNode(), LOCAL);
 	}
 
 	private static ReplayDriver.Sample decisionSample(String split, String recording, String verdict) {
 		return new ReplayDriver.Sample("F1", AgentMode.DECISION, "local", split, recording,
 				Optional.of(DossierView.TABLES), Optional.of(DecisionReport.PLAIN), 1, IncidentStatus.COMPLETED, F1_TRUTH,
 				verdict.equals("MATCH") ? F1_TRUTH : "UNKNOWN|UNKNOWN", verdict, 33, 0, 1.0, 0, null, null, 1.0, 33, 0,
-				JSON.createObjectNode());
+				JSON.createObjectNode(), LOCAL);
 	}
 
 	/** The output the sample's dossier holds for {@code call} (its tool, a space and its arguments). */
@@ -806,7 +860,8 @@ class ReplayDriverTest {
 	private static ReplayDriver.Sample sample(String verdict, double coverage, int prompt, int completion) {
 		return new ReplayDriver.Sample("F2", AgentMode.EXPLORER, "cloud", "-", "r", Optional.empty(), Optional.empty(), 1,
 				IncidentStatus.COMPLETED, "gateway-mock|DEPENDENCY_REJECTING", "gateway-mock|DEPENDENCY_REJECTING",
-				verdict, 1, 1, coverage, 0, prompt, completion, 1.0, 0, 0, JSON.createObjectNode());
+				verdict, 1, 1, coverage, 0, prompt, completion, 1.0, 0, 0, JSON.createObjectNode(),
+				new ReplayDriver.Settings("claude-haiku-5-5", "off", "768", "90s"));
 	}
 
 }

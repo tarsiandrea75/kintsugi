@@ -30,14 +30,15 @@ class LoopConfig {
 	/**
 	 * The router's one route, from {@code kintsugi.agent.route} (cloud-route T3): {@code local}, the default, on Ollama,
 	 * or {@code cloud} on Anthropic. {@link RouteEnvironmentPostProcessor} has already checked the value and made the
-	 * matching provider the only {@code ChatModel}.
+	 * matching provider the only {@code ChatModel}. The local route carries {@code kintsugi.agent.model.think}, unset by
+	 * default, so its requests carry no {@code think} field unless a run sets one (qwen-dev T3; ADR-017).
 	 */
 	@Bean
 	ModelRouter modelRouter(ChatModel chatModel, ModelRouteProperties local, CloudRouteProperties cloud,
 			@Value("${kintsugi.agent.route:local}") String route) {
 		return new OneRouteModelRouter(switch (AgentRoute.of(route)) {
 			case LOCAL -> new OllamaRoute(local.name(), chatModel, local.temperature(), local.numCtx(),
-					local.callTimeout(), local.numPredict());
+					local.callTimeout(), local.numPredict(), local.think());
 			case CLOUD -> new AnthropicRoute(cloud.name(), chatModel, cloud.callTimeout(), cloud.numPredict());
 		});
 	}

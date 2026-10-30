@@ -12,9 +12,11 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.ollama.api.ThinkOption;
 import org.springframework.ai.tool.ToolCallback;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -79,6 +81,54 @@ class ModelRouteTest {
 			.numCtx(8192)
 			.numPredict(1)
 			.build());
+	}
+
+	/**
+	 * With no {@code think} setting the local route sends no {@code think} field, on a call or on the warm-up (AC1 of
+	 * odd/tasks/qwen-dev.md): the request is the one every run before the field existed sent.
+	 */
+	@Test
+	void theLocalRouteSendsNoThinkFieldByDefault() {
+		OllamaChatOptions act = (OllamaChatOptions) this.local.options(384, Duration.ofSeconds(420), TOOLS, null);
+		OllamaChatOptions report = (OllamaChatOptions) this.local.options(512, Duration.ofSeconds(420), List.of(),
+				SCHEMA);
+
+		assertThat(act.getThinkOption()).isNull();
+		assertThat(report.getThinkOption()).isNull();
+		assertThat(((OllamaChatOptions) this.local.warmUpOptions().orElseThrow()).getThinkOption()).isNull();
+		assertThat(this.local.think()).isNull();
+		assertThat(this.local.thinking()).isEqualTo("default");
+	}
+
+	/**
+	 * A {@code think} setting reaches every call and the warm-up as Ollama's {@code think} field with that value, and
+	 * changes nothing else (AC2 of odd/tasks/qwen-dev.md; ADR-017).
+	 */
+	@ParameterizedTest
+	@ValueSource(booleans = { true, false })
+	void aThinkSettingReachesEveryCallAndTheWarmUp(boolean think) {
+		OllamaRoute route = new OllamaRoute("qwen3.5:9b", this.model, 0.0, 8192, DEADLINES, CAPS, think);
+		ThinkOption expected = think ? ThinkOption.ThinkBoolean.ENABLED : ThinkOption.ThinkBoolean.DISABLED;
+
+		assertThat(route.options(512, Duration.ofSeconds(420), List.of(), SCHEMA)).isEqualTo(OllamaChatOptions.builder()
+			.model("qwen3.5:9b")
+			.temperature(0.0)
+			.numCtx(8192)
+			.numPredict(512)
+			.toolCallbacks(List.of())
+			.outputSchema(SCHEMA)
+			.thinkOption(expected)
+			.build());
+		assertThat(((OllamaChatOptions) route.options(384, Duration.ofSeconds(420), TOOLS, null)).getThinkOption())
+			.isEqualTo(expected);
+		assertThat(route.warmUpOptions()).hasValue(OllamaChatOptions.builder()
+			.model("qwen3.5:9b")
+			.temperature(0.0)
+			.numCtx(8192)
+			.numPredict(1)
+			.thinkOption(expected)
+			.build());
+		assertThat(route.thinking()).isEqualTo(think ? "on" : "off");
 	}
 
 	@Test
@@ -230,6 +280,11 @@ class ModelRouteTest {
 	@Test
 	void theCloudRouteHasNoWarmUp() {
 		assertThat(this.cloud.warmUpOptions()).isEmpty();
+	}
+
+	@Test
+	void theCloudRouteRecordsItsThinkingAsOff() {
+		assertThat(this.cloud.thinking()).isEqualTo("off");
 	}
 
 	@Test

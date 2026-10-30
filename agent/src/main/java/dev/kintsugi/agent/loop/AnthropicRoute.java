@@ -44,6 +44,12 @@ public record AnthropicRoute(String model, ChatModel chatModel, CallTimeouts cal
 		return AgentRoute.CLOUD;
 	}
 
+	/** {@code off}: every call disables thinking. */
+	@Override
+	public String thinking() {
+		return "off";
+	}
+
 	@Override
 	public ChatOptions options(int answerCap, Duration wait, List<ToolCallback> tools, String outputSchema) {
 		AnthropicChatOptions.Builder options = AnthropicChatOptions.builder()

@@ -328,6 +328,8 @@ A missing or invalid plan MUST be recorded and MUST NOT end the run or be asked 
 | One model call **(T5c4, T5c5, T5c15)** | per task, `kintsugi.agent.model.call-timeout`: 600 s for an `ACT` call (`act`; 420 s before local-dossier-timing, 300 s before T5c15), 600 s for a `REPORT` call (`report`; 420 s before); never past the incident's time left | the run ends `TIMED_OUT`, reason naming the call and its task's deadline (`model call ACT in <phase> took longer than 600 s`, `model call REPORT in CONCLUDE took longer than 600 s`), or the incident when its time ran out first |
 | One incident **(T5c5)** | 45 minutes from the end of the warm-up, tool calls included, checked before every model or tool call | the run ends `TIMED_OUT`, reason `the incident ran past its time budget of 45 min, ...` |
 
+A measurement MAY override the local route's `REPORT` deadline for its own run with the environment variable `KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT` (`kintsugi.agent.model.call-timeout.report`, by Spring Boot's relaxed binding), set by `replay-agent.sh --report-timeout` from 1 to 2700 s **(qwen-dev T3; ADR-017)**. Why: a slower or thinking local model needs a longer report call than granite's, and the 600 s deadline already cut 4 of 15 granite holdout samples. The loop's HTTP read timeout follows the overridden value, as it follows the configured one ("Shared rules": the longest of the call deadlines and the warm-up), so the client never cuts a report the loop still waits for; the incident's 45 minutes still bound every call. Without the variable the deadline is the 600 s above.
+
 Which units a tool call consumes is fixed in "Phases and their tools": a call refused `REFUSED_PHASE` consumes one unit of the tool budget and of its phase's allowance, like a call that runs; a call refused `REFUSED_BUDGET` consumes nothing; a call refused `REFUSED_PLACEHOLDER` or `REFUSED_DUPLICATE` consumes nothing while the incident has an uncounted refusal left (2), and one unit of each after that **(T5c9)**; no tool call consumes the model-call budget. Every budget end MUST be recorded as a step or a `failure_reason` and logged, never silent. Each tool-step prompt MUST state the tool calls left in the phase and in the incident. The `ACT` task MUST also state, as a rule, how many tool calls the phase still allows, the lesser of the two: `You may make at most <n> tool calls in this phase; more are refused.` **(T5c11)**. Why (T5c11): in the seventh full run every `TRIAGE` planned and requested three calls against an allowance of two, so the third was refused every time; the count in the state lines alone did not stop it.
 
 #### Scenario: The ACT task states the phase's call limit (T5c11)
@@ -370,6 +372,11 @@ Why 600 s for `ACT` and `REPORT` (local-dossier-timing, the human's decision of 
 - WHEN the agent starts in the web profile
 - THEN it fails to start with a message naming the property, instead of failing at the first call
 
+#### Scenario: An overridden report deadline (qwen-dev T3)
+- GIVEN `KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT=900s`, or `kintsugi.agent.model.call-timeout.report=1800s`
+- WHEN the agent binds its local route
+- THEN the `REPORT` deadline is 900 s (1800 s), the `ACT` deadline stays 600 s, and the loop's HTTP read timeout is 900 s (1800 s)
+
 #### Scenario: Incident too long
 - GIVEN the run has lasted 45 minutes since its warm-up ended
 - WHEN the loop is about to start another model or tool call
@@ -386,6 +393,8 @@ Every model call MUST carry Ollama's `num_predict`, the most tokens its answer m
 | a `REPORT` answer (`report`) | 512 | a report with a short summary and two or three evidence items is about 250 to 350 tokens. The schema bounds each field but still admits about 900 tokens, which this CPU cannot write within one call; 512 tokens take about 176 s, which with the prompt read (70 to 90 s) fits the `REPORT` deadline (600 s; 420 s before local-dossier-timing) with room for a slow prompt read. With the cap a report that runs on is cut and retried with the reason, instead of ending the run `TIMED_OUT` |
 | the warm-up | 1 | "The warm-up" |
 
+A measurement MAY override the local `REPORT` cap for its own run with the environment variable `KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT` (`kintsugi.agent.model.num-predict.report`), set by `replay-agent.sh --report-cap` **(qwen-dev T3; ADR-017)**; the other caps stay. Why: with thinking on, Ollama counts the thinking tokens against `num_predict`, so a thinking run's report needs room for its thinking and its JSON, and the cap for such a run comes from a calibration, not from the reasons above. Without the variable the cap is 512.
+
 The cloud route MUST carry its own caps, `kintsugi.agent.cloud.num-predict` (`first-act`, `act`, `report`), as `maxTokens` **(report-length T2)**. They are the local ones but the report at 768 **(report-length)**: on the replay, 512 cut some reports mid-JSON (4 of 15 at 485+ tokens, one run invalid), and 768 removed the cuts with F3 at 13/15 against 14/15, while asking for at most 3 evidence items instead cost F3 (10/15) and was reverted. Why separate: the reasons above are the CPU's write time, which the cloud route does not have, so its caps can be measured and changed without touching the local route. Like the local caps they are required: a missing `kintsugi.agent.cloud.num-predict` stops the start with a message naming it. The environment variable `KINTSUGI_AGENT_CLOUD_NUM_PREDICT_REPORT` overrides the cloud report cap (Spring Boot's relaxed binding of environment variables).
 
 Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it deterministically, without a further call:
@@ -396,6 +405,11 @@ Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it det
 #### Scenario: Caps by call
 - WHEN a run makes a phase's first `ACT` call, a later `ACT` call and a report call
 - THEN they carry `num_predict` 384, 160 and 512, and the warm-up 1
+
+#### Scenario: An overridden local report cap (qwen-dev T3)
+- GIVEN `KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT=1024` (or `kintsugi.agent.model.num-predict.report=2048`)
+- WHEN a run makes its report call on the local route
+- THEN it carries `num_predict` 1024 (2048), and its `ACT` calls still carry 384 and 160
 
 #### Scenario: The cloud route's own report cap (report-length T2)
 - GIVEN `kintsugi.agent.route=cloud` and `kintsugi.agent.cloud.num-predict.report=768`
@@ -454,10 +468,12 @@ The model MUST run on the route of `kintsugi.agent.route` (`${KINTSUGI_AGENT_ROU
 
 | Route | `spring.ai.model.chat` | Model | Call options | Deadlines | Warm-up |
 |-------|------------------------|-------|--------------|-----------|---------|
-| `local` (default) | `ollama` | `kintsugi.agent.model.name`, `granite4.1:8b` | `OllamaChatOptions`: `temperature` 0, `num-ctx` 8192, `num_predict` the answer cap; byte-identical to every run before the cloud route | `kintsugi.agent.model.call-timeout` | yes ("The warm-up") |
+| `local` (default) | `ollama` | `kintsugi.agent.model.name`, `granite4.1:8b` | `OllamaChatOptions`: `temperature` 0, `num-ctx` 8192, `num_predict` the answer cap, and `think` only when `kintsugi.agent.model.think` is set; byte-identical to every run before the cloud route when it is not | `kintsugi.agent.model.call-timeout` | yes ("The warm-up") |
 | `cloud` | `anthropic` | `kintsugi.agent.cloud.name`, `claude-haiku-5-5` | `AnthropicChatOptions`: no `temperature` (the model rejects a non-default one), thinking disabled (thinking tokens would count against `max_tokens`), `maxTokens` the call's answer cap from `kintsugi.agent.cloud.num-predict` ("Answer caps"), the report's `outputSchema`, the phase's tool definitions | `kintsugi.agent.cloud.call-timeout`: `act` 60 s, `report` 90 s (a first guess, measured in cloud-route T5) | none |
 
 `RouteEnvironmentPostProcessor` MUST derive `spring.ai.model.chat` from the route, because Spring AI 2.0.1 turns on both chat auto-configurations when it is missing; so exactly one `ChatModel` exists, and on the local route Anthropic's auto-configuration is off. The cloud client's `spring.ai.anthropic.timeout` MUST be the cloud route's longest call deadline (90 s), and `spring.ai.anthropic.max-retries` MUST be 0, since the loop owns retries and their budget. Every cloud call MUST also carry its own timeout, `AnthropicChatOptions.timeout`: the loop's wait for that call (its deadline, or the incident's time left when that is shorter) plus 1 s, so that a call the loop abandons is cancelled at most 1 s later and the provider stops writing its answer. Why (the review of cloud-route T3): the loop interrupts a call it stops waiting for, which closes Ollama's connection ("Budgets"), but Spring AI 2.0.1's `AnthropicChatModel` calls the Anthropic SDK (anthropic-java-core 2.52.0) through Spring AI's `SpringAiAnthropicHttpClient`, whose OkHttp `Call.execute()` blocks in a socket read that ignores the interruption; with the client's timeout alone an abandoned 60 s `ACT` call held its connection, and the provider kept writing, up to 90 s. Spring AI passes the per-call timeout to the SDK as the call's `RequestOptions`, and OkHttp's call timeout cancels the call. The 1 s keeps the loop's deadline, not the client, the one that ends a call, so a timed-out call still ends the run `TIMED_OUT`. The loop's model-call workers are a cached pool, so a call still ending never delays the next one; and a run whose call timed out has ended, so no retry of it can overlap. The key comes only from `ANTHROPIC_API_KEY` (`spring.ai.anthropic.api-key: ${ANTHROPIC_API_KEY:}`); no key is in the repository.
+
+The local route MUST send Ollama's `think` request field only when `kintsugi.agent.model.think` is set **(qwen-dev T3; ADR-017)**: unset, the default, and an empty value send no `think` field, so every call and the warm-up are the requests of every run before it; `true` or `false` sends `think` with that value (Spring AI 2.0.1's `OllamaChatOptions.thinkOption`) on every call and on the warm-up. Why unset by default: a thinking-capable model such as `qwen3.5:9b` thinks when the field is absent, so only an explicit setting makes a run's thinking known; granite's runs keep their requests. With thinking on, Ollama counts the thinking tokens against `num_predict` ("Answer caps"), and Spring AI returns the thinking apart from the answer, as the message's `thinking` property; the loop MUST read the answer from the message's content alone, so the thinking never reaches a parsed plan, a report or a step. A measurement MAY override the local model and its thinking for its own run with the environment variables `KINTSUGI_AGENT_MODEL_NAME` (`kintsugi.agent.model.name`) and `KINTSUGI_AGENT_MODEL_THINK` (`true` or `false`), set by `replay-agent.sh --model` and `--think on|off`; the warm-up loads the overridden model. The cloud route has no such setting: it always disables thinking.
 
 The start MUST stop, before any bean, on a route other than `local` or `cloud`, with `kintsugi.agent.route must be local or cloud, got "<value>"`, and on the cloud route with an empty or blank key, with a message naming `ANTHROPIC_API_KEY`.
 
@@ -469,6 +485,22 @@ The cloud route MUST send the report schema without the keywords Anthropic's str
 - GIVEN no `kintsugi.agent.route`
 - WHEN the agent starts and an incident runs
 - THEN the route is `local`, the only chat model is Ollama's, and every call and the warm-up carry the same options as before the cloud route
+
+#### Scenario: No local override sends today's request (qwen-dev T3, AC1)
+- GIVEN the local route with no `kintsugi.agent.model.think` and none of the `KINTSUGI_AGENT_MODEL_*` variables, or `KINTSUGI_AGENT_MODEL_THINK` empty
+- WHEN an incident runs
+- THEN every call and the warm-up carry `granite4.1:8b`, `temperature` 0, `num-ctx` 8192 and the caps 384, 160, 512 (1 for the warm-up), and no `think` field
+
+#### Scenario: Each local override reaches the request (qwen-dev T3, AC2)
+- GIVEN `kintsugi.agent.model.name=qwen3.5:9b`, `think=true`, `num-predict.report=2048` and `call-timeout.report=1800s`
+- WHEN the route's report call and warm-up are built
+- THEN they carry the model `qwen3.5:9b` and `think` true, the report call `num_predict` 2048 with a 1800 s deadline
+- AND with `think=false` they carry `think` false instead
+
+#### Scenario: A thinking model's report is read from its content
+- GIVEN a report answer whose content is a valid report naming `payment-service` and whose thinking names `postgres`
+- WHEN the loop reads it in decision mode
+- THEN the run ends `COMPLETED` with the report of the content, and no step holds the thinking
 
 #### Scenario: Cloud options
 - GIVEN `kintsugi.agent.route=cloud` and a key
@@ -575,7 +607,7 @@ The replay driver (`ReplayRunTest`, run by `infra/scripts/replay-agent.sh`) MUST
 
 Each recording and the tool listing are parsed once per run; only the `ReplayLabTools`, and so its counters, is new per sample. A recording without `startedAt`, without `symptom` or without a positive `sinceMinutes` MUST fail with an `IllegalArgumentException` naming the fault and the file, before any model call: in decision mode, every case of the split is checked before the first sample. The incident is opened with the primary recording's symptom and `sinceMinutes`, on a clock offset so that "now" is that recording's `startedAt`: windows and uptimes computed from the clock match the recorded timestamps, and the time budgets still run. Each sample is scored by `agent_verdict`'s rule: `MATCH` only when the incident is `COMPLETED` and its report's `rootCauseService|rootCauseCategory` equals the recorded truth of `recordings.tsv`, else `MISS`.
 
-It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as the full view shows it; `<recording>` is the primary recording's file name without `.json`) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds split recording view report`). Then it writes `aggregate.tsv` per fault, mode, route, split, view and report (`fault mode route split view report recordings samples matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd`); the view and the report are a decision sample's, so a result is attributable to its variant, and `-` for an explorer or dossier sample. The evals' scorer reads a `summary.tsv` with or without the `report` column; with it, a run's default config name ends with the report (`cloud-decision-sheets-assessed`):
+It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as the full view shows it; `<recording>` is the primary recording's file name without `.json`) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds split recording view report model think reportCap reportTimeout`). Then it writes `aggregate.tsv` per fault, mode, route, split, view, report and route settings (`fault mode route split view report recordings samples matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd model think reportCap reportTimeout`); the view and the report are a decision sample's, so a result is attributable to its variant, and `-` for an explorer or dossier sample. The last four columns **(qwen-dev T3)** are the route settings the sample's report call ran with, overridden or not ("Routes"): the model, `think` (`on` or `off` when the route sends the field, `default` when it does not, `off` on the cloud route, which disables thinking), the report's answer cap and the report's deadline (`600s`); a rules sample has model `rules-v1` and `-` for the other three. They come last so every earlier column keeps its position; the evals' scorer reads columns by name. `replay-agent.sh` MUST refuse `--model`, `--think`, `--report-cap` and `--report-timeout` on any route but `local` with exit 2 before Maven, and MUST clear each `KINTSUGI_AGENT_MODEL_*` variable whose option is not given, so a run never takes a value the shell left. The evals' scorer reads a `summary.tsv` with or without the `report` column; with it, a run's default config name ends with the report (`cloud-decision-sheets-assessed`):
 - the distinct recordings the samples opened on, which are the independent observations, and the samples, which outnumber them with repeats;
 - matches out of samples, and mean coverage;
 - the covered samples, those with coverage at least 0.8 (`COVERED_THRESHOLD`: a fully replayed dossier-mode sample still shows about 0.91, its model-chosen calls being unrecorded), and the matches among them out of them;
@@ -660,6 +692,16 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 - WHEN one dossier-mode sample of F1 runs and its report names `UNKNOWN|UNKNOWN`
 - THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage, then the split `-`, the recording it opened on, the view `-` and the report `-`
 - AND its dossier makes 33 calls, all recorded (coverage 1.00): the recording holds the 4 `query_metric` latency calls too ([dossier-latency](../../../odd/tasks/dossier-latency.md) T3)
+
+#### Scenario: The route settings are recorded per sample (qwen-dev T3, AC2)
+- GIVEN a local route with the model `qwen3.5:9b`, `think` true, a report cap of 2048 and a report deadline of 1800 s
+- WHEN a decision sample runs
+- THEN its `summary.tsv` line and its `aggregate.tsv` line end with `qwen3.5:9b on 2048 1800s`, after the view and the report (the cost on `aggregate.tsv`)
+- AND with no override a local line ends with `granite4.1:8b default 512 600s`, and samples under different settings are separate `aggregate.tsv` lines
+
+#### Scenario: A local override on another route is refused (qwen-dev T3)
+- WHEN `replay-agent.sh --route cloud --think on` runs
+- THEN it exits 2 with `--think applies to --route local only, not cloud: ...`, before Maven
 
 #### Scenario: The replay run is excluded from the default build
 - WHEN `./mvnw test` runs without the `replay` profile

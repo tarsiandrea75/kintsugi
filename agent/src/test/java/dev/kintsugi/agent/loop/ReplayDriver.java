@@ -79,11 +79,12 @@ final class ReplayDriver {
 
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
-			"completionTokens", "seconds", "split", "recording", "view", "report");
+			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
+			"reportTimeout");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
-			"promptTokens", "completionTokens", "costUsd");
+			"promptTokens", "completionTokens", "costUsd", "model", "think", "reportCap", "reportTimeout");
 
 	/**
 	 * The coverage from which a sample counts as covered in {@code aggregate.tsv}: a dossier sample's model-chosen calls
@@ -317,7 +318,7 @@ final class ReplayDriver {
 				mode.viewFrom(this.decisionView), mode.reportFrom(this.decisionReport), n, IncidentStatus.COMPLETED,
 				truth, reported, verdict(IncidentStatus.COMPLETED, reported, truth), tools.recordedCalls(),
 				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), 0, 0, seconds,
-				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident);
+				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident, Settings.RULES);
 	}
 
 	/** A clock whose "now" is {@code startedAt}, then running: the recording's start, as the sample sees it. */
@@ -392,7 +393,8 @@ final class ReplayDriver {
 				mode.reportFrom(this.decisionReport), n,
 				status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(),
 				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), total(incident, "promptTokens"),
-				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident);
+				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident,
+				Settings.of(this.router.route(ModelTask.REPORT)));
 	}
 
 	/** The fault's first recording made in {@code mode}, if any. */
@@ -429,7 +431,8 @@ final class ReplayDriver {
 	}
 
 	/**
-	 * One line per fault, mode, route, split, view and report, in the samples' order: the distinct recordings the samples
+	 * One line per fault, mode, route, split, view, report and route settings ({@link Settings}), in the samples' order,
+	 * the settings written last, after the columns of every run before them: the distinct recordings the samples
 	 * opened on, the samples, matches out of samples, mean coverage, the covered samples (coverage at least
 	 * {@link #COVERED_THRESHOLD}) and the matches among them, the samples whose {@code DOSSIER} step made calls and had
 	 * none unrecorded out of samples, tokens and, on the cloud route, the estimated cost at
@@ -437,11 +440,10 @@ final class ReplayDriver {
 	 * recordings, which are the independent observations.
 	 */
 	static List<String> aggregate(List<Sample> samples) {
-		Map<String, List<Sample>> groups = new LinkedHashMap<>();
+		Map<List<String>, List<Sample>> groups = new LinkedHashMap<>();
 		for (Sample sample : samples) {
-			groups.computeIfAbsent(
-					String.join("\t", sample.fault(), sample.mode().value(), sample.route(), sample.split(),
-							sample.viewColumn(), sample.reportColumn()),
+			groups.computeIfAbsent(List.of(String.join("\t", sample.fault(), sample.mode().value(), sample.route(),
+					sample.split(), sample.viewColumn(), sample.reportColumn()), sample.settings().columns()),
 					key -> new ArrayList<>())
 				.add(sample);
 		}
@@ -465,10 +467,10 @@ final class ReplayDriver {
 					: !cloud || (prompt == null && completion == null) ? NONE
 							: format("%.4f", (orZero(prompt) * PROMPT_USD_PER_MILLION
 									+ orZero(completion) * COMPLETION_USD_PER_MILLION) / 1_000_000);
-			lines.add(String.join("\t", key, String.valueOf(recordings), String.valueOf(group.size()),
+			lines.add(String.join("\t", key.get(0), String.valueOf(recordings), String.valueOf(group.size()),
 					matches + "/" + group.size(), format("%.2f", coverage), String.valueOf(covered.size()),
 					matchesCovered + "/" + covered.size(), dossierCovered + "/" + group.size(), shown(prompt),
-					shown(completion), cost));
+					shown(completion), cost, key.get(1)));
 		});
 		return lines;
 	}
@@ -650,7 +652,8 @@ final class ReplayDriver {
 	 * One scored sample. {@code split} is its case's split, or {@code -} for an explorer or dossier sample, which is no
 	 * case; {@code recording} is the stem of the recording it opened on; {@code view} is the dossier view of a decision
 	 * sample, none for the others, which apply none; {@code report} is likewise the report a decision sample asked for.
-	 * The four come in the order of their {@code summary.tsv} columns.
+	 * The four come in the order of their {@code summary.tsv} columns. {@code settings} are the route settings the sample
+	 * ran with, its last four columns ({@link Settings}).
 	 * {@code recorded}, {@code unrecorded}, {@code coverage} and {@code conflicts} are the sample's
 	 * {@link ReplayLabTools} counters; {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
 	 * step's calls and those no recording held; a token count is null when no step counted it.
@@ -659,7 +662,7 @@ final class ReplayDriver {
 			Optional<DossierView> view, Optional<DecisionReport> report, int n, IncidentStatus status, String truth,
 			String reported, String verdict, int recorded, int unrecorded, double coverage, int conflicts,
 			Integer promptTokens, Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded,
-			ObjectNode incident) {
+			ObjectNode incident, Settings settings) {
 
 		/** The sample's line of {@code summary.tsv}, in {@link #SUMMARY_HEADER}'s columns. */
 		String summaryLine() {
@@ -667,7 +670,7 @@ final class ReplayDriver {
 					this.status.name(), this.truth, this.reported, this.verdict, String.valueOf(this.recorded),
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
-					this.recording, viewColumn(), reportColumn());
+					this.recording, viewColumn(), reportColumn(), this.settings.columns());
 		}
 
 		/** The view as {@code summary.tsv} and {@code aggregate.tsv} write it: its value, or {@code -} for none. */
@@ -678,6 +681,32 @@ final class ReplayDriver {
 		/** The report as {@code summary.tsv} and {@code aggregate.tsv} write it: its value, or {@code -} for none. */
 		String reportColumn() {
 			return this.report.map(DecisionReport::value).orElse(NONE);
+		}
+
+	}
+
+	/**
+	 * The route settings a sample ran with, the last four columns of {@code summary.tsv} and {@code aggregate.tsv}
+	 * (agent spec, "Replay of recorded tool outputs"; odd/tasks/qwen-dev.md T3): the model, its thinking setting
+	 * ({@code on}, {@code off} or {@code default}, see {@link ModelRoute#thinking}), the report's answer cap and the
+	 * report's deadline, written in seconds with an {@code s}. They are the route's effective values, overridden or
+	 * not, so a line is attributable to the model and the settings that wrote it. Config 0 calls no model: its model is
+	 * {@link #RULES_MODEL} and the other three are {@code -}.
+	 */
+	record Settings(String model, String think, String reportCap, String reportTimeout) {
+
+		static final Settings RULES = new Settings(RULES_MODEL, NONE, NONE, NONE);
+
+		/** The settings of {@code route}'s report call. */
+		static Settings of(ModelRoute route) {
+			Duration deadline = route.callTimeouts().report();
+			String timeout = deadline.toMillis() % 1000 == 0 ? deadline.toSeconds() + "s" : deadline.toMillis() + "ms";
+			return new Settings(route.model(), route.thinking(), String.valueOf(route.numPredict().report()), timeout);
+		}
+
+		/** The four columns, tab-separated. */
+		String columns() {
+			return String.join("\t", this.model, this.think, this.reportCap, this.reportTimeout);
 		}
 
 	}

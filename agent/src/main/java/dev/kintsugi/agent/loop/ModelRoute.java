@@ -30,6 +30,12 @@ public sealed interface ModelRoute permits OllamaRoute, AnthropicRoute {
 	NumPredict numPredict();
 
 	/**
+	 * The route's thinking setting as a replay records it (agent spec, "Replay of recorded tool outputs"): {@code on} or
+	 * {@code off} when the route sends one, {@code default} when it leaves it to the model.
+	 */
+	String thinking();
+
+	/**
 	 * The options of one call: the route's settings, the answer's cap, the tool definitions offered (none for the
 	 * report) and, for the report, the JSON schema the answer is constrained by. {@code wait} is how long the loop
 	 * waits for this call, its deadline or the incident's time left, whichever ends first; a route whose client does

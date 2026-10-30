@@ -13,10 +13,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * (agent spec, "Budgets")
  * @param numPredict the answer caps per kind of call, {@code num-predict.first-act}, {@code .act} and {@code .report}
  * (agent spec, "Answer caps")
+ * @param think Ollama's {@code think} request field, {@code kintsugi.agent.model.think} (agent spec, "Routes";
+ * ADR-017): null, the default, sends no such field, so every request is the one sent before the field existed;
+ * {@code true} or {@code false} sends it with that value. An empty value, as {@code KINTSUGI_AGENT_MODEL_THINK=}, binds
+ * to null, so a replay can clear one left in the shell.
  */
 @ConfigurationProperties("kintsugi.agent.model")
 public record ModelRouteProperties(String name, double temperature, int numCtx, CallTimeouts callTimeout,
-		NumPredict numPredict) {
+		NumPredict numPredict, Boolean think) {
 
 	/** Both groups are required: without them every call would fail at its first use instead of at start. */
 	public ModelRouteProperties {

@@ -64,7 +64,7 @@ class DefaultBudgetsTest {
 	@Test
 	void theLoopsReadTimeoutFollowsTheReportDeadline() {
 		ModelRouteProperties route = new ModelRouteProperties("granite4.1:8b", 0, 8192, deadlines,
-				new NumPredict(384, 160, 512));
+				new NumPredict(384, 160, 512), null);
 
 		assertThat(LoopConfig.readTimeout(route, loop)).isEqualTo(Duration.ofSeconds(600));
 	}

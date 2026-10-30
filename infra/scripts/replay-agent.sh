@@ -16,6 +16,8 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --mode decision --view sheets   # the dossier as one fact sheet per service
   infra/scripts/replay-agent.sh --mode decision --view sheets --report assessed   # each service's role first
   infra/scripts/replay-agent.sh --route rules --mode decision   # Config 0: the rules alone, no model (ADR-016)
+  infra/scripts/replay-agent.sh --route local --mode decision --model qwen3.5:9b --think on \
+    --report-cap 2048 --report-timeout 1800   # another local model, thinking, with its own report cap and deadline
 
   --route cloud|local|rules      the model's route (default cloud), or rules: Config 0, decision mode only
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
@@ -25,6 +27,10 @@ recorded tool outputs").
   --view tables|sheets           decision: how the dossier is written for the model (default tables)
   --report plain|assessed        decision: which report the model writes (default plain); assessed needs --view sheets
   --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
+  --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
+  --think on|off                 local: send Ollama's think field with this value (default: no think field)
+  --report-cap N                 local: the report's answer cap, num_predict, 1 to 99999 tokens (default 512)
+  --report-timeout SECONDS       local: the report call's deadline, 1 to 2700 s (default 600)
 
 It runs ReplayRunTest (./mvnw test -Preplay) in agent/: the real loop and the route's real model over the recorded
 tool outputs in agent/src/test/resources/replay/, each sample scored against the recorded truth. It writes
@@ -59,6 +65,15 @@ the call graph. assessed with the tables stops the run here, before Maven, since
 owners. Every line of summary.tsv and aggregate.tsv names the view and the report, so a result is attributable to its
 variant.
 
+--model, --think, --report-cap and --report-timeout override the local route for this run only (agent spec, "Routes",
+"Answer caps" and "Budgets"; ADR-017; odd/tasks/qwen-dev.md), and are refused on any other route. They reach the agent
+as KINTSUGI_AGENT_MODEL_NAME, KINTSUGI_AGENT_MODEL_THINK (true or false), KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT and
+KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT; an option not given clears its variable, so the run never takes a value the
+shell left, and the agent's default applies. With thinking on, Ollama counts the thinking tokens against the cap, so
+set the cap and the deadline from a calibration. The report deadline stays within the incident's 45-minute budget. The
+last four columns of summary.tsv and aggregate.tsv record each sample's model, think (on, off, or default when no field
+was sent; off on the cloud route, which disables thinking; - for rules), report cap and report deadline.
+
 Explorer and dossier samples pool the fault's stress recordings, the ones they were measured on, the first one in the
 sample's mode served first, so recordings imported into dev, holdout or probe never change them; --split, --repeats,
 --view and --report are refused there, as --samples is in decision mode.
@@ -69,7 +84,7 @@ and both stay available to inspect that, not to score the agent.
 
 COST: on the cloud route every sample is paid model calls. Run it only with the human's go-ahead, and record the cost.
 The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reaches Maven through the environment only
-and is never printed. The local route needs Ollama serving granite4.1:8b. Both need docker (Testcontainers' Postgres).
+and is never printed. The local route needs Ollama serving granite4.1:8b, or the --model given. Both need docker (Testcontainers' Postgres).
 REPLAY_DIR, when set, names the replay directory instead (used to try the options on a temporary manifest).
 Exit codes: 0 when every sample ran (a MISS is a measurement), 1 when the run failed, 2 on a bad option, a missing
 key or a missing model, and in decision mode on a missing recording or a manifest line the driver refuses.
@@ -86,12 +101,12 @@ route=cloud
 mode=dossier
 faults=F1,F2,F3
 # Unset until given: decision mode refuses --samples, and the other modes refuse --split, --repeats, --view and
-# --report.
-unset samples split repeats view report
+# --report; every route but local refuses --model, --think, --report-cap and --report-timeout.
+unset samples split repeats view report model think report_cap report_timeout
 while (( $# )); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --route|--mode|--samples|--split|--repeats|--view|--report|--faults)
+    --route|--mode|--samples|--split|--repeats|--view|--report|--faults|--model|--think|--report-cap|--report-timeout)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
       set -- "$1=$2" "${@:3}" ;;
     --route=*) route=${1#*=}; shift ;;
@@ -102,6 +117,10 @@ while (( $# )); do
     --view=*) view=${1#*=}; shift ;;
     --report=*) report=${1#*=}; shift ;;
     --faults=*) faults=${1#*=}; shift ;;
+    --model=*) model=${1#*=}; shift ;;
+    --think=*) think=${1#*=}; shift ;;
+    --report-cap=*) report_cap=${1#*=}; shift ;;
+    --report-timeout=*) report_timeout=${1#*=}; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -111,6 +130,22 @@ done
   || { echo "Unknown mode '$mode'; choose explorer, dossier, decision or both" >&2; exit 2; }
 [[ "$route" != rules || "$mode" == decision ]] || { echo "--route rules replays decision mode only, not $mode:" \
   "Config 0 diagnoses the gathered dossier and has no explorer or dossier loop" >&2; exit 2; }
+# The local route's overrides (odd/tasks/qwen-dev.md T3), checked before anything runs.
+for option in model think report_cap report_timeout; do
+  [[ -z "${!option+given}" || "$route" == local ]] || { echo "--${option//_/-} applies to --route local only, not" \
+    "$route: it overrides the local Ollama model's settings" >&2; exit 2; }
+done
+[[ -z "${model+given}" || "$model" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]*$ ]] \
+  || { echo "--model needs an Ollama model name such as qwen3.5:9b, not '$model'" >&2; exit 2; }
+[[ -z "${think+given}" || "$think" == on || "$think" == off ]] \
+  || { echo "Unknown think '$think'; choose on or off" >&2; exit 2; }
+[[ -z "${report_cap+given}" || "$report_cap" =~ ^[1-9][0-9]{0,4}$ ]] \
+  || { echo "--report-cap needs an integer from 1 to 99999 tokens, not '$report_cap'" >&2; exit 2; }
+# The incident's budget, kintsugi.agent.loop.incident-timeout (45 min), bounds every call: a longer deadline would
+# never be reached.
+[[ -z "${report_timeout+given}" || ( "$report_timeout" =~ ^[1-9][0-9]{0,3}$ && "$report_timeout" -le 2700 ) ]] \
+  || { echo "--report-timeout needs seconds from 1 to 2700, the incident's 45-minute budget, not" \
+    "'$report_timeout'" >&2; exit 2; }
 # At most 3 digits for --samples and --repeats, so the bound on cloud samples below cannot wrap around in bash's 64-bit
 # arithmetic.
 if [[ "$mode" == decision ]]; then
@@ -198,11 +233,31 @@ elif [[ "$route" == rules ]]; then
 else
   # The local route never needs the key: keep it out of the test JVM.
   unset ANTHROPIC_API_KEY
-  if ! curl -fsS --max-time "$CURL_MAX_SECONDS" "$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
-    echo "Ollama on $OLLAMA does not serve $MODEL (ollama pull $MODEL)" >&2
+  local_model=${model-$MODEL}
+  if ! curl -fsS --max-time "$CURL_MAX_SECONDS" "$OLLAMA/api/tags" 2>/dev/null \
+      | grep -qF "\"name\":\"$local_model\""; then
+    echo "Ollama on $OLLAMA does not serve $local_model (ollama pull $local_model)" >&2
     exit 2
   fi
 fi
+# The local route's overrides reach the agent through its environment (ModelRouteProperties, by Spring's relaxed
+# binding). Each is set when its option is given and cleared otherwise, so the run never takes a value the shell left
+# and the agent's own default, application.yaml's, applies. The summary records the effective values either way.
+unset KINTSUGI_AGENT_MODEL_NAME KINTSUGI_AGENT_MODEL_THINK KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT \
+  KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT
+overrides=""
+if [[ -n "${model+given}" ]]; then export KINTSUGI_AGENT_MODEL_NAME=$model; overrides+=" model $model;"; fi
+if [[ -n "${think+given}" ]]; then
+  export KINTSUGI_AGENT_MODEL_THINK=$([[ "$think" == on ]] && echo true || echo false)
+  overrides+=" think $think;"
+fi
+if [[ -n "${report_cap+given}" ]]; then
+  export KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT=$report_cap; overrides+=" report cap $report_cap;"
+fi
+if [[ -n "${report_timeout+given}" ]]; then
+  export KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT=${report_timeout}s; overrides+=" report timeout ${report_timeout}s;"
+fi
+[[ -z "$overrides" ]] || info "local route overrides:${overrides%;}"
 
 OUT_DIR="$REPO_DIR/infra/scripts/out/replay-$(date -u +%Y%m%dT%H%M%SZ)-$route"
 if [[ "$mode" == decision ]]; then

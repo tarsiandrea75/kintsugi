@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -123,6 +124,23 @@ final class ScriptedChatModel implements ChatModel {
 		}
 		this.script.add(prompt -> new ChatResponse(List.of(new Generation(new AssistantMessage(text))),
 				metadata.build()));
+		return this;
+	}
+
+	/**
+	 * Answers {@code text} after {@code thinking}, as Spring AI 2.0.1's {@code OllamaChatModel} returns a thinking
+	 * model's answer: the content is the answer, and the thinking travels apart, as the message's {@code thinking}
+	 * property and the generation's {@code thinking} metadata.
+	 */
+	ScriptedChatModel thinking(String thinking, String text) {
+		AssistantMessage message = AssistantMessage.builder()
+			.content(text)
+			.properties(Map.of("thinking", thinking))
+			.build();
+		this.script.add(prompt -> new ChatResponse(
+				List.of(new Generation(message,
+						ChatGenerationMetadata.builder().finishReason("stop").metadata("thinking", thinking).build())),
+				ChatResponseMetadata.builder().usage(new DefaultUsage(10, 5)).build()));
 		return this;
 	}
 
