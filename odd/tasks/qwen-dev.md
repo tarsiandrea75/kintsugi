@@ -31,7 +31,7 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 ## Tasks
 
 - [x] T1 ADR-017: `qwen3.5:9b` as the experiment's second local model (version, quantization, licence, why this one). Route: inline (one doc).
-- [ ] T2 Scorer: a `TIMED_OUT` sample is a miss and not covered; tests first; evals spec. Route: delegated writer.
+- [x] T2 Scorer: a `TIMED_OUT` sample is a miss and not covered; tests first; evals spec. Route: delegated writer.
 - [ ] T3 Replay overrides (`--model`, `--think`, `--report-cap`, `--report-timeout`), recorded per sample; tests first; agent spec "Routes"/"Answer caps". Route: delegated writer.
 - [ ] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
 - [ ] T5 The dev plan, committed before the dev runs. Route: inline.
@@ -60,6 +60,8 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
 
 - 2026-10-30: T1 done, `docs/adr/ADR-017-qwen-dev-experiment.md`. Checked: Ollama 0.31.1, digest `56671c2ab938`, Apache 2.0 (`ollama show --license`); Qwen 3.5 small series released 2026-03-01 and listed on Ollama with thinking (web search). Passive doc, structural readback only.
 
+- 2026-10-30: T2 done. Route: inline, against the declared delegated route: three small, understood edits (about 35 lines), cheaper than a writer's handoff. ADR-015 defines coverage as the share of fault cases with an answer; the spec and `scoring.py` counted only abstentions, so a `TIMED_OUT`, `FAILED` or `INVALID_REPORT` row counted as covered. `FaultScore.unanswered` now counts them; AC@1 and the paired rows are unchanged. RED: the new test failed; GREEN: 66 passed. The lab holdout-1 was rescored from the same run directories (same sha256) and `docs/benchmark.md` regenerated: only A changes, coverage 100% → 73%, selective 13% → 18% (F2: 2 of 2 answered right). Earlier committed results keep the old coverage; they have no timeouts except V2 cloud's 4 `INVALID_REPORT` (coverage 87% there would read 60%).
+
 ## Next step
 
-T2 and T3.
+T3.

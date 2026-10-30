@@ -103,6 +103,8 @@ class FaultScore:
     n: int
     correct: int
     abstained: int
+    # Fault rows with no answer at all: not COMPLETED, or no report (ADR-015, "Coverage").
+    unanswered: int = 0
 
     @property
     def ac1(self):
@@ -114,12 +116,15 @@ class FaultScore:
 
     @property
     def coverage(self):
-        return (self.n - self.abstained) / self.n
+        return self.answered / self.n
+
+    @property
+    def answered(self):
+        return self.n - self.abstained - self.unanswered
 
     @property
     def selective(self):
-        answered = self.n - self.abstained
-        return self.correct / answered if answered else None
+        return self.correct / self.answered if self.answered else None
 
 
 @dataclass(frozen=True)
@@ -147,7 +152,9 @@ class ConfigScore:
 
 def _fault_score(name, rows):
     return FaultScore(name, len(rows), sum(r.outcome == CORRECT for r in rows),
-                      sum(r.outcome == ABSTAIN for r in rows))
+                      sum(r.outcome == ABSTAIN for r in rows),
+                      sum(r.outcome == MISS and (r.status != "COMPLETED" or r.reported in ("", NO_REPORT))
+                          for r in rows))
 
 
 def summarize(rows):

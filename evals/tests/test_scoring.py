@@ -169,3 +169,18 @@ def test_paired_skips_mcnemar_when_cases_have_repetitions(tmp_path):
     assert result.mcnemar_p is None
     assert (result.only_first, result.only_second) == (None, None)
     assert result.diff == pytest.approx(0.6)
+
+
+def test_a_fault_row_with_no_answer_lowers_coverage(tmp_path):
+    rows = [
+        ("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1"),
+        ("F1", "TIMED_OUT", TRUTH, "none", "r2-F1"),
+        ("F1", "INVALID_REPORT", TRUTH, "none", "r3-F1"),
+        ("F1", "COMPLETED", TRUTH, "payment-service|DEPENDENCY_LATENCY", "r4-F1"),
+    ]
+    [score] = summarize(read_summary(write_tsv(tmp_path / "summary.tsv", rows), label="A"))
+    pooled = score.pooled
+    assert (pooled.n, pooled.correct, pooled.abstained, pooled.unanswered) == (4, 1, 0, 2)
+    assert pooled.ac1 == pytest.approx(1 / 4)
+    assert pooled.coverage == pytest.approx(2 / 4)
+    assert pooled.selective == pytest.approx(1 / 2)

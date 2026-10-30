@@ -59,11 +59,15 @@ Each row MUST be rescored from `status`, `truth` and `reported`, ignoring `verdi
 - on a fault truth, a COMPLETED run reporting the truth is correct, `UNKNOWN|UNKNOWN` is an abstention, anything else is a miss;
 - on the healthy truth `NONE|NONE` (provisional until follow-up 10, lab-realism), `UNKNOWN|UNKNOWN` is correct, any cause is a false alarm, and no report is a miss.
 
-AC@1 MUST count an abstention as not correct. Coverage MUST be the share of fault rows that are not abstentions; selective accuracy the share correct among them. Healthy rows MUST NOT enter AC@1 or the paired comparison.
+AC@1 MUST count an abstention as not correct. Coverage MUST be the share of fault rows with an answer (ADR-015): an abstention, a row whose status is not `COMPLETED` (`TIMED_OUT`, `FAILED`, `INVALID_REPORT`) and a row with no report have none. Selective accuracy MUST be the share correct among the answered rows. Healthy rows MUST NOT enter AC@1 or the paired comparison.
 
 #### Scenario: Abstention on a fault
 - Given a COMPLETED fault row reporting `UNKNOWN|UNKNOWN`
 - Then it is an abstention, AC@1 counts it as not correct, and coverage drops
+
+#### Scenario: Fault row with no answer
+- Given a fault row with status `TIMED_OUT` or `INVALID_REPORT` and report `none`
+- Then AC@1 counts it as not correct, coverage drops, and selective accuracy leaves it out
 
 #### Scenario: Healthy case answered UNKNOWN
 - Given a COMPLETED row with truth `NONE|NONE` reporting `UNKNOWN|UNKNOWN`

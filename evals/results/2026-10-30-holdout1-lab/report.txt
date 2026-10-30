@@ -7,7 +7,7 @@ A: route local, mode decision, view tables; 15 fault cases, 0 healthy
 A  F1       0/5   AC@1   0%  [0%, 43%]
 A  F2       2/5   AC@1  40%  [12%, 77%]
 A  F3       0/5   AC@1   0%  [0%, 43%]
-A  pooled   2/15  AC@1  13%  [4%, 38%]  coverage 100%  selective 13%
+A  pooled   2/15  AC@1  13%  [4%, 38%]  coverage 73%  selective 18%
 D: route cloud, mode decision, view tables; 15 fault cases, 0 healthy
 D  F1       5/5   AC@1 100%  [57%, 100%]
 D  F2       5/5   AC@1 100%  [57%, 100%]
