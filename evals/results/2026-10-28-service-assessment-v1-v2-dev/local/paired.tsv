@@ -1,0 +1,4 @@
+first	second	cases	only_first	only_second	mcnemar_p	holm_p	diff	boot_low	boot_high
+A-M0	A-V1	15	0	0	1.0	1.0	0.0000	0.0000	0.0000
+A-M0	A-V2	15	0	0	1.0	1.0	0.0000	0.0000	0.0000
+A-V1	A-V2	15	0	0	1.0	1.0	0.0000	0.0000	0.0000

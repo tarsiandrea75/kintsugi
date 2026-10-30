@@ -139,8 +139,8 @@ The gates; the human decides at each one:
 - [x] T2 The assessed report: schema, prompt task, code-derived evidence, consistency rules, and `kintsugi.agent.decision.report`. Route: delegated writer (loop package, tests, spec).
 - [x] T2r Replays ask for the assessed report: `replay-agent.sh --report`, as `--view` in T1 (b) (`ReplayDriver`, `ReplayRunTest`, `replay-agent.sh`, `test-lib.sh`). Plus the T2 review's WARNING R3-quote-orElseThrow at `ReportCheck.java:236-237`: an owned line with no match in the text must give an invalid result for the retry, not throw. Route: delegated writer.
 - [x] T3 ADR-014 without the bar, plus the stop rule (vision §5); ADR-011's status; the spec's remaining parts. Route: delegated writer, with T2r (the plan had said inline).
-- [ ] T4 Measurement on `dev` under a measurement plan committed before the run (`evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`): V1 and V2, local (about 2 h each) and cloud (about $0.05 each), each against a re-run of the incumbent. Pick one. `holdout` is not read in this feature: holdout-1 is read in follow-up feature 4 (`odd/tasks/vision-revision.md`), next to Config 0. Route: inline.
-- [ ] T5 A descriptive live local round, `verify-agent.sh --mode decision --route local`: it is reported, not a pass or fail gate. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
+- [x] T4 Measurement on `dev` under a measurement plan committed before the run (`evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`): V1 and V2, local (about 2 h each) and cloud (about $0.05 each), each against a re-run of the incumbent. Pick one. `holdout` is not read in this feature: holdout-1 is read in follow-up feature 4 (`odd/tasks/vision-revision.md`), next to Config 0. Route: inline.
+- [x] T5 A descriptive live local round, `verify-agent.sh --mode decision --route local`: it is reported, not a pass or fail gate. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
 
 ## Delivery
 
@@ -288,7 +288,31 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - ADR-014's status says the feature's plan was re-scoped on 2026-10-25 by the vision revision; the ADR's date stays 2026-10-28.
   - The `Sample` record's parameters are wrapped like their neighbours.
   - RED: `theAssessedReportWithTheTablesIsRefusedBeforeAnyDecisionSample` and `explorerAndDossierSamplesIgnoreTheAssessedReportWithTheTables` both failed with the `IllegalArgumentException` thrown when the driver was built. GREEN: `ReplayDriverTest` 23 tests; the full suite 553 tests, 0 failures; `test-lib.sh` 154 cases; the scorer 57 tests.
+- 2026-10-29: T4, the cloud route (route: inline). The three cloud replays ran at `b30ae74` on 2026-10-29, 15 samples each, and are scored in `evals/results/2026-10-28-service-assessment-v1-v2-dev/cloud/`.
+  - D-M0 (tables+plain) 14/15; D-V1 (sheets+plain) 15/15; D-V2 (sheets+assessed) 9/15, coverage 87%.
+  - Per-fault nets against D-M0, case by case from `inputs/*-summary.tsv`:
+    - D-V1: F1 +1, F2 0, F3 0, pooled +1. No fault class loses a case, so V1 meets the cloud clause of the plan's eligibility rule.
+    - D-V2: F1 -2, F2 0, F3 -3, pooled -5. F1 and F3 each lose more than 1 case, so V2 is not eligible, whatever the local result.
+  - D-V2's six misses: four `INVALID_REPORT` (F1 r3, r5, r9; F3 r7) and two `UNKNOWN|UNKNOWN` abstentions (F3 r1, r3).
+  - Paired (descriptive): D-V1 - D-M0 McNemar p = 1, +7 points, bootstrap [+0, +20]; D-V2 - D-M0 McNemar p = 0.062 (Holm 0.12), -33 points, bootstrap [-60, -13].
+  - The first local incumbent run (`replay-20261029T011031Z-local`) stopped at 14 of 15 samples with no process left, so it is discarded. The three local runs are rerun from the start.
+- 2026-10-30: T4 done, the local route (route: inline). The three local replays ran one after the other at `bf016f4` (the code is that of `b30ae74`), from 2026-10-29 23:19 UTC to 2026-10-30 about 03:30 UTC, 15 samples each. They are scored in `evals/results/2026-10-28-service-assessment-v1-v2-dev/local/`.
+  - A-M0, A-V1 and A-V2 are each 5/15: F1 0/5, F2 5/5, F3 0/5, and they match on the same cases. Per-fault nets against A-M0 are 0, 0, 0 for both variants. McNemar p = 1, and the bootstrap is [+0, +0].
+  - The misses differ in kind:
+    - A-M0: payment-service, five times `DEPENDENCY_LATENCY` and five times `DEPENDENCY_REJECTING`.
+    - A-V1: payment-service eight times and order-service twice, every one `DEPENDENCY_REJECTING` or `DEPENDENCY_LATENCY`.
+    - A-V2: all ten F1 and F3 samples are `INVALID_REPORT`, after the one retry. They used about twice A-V1's prompt tokens on F1 and F3.
+  - Rerun check (descriptive): A-M0 against M0 of 2026-10-25 (`results/2026-10-25-m0-dev/inputs/A-summary.tsv`) is 5/15 against 5/15, with no discordant case.
+  - Decision under the plan's rule:
+    - V1 does not pass on the local route: its pooled net gain is 0, and the rule needs at least 3.
+    - V2 is not eligible: it fails on both routes.
+    - So no variant is eligible. The defaults stay `tables` and `plain`. Under the stop rule (ADR-014, vision §5), the local miss is documented, not chased. The human decided on 2026-10-30 to keep the V1 and V2 code, switched off behind `kintsugi.agent.decision.view` and `kintsugi.agent.decision.report`, whose defaults stay `tables` and `plain`.
+  - What it shows: arranging the dossier per service does not change how `granite4.1:8b` reads F1 and F3. This is the same limit `dossier-change-column` met. On the local model, the assessed schema turns wrong answers into invalid ones. On the cloud route, V1's 15/15 is reported and is not kept by this rule.
+
+- 2026-10-30: T5 done (route: inline). One live local round on the defaults (`tables`, `plain`), `verify-agent.sh --mode decision --route local`, from 10:57 to 12:24 UTC (5,216 s), run `infra/scripts/out/verify-agent-20261030T105752Z`.
+  - F1 MISS `payment-service|DEPENDENCY_LATENCY` (476 s); F2 MATCH (467 s); F3 MISS `payment-service|DEPENDENCY_REJECTING` (528 s). All three COMPLETED, every report valid.
+  - The live round agrees with the dev replays: the same answers as A-M0's F1 and F3 misses. The script's exit status 1 counts the two misses; it is descriptive, not a gate.
 
 ## Next step
 
-T4: run V1 and V2 on `dev` under the committed plan `evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`: tables+plain (the incumbent), sheets+plain and sheets+assessed, on the local route (about 2 h each) and the cloud route (about $0.05 each, with the human's go-ahead). Score each route with `kintsugi_evals score` and decide with the plan's rule (ADR-015's dev keep rule). `holdout` is not read.
+The feature is closed. Next: `rules-baseline` T5 (its measurement plan, then Config 0 on dev). The review document "Kintsugi: why the local agent is stuck" (claude.ai artifact) collects every attempt for an outside reviewer.

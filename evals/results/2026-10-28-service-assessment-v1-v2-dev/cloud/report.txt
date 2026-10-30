@@ -1,0 +1,18 @@
+D-M0: route cloud, mode decision, view tables; 15 fault cases, 0 healthy
+D-M0  F1       4/5   AC@1  80%  [38%, 96%]
+D-M0  F2       5/5   AC@1 100%  [57%, 100%]
+D-M0  F3       5/5   AC@1 100%  [57%, 100%]
+D-M0  pooled  14/15  AC@1  93%  [70%, 99%]  coverage 100%  selective 93%
+D-V1: route cloud, mode decision, view sheets; 15 fault cases, 0 healthy
+D-V1  F1       5/5   AC@1 100%  [57%, 100%]
+D-V1  F2       5/5   AC@1 100%  [57%, 100%]
+D-V1  F3       5/5   AC@1 100%  [57%, 100%]
+D-V1  pooled  15/15  AC@1 100%  [80%, 100%]  coverage 100%  selective 100%
+D-V2: route cloud, mode decision, view sheets; 15 fault cases, 0 healthy
+D-V2  F1       2/5   AC@1  40%  [12%, 77%]
+D-V2  F2       5/5   AC@1 100%  [57%, 100%]
+D-V2  F3       2/5   AC@1  40%  [12%, 77%]
+D-V2  pooled   9/15  AC@1  60%  [36%, 80%]  coverage 87%  selective 69%
+D-V1 - D-M0: 15 cases, D-V1 only 1, D-M0 only 0, exact McNemar p = 1 (Holm 1); difference +7 points, cluster bootstrap 95% [+0, +20] (seed 1, 10000 resamples)
+D-V2 - D-M0: 15 cases, D-V2 only 0, D-M0 only 5, exact McNemar p = 0.062 (Holm 0.12); difference -33 points, cluster bootstrap 95% [-60, -13] (seed 1, 10000 resamples)
+D-V2 - D-V1: 15 cases, D-V2 only 0, D-V1 only 6, exact McNemar p = 0.031 (Holm 0.094); difference -40 points, cluster bootstrap 95% [-67, -13] (seed 1, 10000 resamples)
