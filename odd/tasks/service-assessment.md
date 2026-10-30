@@ -140,7 +140,7 @@ The gates; the human decides at each one:
 - [x] T2r Replays ask for the assessed report: `replay-agent.sh --report`, as `--view` in T1 (b) (`ReplayDriver`, `ReplayRunTest`, `replay-agent.sh`, `test-lib.sh`). Plus the T2 review's WARNING R3-quote-orElseThrow at `ReportCheck.java:236-237`: an owned line with no match in the text must give an invalid result for the retry, not throw. Route: delegated writer.
 - [x] T3 ADR-014 without the bar, plus the stop rule (vision §5); ADR-011's status; the spec's remaining parts. Route: delegated writer, with T2r (the plan had said inline).
 - [x] T4 Measurement on `dev` under a measurement plan committed before the run (`evals/plans/2026-10-28-service-assessment-v1-v2-dev.md`): V1 and V2, local (about 2 h each) and cloud (about $0.05 each), each against a re-run of the incumbent. Pick one. `holdout` is not read in this feature: holdout-1 is read in follow-up feature 4 (`odd/tasks/vision-revision.md`), next to Config 0. Route: inline.
-- [ ] T5 A descriptive live local round, `verify-agent.sh --mode decision --route local`: it is reported, not a pass or fail gate. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
+- [x] T5 A descriptive live local round, `verify-agent.sh --mode decision --route local`: it is reported, not a pass or fail gate. It needs `infra/compose.yaml` to pass the chosen variant's settings to the agent container. Route: inline (lab, about 70 minutes).
 
 ## Delivery
 
@@ -309,6 +309,10 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
     - So no variant is eligible. The defaults stay `tables` and `plain`. Under the stop rule (ADR-014, vision §5), the local miss is documented, not chased. The human decided on 2026-10-30 to keep the V1 and V2 code, switched off behind `kintsugi.agent.decision.view` and `kintsugi.agent.decision.report`, whose defaults stay `tables` and `plain`.
   - What it shows: arranging the dossier per service does not change how `granite4.1:8b` reads F1 and F3. This is the same limit `dossier-change-column` met. On the local model, the assessed schema turns wrong answers into invalid ones. On the cloud route, V1's 15/15 is reported and is not kept by this rule.
 
+- 2026-10-30: T5 done (route: inline). One live local round on the defaults (`tables`, `plain`), `verify-agent.sh --mode decision --route local`, from 10:57 to 12:24 UTC (5,216 s), run `infra/scripts/out/verify-agent-20261030T105752Z`.
+  - F1 MISS `payment-service|DEPENDENCY_LATENCY` (476 s); F2 MATCH (467 s); F3 MISS `payment-service|DEPENDENCY_REJECTING` (528 s). All three COMPLETED, every report valid.
+  - The live round agrees with the dev replays: the same answers as A-M0's F1 and F3 misses. The script's exit status 1 counts the two misses; it is descriptive, not a gate.
+
 ## Next step
 
-T5 runs on the defaults (`tables`, `plain`), so `infra/compose.yaml` needs no variant settings. `rules-baseline` T5 can now start, because the local replays are over.
+The feature is closed. Next: `rules-baseline` T5 (its measurement plan, then Config 0 on dev). The review document "Kintsugi: why the local agent is stuck" (claude.ai artifact) collects every attempt for an outside reviewer.
