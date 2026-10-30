@@ -69,6 +69,13 @@ Forecast about 350 authored lines (plan 70, command and tests about 200, spec 40
 
 - 2026-10-30: T4 done. Route: inline. `docs/benchmark.md` v0 generated with `cd evals && python3 -m kintsugi_evals benchmark --out ../docs/benchmark.md results/2026-10-30-holdout1-lab`; two runs give the same sha256 (`883be677…`), so AC3 holds. The paired-table headers said "Second only | First only" in the order of `paired.tsv`, which reads backwards against the pair label "A - 0"; renamed to "Left only | Right only" (test first: 1 failed, then 65 passed). The reading lives in `docs/STATE.md` and the journal, not in the generated file, so regeneration stays byte-identical. Reading: the rules beat the local model on the lab holdout, the cloud beats the rules, and 0 and A are disjoint (oracle 12/15). The M2 check of vision §7 is met.
 
+- 2026-10-30: native review of the slice `9b56927..8d57bdc` (medium, 434 lines, `slice_budget_reached`): consent granted, one lens (reliability), approved and acknowledged (lineage `review-0a1b72ce36bcce1d`). Informational findings, left as follow-ups:
+  - WARNING R3-silent-degraded-render: a missing seed line or a zero-byte TSV renders a valid-looking document with exit 0; only file existence is checked.
+  - WARNING R3-timeouts-reported-as-full-coverage: the scorer counts A's 4 `TIMED_OUT` samples as covered, so A's coverage reads 100%.
+  - WARNING R3-byte-identity-test-normalizes-newlines: the AC3 test normalizes newlines, so it does not prove byte identity.
+  - WARNING R3-regenerate-scenarios-untested: REQ-10's regeneration scenarios have no direct test.
+  - SUGGESTION R3-double-rounding-can-disagree.
+
 ## Next step
 
 Feature closed. Next: the qwen3.5:9b dev experiment under its own plan.

@@ -67,6 +67,8 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 ## Follow-ups
 
+benchmark-v0 review (details in `odd/tasks/benchmark-v0.md`): the scorer counts `TIMED_OUT` samples as covered (A's holdout coverage reads 100% with 4 timeouts); the renderer does not fail on a zero-byte TSV or a missing seed line; the byte-identity test normalizes newlines.
+
 This session (details in each feature document):
 - service-assessment: WARNING R2-config-name-asymmetry (the scorer's default config name gains `-<report>` only when the TSV has the column; T4 is not affected, since it labels every input); SUGGESTION R3-quote-null-fallback; `docs/setup.md` names `--view` but not `--report`.
 - Untracked files in the repository root (`export_bundle.sh`, `project_bundle.*`, `scan_deep_project.sh`, `project_deep_overview.txt`) are not part of any feature; the human decides whether to keep them.
