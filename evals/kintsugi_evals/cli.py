@@ -52,6 +52,9 @@ def _parser():
     score.add_argument("--out", help="write the result files to this directory")
     score.add_argument("--seed", type=int, default=DEFAULT_SEED, help="cluster bootstrap seed")
     score.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
+    bench = commands.add_parser("benchmark", help="render docs/benchmark.md from committed result dirs")
+    bench.add_argument("--out", required=True, help="the Markdown file to write")
+    bench.add_argument("dirs", nargs="+", help="result dirs written by score --out, in document order")
     return parser
 
 
@@ -179,6 +182,24 @@ def _score(args):
     return 0
 
 
+def benchmark(args):
+    from .benchmark import FILES, render
+
+    results = []
+    for directory in args.dirs:
+        files = {}
+        for name in FILES:
+            path = Path(directory) / name
+            if not path.is_file():
+                print(f"benchmark: {path} not found", file=sys.stderr)
+                return 2
+            files[name] = path.read_text(encoding="utf-8")
+        results.append((directory, files))
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.out).write_text(render(args.out, results), encoding="utf-8", newline="\n")
+    return 0
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
-    return score(args)
+    return benchmark(args) if args.command == "benchmark" else score(args)

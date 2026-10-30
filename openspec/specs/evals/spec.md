@@ -1,6 +1,6 @@
 # Spec: evals (the scorer)
 
-The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` from `evals/`.
+The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`) from `evals/`.
 
 ## Requirements
 
@@ -100,3 +100,21 @@ The CLI MUST exit with a one-line message, not a traceback, when an input is mis
 - Given a committed `evals/results/<name>/inputs/` directory
 - When `score` runs on its copies with the same labels and seed
 - Then the report is the same as the committed `report.txt`
+
+### REQ-10 Benchmark document
+`python -m kintsugi_evals benchmark --out FILE DIR...` MUST render one Markdown file from result directories written by `score --out`, reading their `inputs.tsv`, `scores.tsv`, `paired.tsv` and `report.txt`. It MUST compute nothing: every number is copied from those files and formatted as `report.txt` formats it. Per directory, in the order given, it MUST write a table of configs by fault and pooled (matches/n, AC@1, Wilson interval) with coverage and selective accuracy, healthy false alarms when there are healthy rows, a table of the paired rows, the bootstrap seed and resamples, and each input's label, source and sha256. The header MUST name the exact regenerate command with the paths as given and say not to edit by hand. The same inputs MUST give the same bytes: no timestamp, file order preserved. A missing directory or file MUST exit with status 2 and a one-line message, not a traceback, and write nothing.
+
+#### Scenario: The M0 dev result
+- Given `evals/results/2026-10-25-m0-dev/`
+- When `benchmark --out FILE results/2026-10-25-m0-dev` runs
+- Then FILE has the row `| D | 4/5, 80% [38%, 96%] | 5/5, 100% [57%, 100%] | 5/5, 100% [57%, 100%] | 14/15, 93% [70%, 99%] | 100% | 93% |` and the paired row `| D - A | 15 | 9 | 0 | 0.0039 | 0.0039 | +60 | [+33, +87] |`
+
+#### Scenario: Regenerate byte for byte
+- Given a committed `docs/benchmark.md`
+- When the command in its header runs again from `evals/`
+- Then the file has no diff
+
+#### Scenario: A missing result
+- Given a directory with no `paired.tsv`
+- When `benchmark` runs on it
+- Then it exits with status 2, prints one line naming the missing file, and writes nothing
