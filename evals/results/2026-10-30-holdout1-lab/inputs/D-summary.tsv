@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5313	496	7.2	holdout	verify-agent-20261024T162555Z-r2-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5294	484	3.2	holdout	verify-agent-20261024T162555Z-r4-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5511	597	3.5	holdout	verify-agent-20261024T162555Z-r6-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5501	498	3.2	holdout	verify-agent-20261024T162555Z-r8-F1	tables	plain
+F1	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	5343	589	3.0	holdout	verify-agent-20261024T162555Z-r10-F1	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5337	581	3.3	holdout	verify-agent-20261024T162555Z-r2-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5346	503	2.9	holdout	verify-agent-20261024T162555Z-r4-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5319	563	3.5	holdout	verify-agent-20261024T162555Z-r6-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5337	513	3.1	holdout	verify-agent-20261024T162555Z-r8-F2	tables	plain
+F2	decision	cloud	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	5344	503	3.1	holdout	verify-agent-20261024T162555Z-r10-F2	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5111	516	3.3	holdout	verify-agent-20261024T162555Z-r2-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5312	508	3.2	holdout	verify-agent-20261024T162555Z-r4-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5131	513	3.1	holdout	verify-agent-20261024T162555Z-r6-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5320	533	3.1	holdout	verify-agent-20261024T162555Z-r8-F3	tables	plain
+F3	decision	cloud	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	5107	488	2.7	holdout	verify-agent-20261024T162555Z-r10-F3	tables	plain
