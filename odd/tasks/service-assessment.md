@@ -306,9 +306,9 @@ T1 alone came to about 1,870 authored lines, so it is two work-unit commits, eac
   - Decision under the plan's rule:
     - V1 does not pass on the local route: its pooled net gain is 0, and the rule needs at least 3.
     - V2 is not eligible: it fails on both routes.
-    - So no variant is eligible. The defaults stay `tables` and `plain`. Under the stop rule (ADR-014, vision §5), the local miss is documented, not chased. The human decides which variant code is deleted.
+    - So no variant is eligible. The defaults stay `tables` and `plain`. Under the stop rule (ADR-014, vision §5), the local miss is documented, not chased. The human decided on 2026-10-30 to keep the V1 and V2 code, switched off behind `kintsugi.agent.decision.view` and `kintsugi.agent.decision.report`, whose defaults stay `tables` and `plain`.
   - What it shows: arranging the dossier per service does not change how `granite4.1:8b` reads F1 and F3. This is the same limit `dossier-change-column` met. On the local model, the assessed schema turns wrong answers into invalid ones. On the cloud route, V1's 15/15 is reported and is not kept by this rule.
 
 ## Next step
 
-T5 runs on the defaults (`tables`, `plain`), so `infra/compose.yaml` needs no variant settings. First the human decides whether the V1 and V2 code is deleted or kept behind its settings. `rules-baseline` T5 can now start, because the local replays are over.
+T5 runs on the defaults (`tables`, `plain`), so `infra/compose.yaml` needs no variant settings. `rules-baseline` T5 can now start, because the local replays are over.

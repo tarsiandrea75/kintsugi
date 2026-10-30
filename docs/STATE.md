@@ -21,7 +21,7 @@ This session (journal `docs/journal/2026-10-29-01.md`), all on local branches, n
 
 ## Next action
 
-1. Done on 2026-10-30 (`ad6658f`): T4 is closed. Local A-M0, A-V1 and A-V2 are each 5/15 on the same cases, so no variant is eligible and the defaults stay `tables` and `plain`. Open: the human decides whether the V1 and V2 code is deleted or kept behind its settings.
+1. Done on 2026-10-30 (`ad6658f`): T4 is closed. Local A-M0, A-V1 and A-V2 are each 5/15 on the same cases, so no variant is eligible and the defaults stay `tables` and `plain`. The V1 and V2 code stays, switched off behind its settings (decided 2026-10-30).
 2. Then `service-assessment` T5 (the live local round, descriptive).
 3. Then `rules-baseline` T5: its measurement plan, then Config 0 on dev. It waits for the local replays to end, because both share one CPU.
 
