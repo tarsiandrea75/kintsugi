@@ -85,7 +85,7 @@ Out of scope:
 - [x] T2: `RulesDiagnosis` and `RulesVerdict`, with unit tests over the `dossier/` golden fixtures, RED first (AC2, AC3). Route: delegated writer (2+ non-trivial files).
 - [x] T3: the `rules` replay route: the `ReplayDriver` branch, `replay-agent.sh`, the cost-0 aggregate, tests (AC4, AC5), and the agent spec requirement (AC7). Route: delegated writer.
 - [x] T4: correct the `Prompts.java:15-16` comment, with a byte-identical prompt golden (AC6). Route: inline (mechanical).
-- [ ] T5: the measurement plan, the Config 0 run on dev, the score against M0 A and D, and the committed result (AC8). Route: inline commands. The run starts only after the T4 local replays of service-assessment finish, because both rebuild under `nice` and share one CPU.
+- [x] T5: the measurement plan, the Config 0 run on dev, the score against M0 A and D, and the committed result (AC8). Route: inline commands. The run starts only after the T4 local replays of service-assessment finish, because both rebuild under `nice` and share one CPU.
 
 ## Checks
 
@@ -108,6 +108,13 @@ Out of scope:
 - 2026-10-29: T3 committed as `f86a43c`; review high risk, approved, lineage review-8b2b8c628c85022e, acknowledged. Follow-ups, not fixed: RulesReplayTest duplicates ReplayRunTest property parsing; a duplicated unset branch in replay-agent.sh; aggregate Javadoc says '0' not '0.0000'; no script case for the accepted rules path.
 - 2026-10-29: T4: the Prompts doc comment now says the system message carries the call graph and two diagnostic rules and points at ADR-016; `javap -c -p -constants` of Prompts.class is identical before and after, so the prompt bytes are unchanged.
 
+- 2026-10-30: T5 done (route: inline). Plan `evals/plans/2026-10-30-config0-dev.md` committed at `5797d16`, marked retrospective: the T3 smoke run's verdicts had been seen. Run `replay-20261030T141146Z-rules` at `5797d16`; result in `evals/results/2026-10-30-config0-dev/`.
+  - The fresh run matches the T3 smoke run case by case (fault, answer, verdict, recording), so Config 0 is deterministic.
+  - Config 0 10/15, 67% [42%, 85%]: F1 5/5, F2 0/5 (all R-NONE), F3 5/5. Coverage 67%, selective 100%: every answer it gives is right.
+  - Against M0: A 5/15, A − 0 −33 points, McNemar p = 0.3; D 14/15, D − 0 +27 points, McNemar p = 0.22 (Holm 0.44 each).
+  - Complementarity (descriptive): 0 alone right on 10 cases, A alone on 5, none shared; an oracle choosing between 0 and A reaches 15/15. This is an upper bound for a hybrid, not a result of one.
+  - F2's misses: the rules find no refusing component on the call path under ADR-016's thresholds. Frozen at `5797d16`: changing them makes a new config.
+
 ## Next step
 
-T5: commit the measurement plan, then run Config 0 on dev (after the service-assessment local replays end) and score it against M0 A and D.
+The feature is closed. Next: the benchmark feature (vision §7, follow-up 4) reads holdout-1 once for Configs 0, A and D; then the qwen3.5:9b dev experiment under its own plan.
