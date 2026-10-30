@@ -33,8 +33,8 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 - [x] T1 ADR-017: `qwen3.5:9b` as the experiment's second local model (version, quantization, licence, why this one). Route: inline (one doc).
 - [x] T2 Scorer: a `TIMED_OUT` sample is a miss and not covered; tests first; evals spec. Route: delegated writer.
 - [x] T3 Replay overrides (`--model`, `--think`, `--report-cap`, `--report-timeout`), recorded per sample; tests first; agent spec "Routes"/"Answer caps". Route: delegated writer.
-- [ ] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
-- [ ] T5 The dev plan, committed before the dev runs. Route: inline.
+- [x] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
+- [x] T5 The dev plan, committed before the dev runs. Route: inline.
 - [ ] T6 The dev runs and the scored result; reading; STATE. Route: inline commands.
 
 ## Acceptance criteria
@@ -71,6 +71,9 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
   - WARNING R2-coverage-mixed-definitions: results committed before `d4de651` use the old coverage; this document says so in T2.
   - SUGGESTIONs: R2-aggregate-positional-key, R2-report-timeout-ms-branch, R2-task-check-names-gradle (the agent's check is `cd agent && ./mvnw -q test`, not Gradle), R2-think-vs-thinking-names, R3-completed-no-report-branch, R3-thinking-cut-path-unproved.
 
+- 2026-10-30: T4 done. Calibration on `stress` (timing and token columns only, no verdicts read): thinking off, longest report call 527 s, 2 of 3 samples needed a second report attempt; thinking on, longest call 801 s, one call each. Numbers in the plan.
+- 2026-10-30: T5 done, `evals/plans/2026-10-30-qwen-dev.md`, committed before any dev run: Qoff (cap 512, 1200 s) and Qon (cap 4096, 1200 s) against the committed 0 and A dev inputs; ADR-015 keep rule against A.
+
 ## Next step
 
-T4.
+T6: the two dev runs, one after the other, then the score.
