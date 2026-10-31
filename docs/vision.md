@@ -121,7 +121,7 @@ L2 and L3 are annotations, not retries, so a check never steers the model toward
 
 **Leakage principle.** A rule derived from the lab catalog may stay in the prompt only if Config 0 runs it too. Its transfer is then tested on RCAEval, and a generic-prompt ablation runs on the cloud route. Otherwise the prompt teaches the test, and the LLM gets the credit for the designer's knowledge.
 
-Config 0 is the code diagnosing with rules that ADR-011 rejected for the agent: "the LLM would become redundant". It stays a baseline that measures exactly that redundancy, never the agent's answer; ADR-016 records it.
+Config 0 is the code diagnosing with rules that ADR-011 rejected for the agent: "the LLM would become redundant". It stays a baseline that measures exactly that redundancy; ADR-016 records it. Only Config H (ADR-019) uses the same rules inside the agent, as proposers the LLM chooses from; H − 0 then measures what the LLM adds once it sees them.
 
 ### Modules
 
@@ -134,7 +134,7 @@ Mapping from the 25 circles of the original "AI Agent Architecture" image to cod
 | Short-term, Long-term Memory | `memory` | short: messages of the current run. Long-term memory was cut on 2026-10-25 |
 | Knowledge Base | `knowledge` | runbooks and service docs in Markdown, RAG on pgvector |
 | Goal Setting, Planning, Strategy | `planner` | LLM produces a JSON plan, validated against a schema before execution |
-| Reasoning, Logical Inference, Heuristics | `reasoning` | Config 0: rules only, in Java, over the same dossier. A baseline, never the agent's answer |
+| Reasoning, Logical Inference, Heuristics | `reasoning` | Config 0: rules only, in Java, over the same dossier. A baseline; in Config H (ADR-019) the same rules propose candidates |
 | Action Selection, Tool Usage, API Integration | `tools` | MCP server: getLogs, getMetrics, getDeployments, read-only queryDb, searchRunbooks, rollback, restart |
 | Execution (authorized) | `policy` | every tool has a risk level; write actions wait for human approval |
 | Monitoring | `observability` | OpenTelemetry trace of every step: tokens, cost, latency, tools used |
@@ -173,6 +173,7 @@ The agent never calls a model directly: it goes through a `ModelRouter` interfac
 | B | Local 14B, on a paired subset of about 60 cases | how much does a bigger local model buy? |
 | C | Local first, escalating to D on abstention, an L2/L3 failure or low confidence (threshold set on dev). Computed from the paired A and D outputs, with no extra runs | near-D quality at a fraction of the cost? |
 | D | `claude-haiku-5-5`, the cheapest API model (ADR-012) | the API reference, and its price |
+| H | Hybrid (ADR-019): Config 0's rules propose up to 5 candidates, local qwen3.5:9b with thinking (ADR-018) picks one or UNKNOWN and explains, with no fallback | does the LLM add anything over the rules once it sees them? (H − 0 on RCAEval dev) |
 | D+ | An optional frontier spot-check, about 60 cases, only with the human's go-ahead and a price check | does a frontier model change the picture? |
 
 The hypotheses are pre-registered in §1 (H1–H3) and verified, not assumed. Any result is reported; "small models fail here, and here is why" is valuable to an SME too.
@@ -251,6 +252,7 @@ Four 3-week milestones, Oct 5 – Dec 27, 2026. Each ends with something working
 
 **M3 — Two tracks, frozen (Nov 16 – Dec 6)**
 - The ranked report (1–5 candidates)
+- Config H, the hybrid (ADR-019)
 - The case dossier with resource facts
 - RCAEval dev for 0, A, D and BARO
 - Lab realism
