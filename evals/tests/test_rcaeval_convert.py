@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from kintsugi_evals.cli import main
-from kintsugi_evals.rcaeval import convert, leakage
+from kintsugi_evals.rcaeval import convert, leakage, trace_edges, traffic
 
 FIXTURE = Path(__file__).parent / "fixtures" / "rcaeval"
 REPO = Path(__file__).resolve().parents[2]
@@ -93,11 +93,146 @@ def test_the_dossier_holds_exactly_the_gatherers_calls_with_its_arguments(conver
         assert list(json.loads(call["output"])) == ["outcome", "returned", "truncated", "items"]
 
 
-def test_restarts_and_traffic_are_empty_answers(converted):
+def test_restarts_are_an_empty_answer(converted):
     out, _ = converted
     _, incident = recording(out, "checkoutservice_cpu")
     empty = {"outcome": "OK", "returned": 0, "truncated": False, "items": []}
     assert output(incident, "service_restarts", sinceMinutes=10) == empty
+
+
+# Traffic from the traces (T4)
+
+
+def traffic_row(side, service, status, outcome, count, client=None):
+    """One item as mcp-tools' TrafficCounts.Row prints it: server rows carry no clientName and no exception."""
+    item = {"side": side, "service": service}
+    if side == "client":
+        item["clientName"] = client
+    item.update(method="CALL", uri="/", status=status, outcome=outcome)
+    if side == "client":
+        item["exception"] = "none"
+    item["count"] = count
+    return item
+
+
+def assert_items(result, expected):
+    assert result["returned"] == len(expected) and result["truncated"] is False
+    assert result["items"] == expected
+    assert [list(item) for item in result["items"]] == [list(item) for item in expected]
+
+
+def test_previous_window_traffic_counts_cross_service_spans_before_the_injection(converted):
+    out, _ = converted
+    _, incident = recording(out, "checkoutservice_cpu")
+    # [inject - 600 s, inject): the span at inject - 600 s counts, the one at inject - 601 s does not.
+    assert_items(output(incident, "traffic_counts", sinceMinutes=20, untilMinutesAgo=10), [
+        traffic_row("client", "frontend", "200", "SUCCESS", 1, client="checkoutservice"),
+        traffic_row("client", "frontend", "200", "SUCCESS", 1, client="currencyservice"),
+        traffic_row("server", "checkoutservice", "200", "SUCCESS", 1),
+        traffic_row("server", "currencyservice", "200", "SUCCESS", 1),
+    ])
+
+
+def test_incident_window_traffic_has_each_sides_status_and_the_lab_row_order(converted):
+    out, _ = converted
+    _, incident = recording(out, "checkoutservice_cpu")
+    # [inject, inject + 600 s), each row by its own span's start. Client rows come from the client spans (their
+    # operationName names the callee), so a call to cartservice, which emits no spans, still counts; the client span
+    # started in the previous window counts there, while its callee's span at inject + 599 s counts here as a server
+    # row, and the one at inject + 600 s does not. The client row takes the client span's status, the server row the
+    # callee's: UNAVAILABLE seen by the caller (503) while the callee answered OK (200). The call from an unknown
+    # tracer to currencyservice is still one of currencyservice's answers.
+    assert_items(output(incident, "traffic_counts", sinceMinutes=10), [
+        traffic_row("client", "checkoutservice", "200", "SUCCESS", 1, client="paymentservice"),
+        traffic_row("client", "frontend", "503", "SERVER_ERROR", 1, client="cartservice"),
+        traffic_row("client", "frontend", "200", "SUCCESS", 1, client="checkoutservice"),
+        traffic_row("client", "frontend", "500", "SERVER_ERROR", 1, client="checkoutservice"),
+        traffic_row("client", "frontend", "503", "SERVER_ERROR", 1, client="checkoutservice"),
+        traffic_row("server", "checkoutservice", "200", "SUCCESS", 2),
+        traffic_row("server", "checkoutservice", "500", "SERVER_ERROR", 1),
+        traffic_row("server", "currencyservice", "200", "SUCCESS", 2),
+        traffic_row("server", "paymentservice", "504", "SERVER_ERROR", 1),
+    ])
+
+
+def test_every_client_row_is_a_topology_edge_with_its_method_and_uri(converted):
+    out, _ = converted
+    edges = {(e["caller"], e["target"], e["method"], e["uri"])
+             for e in json.loads(OB_TOPOLOGY.read_text())["edges"]}
+    _, incident = recording(out, "checkoutservice_cpu")
+    for args in ({"sinceMinutes": 20, "untilMinutesAgo": 10}, {"sinceMinutes": 10}):
+        for item in output(incident, "traffic_counts", **args)["items"]:
+            if item["side"] == "client":
+                assert (item["service"], item["clientName"], item["method"], item["uri"]) in edges
+
+
+def test_the_grpc_status_code_maps_to_an_http_status_and_outcome():
+    assert traffic.status_of("0.0") == ("200", "SUCCESS")
+    assert traffic.status_of("") == ("200", "SUCCESS")  # unset: no error recorded
+    assert traffic.status_of("2.0") == ("500", "SERVER_ERROR")
+    assert traffic.status_of("4.0") == ("504", "SERVER_ERROR")
+    assert traffic.status_of("13.0") == ("500", "SERVER_ERROR")
+    assert traffic.status_of("14.0") == ("503", "SERVER_ERROR")
+    assert traffic.status_of("1") == ("499", "CLIENT_ERROR")
+    assert traffic.status_of("5.0") == ("404", "CLIENT_ERROR")
+    for bad in ("17.0", "-1", "OK", "0.5"):
+        with pytest.raises(ValueError, match="statusCode"):
+            traffic.status_of(bad)
+
+
+def test_trace_names_are_aliased_by_the_one_table_trace_edges_uses():
+    assert traffic.service_of is trace_edges.service_of
+    assert trace_edges.ALIASES == {"frontendservice": "frontend"}
+    assert trace_edges.service_of("frontendservice") == "frontend"
+    assert trace_edges.service_of("checkoutservice") == "checkoutservice"
+    assert traffic.callee_of is trace_edges.callee_of
+
+
+def test_a_client_span_is_recognized_by_the_service_its_operation_names():
+    callee_of = trace_edges.callee_of
+    assert callee_of("hipstershop.ProductCatalogService/ListProducts") == "productcatalogservice"
+    assert callee_of("hipstershop.CartService/GetCart") == "cartservice"
+    # Server spans ("grpc." prefix, or the service's own name), HTTP roots, exporters and health checks are not.
+    for operation in ("grpc.hipstershop.CurrencyService/Convert", "frontend", "", "grpc.health.v1.Health/Check",
+                      "opentelemetry.proto.collector.trace.v1.TraceService/Export", "hipstershop.CartService"):
+        assert callee_of(operation) is None, operation
+
+
+def test_trace_names_outside_the_topology_are_dropped_and_reported(converted):
+    out, _ = converted
+    _, incident = recording(out, "checkoutservice_cpu")
+    rows = output(incident, "traffic_counts", sinceMinutes=10)["items"]
+    assert not [r for r in rows if "mysterytracer" in (r["service"], r.get("clientName"))]
+    report = (out / "converter-report.tsv").read_text()
+    assert "\tunknown_trace_service\tmysterytracer\t1\n" in report
+    assert "\tunknown_trace_service\tshoppingassistantservice\t1\n" in report
+    assert not [r for r in rows if "shoppingassistantservice" in (r["service"], r.get("clientName"))]
+
+
+def test_a_traffic_answer_over_the_labs_8_kb_fails_the_conversion(tmp_path, monkeypatch):
+    monkeypatch.setattr(traffic, "MAX_OUTPUT_BYTES", 300)
+    with pytest.raises(ValueError, match="traffic_counts"):
+        convert.convert(FIXTURE, "re2-ob", 1, tmp_path / "out", cases=["checkoutservice_cpu"])
+
+
+def ss_case(root):
+    """A minimal RE2-SS case: Sock Shop has no traces, and a stray traces.csv must not be read."""
+    case = root / "RE2-SS" / "carts_cpu" / "1"
+    case.mkdir(parents=True)
+    (case / "inject_time.txt").write_text(f"{INJECT}\n")
+    (case / "simple_metrics.csv").write_text(f"time,carts_latency-50\n{INJECT},0.01\n")
+    (case / "logs.csv").write_text("time,timestamp,container_name,message,level\n")
+    (case / "traces.csv").write_text("not,a,trace,file\n")
+    return case
+
+
+def test_sock_shop_traffic_stays_empty(tmp_path):
+    ss_case(tmp_path)
+    out = tmp_path / "out"
+    convert.convert(tmp_path, "re2-ss", 1, out, allow_holdout="B")
+    (row,) = manifest(out)
+    incident = json.loads((out / row["file"]).read_text())
+    empty = {"outcome": "OK", "returned": 0, "truncated": False, "items": []}
     assert output(incident, "traffic_counts", sinceMinutes=20, untilMinutesAgo=10) == empty
     assert output(incident, "traffic_counts", sinceMinutes=10) == empty
 
@@ -357,10 +492,60 @@ def test_the_guard_reads_underscores_as_word_breaks_but_not_inside_words():
     assert leakage.scan(json.dumps({"a": "memory socketed overcommit_memory"}), []).strict == []
 
 
-def test_the_converter_fails_when_a_recording_leaks(tmp_path, monkeypatch):
+def test_the_converter_fails_when_a_recording_leaks_and_leaves_nothing(tmp_path, monkeypatch):
     monkeypatch.setitem(convert.SYMPTOMS, "re2-ob", "Users see slow disk responses from frontend.")
     with pytest.raises(leakage.LeakageError, match="disk"):
-        convert.convert(FIXTURE, "re2-ob", 1, tmp_path)
+        convert.convert(FIXTURE, "re2-ob", 1, tmp_path / "out")
+    assert list(tmp_path.iterdir()) == []  # no --out, no staging directory, no recording
+
+
+# Atomic output and encodings
+
+
+def test_a_run_that_fails_part_way_leaves_no_output(tmp_path):
+    root = tmp_path / "root"
+    shutil.copytree(FIXTURE, root)
+    # The second case in name order has no traces.csv: the first case is converted before the run fails.
+    (root / "RE2-OB" / "currencyservice_delay" / "1" / "traces.csv").unlink()
+    with pytest.raises(FileNotFoundError):
+        convert.convert(root, "re2-ob", 1, tmp_path / "out")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["root"]
+
+
+def test_a_successful_run_keeps_unrelated_files_in_an_existing_out(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "README").write_text("kept")
+    convert.convert(FIXTURE, "re2-ob", 1, out)
+    assert (out / "README").read_text() == "kept"
+    assert len(manifest(out)) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out"]
+
+
+def test_every_input_is_read_as_utf_8(tmp_path, monkeypatch):
+    opened = []
+    real_open = Path.open
+
+    def recording_open(self, mode="r", *args, **kwargs):
+        if "r" in mode and "RE2-OB" in str(self):
+            opened.append((self.name, kwargs.get("encoding")))
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", recording_open)
+    convert.convert(FIXTURE, "re2-ob", 1, tmp_path / "out", cases=["checkoutservice_cpu"])
+    assert {name for name, _ in opened} == {"inject_time.txt", "simple_metrics.csv", "logs.csv", "traces.csv"}
+    assert {encoding for _, encoding in opened} == {"utf-8"}
+
+
+def test_an_undecodable_log_byte_becomes_a_replacement_character(tmp_path):
+    root = tmp_path / "root"
+    shutil.copytree(FIXTURE, root)
+    logs = root / "RE2-OB" / "checkoutservice_cpu" / "1" / "logs.csv"
+    logs.write_bytes(logs.read_bytes() + b"00:00,1700000100000000000,adservice,bad byte \xff here,error,,,1,x\n")
+    convert.convert(root, "re2-ob", 1, tmp_path / "out", cases=["checkoutservice_cpu"])
+    _, incident = recording(tmp_path / "out", "checkoutservice_cpu")
+    result = output(incident, "search_logs", service="adservice", level="ERROR", sinceMinutes=10, limit=20)
+    assert [i["untrustedText"] for i in result["items"]] == ["bad byte \ufffd here"]
 
 
 def test_the_converted_fixture_passes_the_guard_and_reports_untrusted_hits(converted):

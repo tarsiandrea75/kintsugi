@@ -149,11 +149,12 @@ The CLI MUST exit with a one-line message, not a traceback, when an input is mis
 `python -m kintsugi_evals convert-rcaeval --system re2-ob|re2-ss --rep N` MUST turn each case directory `<root>/RE2-<SYS>/<service>_<fault>/<N>/` into one replay recording the unchanged agent reads, plus one `recordings.tsv` row (`fault mode route truth file incident split`), under `--out` (default `evals/out/rcaeval/<system>-rep<N>/`, git-ignored) ([ADR-020](../../../docs/adr/ADR-020-rcaeval-dataset-converter.md)). The root MUST default to `$KINTSUGI_RCAEVAL_DIR`, else `~/data/rcaeval`. A recording MUST hold `id`, the system's one fixed `symptom`, `sinceMinutes` 10, `startedAt` = inject time + 10 minutes, and one `DOSSIER` step whose calls are exactly those `DossierGatherer` makes for the system's topology file, with the arguments it sends:
 - `query_metric latency_avg` per service from `<service>_latency-50` (seconds), resampled to the lab's 21 s step for 20 minutes, each point the mean of the rows in (t - 21 s, t], `NaN` when none has a value, and no series for a service without the column;
 - `count_logs` and `search_logs` per service and level (WARN, ERROR) from `logs.csv` in [inject, inject + 10 min): the level column when it names one, else a whole word of the message (error, exception, traceback, fatal, panic: ERROR; warn, warning: WARN); `search_logs` gives the newest 20 lines, each cut at 1000 characters with `[truncated]`;
-- `service_restarts` and `traffic_counts` (previous and incident) with no items.
+- `traffic_counts` for the previous window [inject - 10 min, inject) and the incident window [inject, inject + 10 min), for RE2-OB from `traces.csv`, each row counted in the window holding its own span's start time. A client span (its `operationName` is `hipstershop.<Name>Service/<Method>`, naming a service other than its own) adds 1 to a client row (`service` its service, `clientName` the named service, its own status, `exception` `none`); a span whose parent span belongs to another service adds 1 to a server row (`service` its service, its own status, no `clientName` or `exception`). No span is both. Both rows have `method` `CALL` and `uri` `/` as the topology's edges, in mcp-tools' row order. The gRPC `statusCode` maps to the HTTP status of `google.rpc.Code` (0 or blank 200, 2 500, 4 504, 13 500, 14 503, ...) and Spring's outcome of it; traces show no exception class, so none is invented. Trace names go through the one alias table `trace_edges` uses (`frontendservice` is `frontend`); a call naming a service outside the topology is dropped and counted in `converter-report.tsv`. RE2-SS has no traces: both answers have no items;
+- `service_restarts` with no items.
 
 The truth, `<service>|<category>` by ADR-020's map, MUST appear only in `recordings.tsv`; the file name MUST be a 16-hex-digit sha256 of `RE2-<SYS>/<case>/<N>` and the incident id a UUID from the same hash. The same input MUST give the same bytes. Only RE2-OB repetition 1 is `dev`; any other repetition, and RE2-SS, is a holdout the converter MUST refuse, before reading any case file or creating `--out`, unless `--allow-holdout A` (RE2-OB repetitions 2-3) or `--allow-holdout B` (RE2-SS) names it; its rows then carry the split `holdout`.
 
-After writing, the converter MUST scan every recording it wrote. A fault word (cpu, mem, disk, delay, loss, socket, whole word, case-insensitive, `_` breaking words) outside `untrustedText`, or a case directory name or a category anywhere, MUST fail the conversion and remove its recordings. Fault words inside `untrustedText`, the system's own log text, MUST be counted in `converter-report.tsv`, not fail: rewriting a log line would falsify the evidence, and the leak guarded against is the converter's own. The report also lists metric prefixes and log containers outside the topology.
+The converter MUST write into a staging directory beside `--out` and move the files into `--out` only after the scan below passed, so a run that fails for any reason leaves no recording, manifest or report behind. After writing, the converter MUST scan every recording it wrote. A fault word (cpu, mem, disk, delay, loss, socket, whole word, case-insensitive, `_` breaking words) outside `untrustedText`, or a case directory name or a category anywhere, MUST fail the conversion and remove its recordings. Fault words inside `untrustedText`, the system's own log text, MUST be counted in `converter-report.tsv`, not fail: rewriting a log line would falsify the evidence, and the leak guarded against is the converter's own. The report also lists metric prefixes and log containers outside the topology.
 
 #### Scenario: The windows
 - Given a case whose `inject_time.txt` holds 1700000000
@@ -176,7 +177,19 @@ After writing, the converter MUST scan every recording it wrote. A fault word (c
 - Then the conversion fails naming the fault word and keeps no recording
 - And a log line saying "delay" is kept as is in `untrustedText` and counted in `converter-report.tsv`
 
+#### Scenario: Traffic from the traces
+- Given an RE2-OB case whose `traces.csv` has a `frontendservice` span calling `checkoutservice` 20 s after the injection, with status 14 on the caller's span and 0 on the callee's
+- When it is converted
+- Then the incident `traffic_counts` holds a client row `frontend` -> `checkoutservice` `CALL /` status `503` `SERVER_ERROR` exception `none` and a server row `checkoutservice` `CALL /` status `200` `SUCCESS`, and the previous window does not count that call
+- And a `frontendservice` client span `hipstershop.CartService/GetCart` with status 14 and no child span gives a client row `frontend` -> `cartservice` status `503`, with no server row
+- And an RE2-SS case's `traffic_counts` answers have no items
+
+#### Scenario: A failed run leaves nothing
+- Given a run whose second case has no `traces.csv`, or whose recording leaks a fault word
+- When the conversion fails
+- Then neither `--out` nor a staging directory exists afterwards
+
 #### Scenario: The agent replays a converted recording
 - Given the recording `agent/src/test/resources/rcaeval/` holds, converted from the synthetic fixture and checked byte for byte against a fresh conversion
 - When `DossierGatherer` gathers with the RE2-OB topology at its `startedAt`
-- Then no call is answered `not recorded in this replay`, and `RulesDiagnosis.diagnose` returns a verdict
+- Then no call is answered `not recorded in this replay`, the incident traffic is not empty and its client rows match the topology's edges, and `RulesDiagnosis.diagnose` returns a verdict

@@ -11,27 +11,38 @@ Choices, with their evidence in the feature document's T3 entry:
 - Latency is `<svc>_latency-50`, already in seconds (`LATENCY_TO_SECONDS`), resampled to the lab's step for a 20-minute
   window (21 s): each point is the mean of the 1 s rows in (t - 21 s, t]; a bucket with no finite value is "NaN".
 - A log line's level is its `level` column when that names one, else read from the message (`level_of`).
-- Restarts and traffic are empty answers here; T4 fills traffic for Online Boutique from its traces.
-- A refused holdout reads no data file and writes nothing.
+- Restarts are an empty answer. Traffic comes from Online Boutique's traces (`traffic.py`, T4); Sock Shop has no
+  traces, so its traffic is an empty answer and no `traces.csv` is read for it.
+- Every input is read as UTF-8, whatever the locale. `logs.csv` decodes with `errors="replace"`: it is the system's
+  free text, and a bad byte becomes U+FFFD in `untrustedText` instead of failing the case. The structured files
+  (metrics, traces, inject time, topology) decode strictly, so a bad byte there fails the conversion.
+- A refused holdout reads no data file and writes nothing. A conversion writes into a staging directory beside
+  `--out` and moves its files into `--out` only after the leakage scan passed; a run that fails leaves nothing.
 """
 
 import csv
 import hashlib
 import json
 import math
+import os
 import re
+import shutil
+import tempfile
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import leakage
+from . import leakage, traffic
 from .trace_edges import normalize
 
 REPO = Path(__file__).resolve().parents[3]
 
 SYSTEM_DIRS = {"re2-ob": "RE2-OB", "re2-ss": "RE2-SS"}
+
+# Systems whose cases carry `traces.csv` (ADR-020): Sock Shop has none.
+TRACED_SYSTEMS = {"re2-ob"}
 
 # One sentence per system, defined here only. It names the entry service, which is the entry of every case, and no
 # fault, resource or root cause (leakage.py fails a recording whose symptom holds a fault word).
@@ -175,7 +186,7 @@ def _latency(case_dir, services, end, report):
     """The `query_metric latency_avg` items per service: one series, uri `/`, or none without a column."""
     start = end - LATENCY_WINDOW_SECONDS
     count = LATENCY_WINDOW_SECONDS // LATENCY_STEP_SECONDS + 1
-    with (case_dir / "simple_metrics.csv").open(newline="") as handle:
+    with (case_dir / "simple_metrics.csv").open(newline="", encoding="utf-8") as handle:
         reader = csv.reader(handle)
         header = [name.strip().lower() for name in next(reader)]
         prefixes = {normalize(name) for name in header if name != "time"}
@@ -213,7 +224,7 @@ def _logs(case_dir, services, inject, report):
     lo, hi = inject * 10**9, (inject + SINCE_MINUTES * 60) * 10**9
     lines = defaultdict(list)
     unknown = Counter()
-    with (case_dir / "logs.csv").open(newline="") as handle:
+    with (case_dir / "logs.csv").open(newline="", encoding="utf-8", errors="replace") as handle:
         for row in csv.DictReader(handle):
             service = normalize(row["container_name"])
             if service not in services:
@@ -253,16 +264,21 @@ def convert_case(case_dir, system, case, rep, services):
     truth_service = normalize(service)
     if truth_service not in services:
         raise ValueError(f"{case}: the root-cause service {truth_service} is not in the topology")
-    inject = int((case_dir / "inject_time.txt").read_text().strip())
+    inject = int((case_dir / "inject_time.txt").read_text(encoding="utf-8").strip())
     end = inject + SINCE_MINUTES * 60
     report = []
     latency = _latency(case_dir, services, end, report)
     logs = _logs(case_dir, services, inject, report)
+    previous, current = [], []
+    if system in TRACED_SYSTEMS:
+        # The gatherer's previous window [inject - 10 min, inject) and incident window [inject, inject + 10 min).
+        windows = [(inject - SINCE_MINUTES * 60, inject), (inject, end)]
+        previous, current = traffic.counts(case_dir / "traces.csv", services, windows, report)
     incident_args = {"sinceMinutes": SINCE_MINUTES}
     calls = [_call("service_restarts", dict(incident_args), _result([])),
              _call("traffic_counts", {"sinceMinutes": 2 * SINCE_MINUTES, "untilMinutesAgo": SINCE_MINUTES},
-                   _result([])),
-             _call("traffic_counts", dict(incident_args), _result([]))]
+                   traffic.check_size(_result(previous))),
+             _call("traffic_counts", dict(incident_args), traffic.check_size(_result(current)))]
     for s in services:
         calls.append(_call("query_metric", {"metric": LATENCY_METRIC, "service": s,
                                             "sinceMinutes": 2 * SINCE_MINUTES}, _result(latency[s])))
@@ -289,7 +305,9 @@ def _write_tsv(path, header, rows):
 
 def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=None):
     """Converts repetition `rep` of `system` under `root` into `out`: one recording per case, `recordings.tsv` and
-    `converter-report.tsv`. Refuses a holdout before reading anything; fails, keeping no recording, on a leak."""
+    `converter-report.tsv`. Refuses a holdout before reading anything. Everything is written to a staging directory
+    beside `out` and moved into `out` only after the leakage scan passed, so a leak or any other failure leaves no
+    file behind; other files already in `out` are kept."""
     split = split_of(system, rep, allow_holdout)
     system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
     topology = Path(topology) if topology else REPO / "agent/src/main/resources/topology" / f"{system}.json"
@@ -299,7 +317,21 @@ def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=Non
         raise ValueError(f"no case with repetition {rep} in {system_dir}")
     case_names = [p.name for p in system_dir.iterdir() if p.is_dir() and CASE_NAME.match(p.name)]
     out = Path(out)
-    out.mkdir(parents=True, exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{out.name}.", suffix=".partial", dir=out.parent))
+    try:
+        summary = _convert_into(staging, chosen, system, rep, split, services, case_names)
+        out.mkdir(exist_ok=True)
+        for path in sorted(staging.iterdir()):
+            os.replace(path, out / path.name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    summary.out = out
+    return summary
+
+
+def _convert_into(out, chosen, system, rep, split, services, case_names):
+    """Writes the recordings, the manifest and the report of `chosen` into `out`; raises on a leak."""
     rows, report, written = [], [], []
     for case, case_dir in chosen:
         incident, row, case_report = convert_case(case_dir, system, case, rep, services)
@@ -312,8 +344,6 @@ def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=Non
     for path in written:
         found = leakage.scan(path.read_text(encoding="utf-8"), case_names)
         if found.strict:
-            for leaked in written:
-                leaked.unlink()
             raise leakage.LeakageError(f"{path.name} leaks {', '.join(found.strict)}; no recording was kept")
         for word, n in sorted(found.untrusted.items()):
             report.append((path.name, "untrusted_fault_word", word, n))

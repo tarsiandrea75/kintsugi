@@ -1,0 +1,4 @@
+time,traceID,spanID,serviceName,methodName,operationName,startTimeMillis,startTime,duration,statusCode,parentSpanID
+00:00,t1,r1,frontendservice,frontend,frontend,1700003630000,1700003630000000,1000,,
+00:00,t1,c1,frontendservice,Convert,hipstershop.CurrencyService/Convert,1700003630000,1700003630000000,1000,0.0,r1
+00:00,t1,s1,currencyservice,Convert,grpc.hipstershop.CurrencyService/Convert,1700003630000,1700003630000000,1000,0.0,c1

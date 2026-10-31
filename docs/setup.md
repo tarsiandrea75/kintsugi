@@ -562,7 +562,15 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
 
 - It writes one blinded `<hash>.json` per case, `recordings.tsv` (the truth is only there) and `converter-report.tsv` to `evals/out/rcaeval/re2-ob-rep1/` (git-ignored); `--out` sets another directory, `--case NAME` converts only that case (repeatable).
 - Only RE2-OB repetition 1 is `dev`. Repetitions 2-3 (holdout A) and RE2-SS (holdout B) are refused unless `--allow-holdout A` or `--allow-holdout B` names them, which only a committed holdout plan may do.
-- The conversion fails if a recording holds a fault word, a case name or a category outside the logs' own text; fault words in log text are counted in `converter-report.tsv`.
+- The conversion fails if a recording holds a fault word, a case name or a category outside the logs' own text; fault words in log text are counted in `converter-report.tsv`. A failed run leaves nothing in `--out`: the files are written to a staging directory beside it and moved in only after the check.
+- RE2-OB traffic comes from `traces.csv`. To check that every caller -> callee pair in the dev traces is an edge of the topology file (AC3 of `odd/tasks/rcaeval-converter.md`; about 75 s, 70 MB), run from the repository root:
+
+  ```bash
+  python3 -I evals/kintsugi_evals/rcaeval/trace_edges.py \
+    --topology agent/src/main/resources/topology/re2-ob.json ~/data/rcaeval/RE2-OB/*/1
+  ```
+
+  It takes the pairs from client spans (an `operationName` of `hipstershop.<Name>Service/<Method>`) and from parent links, with the same names as the converter (`frontendservice` is `frontend`), marks each pair `edge` or `NOT AN EDGE`, and exits 1 when a pair is not an edge or no pair is found.
 
 ### Reset a volume
 

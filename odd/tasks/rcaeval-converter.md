@@ -66,7 +66,7 @@ Without the converter, every number is on a lab one person built and tuned again
 - **Tool outputs from case files:**
   - `query_metric latency_avg` per service comes from `<svc>_latency-50`, converted to seconds, with uri `/`. It is resampled to the lab's step.
   - `count_logs` and `search_logs` (WARN and ERROR) come from `logs.csv`, with the level parsed from the message.
-  - `traffic_counts` comes, for OB, from the spans in `traces.csv`: client and server rows per caller→callee and operation, with status and error counts. SS has no traces, so its rows are empty.
+  - `traffic_counts` comes, for OB, from the spans in `traces.csv`: client and server rows per caller→callee pair (`CALL /`, the edge convention), with the gRPC status mapped to an HTTP status (T4). SS has no traces, so its rows are empty.
   - `service_restarts` is empty items.
   - No status tables and no event sources: the topology files have no owners.
 - **Topology files** (`agent/src/main/resources/topology/re2-ob.json`, `re2-ss.json`):
@@ -90,7 +90,7 @@ Without the converter, every number is on a lab one person built and tuned again
 - [x] T1 ADR-020, the vision fix ("ADR-017 will pin" → ADR-020) and this document. Route: inline (docs). The human confirmed the design and the category map on 2026-10-31. Passive docs, structural readback only.
 - [x] T2 The topology files for RE2-OB and RE2-SS, from the pinned upstream manifests, with the OB cross-check on repetition 1's traces recorded. `TopologyTest` loads both. Route: delegated writer.
 - [x] T3 The converter core, tests first on a synthetic fixture: case discovery, windows, metrics → `query_metric`, logs → `count_logs`/`search_logs`, empty restarts, the incident JSON and `recordings.tsv`, the leakage grep. Route: delegated writer.
-- [ ] T4 Traces → `traffic_counts` (OB), tests first. Route: delegated writer.
+- [x] T4 Traces → `traffic_counts` (OB), tests first. Route: delegated writer.
 - [ ] T5 Replay plumbing and scorer, tests first:
   - `ReplayDriver` reads the topology property;
   - `replay-agent.sh` gets `--dataset re2-ob`, a recordings directory and the topology;
@@ -223,6 +223,64 @@ Without the converter, every number is on a lab one person built and tuned again
     - SUGGESTION R3-holdout-and-ss-paths-unexercised (`convert.py:309`): the holdout and Sock Shop paths have no test. Follow-up, before the holdout plans.
     - SUGGESTION R3-replay-verdict-assertion-is-weak (`RcaevalRecordingTest.java:54-59`): the test only checks that `diagnose` returns. Follow-up; T6 runs the rules for real.
 
+- 2026-10-31, T4 (route: delegated writer; trigger: a new module, two changed modules, two test modules, fixtures, a Java test and two docs). Traffic from the traces, and the T2 and T3 review items.
+  - **Files:**
+    - `evals/kintsugi_evals/rcaeval/traffic.py` (new: traces → `traffic_counts`);
+    - `trace_edges.py` (the alias table, the client-operation pattern, `--topology`, the non-zero exits), `convert.py` (traffic, staging, encodings);
+    - `evals/tests/test_rcaeval_convert.py`, `evals/tests/test_trace_edges.py`, the fixture's two `traces.csv`;
+    - the regenerated `agent/src/test/resources/rcaeval/4490c7f4fb1d2bf7.json` and `RcaevalRecordingTest`;
+    - evals spec REQ-11 (the traffic bullet, the staging sentence, two scenarios), `docs/setup.md` (the AC3 command).
+  - **`traces.csv` shape** (RE2-OB repetition 1, headers and the columns named here only): `time,traceID,spanID,serviceName,methodName,operationName,startTimeMillis,startTime,duration,statusCode,parentSpanID`, `startTime` in µs. Spans cover inject − 720 s to inject + 720 s in every case.
+  - **`statusCode` values** over the 30 repetition-1 files: `0.0` (10,721,638 spans), blank (535,270, all the `frontendservice` root HTTP spans), `14.0` (6,032), `13.0` (330), `4.0` (17), `2.0` (4). They are gRPC status codes.
+  - **Status mapping** (`traffic.status_of`): the gRPC code's HTTP status from `google.rpc.Code` (0 → 200, 1 → 499, 2 → 500, 4 → 504, 13 → 500, 14 → 503, and the rest of the table), the outcome Spring's (2xx `SUCCESS`, 4xx `CLIENT_ERROR`, 5xx `SERVER_ERROR`). Blank is OpenTelemetry's unset status, read as OK. Anything else in a window fails the conversion.
+    - `exception` is always `none`: the traces carry no exception class. So 14 (UNAVAILABLE) is an error answer (`status >= 400`, the rules' "refusing" test), never an R-REACH connection failure, and 4 (DEADLINE_EXCEEDED) is a 504, not an R-DOWN timeout.
+  - **Rows** (`method` `CALL`, `uri` `/`, the edge convention):
+    - Client row, one per client span: a span whose `operationName` matches `^hipstershop\.<Name>Service/<Method>$` (`trace_edges.CLIENT_OPERATION`, `callee_of`: `ProductCatalogService` → `productcatalogservice`) naming a service other than its own. `service` the span's service, `clientName` the named one, the span's own status, `exception` `none`. Server spans (`grpc.hipstershop...`, or named after their own service), HTTP roots, exporters and health checks do not match.
+    - Server row, one per server span: a span whose parent span is in another service. `service` the span's service, its own status, no `clientName` and no `exception` (the lab's `TrafficCounts.Row` is `@JsonInclude(NON_NULL)` with both null on the server side; the brief's "clientName on server rows" did not match the lab, which the converter follows). An unknown caller does not drop a server row: the callee answered either way.
+    - No double counting: over the 30 repetition-1 files, 5,429,757 spans are client spans, 4,829,829 are server spans, and 0 are both.
+    - Rows are summed by (side, service, clientName, status, outcome), sorted in `TrafficCounts`' order, counts above zero only. An answer over the lab's 8 KB cap fails the conversion rather than being cut (real answers are under 3 KB).
+  - **Window counting:** a row counts in the window holding its own span's `startTime`: previous [inject − 600 s, inject), incident [inject, inject + 600 s). The span map holds every span of one file (an interned service per span id), so memory is the span-id map of one file.
+  - **Alias table and operation pattern** (`trace_edges.ALIASES` and `CLIENT_OPERATION`, used by `trace_edges.pairs_in` and `traffic.counts` through `service_of` and `callee_of`): `frontendservice` → `frontend`. The other six span-emitting services, and every service an operation names, already carry their metric-prefix names. A row naming a service outside the topology after mapping is dropped and reported as `unknown_trace_service` (none in the sanity run).
+  - **Coverage, before and after (parent decision).** The first build took client rows from parent links only. Measured on repetition 1:
+    - Client spans to `cartservice`, `adservice` and `shippingservice` (about 952,000) had no server child, since those services emit no spans: 5 edges got no rows.
+    - Of 6,198 non-OK client spans, only 166 had a server child: calls that fail before the callee (mostly UNAVAILABLE) leave none, so about 97 % of the error signal was missing.
+    - The parent decided to take client rows from the client spans, as an implementation correction inside T4: the approved design says "client and server rows per caller→callee", and the parent-link-only rule was the brief's, not a human product decision. Now every client span is a client row, so all 6,198 non-OK client spans count when they fall in a window.
+    - Lost by the new rule: `recommendationservice`'s spans carry no `operationName`, so its calls to `productcatalogservice` give server rows (on `productcatalogservice`) but no client row. The parent-link pairs still show that edge in `trace_edges`.
+  - **AC3, reproducible:** `python3 -I evals/kintsugi_evals/rcaeval/trace_edges.py --topology agent/src/main/resources/topology/re2-ob.json ~/data/rcaeval/RE2-OB/*/1`. With client spans and parent links, 78 s, 68 MB peak, exit 0:
+
+    ```
+    checkoutservice -> cartservice  edge
+    checkoutservice -> currencyservice  edge
+    checkoutservice -> emailservice  edge
+    checkoutservice -> paymentservice  edge
+    checkoutservice -> productcatalogservice  edge
+    checkoutservice -> shippingservice  edge
+    frontend -> adservice  edge
+    frontend -> cartservice  edge
+    frontend -> checkoutservice  edge
+    frontend -> currencyservice  edge
+    frontend -> productcatalogservice  edge
+    frontend -> recommendationservice  edge
+    frontend -> shippingservice  edge
+    recommendationservice -> productcatalogservice  edge
+    14 pairs from 30 case directories; all are edges of re2-ob.json
+    ```
+
+    All 14 pairs are edges (T2's parent-link-only run found 9). The one file edge not seen is `cartservice` → `redis`: neither emits spans. `trace_edges` exits 1 when it finds no pair, or when a pair is not an edge of `--topology`.
+  - **Atomic output:** `convert` writes everything to `mkdtemp` beside `--out` (`.<name>.*.partial`), scans it, then moves each file into `--out` (created if missing, other files in it kept); the staging directory is removed in a `finally`. A leak or any failure leaves no recording, manifest or report, and no staging directory.
+  - **Encodings:** every input opens with `encoding="utf-8"`. `logs.csv` uses `errors="replace"` (the system's free text: a bad byte becomes U+FFFD in `untrustedText` instead of failing the case); metrics, traces, the inject time and the topology decode strictly, so a bad byte there fails the run.
+  - **RED/GREEN:**
+    - First build: `tests/test_trace_edges.py` 4 failed, 4 passed, then 8 passed; `tests/test_rcaeval_convert.py` a collection error (`cannot import name 'traffic'`), then green; the full suite 124 passed.
+    - Client-span rule: RED 5 failed, 49 passed (the incident rows, the shared-function check, `callee_of`, the unknown-name report, the `trace_edges` client-span pair); GREEN after the code and the fixture regeneration: the full evals suite 126 passed (108 + 18).
+    - `RcaevalRecordingTest` with the new assertion against the T3 recording: RED (`Expecting actual not to be empty`); with the regenerated recording: GREEN.
+    - `./mvnw -q test -Dtest=RcaevalRecordingTest,TopologyTest`: exit 0, 1/1 and 37/37.
+  - **AC1 fixture:** `checkoutservice_cpu/1/traces.csv` (22 spans: both windows, both boundaries, a client span in the previous window whose callee span falls in the incident one, statuses 13, 14 and 4, a client span to `cartservice` with no child, a client span to an unknown `shoppingassistantservice`, an out-of-topology tracer, an orphan) and a 3-span `currencyservice_delay/1/traces.csv`. The agent copy was regenerated with the T3 command and its `converter-report.tsv` deleted; only the recording changed, `recordings.tsv` did not.
+  - **Real-data sanity** (repetition 1, `--case checkoutservice_cpu --case productcatalogservice_delay`, under `python3 -I`, output in the session scratchpad): 2 recordings, 58 calls each, 19 traffic rows per window in both cases (15 under the first build), answers up to 2.9 KB, 0 non-OK client rows in these two cases' windows, no `unknown_trace_service`, no staging directory left; 7.1 s, 72 MB peak.
+  - **Data reads (dev only):** the 30 repetition-1 `traces.csv` (`serviceName`, `operationName`, `statusCode`, `startTime` range, parent links) and the two sanity cases. No repetition 2-3 or RE2-SS file was opened.
+  - Totals: about 460 added and 44 removed lines in tracked files (this document included), plus `traffic.py` (132) and the two fixture files (27).
+
+  - The parent re-ran the full evals suite: 126 passed. It accepted the new loss: `recommendationservice` and `emailservice` spans have an empty `operationName`, so `recommendationservice` → `productcatalogservice` keeps its server rows but has no client rows. Follow-up: a fallback from the parent link for client spans with an empty `operationName`.
+
 ## Next step
 
-T4: traces → `traffic_counts` for OB, with the T2 review items (one shared alias table, `frontendservice` → `frontend`; a non-zero exit from `trace_edges` when it finds no pair) and the three T3 review items above.
+T5: the replay plumbing and the scorer (branch `feat/rcaeval-converter-02-replay`).
