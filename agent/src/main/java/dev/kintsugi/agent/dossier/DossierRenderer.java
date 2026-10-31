@@ -145,7 +145,7 @@ public final class DossierRenderer {
 	public static String render(Dossier dossier, Topology topology) {
 		Out out = new Out();
 		header(out, dossier);
-		services(out, dossier.services());
+		services(out, dossier.services(), topology);
 		for (TableStates table : dossier.states()) {
 			states(out, table);
 		}
@@ -177,7 +177,8 @@ public final class DossierRenderer {
 				"- Gathered at " + dossier.gatheredAt() + ". All times are UTC.");
 	}
 
-	private static void services(Out out, Gathered<List<ServiceStatus>> services) {
+	/** The status table; when the call failed, one empty row per service of {@code topology}, in gather order. */
+	private static void services(Out out, Gathered<List<ServiceStatus>> services, Topology topology) {
 		out.section("## Service status (incident window)");
 		List<List<String>> rows = new ArrayList<>();
 		switch (services) {
@@ -191,7 +192,7 @@ public final class DossierRenderer {
 			case Gathered.Failed<List<ServiceStatus>> failed -> {
 				out.line(failed(failed, null));
 				out.blank();
-				for (String service : DossierGatherer.SERVICES) {
+				for (String service : topology.gatherOrder()) {
 					rows.add(List.of(service, NO_VALUE, NO_VALUE, NO_VALUE));
 				}
 			}

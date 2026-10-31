@@ -132,13 +132,13 @@ final class ReportCheck {
 	}
 
 	/** Every rule an explorer-mode {@code report} breaks; empty when the report is valid ({@link #check}). */
-	static List<String> errors(JsonNode report, Map<Integer, ToolStep> toolSteps) {
-		return check(report, toolSteps).errors();
+	static List<String> errors(JsonNode report, Map<Integer, ToolStep> toolSteps, Topology topology) {
+		return check(report, toolSteps, topology).errors();
 	}
 
 	/** Checks an explorer-mode {@code report}: it has no dossier to cite. */
-	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps) {
-		return check(report, toolSteps, AgentMode.EXPLORER, null);
+	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, Topology topology) {
+		return check(report, toolSteps, AgentMode.EXPLORER, null, topology);
 	}
 
 	/**
@@ -156,14 +156,16 @@ final class ReportCheck {
 	 * {@code toolCallId} be {@code "dossier"}
 	 * @param dossier the rendered dossier the model read, its lines numbered, without its introduction; null when
 	 * there is none
+	 * @param topology the system whose causes ({@link Topology#causes()}) {@code rootCauseService} must name
 	 */
-	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier) {
+	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
+			Topology topology) {
 		if (report == null || !report.isObject()) {
 			return invalid(List.of(NOT_AN_OBJECT));
 		}
 		List<String> errors = new ArrayList<>();
 		unexpected(report, FIELDS, "", errors);
-		causesAndConfidence(report, errors);
+		causesAndConfidence(report, topology, errors);
 		JsonNode evidence = report.get("evidence");
 		if (evidence == null || !evidence.isArray()) {
 			errors.add("evidence must be an array of at most 5 items");
@@ -206,10 +208,11 @@ final class ReportCheck {
 	 * {@code rootCauseService|rootCauseCategory} is the pair of one of {@code candidates} or {@code UNKNOWN|UNKNOWN}. A
 	 * pair outside the list is an error like the others, naming the allowed pairs, so it gets the same one retry.
 	 * @param candidates the rules' candidates the report task listed, at least one
+	 * @param topology the system whose causes the report must name, as for {@link #check}
 	 */
 	static Result checkHybrid(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
-			List<RulesCandidate> candidates) {
-		Result checked = check(report, toolSteps, mode, dossier);
+			List<RulesCandidate> candidates, Topology topology) {
+		Result checked = check(report, toolSteps, mode, dossier, topology);
 		if (report == null || !report.isObject()) {
 			return checked;
 		}
@@ -253,7 +256,7 @@ final class ReportCheck {
 		List<String> errors = new ArrayList<>();
 		unexpected(report, Set.copyOf(ASSESSED_FIELDS), "", errors);
 		Map<String, Assessment> assessments = assessments(report.get("assessments"), services, errors);
-		causesAndConfidence(report, errors);
+		causesAndConfidence(report, topology, errors);
 		// Each cited line's text, by service, for the derived evidence: a line that is owned but not in the text is a
 		// Citation error, never a lookup that fails later.
 		Map<String, String> quotes = new LinkedHashMap<>();
@@ -411,9 +414,13 @@ final class ReportCheck {
 		return text;
 	}
 
-	/** Adds to {@code errors} each rule the cause, the summary and the confidence break, as both reports write them. */
-	private static void causesAndConfidence(JsonNode report, List<String> errors) {
-		addIfError(errors, Causes.enumError("rootCauseService", report.get("rootCauseService"), Causes.SERVICES));
+	/**
+	 * Adds to {@code errors} each rule the cause, the summary and the confidence break, as both reports write them;
+	 * {@code rootCauseService} is one of {@code topology}'s causes.
+	 */
+	private static void causesAndConfidence(JsonNode report, Topology topology, List<String> errors) {
+		addIfError(errors,
+				Causes.enumError("rootCauseService", report.get("rootCauseService"), topology.causes()));
 		addIfError(errors, Causes.enumError("rootCauseCategory", report.get("rootCauseCategory"), Causes.CATEGORIES));
 		if (!Causes.string(report.get("summary"), 1, Integer.MAX_VALUE)) {
 			errors.add("summary must be a string of 1 to " + MAX_SUMMARY_LENGTH + " characters");

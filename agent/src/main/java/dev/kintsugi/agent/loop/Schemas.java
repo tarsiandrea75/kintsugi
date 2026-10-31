@@ -19,15 +19,6 @@ final class Schemas {
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
-	/** The report schema of explorer mode: a {@code toolCallId} is a step number. */
-	static final String REPORT = JSON.writeValueAsString(report(false));
-
-	/**
-	 * The report schema of the modes that gather the dossier, dossier (T5b) and decision mode: a {@code toolCallId} is
-	 * a step number or {@code "dossier"}; the rest is the same.
-	 */
-	private static final String DOSSIER_REPORT = JSON.writeValueAsString(report(true));
-
 	private Schemas() {
 	}
 
@@ -40,15 +31,19 @@ final class Schemas {
 	 * the properties in this order.
 	 */
 	static String assessedReport(Topology topology) {
-		return JSON.writeValueAsString(assessedReportNode(topology.leafFirst()));
+		return JSON.writeValueAsString(assessedReportNode(topology.leafFirst(), topology.causes()));
 	}
 
-	/** The report schema of {@code mode}. */
-	static String report(AgentMode mode) {
-		return mode.gathersDossier() ? DOSSIER_REPORT : REPORT;
+	/**
+	 * The report schema of {@code mode}, whose {@code rootCauseService} is one of {@code topology}'s causes
+	 * ({@link Topology#causes()}). In explorer mode a {@code toolCallId} is a step number; in the modes that gather
+	 * the dossier, dossier (T5b) and decision mode, it is a step number or {@code "dossier"}; the rest is the same.
+	 */
+	static String report(AgentMode mode, Topology topology) {
+		return JSON.writeValueAsString(report(mode.gathersDossier(), topology.causes()));
 	}
 
-	private static ObjectNode report(boolean dossier) {
+	private static ObjectNode report(boolean dossier, List<String> causes) {
 		// Evidence-by-reference (ADR-013): an item cites a line by its number, and code fills in its text.
 		ObjectNode item = object(List.of("toolCallId", "tool", "line", "why"));
 		ObjectNode stepNo = JSON.createObjectNode().put("type", "integer").put("minimum", 1);
@@ -70,13 +65,13 @@ final class Schemas {
 		ObjectNode properties = report.withObject("properties");
 		properties.set("summary", string(1, 500));
 		properties.set("evidence", array(item, 0, 5));
-		properties.set("rootCauseService", enumOf(Causes.SERVICES));
+		properties.set("rootCauseService", enumOf(causes));
 		properties.set("rootCauseCategory", enumOf(Causes.CATEGORIES));
 		properties.set("confidence", JSON.createObjectNode().put("type", "number").put("minimum", 0).put("maximum", 1));
 		return report;
 	}
 
-	private static ObjectNode assessedReportNode(List<String> services) {
+	private static ObjectNode assessedReportNode(List<String> services, List<String> causes) {
 		ObjectNode assessments = object(services);
 		for (String service : services) {
 			ObjectNode assessment = object(ReportCheck.ASSESSMENT_FIELDS);
@@ -91,7 +86,7 @@ final class Schemas {
 		ObjectNode properties = report.withObject("properties");
 		properties.set("assessments", assessments);
 		properties.set("summary", string(1, 500));
-		properties.set("rootCauseService", enumOf(Causes.SERVICES));
+		properties.set("rootCauseService", enumOf(causes));
 		properties.set("rootCauseCategory", enumOf(Causes.CATEGORIES));
 		properties.set("confidence", JSON.createObjectNode().put("type", "number").put("minimum", 0).put("maximum", 1));
 		return report;

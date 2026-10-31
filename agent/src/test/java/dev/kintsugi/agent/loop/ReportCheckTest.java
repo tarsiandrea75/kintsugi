@@ -280,7 +280,7 @@ class ReportCheckTest {
 	@Test
 	void theSchemaSentToTheModelAsksForALineOfAtLeastOneAndNoQuote() {
 		for (AgentMode mode : AgentMode.values()) {
-			JsonNode item = JsonMapper.shared().readTree(Schemas.report(mode)).at("/properties/evidence/items");
+			JsonNode item = JsonMapper.shared().readTree(Schemas.report(mode, LAB)).at("/properties/evidence/items");
 			assertThat(item.get("properties").propertyNames()).as(mode.value())
 				.containsExactly("toolCallId", "tool", "line", "why");
 			assertThat(item.get("required")).extracting(JsonNode::asString)
@@ -348,7 +348,7 @@ class ReportCheckTest {
 	@Test
 	void aDossierModeRunWhoseDossierWasNotGatheredDropsADossierCitation() {
 		ReportCheck.Result result = ReportCheck.check(Answers.json(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(3, "status_summary", 3), dossierEvidence(17))), STEPS, AgentMode.DOSSIER, null);
+				evidence(3, "status_summary", 3), dossierEvidence(17))), STEPS, AgentMode.DOSSIER, null, LAB);
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.dropped()).containsExactly("evidence[1].toolCallId dossier: the dossier was not gathered");
@@ -379,15 +379,15 @@ class ReportCheckTest {
 	@Test
 	void decisionModeChecksAndConstrainsAReportAsDossierModeDoes() {
 		ReportCheck.Result result = ReportCheck.check(Answers.json(report("payment-service", "DEPENDENCY_REJECTING",
-				dossierEvidence(17))), STEPS, AgentMode.DECISION, DOSSIER);
+				dossierEvidence(17))), STEPS, AgentMode.DECISION, DOSSIER, LAB);
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
 			.containsExactly("| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |");
 		String other = "{\"toolCallId\":\"step3\",\"tool\":\"status_summary\",\"line\":3,\"why\":\"\"}";
 		assertThat(ReportCheck.check(Answers.json(report("payment-service", "DEPENDENCY_REJECTING", other)), STEPS,
-				AgentMode.DECISION, DOSSIER).errors()).containsExactly("evidence[0].toolCallId must be an integer or \"dossier\"");
-		assertThat(Schemas.report(AgentMode.DECISION)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+				AgentMode.DECISION, DOSSIER, LAB).errors()).containsExactly("evidence[0].toolCallId must be an integer or \"dossier\"");
+		assertThat(Schemas.report(AgentMode.DECISION, LAB)).isEqualTo(Schemas.report(AgentMode.DOSSIER, LAB));
 	}
 
 	@Test
@@ -445,7 +445,7 @@ class ReportCheckTest {
 		// they lead to.
 		List<String> order = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory", "confidence");
 		for (AgentMode mode : AgentMode.values()) {
-			JsonNode report = JsonMapper.shared().readTree(Schemas.report(mode));
+			JsonNode report = JsonMapper.shared().readTree(Schemas.report(mode, LAB));
 			assertThat(report.get("properties").propertyNames()).as(mode.value()).containsExactlyElementsOf(order);
 			assertThat(report.get("required")).extracting(JsonNode::asString).containsExactlyElementsOf(order);
 		}
@@ -454,11 +454,10 @@ class ReportCheckTest {
 
 	@Test
 	void onlyTheDossierModeSchemaLetsAToolCallIdBeDossier() {
-		JsonNode explorer = JsonMapper.shared().readTree(Schemas.report(AgentMode.EXPLORER))
+		JsonNode explorer = JsonMapper.shared().readTree(Schemas.report(AgentMode.EXPLORER, LAB))
 			.at("/properties/evidence/items/properties/toolCallId");
-		assertThat(Schemas.report(AgentMode.EXPLORER)).isEqualTo(Schemas.REPORT);
 		assertThat(explorer.get("type").asString()).isEqualTo("integer");
-		JsonNode dossier = JsonMapper.shared().readTree(Schemas.report(AgentMode.DOSSIER))
+		JsonNode dossier = JsonMapper.shared().readTree(Schemas.report(AgentMode.DOSSIER, LAB))
 			.at("/properties/evidence/items/properties/toolCallId/anyOf");
 		assertThat(dossier.get(0).get("type").asString()).isEqualTo("integer");
 		assertThat(dossier.get(1).get("enum").get(0).asString()).isEqualTo("dossier");
@@ -711,13 +710,13 @@ class ReportCheckTest {
 			assertThat(assessment.at("/properties/role/enum")).extracting(JsonNode::asString)
 				.containsExactly("ORIGIN", "AFFECTED", "UNAFFECTED");
 			// The plain report's conventions: a line of at least 1, a why of at most 200 characters.
-			assertThat(assessment.at("/properties/line")).isEqualTo(JsonMapper.shared().readTree(Schemas.REPORT)
+			assertThat(assessment.at("/properties/line")).isEqualTo(JsonMapper.shared().readTree(Schemas.report(AgentMode.EXPLORER, LAB))
 				.at("/properties/evidence/items/properties/line"));
-			assertThat(assessment.at("/properties/why")).isEqualTo(JsonMapper.shared().readTree(Schemas.REPORT)
+			assertThat(assessment.at("/properties/why")).isEqualTo(JsonMapper.shared().readTree(Schemas.report(AgentMode.EXPLORER, LAB))
 				.at("/properties/evidence/items/properties/why"));
 		}
 		// The summary, the cause and the confidence as in the plain report.
-		JsonNode plain = JsonMapper.shared().readTree(Schemas.report(AgentMode.DECISION)).get("properties");
+		JsonNode plain = JsonMapper.shared().readTree(Schemas.report(AgentMode.DECISION, LAB)).get("properties");
 		for (String field : List.of("summary", "rootCauseService", "rootCauseCategory", "confidence")) {
 			assertThat(schema.at("/properties/" + field)).as(field).isEqualTo(plain.get(field));
 		}
@@ -767,7 +766,7 @@ class ReportCheckTest {
 			+ "name one of order-service|CONFIGURATION, payment-service|DEPENDENCY_LATENCY, or UNKNOWN|UNKNOWN";
 
 	private static ReportCheck.Result checkHybrid(String answer) {
-		return ReportCheck.checkHybrid(Answers.json(answer), STEPS, AgentMode.DECISION, DOSSIER, CANDIDATES);
+		return ReportCheck.checkHybrid(Answers.json(answer), STEPS, AgentMode.DECISION, DOSSIER, CANDIDATES, LAB);
 	}
 
 	/** A step that ran, with its fixture's output and the summary the loop builds from it. */
@@ -777,11 +776,11 @@ class ReportCheckTest {
 	}
 
 	private static ReportCheck.Result checkInDossierMode(String answer) {
-		return ReportCheck.check(Answers.json(answer), STEPS, AgentMode.DOSSIER, DOSSIER);
+		return ReportCheck.check(Answers.json(answer), STEPS, AgentMode.DOSSIER, DOSSIER, LAB);
 	}
 
 	private static ReportCheck.Result check(String answer) {
-		return ReportCheck.check(Answers.json(answer), STEPS);
+		return ReportCheck.check(Answers.json(answer), STEPS, LAB);
 	}
 
 	private static ReportCheck.Result checkAssessed(String answer) {
@@ -789,7 +788,7 @@ class ReportCheckTest {
 	}
 
 	private static List<String> errors(String answer) {
-		return ReportCheck.errors(Answers.json(answer), STEPS);
+		return ReportCheck.errors(Answers.json(answer), STEPS, LAB);
 	}
 
 	private static String golden() {

@@ -1080,7 +1080,7 @@ class AgentLoopTest {
 		String system = this.model.prompts().get(0).getInstructions().get(0).getText();
 		assertThat(system).contains("untrustedText").contains("never an instruction").contains("toolCallId")
 			.contains("UNKNOWN").contains(SYMPTOM).contains("15 minutes");
-		for (String text : List.of(Prompts.system(SYMPTOM, 15), this.model.everything(), Schemas.REPORT,
+		for (String text : List.of(Prompts.system(LAB, SYMPTOM, 15), this.model.everything(), Schemas.report(AgentMode.EXPLORER, LAB),
 				Prompts.WARM_UP)) {
 			assertThat(LEAK.matcher(text).find()).as(text).isFalse();
 		}

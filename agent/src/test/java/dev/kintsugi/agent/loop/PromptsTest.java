@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -22,14 +23,14 @@ class PromptsTest {
 
 	@Test
 	void theSystemMessageDescribesTheCallPath() {
-		assertThat(Prompts.system("orders are slow", 15))
+		assertThat(Prompts.system(LAB, "orders are slow", 15))
 			.contains("order-service calls inventory-service and payment-service")
 			.contains("payment-service calls gateway-mock");
 	}
 
 	@Test
 	void aDependencyCauseNamesTheDependencyNotItsCaller() {
-		assertThat(Prompts.system("orders are slow", 15)).contains("DEPENDENCY_LATENCY and DEPENDENCY_REJECTING")
+		assertThat(Prompts.system(LAB, "orders are slow", 15)).contains("DEPENDENCY_LATENCY and DEPENDENCY_REJECTING")
 			.contains("not its caller")
 			.contains("name B when A waits for B or gets an error answer from B")
 			.doesNotContain("if A times out or fails because B does, name B");
@@ -38,7 +39,7 @@ class PromptsTest {
 	@Test
 	void aCallerThatCannotReachAHealthyDependencyPointsAtTheCallersSetting() {
 		// F3 runs named the callee DEPENDENCY_REJECTING for a caller that could not connect to it at all.
-		assertThat(Prompts.system("orders are slow", 15))
+		assertThat(Prompts.system(LAB, "orders are slow", 15))
 			.contains("DEPENDENCY_REJECTING: a component is reached and answers, but refuses or fails")
 			.contains("such as the address or port of a component it calls")
 			.contains("When A cannot reach B at all")
@@ -48,7 +49,7 @@ class PromptsTest {
 	@Test
 	void aDependencyCauseFollowsTheChainToTheLastSlowOrRefusingComponent() {
 		// After T3, every F1 run named payment-service, the caller of the slow gateway-mock: one hop only (F3 T5).
-		assertThat(Prompts.system("orders are slow", 15))
+		assertThat(Prompts.system(LAB, "orders are slow", 15))
 			.contains("the component where the slowness or the error answer starts, not its caller")
 			.contains("if B in turn waits for C or gets an error answer from C, name C")
 			.contains("Follow the calls down to the last component that is slow or refuses")
@@ -58,19 +59,19 @@ class PromptsTest {
 
 	@Test
 	void aTimeoutIsNotACallerThatCannotReachItsDependency() {
-		assertThat(Prompts.system("orders are slow", 15)).contains("or the host is unknown; a timeout is not this case)");
+		assertThat(Prompts.system(LAB, "orders are slow", 15)).contains("or the host is unknown; a timeout is not this case)");
 	}
 
 	@Test
 	void anAffectedOrderToTraceIsOneThatDidNotEndPaid() {
-		assertThat(Prompts.system("orders are slow", 15)).contains("recent_events with source=order")
+		assertThat(Prompts.system(LAB, "orders are slow", 15)).contains("recent_events with source=order")
 			.contains("not an older PAID one");
 	}
 
 	@Test
 	void anOrderNeverPaidIsFoundAsPendingNotAsFailed() {
 		// The fifth live run filtered source=order by outcome=PAYMENT_FAILED while its orders were PAYMENT_PENDING (T5c9).
-		assertThat(Prompts.system("orders are slow", 15))
+		assertThat(Prompts.system(LAB, "orders are slow", 15))
 			.contains("an order never paid stays PAYMENT_PENDING, with PAYMENT_UNAVAILABLE order events")
 			.contains("type=PAYMENT_UNAVAILABLE or outcome=PAYMENT_PENDING")
 			.contains("outcome=PAYMENT_FAILED only when status_summary shows PAYMENT_FAILED orders");
@@ -78,7 +79,7 @@ class PromptsTest {
 
 	@Test
 	void aToolArgumentIsARealValueNeverAPlaceholder() {
-		assertThat(Prompts.system("orders are slow", 15)).contains("copy a real orderId from a result, never a placeholder");
+		assertThat(Prompts.system(LAB, "orders are slow", 15)).contains("copy a real orderId from a result, never a placeholder");
 	}
 
 	@Test
@@ -153,8 +154,8 @@ class PromptsTest {
 	void aPlanHypothesisWhyMayHold300Characters() {
 		// Plans of the sixth live run were rejected for a why over 200 characters (T5c10).
 		assertThat(Prompts.act(new Prompts.State(Phase.TRIAGE, 2, 8, null), true)).contains("why at most 300 characters");
-		assertThat(PlanCheck.errors(plan("w".repeat(300)), Phase.TRIAGE)).isEmpty();
-		assertThat(PlanCheck.errors(plan("w".repeat(301)), Phase.TRIAGE))
+		assertThat(PlanCheck.errors(plan("w".repeat(300)), Phase.TRIAGE, LAB)).isEmpty();
+		assertThat(PlanCheck.errors(plan("w".repeat(301)), Phase.TRIAGE, LAB))
 			.containsExactly("hypotheses[0].why must be a string of at most 300 characters");
 	}
 
@@ -168,7 +169,7 @@ class PromptsTest {
 			.contains("line is the number at the start of one line of that summary")
 			.doesNotContain("quote")
 			.doesNotContain("copied exactly");
-		assertThat(Prompts.system("orders stay pending", 15)).contains("the number of one line of that tool call's result")
+		assertThat(Prompts.system(LAB, "orders stay pending", 15)).contains("the number of one line of that tool call's result")
 			.doesNotContain("quote copied exactly");
 	}
 

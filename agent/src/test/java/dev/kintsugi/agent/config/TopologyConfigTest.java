@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.io.DefaultResourceLoader;
 
 import dev.kintsugi.agent.dossier.Topology;
 
@@ -29,8 +30,11 @@ class TopologyConfigTest {
 
 	@Test
 	void thePropertyNamesTheFile() {
-		this.runner.withPropertyValues(Topology.PROPERTY + "=classpath:topology/lab.json")
-			.run(context -> assertThat(context.getBean(Topology.class)).isEqualTo(LAB));
+		// Another file than the default, so the test fails if the property is ignored (T3 review, R3-005).
+		Topology chain = Topology.load(new DefaultResourceLoader().getResource("classpath:topology/chain.json"));
+		this.runner.withPropertyValues(Topology.PROPERTY + "=classpath:topology/chain.json")
+			.run(context -> assertThat(context.getBean(Topology.class)).isEqualTo(chain).isNotEqualTo(LAB));
+		assertThat(chain.services()).containsExactly("a", "b", "c");
 	}
 
 	@Test

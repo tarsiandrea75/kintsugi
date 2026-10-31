@@ -44,16 +44,6 @@ import dev.kintsugi.agent.lab.ToolResult;
  */
 public final class DossierGatherer {
 
-	/** The lab services, in the order of the call path. */
-	public static final List<String> SERVICES = List.of("order-service", "payment-service", "inventory-service",
-			"gateway-mock");
-
-	/** The {@code status_summary} tables with states over a window. */
-	public static final List<String> STATUS_TABLES = List.of("orders", "payments");
-
-	/** The {@code event_counts} sources. */
-	public static final List<String> EVENT_SOURCES = List.of("order", "payment", "reservation");
-
 	/** The log levels read: the lab services log failures at WARN; ERROR is read too, as ADR-011 names both. */
 	public static final List<String> LOG_LEVELS = List.of("WARN", "ERROR");
 
@@ -73,9 +63,25 @@ public final class DossierGatherer {
 
 	private final Clock clock;
 
-	public DossierGatherer(LabTools tools, Clock clock) {
+	/** The services, in the order of the call path ({@link Topology#gatherOrder()}). */
+	private final List<String> services;
+
+	/** The {@code status_summary} tables with states over a window ({@link Topology#statusTables()}). */
+	private final List<String> statusTables;
+
+	/** The {@code event_counts} sources ({@link Topology#eventSources()}). */
+	private final List<String> eventSources;
+
+	/**
+	 * A gatherer that reads, through {@code tools}, the services, tables and sources of {@code topology}
+	 * (odd/tasks/topology-data.md T4): the services down the call path, the tables and sources in file order.
+	 */
+	public DossierGatherer(LabTools tools, Clock clock, Topology topology) {
 		this.tools = tools;
 		this.clock = clock;
+		this.services = topology.gatherOrder();
+		this.statusTables = topology.statusTables();
+		this.eventSources = topology.eventSources();
 	}
 
 	/**
@@ -95,9 +101,9 @@ public final class DossierGatherer {
 		Calls calls = new Calls();
 
 		Gathered<List<ServiceStatus>> services = calls.read("service_restarts", args(incident),
-				result -> services(result, at));
+				result -> services(result, at, this.services));
 		List<TableStates> states = new ArrayList<>();
-		for (String table : STATUS_TABLES) {
+		for (String table : this.statusTables) {
 			states.add(new TableStates(table, calls.compared("status_summary", "table", table, previous, incident,
 					DossierGatherer::statusCounts)));
 		}
@@ -105,7 +111,7 @@ public final class DossierGatherer {
 				DossierGatherer::trafficRows);
 		// query_metric takes no untilMinutesAgo: one call per service over both windows, its points split by time.
 		List<ServiceLatency> latency = new ArrayList<>();
-		for (String service : SERVICES) {
+		for (String service : this.services) {
 			ObjectNode args = JSON.createObjectNode()
 				.put("metric", LATENCY_METRIC)
 				.put("service", service)
@@ -114,7 +120,7 @@ public final class DossierGatherer {
 					calls.read("query_metric", args, result -> latency(result, incident.from()))));
 		}
 		List<ServiceLogs> logs = new ArrayList<>();
-		for (String service : SERVICES) {
+		for (String service : this.services) {
 			List<LevelLogs> levels = new ArrayList<>();
 			for (String level : LOG_LEVELS) {
 				ObjectNode args = JSON.createObjectNode().put("service", service).put("level", level);
@@ -127,7 +133,7 @@ public final class DossierGatherer {
 			logs.add(new ServiceLogs(service, levels));
 		}
 		List<SourceEvents> events = new ArrayList<>();
-		for (String source : EVENT_SOURCES) {
+		for (String source : this.eventSources) {
 			events.add(new SourceEvents(source, calls.compared("event_counts", "source", source, previous, incident,
 					DossierGatherer::eventCounts)));
 		}
@@ -143,9 +149,9 @@ public final class DossierGatherer {
 		return args;
 	}
 
-	private static List<ServiceStatus> services(JsonNode result, Instant at) {
+	private static List<ServiceStatus> services(JsonNode result, Instant at, List<String> names) {
 		List<ServiceStatus> services = new ArrayList<>();
-		for (String service : SERVICES) {
+		for (String service : names) {
 			JsonNode item = null;
 			for (JsonNode candidate : result.path("items")) {
 				if (service.equals(candidate.path("service").asString(""))) {

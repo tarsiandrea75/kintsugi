@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.dossier;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -47,7 +48,7 @@ class DossierGathererTest {
 	void callsEveryToolForBothWindowsInAFixedOrder() {
 		RecordedLab lab = new RecordedLab("healthy");
 
-		new DossierGatherer(lab, CLOCK).gather(10);
+		new DossierGatherer(lab, CLOCK, LAB).gather(10);
 
 		List<String> expected = new ArrayList<>(List.of( //
 				"service_restarts {\"sinceMinutes\":10}",
@@ -79,8 +80,8 @@ class DossierGathererTest {
 		RecordedLab first = new RecordedLab("f3");
 		RecordedLab second = new RecordedLab("f3");
 
-		Dossier one = new DossierGatherer(first, CLOCK).gather(10);
-		Dossier two = new DossierGatherer(second, CLOCK).gather(10);
+		Dossier one = new DossierGatherer(first, CLOCK, LAB).gather(10);
+		Dossier two = new DossierGatherer(second, CLOCK, LAB).gather(10);
 
 		assertThat(second.calls()).isEqualTo(first.calls());
 		assertThat(two).isEqualTo(one);
@@ -89,7 +90,7 @@ class DossierGathererTest {
 
 	@Test
 	void windowsAreTheLastNMinutesAndTheNMinutesJustBefore() {
-		Dossier dossier = new DossierGatherer(new RecordedLab("healthy"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("healthy"), CLOCK, LAB).gather(10);
 
 		assertThat(dossier.gatheredAt()).isEqualTo(NOW);
 		assertThat(dossier.incidentWindow())
@@ -100,7 +101,7 @@ class DossierGathererTest {
 
 	@Test
 	void serviceStatusHasRestartsInTheWindowAndUptimeFromTheNewestStart() {
-		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK, LAB).gather(10);
 
 		List<ServiceStatus> services = ok(dossier.services());
 		assertThat(services).extracting(ServiceStatus::service).containsExactlyElementsOf(SERVICES);
@@ -120,7 +121,7 @@ class DossierGathererTest {
 				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"service\":\"order-service\","
 						+ "\"startTimes\":[\"2026-10-16T09:53:12.400Z\",\"2026-10-16T08:00:20.300Z\"],\"restartsInWindow\":1}]}");
 
-		ServiceStatus order = ok(new DossierGatherer(lab, CLOCK).gather(10).services()).get(0);
+		ServiceStatus order = ok(new DossierGatherer(lab, CLOCK, LAB).gather(10).services()).get(0);
 
 		assertThat(order.startTimes()).containsExactly(Instant.parse("2026-10-16T08:00:20.300Z"),
 				Instant.parse("2026-10-16T09:53:12.400Z"));
@@ -133,7 +134,7 @@ class DossierGathererTest {
 				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"service\":\"gateway-mock\","
 						+ "\"startTimes\":[\"2026-10-16T08:00:01.200Z\"],\"restartsInWindow\":0}]}");
 
-		List<ServiceStatus> services = ok(new DossierGatherer(lab, CLOCK).gather(10).services());
+		List<ServiceStatus> services = ok(new DossierGatherer(lab, CLOCK, LAB).gather(10).services());
 
 		assertThat(services).extracting(ServiceStatus::service).containsExactlyElementsOf(SERVICES);
 		assertThat(services.get(0).startTimes()).isEmpty();
@@ -143,7 +144,7 @@ class DossierGathererTest {
 
 	@Test
 	void orderAndPaymentStatesPerWindowWithSampleOrderIds() {
-		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK, LAB).gather(10);
 
 		assertThat(dossier.states()).extracting(Dossier.TableStates::table).containsExactly("orders", "payments");
 		Compared<List<StatusCount>> orders = dossier.states().get(0).windows();
@@ -161,7 +162,7 @@ class DossierGathererTest {
 
 	@Test
 	void trafficKeepsTheToolsRowsPerWindow() {
-		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK, LAB).gather(10);
 
 		assertThat(ok(dossier.traffic().previous())).hasSize(7)
 			.contains(new TrafficRow("server", "payment-service", null, "POST", "/payments", "201", "SUCCESS", null, 4));
@@ -177,7 +178,7 @@ class DossierGathererTest {
 	@Test
 	void latencyPerServiceAndUriWithItsPointsSplitAtTheIncidentWindowsStart() {
 		// F1: gateway-mock answers /authorize in about 10 s with 200 from 09:53; payment-service waits on it.
-		Dossier dossier = new DossierGatherer(new RecordedLab("f1", "healthy"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("f1", "healthy"), CLOCK, LAB).gather(10);
 
 		assertThat(dossier.latency()).extracting(ServiceLatency::service).containsExactlyElementsOf(SERVICES);
 		LatencySeries gateway = ok(dossier.latency().get(3).latency());
@@ -205,7 +206,7 @@ class DossierGathererTest {
 				+ "\"gateway-mock\",\"uri\":\"/authorize\"},\"points\":[[1792143600,\"NaN\"],[1792144200,\"+Inf\"]]}]}";
 		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-latency_avg-gateway-mock", output);
 
-		LatencySeries gateway = ok(new DossierGatherer(lab, CLOCK).gather(10).latency().get(3).latency());
+		LatencySeries gateway = ok(new DossierGatherer(lab, CLOCK, LAB).gather(10).latency().get(3).latency());
 
 		assertThat(gateway.truncated()).isTrue();
 		assertThat(gateway.uris()).containsExactly(new UriLatency("/authorize", new LatencyPoints(1, 0, null, null),
@@ -218,7 +219,7 @@ class DossierGathererTest {
 				+ "\"gateway-mock\",\"uri\":\"/authorize\"},\"points\":[[1792143600,\"slow\"]]}]}";
 		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-latency_avg-gateway-mock", output);
 
-		Gathered<LatencySeries> gateway = new DossierGatherer(lab, CLOCK).gather(10).latency().get(3).latency();
+		Gathered<LatencySeries> gateway = new DossierGatherer(lab, CLOCK, LAB).gather(10).latency().get(3).latency();
 
 		assertThat(gateway).isInstanceOfSatisfying(Gathered.Failed.class,
 				failed -> assertThat(failed.reason()).startsWith("the output could not be read"));
@@ -229,7 +230,7 @@ class DossierGathererTest {
 		RecordedLab lab = new RecordedLab("f3").answer("query_metric-latency_avg-payment-service",
 				"{\"outcome\":\"INVALID_PARAMETER\",\"reason\":\"sinceMinutes must be 1 to 360\"}");
 
-		Dossier dossier = new DossierGatherer(lab, CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB).gather(10);
 
 		assertThat(dossier.latency().get(1).latency()).isEqualTo(
 				new Gathered.Failed<>("query_metric", ToolOutcome.INVALID_PARAMETER, "sinceMinutes must be 1 to 360"));
@@ -239,7 +240,7 @@ class DossierGathererTest {
 
 	@Test
 	void logSignaturesPerServiceAndLevelWithCountsAndUntrustedText() {
-		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK, LAB).gather(10);
 
 		assertThat(dossier.logs()).extracting(Dossier.ServiceLogs::service).containsExactlyElementsOf(SERVICES);
 		List<LevelLogs> order = dossier.logs().get(0).levels();
@@ -270,7 +271,7 @@ class DossierGathererTest {
 				+ "]}";
 		RecordedLab lab = new RecordedLab("healthy").answer("search_logs-payment-service-WARN-incident", output);
 
-		LogLines lines = ok(new DossierGatherer(lab, CLOCK).gather(10).logs().get(1).levels().get(0).lines());
+		LogLines lines = ok(new DossierGatherer(lab, CLOCK, LAB).gather(10).logs().get(1).levels().get(0).lines());
 
 		assertThat(lines.returned()).isEqualTo(3);
 		assertThat(lines.truncated()).isTrue();
@@ -282,7 +283,7 @@ class DossierGathererTest {
 
 	@Test
 	void eventCountsPerSourceAndWindow() {
-		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK, LAB).gather(10);
 
 		assertThat(dossier.events()).extracting(Dossier.SourceEvents::source)
 			.containsExactly("order", "payment", "reservation");
@@ -301,7 +302,7 @@ class DossierGathererTest {
 				"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\",\"returned\":0,"
 						+ "\"truncated\":false,\"items\":[]}");
 
-		Dossier dossier = new DossierGatherer(lab, CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB).gather(10);
 
 		assertThat(dossier.traffic().incident()).isEqualTo(
 				new Gathered.Failed<>("traffic_counts", ToolOutcome.UPSTREAM_ERROR, "Prometheus did not answer"));
@@ -317,7 +318,7 @@ class DossierGathererTest {
 			.answer("service_restarts", "mcp-tools call failed: ResourceAccessException: Connection refused")
 			.fail("status_summary-orders-incident", new IllegalStateException("no MCP session"));
 
-		Dossier dossier = new DossierGatherer(lab, CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB).gather(10);
 
 		assertThat(dossier.services()).isEqualTo(new Gathered.Failed<>("service_restarts", ToolOutcome.CLIENT_ERROR,
 				"mcp-tools call failed: ResourceAccessException: Connection refused"));
@@ -333,7 +334,7 @@ class DossierGathererTest {
 		RecordedLab lab = new RecordedLab("healthy").answer("event_counts-order-incident",
 				"{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"total\":\"many\"}]}");
 
-		Dossier dossier = new DossierGatherer(lab, CLOCK).gather(10);
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB).gather(10);
 
 		assertThat(dossier.events().get(0).windows().incident()).isInstanceOfSatisfying(Gathered.Failed.class,
 				failed -> {
@@ -344,7 +345,7 @@ class DossierGathererTest {
 
 	@Test
 	void aWindowOfLessThanOneMinuteIsRefused() {
-		assertThatThrownBy(() -> new DossierGatherer(new RecordedLab("healthy"), CLOCK).gather(0))
+		assertThatThrownBy(() -> new DossierGatherer(new RecordedLab("healthy"), CLOCK, LAB).gather(0))
 			.isInstanceOf(IllegalArgumentException.class);
 	}
 

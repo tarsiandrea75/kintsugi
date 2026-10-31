@@ -190,7 +190,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		// Checked before any thread is started: the assessed report reads the sheets' line owners.
 		mode.reportFrom(decisionReport).ifPresent(report -> report.checkView(decisionView));
 		this.mode = mode;
-		this.gatherer = new DossierGatherer(labTools, clock);
+		this.gatherer = new DossierGatherer(labTools, clock, topology);
 		this.incidents = incidents;
 		this.router = router;
 		this.labTools = labTools;
@@ -244,7 +244,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			log.warn("incident={} event=run_not_started reason=\"the incident is not RUNNING\"", incidentId);
 			return null;
 		}
-		Run run = new Run(open.get(), this.mode);
+		Run run = new Run(open.get(), this.mode, this.topology);
 		IncidentStatus status;
 		String reason = null;
 		String report = null;
@@ -539,12 +539,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * @return the verdict for the {@code ACT} step: {@code plan valid}, with the dropped {@code nextTools} if any,
 	 *     {@code plan missing} or {@code plan invalid: ...}
 	 */
-	private static String plan(Run run, Phase phase, String text) {
+	private String plan(Run run, Phase phase, String text) {
 		JsonNode plan = Answers.embedded(text);
 		if (plan == null) {
 			return "plan missing";
 		}
-		PlanCheck.Result checked = PlanCheck.check(plan, phase);
+		PlanCheck.Result checked = PlanCheck.check(plan, phase, this.topology);
 		if (!checked.errors().isEmpty()) {
 			return "plan invalid: " + String.join("; ", checked.errors());
 		}
@@ -638,12 +638,13 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					: candidates != null ? Prompts.hybridReport(state, errors, run.toolSteps.values(), candidates)
 							: Prompts.report(state, errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(),
-					assessed ? this.assessedSchema : Schemas.report(run.mode));
+					assessed ? this.assessedSchema : Schemas.report(run.mode, this.topology));
 			JsonNode report = Answers.json(answer.text());
 			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets, this.topology)
 					: candidates != null
-							? ReportCheck.checkHybrid(report, run.toolSteps, run.mode, run.dossierText, candidates)
-							: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);
+							? ReportCheck.checkHybrid(report, run.toolSteps, run.mode, run.dossierText, candidates,
+									this.topology)
+							: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText, this.topology);
 			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
 				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one. The
@@ -995,11 +996,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		 */
 		Instant budgetStart;
 
-		Run(OpenIncident incident, AgentMode mode) {
+		Run(OpenIncident incident, AgentMode mode, Topology topology) {
 			this.incident = incident;
 			this.mode = mode;
 			this.toolsLeft = mode.toolBudget();
-			this.system = new SystemMessage(Prompts.system(incident.symptom(), incident.sinceMinutes()));
+			this.system = new SystemMessage(Prompts.system(topology, incident.symptom(), incident.sinceMinutes()));
 		}
 
 		/** The parts of the state the instruction shows. */

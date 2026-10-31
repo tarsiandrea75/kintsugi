@@ -807,7 +807,7 @@ It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a d
 
 ### Requirement: Evidence dossier gathering
 
-`DossierGatherer` MUST build the evidence dossier of an incident (ADR-011, [feature document](../../../odd/tasks/evidence-dossier.md)) through the `LabTools` port, the same path to mcp-tools as the loop's calls. For an incident window of N minutes (the incident's `sinceMinutes`) it uses two windows: the **incident window**, `sinceMinutes` N, and the **previous window**, the N minutes just before it, `sinceMinutes` 2N with `untilMinutesAgo` N. It MUST make the same calls, with the same arguments, in this order, for every incident, whatever the symptom or any output says:
+`DossierGatherer` MUST build the evidence dossier of an incident (ADR-011, [feature document](../../../odd/tasks/evidence-dossier.md)) through the `LabTools` port, the same path to mcp-tools as the loop's calls. For an incident window of N minutes (the incident's `sinceMinutes`) it uses two windows: the **incident window**, `sinceMinutes` N, and the **previous window**, the N minutes just before it, `sinceMinutes` 2N with `untilMinutesAgo` N. It MUST make the same calls, with the same arguments, in this order, for every incident, whatever the symptom or any output says. The services, tables and sources come from the loaded `Topology` (**topology-data T4**): the services in its gather order (`gatherOrder()`, leaf first reversed, so down the call path), the tables and sources in the file order of its `tableOwners` and `sourceOwners`. The lab file gives the lists below.
 
 1. `service_restarts` over the incident window;
 2. `status_summary` for `orders`, then `payments`, each for the previous then the incident window;
@@ -1277,7 +1277,7 @@ The messages of every model call MUST come in this order, what changes least fir
 
 The system message MUST also say **(T5c8)**:
 
-- the call path: order-service calls inventory-service and payment-service, payment-service calls gateway-mock, and the three services keep their data in postgres;
+- the components and the call path, rendered from the loaded `Topology` (**topology-data T4**); for the lab file, byte for byte the text of before T4: `Its components are gateway-mock, payment-service, order-service, inventory-service and their database, postgres. The call path: order-service calls inventory-service and payment-service; payment-service calls gateway-mock; the three services keep their data in postgres.` The rule: the services in display order joined by `, `, then ` and their database, <datastore>` (` and their databases, <list>` for several; the services as a list for none); one clause `<caller> calls <targets>` per calling service, in the order it first calls in the edges, its targets in edge order as a list, the clauses joined by `; ` (`no component calls another` for none); then, when there are datastores and services that own a table or a source, `; the <count> services keep their data in <datastores>`, the count in words up to twelve (`<service> keeps its data in <datastores>` for one). A list is `a`, `a and b` or `a, b and c`. The values of `rootCauseService` it lists are the topology's causes (the services, the datastores, `UNKNOWN`), joined by `, ` with `, or ` before the last;
 - that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING`, `rootCauseService` is the component where the slowness or the error answer starts, not its caller: name B when A waits for B or gets an error answer from B, and if B in turn waits for C or gets an error answer from C, name C; follow the calls down to the last component that is slow or refuses, and an answer that takes long is that component's own failure even when it ends in success and logs no error **(F3 T5)**;
 - that `DEPENDENCY_REJECTING` means B is reached and answers with an error, and `CONFIGURATION` includes a wrong address or port of a component A calls; when A cannot reach B at all (connection refused or closed, unknown host; a timeout is not this case) while B shows no failure of its own (no errors, no restarts, healthy metrics), B is not the cause and A's own setting for B, a `CONFIGURATION` of A, is suspected **(F3 T3)**;
 - that an affected order to trace is found with `recent_events` with `source=order`, not an older `PAID` one, and that its `orderId` is copied from a result, never a placeholder;
@@ -1308,6 +1308,13 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 - AND it says to trace a `PAYMENT_PENDING` or `PAYMENT_FAILED` order found with `recent_events` with `source=order`
 - AND it names no cause the lab may be put through
 
+#### Scenario: Another topology changes the system message (topology-data T4)
+- GIVEN the agent loads a topology of three services `a`, `b` and `c`, where `a` calls `b` and `b` calls `c`, each owning a table or a source, and the datastore `db`
+- WHEN the loop builds the system message
+- THEN it says `Its components are a, b, c and their database, db. The call path: a calls b; b calls c; the three services keep their data in db.`
+- AND it lists `a, b, c, db, or UNKNOWN` as the values of `rootCauseService`, the report schema's enum is the same list, and the gatherer reads `a`, `b`, `c` in that order
+- AND with the lab file the message, the schemas and the gathered lists are the same as before T4, byte for byte
+
 #### Scenario: A caller that cannot reach a healthy dependency points at its own setting (F3 T3)
 - GIVEN A's calls to B fail because the connection is refused or closed, or the host is unknown
 - AND B shows no failure of its own: no errors, no restarts, healthy metrics
@@ -1334,7 +1341,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `evidence[].tool` | that step's `tool_name`; `"dossier"` when the item cites the dossier |
 | `evidence[].line` | an integer of at least 1: the number of the cited line in that step's summary, or `D<line>` in the dossier **(evidence-by-reference)** |
 | `evidence[].why` | at most 200 characters **(chosen)** |
-| `rootCauseService` | `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN` |
+| `rootCauseService` | the loaded topology's causes: its services in display order, its datastores, then `UNKNOWN` (**topology-data T4**); for the lab, `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN` |
 | `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN` |
 | `confidence` | number, 0 to 1 |
 

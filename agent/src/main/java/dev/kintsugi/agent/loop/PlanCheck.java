@@ -10,6 +10,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 import tools.jackson.databind.node.StringNode;
 
+import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.lab.Phase;
 
 /** Checks a plan against its schema in code, whatever the model returned (agent spec, "The plan"). */
@@ -29,16 +30,17 @@ final class PlanCheck {
 	}
 
 	/** Every rule {@code plan} breaks, each naming its field; empty when the plan is valid in {@code phase}. */
-	static List<String> errors(JsonNode plan, Phase phase) {
-		return check(plan, phase).errors();
+	static List<String> errors(JsonNode plan, Phase phase, Topology topology) {
+		return check(plan, phase, topology).errors();
 	}
 
 	/**
 	 * Checks {@code plan} in {@code phase}. A {@code nextTools} entry that names a tool outside the phase is dropped and
 	 * recorded, not an error (T5c12): the sixth to eighth live runs lost every KNOWLEDGE plan to a {@code search_logs}
-	 * entry. Every other rule still invalidates the plan.
+	 * entry. Every other rule still invalidates the plan. A hypothesis's {@code rootCauseService} is one of
+	 * {@code topology}'s causes ({@link Topology#causes()}).
 	 */
-	static Result check(JsonNode plan, Phase phase) {
+	static Result check(JsonNode plan, Phase phase, Topology topology) {
 		if (plan == null || !plan.isObject()) {
 			return new Result(List.of("the answer is not a JSON object"), List.of(), plan);
 		}
@@ -52,7 +54,7 @@ final class PlanCheck {
 		}
 		else {
 			for (int i = 0; i < hypotheses.size(); i++) {
-				hypothesis(hypotheses.get(i), "hypotheses[" + i + "]", errors);
+				hypothesis(hypotheses.get(i), "hypotheses[" + i + "]", topology.causes(), errors);
 			}
 		}
 		JsonNode nextTools = plan.get("nextTools");
@@ -91,14 +93,14 @@ final class PlanCheck {
 	record Result(List<String> errors, List<String> dropped, JsonNode plan) {
 	}
 
-	private static void hypothesis(JsonNode hypothesis, String name, List<String> errors) {
+	private static void hypothesis(JsonNode hypothesis, String name, List<String> causes, List<String> errors) {
 		if (!hypothesis.isObject()) {
 			errors.add(name + " must be an object {rootCauseService, rootCauseCategory, why}");
 			return;
 		}
 		unexpected(hypothesis, HYPOTHESIS_FIELDS, name + ".", errors);
 		addIfError(errors, Causes.enumError(name + ".rootCauseService", hypothesis.get("rootCauseService"),
-				Causes.SERVICES));
+				causes));
 		addIfError(errors, Causes.enumError(name + ".rootCauseCategory", hypothesis.get("rootCauseCategory"),
 				Causes.CATEGORIES));
 		if (!Causes.string(hypothesis.get("why"), 0, MAX_WHY_LENGTH)) {

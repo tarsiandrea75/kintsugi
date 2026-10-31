@@ -141,7 +141,7 @@ class AgentLoopDossierModeTest {
 		assertThat(dossierPrompt.getInstructions().get(1).getText()).startsWith(Prompts.DOSSIER_INTRO);
 		String dossier = dossierPrompt.getInstructions().get(0).getText();
 
-		assertThat(dossier).isEqualTo(explorer).isEqualTo(Prompts.system(SYMPTOM, 15));
+		assertThat(dossier).isEqualTo(explorer).isEqualTo(Prompts.system(LAB, SYMPTOM, 15));
 	}
 
 	@Test
@@ -183,7 +183,7 @@ class AgentLoopDossierModeTest {
 		assertThat(last(reportPrompt)).contains("Citable toolCallIds: dossier.")
 			.contains("To cite the dossier, write toolCallId \"dossier\" and tool \"dossier\"");
 		assertThat(JSON.readTree(((StructuredOutputChatOptions) reportPrompt.getOptions()).getOutputSchema()))
-			.isEqualTo(JSON.readTree(Schemas.report(AgentMode.DOSSIER)));
+			.isEqualTo(JSON.readTree(Schemas.report(AgentMode.DOSSIER, LAB)));
 	}
 
 	@Test
@@ -353,7 +353,7 @@ class AgentLoopDossierModeTest {
 	 */
 	@Test
 	void theLargestDossierModePromptFitsTheContext() {
-		String system = Prompts.system("s".repeat(500), 360);
+		String system = Prompts.system(LAB, "s".repeat(500), 360);
 		String dossier = Prompts.dossier(golden("f3"));
 		List<ToolStep> steps = List.of(new ToolStep(2, "search_logs", "OK", "{}", null),
 				new ToolStep(3, "count_logs", "OK", "{}", null), new ToolStep(4, "recent_events", "OK", "{}", null),

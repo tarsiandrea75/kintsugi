@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,7 @@ class PlanCheckTest {
 	@Test
 	void aNextToolOutsideThePhaseIsDroppedAndThePlanStaysValid() {
 		// The sixth to eighth live runs: every KNOWLEDGE plan named search_logs and was rejected (T5c12).
-		PlanCheck.Result checked = PlanCheck.check(plan("\"search_logs\",\"search_runbooks\""), Phase.KNOWLEDGE);
+		PlanCheck.Result checked = PlanCheck.check(plan("\"search_logs\",\"search_runbooks\""), Phase.KNOWLEDGE, LAB);
 
 		assertThat(checked.errors()).isEmpty();
 		assertThat(checked.dropped())
@@ -32,7 +33,7 @@ class PlanCheckTest {
 
 	@Test
 	void aPlanWhoseEveryNextToolIsOutsideThePhaseKeepsAnEmptyList() {
-		PlanCheck.Result checked = PlanCheck.check(plan("\"search_logs\",\"count_logs\""), Phase.KNOWLEDGE);
+		PlanCheck.Result checked = PlanCheck.check(plan("\"search_logs\",\"count_logs\""), Phase.KNOWLEDGE, LAB);
 
 		assertThat(checked.errors()).isEmpty();
 		assertThat(checked.dropped()).hasSize(2);
@@ -41,7 +42,7 @@ class PlanCheckTest {
 
 	@Test
 	void aPlanWithAllItsToolsInThePhaseDropsNothing() {
-		PlanCheck.Result checked = PlanCheck.check(plan("\"search_logs\""), Phase.INVESTIGATE);
+		PlanCheck.Result checked = PlanCheck.check(plan("\"search_logs\""), Phase.INVESTIGATE, LAB);
 
 		assertThat(checked.errors()).isEmpty();
 		assertThat(checked.dropped()).isEmpty();
@@ -50,12 +51,12 @@ class PlanCheckTest {
 
 	@Test
 	void everyOtherRuleStillInvalidatesThePlan() {
-		assertThat(PlanCheck.check(plan("3"), Phase.KNOWLEDGE).errors())
+		assertThat(PlanCheck.check(plan("3"), Phase.KNOWLEDGE, LAB).errors())
 			.containsExactly("nextTools[0] must be one of this phase's tools: search_runbooks; got 3");
-		assertThat(PlanCheck.check(plan("\"a\",\"b\",\"c\",\"d\",\"e\""), Phase.KNOWLEDGE).errors())
+		assertThat(PlanCheck.check(plan("\"a\",\"b\",\"c\",\"d\",\"e\""), Phase.KNOWLEDGE, LAB).errors())
 			.containsExactly("nextTools must be an array of 0 to 4 tool names");
 		PlanCheck.Result badHypothesis = PlanCheck.check(JsonMapper.shared()
-			.readTree("{\"hypotheses\":[],\"nextTools\":[\"search_logs\"]}"), Phase.KNOWLEDGE);
+			.readTree("{\"hypotheses\":[],\"nextTools\":[\"search_logs\"]}"), Phase.KNOWLEDGE, LAB);
 		assertThat(badHypothesis.errors()).containsExactly("hypotheses must be an array of 1 to 3 items");
 	}
 

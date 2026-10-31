@@ -36,7 +36,7 @@ class ModelRouteTest {
 
 	private static final List<ToolCallback> TOOLS = new FakeLabTools().toolsFor(Phase.TRIAGE);
 
-	private static final String SCHEMA = Schemas.report(AgentMode.EXPLORER);
+	private static final String SCHEMA = Schemas.report(AgentMode.EXPLORER, LAB);
 
 	private final ScriptedChatModel model = new ScriptedChatModel();
 
@@ -173,7 +173,7 @@ class ModelRouteTest {
 	@ParameterizedTest
 	@EnumSource(AgentMode.class)
 	void theCloudRoutesSchemaHasOnlyWhatAnthropicAccepts(AgentMode mode) {
-		String schema = Schemas.report(mode);
+		String schema = Schemas.report(mode, LAB);
 		AnthropicChatOptions options = (AnthropicChatOptions) this.cloud.options(512, Duration.ofSeconds(90),
 				List.of(), schema);
 		JsonNode sent = JsonMapper.shared().readTree(options.getOutputSchema());

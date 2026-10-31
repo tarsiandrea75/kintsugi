@@ -16,12 +16,12 @@ import dev.kintsugi.agent.lab.ToolResult;
  * @param gatheredAt the time the gathering started, by the gatherer's clock
  * @param incidentWindow the last N minutes
  * @param previousWindow the N minutes just before the incident window
- * @param services service status per lab service, in {@link DossierGatherer#SERVICES} order
- * @param states order and payment states, in {@link DossierGatherer#STATUS_TABLES} order
+ * @param services service status per lab service, in {@link Topology#gatherOrder()} order
+ * @param states order and payment states, in {@link Topology#statusTables()} order
  * @param traffic the request counts per edge and side
- * @param latency the server-side latency per service, in {@link DossierGatherer#SERVICES} order
+ * @param latency the server-side latency per service, in {@link Topology#gatherOrder()} order
  * @param logs WARN and ERROR log signatures per service, incident window only
- * @param events event counts per source, in {@link DossierGatherer#EVENT_SOURCES} order
+ * @param events event counts per source, in {@link Topology#eventSources()} order
  * @param calls every tool call made, in order, with its full output; how they are recorded as steps is the loop's
  * concern
  */

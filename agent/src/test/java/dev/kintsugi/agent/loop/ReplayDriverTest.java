@@ -569,7 +569,7 @@ class ReplayDriverTest {
 		assertThat(dossier.report()).isEmpty();
 		assertThat(this.model.prompts().getLast().getOptions()).isInstanceOfSatisfying(
 				StructuredOutputChatOptions.class,
-				options -> assertThat(options.getOutputSchema()).isEqualTo(Schemas.report(AgentMode.DOSSIER)));
+				options -> assertThat(options.getOutputSchema()).isEqualTo(Schemas.report(AgentMode.DOSSIER, LAB)));
 	}
 
 	/** The dossier message the sample's model read: its {@code DOSSIER} step's summary. */

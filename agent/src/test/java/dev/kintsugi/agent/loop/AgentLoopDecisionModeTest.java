@@ -222,7 +222,7 @@ class AgentLoopDecisionModeTest {
 		// The system message and the dossier message, byte for byte, "before the first phase" included.
 		assertThat(decisionReport.getInstructions().get(0).getText())
 			.isEqualTo(dossierReport.getInstructions().get(0).getText())
-			.isEqualTo(Prompts.system(SYMPTOM, 15));
+			.isEqualTo(Prompts.system(LAB, SYMPTOM, 15));
 		assertThat(decisionReport.getInstructions().get(1).getText())
 			.isEqualTo(dossierReport.getInstructions().get(1).getText())
 			.startsWith(Prompts.DOSSIER_INTRO);
@@ -233,7 +233,7 @@ class AgentLoopDecisionModeTest {
 		String dossier = last(dossierReport);
 		assertThat(dossier).startsWith("Phase: CONCLUDE (the phases run in order: INVESTIGATE, KNOWLEDGE, CONCLUDE)");
 		assertThat(task(decision)).isEqualTo(task(dossier)).contains("Citable toolCallIds: dossier.");
-		assertThat(schema(decisionReport)).isEqualTo(schema(dossierReport)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+		assertThat(schema(decisionReport)).isEqualTo(schema(dossierReport)).isEqualTo(Schemas.report(AgentMode.DOSSIER, LAB));
 	}
 
 	@Test
@@ -366,7 +366,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theSheetsViewGivesTheReportCallTheSheetsWhoseLinesAreCitedAsTheTablesAre() {
 		Clock clock = fixedClock();
-		ServiceSheets.Rendered sheets = ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15), LAB);
+		ServiceSheets.Rendered sheets = ServiceSheets.render(new DossierGatherer(lab(), clock, LAB).gather(15), LAB);
 		// The first line gateway-mock owns: its place in the call graph.
 		int line = sheets.owners().indexOf("gateway-mock") + 1;
 		this.model.text(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(line)));
@@ -388,7 +388,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theTablesViewIsTheDefaultAndKeepsTodaysDossierByteForByte() {
 		Clock clock = fixedClock();
-		String today = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15), LAB));
+		String today = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock, LAB).gather(15), LAB));
 		this.model.text(unknownReport()).text(unknownReport());
 
 		// The loop of the constructor without a view, as every caller built it before the setting.
@@ -514,7 +514,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 
 		Prompt prompt = this.model.prompts().get(0);
-		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DECISION));
+		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DECISION, LAB));
 		assertThat(last(prompt)).contains("Citable toolCallIds: none.").doesNotContain("assessments");
 		assertThat(storedReport().get("rootCauseService").asString()).isEqualTo("UNKNOWN");
 		assertThat(storedReport().has("assessments")).isFalse();
@@ -560,7 +560,7 @@ class AgentLoopDecisionModeTest {
 
 		Prompt assessed = this.model.prompts().getLast();
 		assertThat(last(assessed)).isEqualTo(last(plain)).doesNotContain("assessments");
-		assertThat(schema(assessed)).isEqualTo(schema(plain)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+		assertThat(schema(assessed)).isEqualTo(schema(plain)).isEqualTo(Schemas.report(AgentMode.DOSSIER, LAB));
 		assertThat(storedReport().has("assessments")).isFalse();
 		// The one rule of which mode reads the setting, as for the view.
 		assertThat(AgentMode.DECISION.reportFrom(DecisionReport.ASSESSED)).hasValue(DecisionReport.ASSESSED);
@@ -615,7 +615,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theViewIsReadInDecisionModeOnly() {
 		Clock clock = fixedClock();
-		String tables = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15), LAB));
+		String tables = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock, LAB).gather(15), LAB));
 		this.model.quiet().quiet().text(unknownReport());
 		this.loop = loop(AgentMode.DOSSIER, DossierView.SHEETS, clock);
 
@@ -776,7 +776,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 
 		Prompt prompt = this.model.prompts().get(0);
-		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DECISION));
+		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DECISION, LAB));
 		assertThat(last(prompt)).contains("Citable toolCallIds: none.").doesNotContain("Candidates");
 	}
 
@@ -790,7 +790,7 @@ class AgentLoopDecisionModeTest {
 
 		Prompt prompt = this.model.prompts().getLast();
 		assertThat(last(prompt)).doesNotContain("Candidates");
-		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DOSSIER, LAB));
 		assertThat(AgentMode.DOSSIER.reportFrom(DecisionReport.HYBRID)).isEmpty();
 		assertThat(AgentMode.EXPLORER.reportFrom(DecisionReport.HYBRID)).isEmpty();
 		// It reads the typed dossier, never the rendered text, so either view takes it.
@@ -805,7 +805,7 @@ class AgentLoopDecisionModeTest {
 
 	/** The candidates the rules propose on the dossier {@code lab} gives on {@code clock}. */
 	private static List<RulesCandidate> candidates(FakeLabTools lab, Clock clock) {
-		return RulesDiagnosis.candidates(new DossierGatherer(lab, clock).gather(15), LAB);
+		return RulesDiagnosis.candidates(new DossierGatherer(lab, clock, LAB).gather(15), LAB);
 	}
 
 	/** A decision loop over {@code lab} that writes its dossier in {@code view} and asks for the hybrid report. */
@@ -875,7 +875,7 @@ class AgentLoopDecisionModeTest {
 
 	/** The sheets a decision run of this test's lab writes on {@code clock}, with the owner of each line. */
 	private static ServiceSheets.Rendered sheets(Clock clock) {
-		return ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15), LAB);
+		return ServiceSheets.render(new DossierGatherer(lab(), clock, LAB).gather(15), LAB);
 	}
 
 	/** The number of the first line {@code service} owns in {@code sheets}: its place in the call graph. */

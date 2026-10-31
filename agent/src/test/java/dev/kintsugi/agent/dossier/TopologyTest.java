@@ -48,7 +48,7 @@ class TopologyTest {
 	void theServicesComeLeafFirstAndAreTheOnesTheGathererReads() {
 		List<String> leafFirst = LAB.leafFirst();
 		assertThat(leafFirst).containsExactly("gateway-mock", "inventory-service", "payment-service", "order-service");
-		assertThat(leafFirst).containsExactlyInAnyOrderElementsOf(DossierGatherer.SERVICES);
+		assertThat(leafFirst).containsExactlyInAnyOrderElementsOf(LAB.gatherOrder());
 		// Leaf first: every service comes after the services it calls.
 		for (int i = 0; i < leafFirst.size(); i++) {
 			for (String callee : LAB.calls(leafFirst.get(i))) {
@@ -95,11 +95,11 @@ class TopologyTest {
 		Dossier dossier = DossierRendererTest.gather("f3");
 
 		assertThat(dossier.states()).extracting(TableStates::table)
-			.containsExactlyElementsOf(DossierGatherer.STATUS_TABLES)
+			.containsExactlyElementsOf(LAB.statusTables())
 			.allSatisfy(table -> assertThat(LAB.ownerOfTable(table)).as(table)
 				.hasValueSatisfying(owner -> assertThat(LAB.services()).contains(owner)));
 		assertThat(dossier.events()).extracting(SourceEvents::source)
-			.containsExactlyElementsOf(DossierGatherer.EVENT_SOURCES)
+			.containsExactlyElementsOf(LAB.eventSources())
 			.allSatisfy(source -> assertThat(LAB.ownerOfSource(source)).as(source)
 				.hasValueSatisfying(owner -> assertThat(LAB.services()).contains(owner)));
 		assertThat(ServiceSheets.render(dossier, LAB).text()).doesNotContain("## Other rows");
@@ -113,9 +113,10 @@ class TopologyTest {
 
 	@Test
 	void theLabFileReproducesTheGathererLists() {
-		assertThat(LAB.gatherOrder()).isEqualTo(DossierGatherer.SERVICES);
-		assertThat(LAB.statusTables()).isEqualTo(DossierGatherer.STATUS_TABLES);
-		assertThat(LAB.eventSources()).isEqualTo(DossierGatherer.EVENT_SOURCES);
+		assertThat(LAB.gatherOrder()).containsExactly("order-service", "payment-service", "inventory-service",
+				"gateway-mock");
+		assertThat(LAB.statusTables()).containsExactly("orders", "payments");
+		assertThat(LAB.eventSources()).containsExactly("order", "payment", "reservation");
 	}
 
 	@Test

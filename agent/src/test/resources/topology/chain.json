@@ -1,0 +1,16 @@
+{
+  "services": ["a", "b", "c"],
+  "datastores": ["db"],
+  "edges": [
+    {"caller": null, "target": "a", "method": "GET", "uri": "/a"},
+    {"caller": "a", "target": "b", "method": "GET", "uri": "/b"},
+    {"caller": "b", "target": "c", "method": "GET", "uri": "/c"}
+  ],
+  "tableOwners": {
+    "ta": "a"
+  },
+  "sourceOwners": {
+    "sb": "b",
+    "sc": "c"
+  }
+}

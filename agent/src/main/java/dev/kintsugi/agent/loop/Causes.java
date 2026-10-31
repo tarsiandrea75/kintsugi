@@ -6,14 +6,13 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * The report's taxonomy, chosen by the human (ADR-010, "Plan and report schemas"): generic SRE vocabularies that a
- * script compares with the truth by equality.
+ * script compares with the truth by equality. The service vocabulary is the system's, so it comes from the loaded
+ * topology ({@link dev.kintsugi.agent.dossier.Topology#causes()}, odd/tasks/topology-data.md T4); the categories are
+ * the report's own, the same for every system.
  */
 final class Causes {
 
 	static final String UNKNOWN = "UNKNOWN";
-
-	static final List<String> SERVICES = List.of("gateway-mock", "payment-service", "order-service",
-			"inventory-service", "postgres", UNKNOWN);
 
 	static final List<String> CATEGORIES = List.of("DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION",
 			"RESOURCE_EXHAUSTION", UNKNOWN);

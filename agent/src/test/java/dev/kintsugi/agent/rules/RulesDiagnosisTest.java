@@ -363,7 +363,7 @@ class RulesDiagnosisTest {
 
 	/** A golden dossier, gathered from the recorded outputs as the dossier tests gather it. */
 	private static Dossier golden(String set, String... fallbacks) {
-		return new DossierGatherer(new RecordedLab(set, fallbacks), CLOCK).gather(10);
+		return new DossierGatherer(new RecordedLab(set, fallbacks), CLOCK, LAB).gather(10);
 	}
 
 	/**
@@ -456,7 +456,7 @@ class RulesDiagnosisTest {
 			Window previous = new Window(20, 10, NOW.minusSeconds(1200), NOW.minusSeconds(600));
 			Instant start = NOW.minus(Duration.ofHours(2));
 			Instant restart = NOW.minusSeconds(300);
-			List<ServiceStatus> statuses = DossierGatherer.SERVICES.stream()
+			List<ServiceStatus> statuses = LAB.gatherOrder().stream()
 				.map(service -> this.restarted.contains(service)
 						? new ServiceStatus(service, List.of(start, restart), List.of(restart), Duration.ofMinutes(5))
 						: new ServiceStatus(service, List.of(start), List.of(), Duration.ofHours(2)))
@@ -465,13 +465,13 @@ class RulesDiagnosisTest {
 					: new Gathered.Ok<>(statuses);
 			Gathered<List<TrafficRow>> incidentRows = this.failedTraffic ? failed("traffic_counts")
 					: new Gathered.Ok<>(List.copyOf(this.rows));
-			List<ServiceLatency> latencies = DossierGatherer.SERVICES.stream()
+			List<ServiceLatency> latencies = LAB.gatherOrder().stream()
 				.map(service -> new ServiceLatency(service,
 						this.failedLatency.contains(service) ? failed("query_metric")
 								: new Gathered.Ok<>(new LatencySeries(false,
 										this.latency.getOrDefault(service, List.of())))))
 				.toList();
-			List<ServiceLogs> logs = DossierGatherer.SERVICES.stream()
+			List<ServiceLogs> logs = LAB.gatherOrder().stream()
 				.map(service -> new ServiceLogs(service,
 						List.of(level(service, "WARN", this.warn), level(service, "ERROR", this.error))))
 				.toList();

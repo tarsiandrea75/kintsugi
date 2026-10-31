@@ -2,10 +2,13 @@ package dev.kintsugi.agent.loop;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import tools.jackson.databind.json.JsonMapper;
 
+import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.rules.RulesCandidate;
 
@@ -14,7 +17,7 @@ import dev.kintsugi.agent.rules.RulesCandidate;
  * Each call is rebuilt from the incident's state, never from an accumulated chat history, in an order that keeps what
  * changes last: the system message, the evidence of earlier calls (which only grows), the previous answer and its
  * tool results, then the instruction with the budgets left and the task. The system message does map symptoms to
- * causes: it gives the lab's call graph and two diagnostic rules, follow the calls down to the last slow or refusing
+ * causes: it gives the loaded topology's call graph and two diagnostic rules, follow the calls down to the last slow or refusing
  * component, and an unreachable but healthy callee is a CONFIGURATION of its caller. Config 0 runs the same rules
  * without a model (ADR-016, dev.kintsugi.agent.rules.RulesDiagnosis), so what the model adds over them is measured.
  */
@@ -22,12 +25,18 @@ final class Prompts {
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
-	private static final String SYSTEM = """
-			You are an SRE agent diagnosing one incident in a small online shop. Its components are gateway-mock, \
-			payment-service, order-service, inventory-service and their database, postgres. The call path: \
-			order-service calls inventory-service and payment-service; payment-service calls gateway-mock; the \
-			three services keep their data in postgres.
+	/** The system message's first words; the system's components and call path follow ({@link #system}). */
+	private static final String ROLE = "You are an SRE agent diagnosing one incident in a small online shop.";
 
+	/** Small counts as the system message writes them; a larger count is written in digits. */
+	private static final List<String> NUMBERS = List.of("zero", "one", "two", "three", "four", "five", "six", "seven",
+			"eight", "nine", "ten", "eleven", "twelve");
+
+	/**
+	 * The system message after its first paragraph: the symptom, the window, the rules, and the causes
+	 * {@code rootCauseService} may name, all three filled in by {@link #system}.
+	 */
+	private static final String SYSTEM_RULES = """
 			Reported symptom: %s
 			Time window: the last %d minutes, unless a tool call needs another window.
 
@@ -49,7 +58,7 @@ final class Prompts {
 			- Prefer UNKNOWN to a guess: name a component or a category only when the evidence supports it.
 
 			rootCauseService is the component where the problem starts, which may differ from the one where it \
-			shows: gateway-mock, payment-service, order-service, inventory-service, postgres, or UNKNOWN.
+			shows: %s.
 
 			rootCauseCategory is the kind of problem:
 			- DEPENDENCY_LATENCY: a component answers its callers, but too slowly, so they wait or give up.
@@ -204,9 +213,77 @@ final class Prompts {
 		return DOSSIER_FACTS + "\n\nThe dossier was not gathered: " + why + "; there is no dossier to cite.";
 	}
 
-	/** The system message: the role, the symptom and window, and the rules. */
-	static String system(String symptom, int sinceMinutes) {
-		return SYSTEM.formatted(JSON.writeValueAsString(symptom), sinceMinutes);
+	/**
+	 * The system message: the role and {@code topology}'s components and call path ({@link #system(Topology)}), then
+	 * the symptom and window, and the rules, which list {@code topology}'s causes ({@link Topology#causes()}) as the
+	 * values of {@code rootCauseService}: every one but the last joined by {@code ", "}, then {@code ", or "} and the
+	 * last.
+	 */
+	static String system(Topology topology, String symptom, int sinceMinutes) {
+		List<String> causes = topology.causes();
+		String allowed = String.join(", ", causes.subList(0, causes.size() - 1)) + ", or " + causes.getLast();
+		return system(topology) + "\n\n"
+				+ SYSTEM_RULES.formatted(JSON.writeValueAsString(symptom), sinceMinutes, allowed);
+	}
+
+	/**
+	 * The system message's first paragraph, rendered from {@code topology} (odd/tasks/topology-data.md T4) by these
+	 * rules, which give the lab's text of before T4 byte for byte:
+	 * <ul>
+	 * <li>{@code Its components are} the services in display order joined by {@code ", "}, then
+	 * {@code " and their database, "} and the datastore, or {@code " and their databases, "} and the datastores as a
+	 * list; with no datastore, the services as a list.</li>
+	 * <li>{@code The call path:} one clause per calling service, in the order it first calls in the edges,
+	 * {@code "<caller> calls <targets>"} with its targets in edge order as a list, the clauses joined by {@code "; "};
+	 * {@code no component calls another} when no service calls one. The external client's edges are not clauses.</li>
+	 * <li>Then, when there are datastores and services that own a {@code status_summary} table or an
+	 * {@code event_counts} source, the services that keep data: {@code "; the <count> services keep their data in
+	 * <datastores>"}, the count in words up to twelve, or {@code "; <service> keeps its data in <datastores>"} for
+	 * one. Owning a table or a source is what keeping data means here; the file says nothing more.</li>
+	 * </ul>
+	 * A list is {@code a}, {@code a and b}, or {@code a, b and c}. Lab: "Its components are gateway-mock,
+	 * payment-service, order-service, inventory-service and their database, postgres. The call path: order-service calls
+	 * inventory-service and payment-service; payment-service calls gateway-mock; the three services keep their data in
+	 * postgres."
+	 */
+	static String system(Topology topology) {
+		List<String> datastores = topology.datastores();
+		String components = datastores.isEmpty() ? list(topology.services())
+				: String.join(", ", topology.services()) + " and their "
+						+ (datastores.size() == 1 ? "database, " : "databases, ") + list(datastores);
+		Map<String, List<String>> calls = new LinkedHashMap<>();
+		for (Topology.Edge edge : topology.edges()) {
+			if (edge.caller() != null) {
+				calls.computeIfAbsent(edge.caller(), caller -> new ArrayList<>()).add(edge.target());
+			}
+		}
+		List<String> clauses = new ArrayList<>();
+		calls.forEach((caller, targets) -> clauses.add(caller + " calls " + list(targets)));
+		if (clauses.isEmpty()) {
+			clauses.add("no component calls another");
+		}
+		List<String> keepData = topology.services()
+			.stream()
+			.filter(service -> topology.tableOwners().containsValue(service)
+					|| topology.sourceOwners().containsValue(service))
+			.toList();
+		if (!datastores.isEmpty() && !keepData.isEmpty()) {
+			clauses.add(keepData.size() == 1 ? keepData.getFirst() + " keeps its data in " + list(datastores)
+					: "the " + number(keepData.size()) + " services keep their data in " + list(datastores));
+		}
+		return ROLE + " Its components are " + components + ". The call path: " + String.join("; ", clauses) + ".";
+	}
+
+	/** {@code a}, {@code a and b}, or {@code a, b and c}. */
+	private static String list(List<String> items) {
+		if (items.size() == 1) {
+			return items.getFirst();
+		}
+		return String.join(", ", items.subList(0, items.size() - 1)) + " and " + items.getLast();
+	}
+
+	private static String number(int n) {
+		return n < NUMBERS.size() ? NUMBERS.get(n) : String.valueOf(n);
 	}
 
 	/**
