@@ -281,6 +281,11 @@ Without the converter, every number is on a lab one person built and tuned again
 
   - The parent re-ran the full evals suite: 126 passed. It accepted the new loss: `recommendationservice` and `emailservice` spans have an empty `operationName`, so `recommendationservice` → `productcatalogservice` keeps its server rows but has no client rows. Follow-up: a fallback from the parent link for client spans with an empty `operationName`.
 
+  - Commit `bea1777`. Review of `d7dc977..bea1777`: medium, `slice_budget_reached`; one lens (reliability), approved and acknowledged. Three non-blocking SUGGESTIONs, all follow-ups:
+    - R3-no-span-is-both-is-not-enforced (`traffic.py:116-120`): "no span is both client and server" was measured, not checked by code.
+    - R3-publish-step-is-not-all-or-nothing (`convert.py:324-326`): the move into `--out` is per file, not one rename.
+    - R3-replay-edge-assertion-proves-one-row (`RcaevalRecordingTest.java:60-61`): the Java test proves only one traffic row.
+
 ## Next step
 
 T5: the replay plumbing and the scorer (branch `feat/rcaeval-converter-02-replay`).
