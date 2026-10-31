@@ -1,0 +1,19 @@
+{
+  "services": ["gateway-mock", "payment-service", "order-service", "inventory-service"],
+  "datastores": ["postgres"],
+  "edges": [
+    {"caller": null, "target": "order-service", "method": "POST", "uri": "/orders"},
+    {"caller": "order-service", "target": "inventory-service", "method": "POST", "uri": "/reservations"},
+    {"caller": "order-service", "target": "payment-service", "method": "POST", "uri": "/payments"},
+    {"caller": "payment-service", "target": "gateway-mock", "method": "POST", "uri": "/authorize"}
+  ],
+  "tableOwners": {
+    "orders": "order-service",
+    "payments": "payment-service"
+  },
+  "sourceOwners": {
+    "order": "order-service",
+    "payment": "payment-service",
+    "reservation": "inventory-service"
+  }
+}

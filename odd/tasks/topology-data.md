@@ -57,7 +57,7 @@ With topology as data, the converter can write one topology file per RCAEval sys
 ## Tasks
 
 - [x] T1 This document and the design. Route: inline (docs). Human confirmed the design on 2026-10-31. Passive docs, structural readback only.
-- [ ] T2 `Topology`, the lab file and the loader, tests first: the loaded lab topology equals today's `CallGraph`, `DossierGatherer` and `Causes` constants and orders, and the validation failures (unknown name, cycle, foreign owner, missing file). No call site changes yet. Route: delegated writer.
+- [x] T2 `Topology`, the lab file and the loader, tests first: the loaded lab topology equals today's `CallGraph`, `DossierGatherer` and `Causes` constants and orders, and the validation failures (unknown name, cycle, foreign owner, missing file). No call site changes yet. Route: delegated writer.
 - [ ] T3 The call sites read a `Topology`: `ServiceSheets`, `DossierRenderer`, `ReportCheck`, `RulesDiagnosis`, `Schemas` and the Spring wiring. `CallGraph`'s constants are removed. All goldens stay byte-identical and the Config 0 tests stay green. Agent spec: the sheets and Coverage/Graph requirements say the graph is loaded from data. Route: delegated writer.
 - [ ] T4 `DossierGatherer`'s lists, `Causes.SERVICES` and the `Prompts` system message derive from the topology, tests first (byte-identical prompt and schema). Agent spec: the system-message requirement. Route: delegated writer.
 - [ ] T5 Closing check: the Config 0 replay over dev and holdout gives the same verdicts and candidates as before, then STATE, the journal and the backup. Route: inline commands.
@@ -83,6 +83,10 @@ With topology as data, the converter can write one topology file per RCAEval sys
 ## Progress
 
 - 2026-10-31: exploration (one read-only explorer) mapped every hard-coded copy, with path:line evidence; it is summarized under Problem. The branch `feat/topology-data` was created from `e8c4731`.
+- 2026-10-31, T2 (route: delegated writer): added `agent/src/main/resources/topology/lab.json`, the record `dossier/Topology` with `Topology.load(Resource)` and `Topology.load(InputStream, origin)` (Jackson's `JsonMapper.shared()`), and the tests `dossier/TopologyTest` (14) and `loop/CausesTopologyTest` (1, in `loop` because `Causes.SERVICES` is package-private). `Topology` reuses `CallGraph.Edge`; `CallGraph` and every call site are unchanged.
+  - Validation, in the record's constructor so every instance is checked: no services; a duplicate name across services and datastores; an edge caller or target that is not a service (a datastore target fails too); a table or source owner that is not a service; a cycle (the message names the path, for example `cycle: a -> b -> a`). `load` also fails on a missing file, malformed JSON, a missing field or a non-string name. Every failure is an `IllegalArgumentException` whose message names the file and the culprit.
+  - Order rule for `statusTables()` and `eventSources()`: the key order of `tableOwners` and `sourceOwners` in the file (Jackson's object nodes keep it; the record copies into a `LinkedHashMap`). The lab file lists them as `orders, payments` and `order, payment, reservation`, today's `DossierGatherer` lists.
+  - RED: `./mvnw -q test -Dtest=TopologyTest` failed to compile (`Topology` missing). GREEN: `TopologyTest` 14 run, 0 failures; `CausesTopologyTest` 1 run, 0 failures. Full suite `./mvnw -q test`: 626 run, 0 failures, 0 errors, 0 skipped.
 
 ## Next step
 
