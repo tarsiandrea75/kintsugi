@@ -101,6 +101,22 @@ With topology as data, the converter can write one topology file per RCAEval sys
 
   - Size: about 1,100 changed lines, over the 400 heuristic; mostly mechanical (deleting `CallGraph` and `CallGraphTest`, passing `LAB` at about 150 test call sites). Kept as one slice: splitting would leave a branch where half the call sites read constants that no longer exist. The pre-T3 baseline is 624 tests (the writer re-ran `023b747`); the 626 recorded for T2 was a miscount. The parent re-ran `RulesDiagnosisTest`, `DossierRendererTest`, `ServiceSheetsTest`, `TopologyTest` and `TopologyConfigTest`: green; no file under `agent/src/test/resources` changed.
 
+  - Commit `369568d`. Review of `023b747..369568d`: medium, `slice_budget_reached`; one lens (reliability), approved and acknowledged. Six non-blocking findings; the capture gave only id and location:
+    - WARNING R3-001, `application.yaml:69`;
+    - WARNING R3-002, `ServiceSheets.java:91`;
+    - WARNING R3-003, `ServiceSheets.java:176`;
+    - WARNING R3-004, `TopologyConfig.java:20-21`;
+    - WARNING R3-005, `TopologyConfigTest.java:31-33`;
+    - SUGGESTION R3-006, `Topology.java:181-184`.
+
+    The parent's reading of those lines, not the reviewer's text:
+    - the default location is written twice (the yaml and the `@Value` default);
+    - the sheets silently drop logs of a service missing from the topology;
+    - the property test names the lab file, which is also the default, so it does not prove the property is honored;
+    - the `UNKNOWN` check is case-sensitive.
+
+    R3-005 is taken into T4: point the property at a different file. The rest are follow-ups.
+
 ## Next step
 
-T4: the derived lists and the system message.
+T4: the derived lists and the system message, plus R3-005.
