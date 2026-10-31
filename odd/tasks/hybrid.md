@@ -65,7 +65,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
 - [x] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
 - [x] T7 The lab dev plan, committed before the run. Route: inline.
-- [ ] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
+- [x] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -152,6 +152,16 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
 
 - 2026-10-31: T7 done. The plan `evals/plans/2026-10-31-hybrid-dev.md` is committed with this entry before the dev run (human go-ahead for T7 and T8). It sets H against the committed 0 and Qon dev inputs. It is a mechanics check with no decision rule on the configs.
 
+- 2026-10-31: T8 done. Route: inline commands. Run `replay-20261031T144625Z-local` on `eafa834`, scored into `evals/results/2026-10-31-hybrid-dev/`.
+  - Mechanics check: passed. 15 samples, split `dev`, view `tables`, report `hybrid`, `qwen3.5:9b`, think on, cap 4096, deadline 2100 s; every sample COMPLETED. No sample was discarded or rerun.
+  - AC@1: H 13/15, 87% [62%, 96%]; F1 3/5, F2 5/5, F3 5/5. Coverage 100%, candidate recall 100% on every fault. Against the committed inputs: 0 10/15 (F2 0/5), Qon 8/15 (F1 1/5).
+  - Paired: H − 0 +20 points (H only 5, 0 only 2; McNemar p = 0.45, Holm 0.91; bootstrap [−13, +53]). H − Qon +33 (H only 5, Qon only 0; p = 0.062, Holm 0.19; bootstrap [+13, +60]). Qon − 0 −13 (Holm 0.91).
+  - Per-fault net: against 0, F1 −2, F2 +5, F3 0. Against Qon, F1 +2, F2 +1, F3 +2.
+  - UNKNOWN 0, `INVALID_REPORT` 0. Every sample needed one report call; no second attempt.
+  - F1: H kept the rules' first candidate (the truth) 3 times out of 5. In r1 and r7 it picked `payment-service`, the second candidate, the caller: the same miss Qon makes alone.
+  - Report time per sample 675-1660 s, median 850 s, total about 4.1 h.
+  - Reading. On F2 and F3 every list had one candidate, the truth, so H's gain there comes from the rules' proposals, not from the model's choice. F1 is the only fault with a real choice, and there the model lost 2 of 5 that the rules' first candidate had right. On these 15 cases, "take the first candidate" (the fallback ADR-019 rejected for measurement) would score 15/15. Dev has been read many times, so this is no claim; it says where to look on RCAEval: whether the model adds anything when the list has more than one entry.
+
 ## Next step
 
-T8: the H dev run.
+The feature is complete on `feat/hybrid`. The stop-rule measurement H − 0 on RCAEval dev waits for the converter and topology-as-data.

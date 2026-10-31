@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-10-31 (session 01, continued from 2026-10-30)
+2026-10-31 (session 02)
 
 ## Milestone
 
@@ -25,7 +25,7 @@ This session (journal `docs/journal/2026-10-30-01.md`), all on local branches, n
 ## Next action
 
 1. Done 2026-10-31 (`odd/tasks/qwen-dev.md`): qwen3.5:9b on dev, 8/15 with and without thinking (A 5/15, 0 10/15); Qon passed ADR-015's keep rule against A and read holdout-1: 12/15. The human chose Qon as the M3 hybrid's local model (ADR-018); granite stays the local default.
-2. In M3: Config H, the hybrid (ADR-019, vision amended): `odd/tasks/hybrid.md` on `feat/hybrid`, T1–T4 done (ADR-019, `RulesDiagnosis.candidates`, the `hybrid` decision report, replay `--report hybrid` with the `candidates` column), T5 done (candidate recall in the scorer), next T6 (the `stress` calibration of H with Qon). The stop-rule measurement H − 0 on RCAEval dev waits for the converter and topology-as-data.
+2. In M3: Config H, the hybrid (ADR-019, vision amended): `odd/tasks/hybrid.md` on `feat/hybrid`, T1–T8 done; the feature is complete (journal `docs/journal/2026-10-31-02.md`). Lab dev mechanics check passed: H 13/15, 87% [62%, 96%], against 0 10/15 and Qon 8/15 (`evals/results/2026-10-31-hybrid-dev/`). F2 and F3 lists held only the truth; on F1, the only real choice, the model kept the rules' first candidate 3/5 and picked the caller twice. Next: the stop-rule measurement H − 0 on RCAEval dev, which waits for the converter and topology-as-data. Follow-ups in the feature document: a partial dossier gives empty candidates; a `rulesOnly` HYBRID guard; a script-level test for the cloud route.
 3. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
 
 ## Local branch chains (not pushed)
