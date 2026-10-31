@@ -44,6 +44,7 @@ Without the converter, every number is on a lab one person built and tuned again
   - The converter's tests use synthetic fixtures.
   - Only RE2-OB repetition 1 is converted in this feature.
   - The topology files are built from upstream manifests and from repetition 1's traces only.
+  - Amended at T2 (review R3-holdout-read-contradicts-constraints): one structural read outside dev was made, the header line of `RE2-SS/carts_cpu/1/simple_metrics.csv`, to confirm Sock Shop's metric prefixes. It holds column names only, no values and no outcome, and it is disclosed here and in the T2 entry.
 - **Data stays outside the repository.**
   - The raw data is in `~/data/rcaeval` (property or env `KINTSUGI_RCAEVAL_DIR`), verified against the Zenodo md5s.
   - Converted recordings go to a git-ignored directory and are reproducible from the pinned data and the converter.
@@ -152,6 +153,12 @@ Without the converter, every number is on a lab one person built and tuned again
     - 6 file edges are absent from the traces, because only seven services emit spans (`checkoutservice`, `currencyservice`, `emailservice`, `frontendservice`, `paymentservice`, `productcatalogservice`, `recommendationservice`): `cartservice`, `shippingservice`, `adservice` and `redis` do not, so their incoming edges are unseen.
     - T4 must map `frontendservice` to `frontend` when it builds `traffic_counts`.
   - Checks: `evals/.venv/bin/python -m pytest -q tests/test_trace_edges.py` RED (collection error, module missing), then GREEN 4 passed; the full evals suite 76 passed; `./mvnw -q test -Dtest=TopologyTest` exit 0, 37 tests, 0 failures.
+
+  - Commit `ebf3044`. Review of `24af8d5..ebf3044` (T1–T2): medium, `slice_budget_reached`; one lens (reliability), approved and acknowledged. Non-blocking findings:
+    - WARNING R3-ac3-check-not-reproducible-from-tool (`trace_edges.py:19-23`): the tool does not apply the `frontendservice` → `frontend` alias, so AC3 needs a manual step. Taken into T4: one alias table shared by `trace_edges` and the traffic builder.
+    - WARNING R3-holdout-read-contradicts-constraints: answered by the amended Constraints above.
+    - SUGGESTION R3-silent-empty-extraction-passes (`trace_edges.py:52-58`): an empty extraction exits successfully. Taken into T4: a non-zero exit when no pair is found.
+    - SUGGESTION R3-ss-services-proved-from-one-header (`TopologyTest.java:289-297`): RE2-OB headers vary across cases (15 distinct sets in repetition 1), so one SS header may miss services. Follow-up for the holdout-B plan: before that read, a header-only check over every RE2-SS case confirms the services, and the converter reports any metric prefix missing from the topology.
 
 ## Next step
 
