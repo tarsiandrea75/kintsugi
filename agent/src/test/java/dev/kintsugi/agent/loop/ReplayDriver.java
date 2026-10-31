@@ -25,6 +25,7 @@ import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
@@ -32,12 +33,14 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
+import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
 import dev.kintsugi.agent.rules.RulesVerdict;
 
@@ -80,7 +83,7 @@ final class ReplayDriver {
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
 			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
-			"reportTimeout");
+			"reportTimeout", "candidates");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
@@ -289,8 +292,11 @@ final class ReplayDriver {
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), List.of(parsed.incident()));
 		Clock clock = clockAt(parsed.startedAt());
 		long start = System.nanoTime();
-		RulesVerdict verdict = RulesDiagnosis.diagnose(new DossierGatherer(tools, clock).gather(parsed.sinceMinutes()));
+		Dossier dossier = new DossierGatherer(tools, clock).gather(parsed.sinceMinutes());
+		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier);
 		double seconds = (System.nanoTime() - start) / 1e9;
+		// The candidates a hybrid run would list on the same dossier (hybrid T4); the verdict above is unchanged.
+		List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier);
 
 		AgentMode mode = AgentMode.DECISION;
 		String reported = verdict.service() + "|" + verdict.category();
@@ -318,7 +324,8 @@ final class ReplayDriver {
 				mode.viewFrom(this.decisionView), mode.reportFrom(this.decisionReport), n, IncidentStatus.COMPLETED,
 				truth, reported, verdict(IncidentStatus.COMPLETED, reported, truth), tools.recordedCalls(),
 				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), 0, 0, seconds,
-				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident, Settings.RULES);
+				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident, Settings.RULES,
+				candidates);
 	}
 
 	/** A clock whose "now" is {@code startedAt}, then running: the recording's start, as the sample sees it. */
@@ -364,16 +371,17 @@ final class ReplayDriver {
 		Clock clock = clockAt(primary.startedAt());
 
 		UUID id = open(primary.symptom(), primary.sinceMinutes(), clock.instant());
-		IncidentStatus status;
+		AgentLoop.Outcome outcome;
 		long start = System.nanoTime();
 		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, mode,
 				this.decisionView, this.decisionReport)) {
-			status = loop.run(id);
+			outcome = loop.runToOutcome(id);
 		}
 		double seconds = (System.nanoTime() - start) / 1e9;
-		if (status == null) {
+		if (outcome == null) {
 			throw new IllegalStateException("the loop did not run incident " + id + " of " + fault);
 		}
+		IncidentStatus status = outcome.status();
 
 		ObjectNode incident = incident(id);
 		JsonNode report = incident.path("report");
@@ -394,7 +402,7 @@ final class ReplayDriver {
 				status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(),
 				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), total(incident, "promptTokens"),
 				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident,
-				Settings.of(this.router.route(ModelTask.REPORT)));
+				Settings.of(this.router.route(ModelTask.REPORT)), outcome.candidates());
 	}
 
 	/** The fault's first recording made in {@code mode}, if any. */
@@ -653,7 +661,8 @@ final class ReplayDriver {
 	 * case; {@code recording} is the stem of the recording it opened on; {@code view} is the dossier view of a decision
 	 * sample, none for the others, which apply none; {@code report} is likewise the report a decision sample asked for.
 	 * The four come in the order of their {@code summary.tsv} columns. {@code settings} are the route settings the sample
-	 * ran with, its last four columns ({@link Settings}).
+	 * ran with ({@link Settings}), and {@code candidates} the rules' candidates of a rules sample or the list a hybrid
+	 * run's report task gave the model, empty for every other sample (hybrid T4), its last column.
 	 * {@code recorded}, {@code unrecorded}, {@code coverage} and {@code conflicts} are the sample's
 	 * {@link ReplayLabTools} counters; {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
 	 * step's calls and those no recording held; a token count is null when no step counted it.
@@ -662,7 +671,7 @@ final class ReplayDriver {
 			Optional<DossierView> view, Optional<DecisionReport> report, int n, IncidentStatus status, String truth,
 			String reported, String verdict, int recorded, int unrecorded, double coverage, int conflicts,
 			Integer promptTokens, Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded,
-			ObjectNode incident, Settings settings) {
+			ObjectNode incident, Settings settings, List<RulesCandidate> candidates) {
 
 		/** The sample's line of {@code summary.tsv}, in {@link #SUMMARY_HEADER}'s columns. */
 		String summaryLine() {
@@ -670,7 +679,14 @@ final class ReplayDriver {
 					this.status.name(), this.truth, this.reported, this.verdict, String.valueOf(this.recorded),
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
-					this.recording, viewColumn(), reportColumn(), this.settings.columns());
+					this.recording, viewColumn(), reportColumn(), this.settings.columns(), candidatesColumn());
+		}
+
+		/** The candidates as {@code summary.tsv} writes them: each {@code service|category}, in order, joined by ';'. */
+		String candidatesColumn() {
+			return this.candidates.stream()
+				.map(candidate -> candidate.service() + "|" + candidate.category())
+				.collect(Collectors.joining(";"));
 		}
 
 		/** The view as {@code summary.tsv} and {@code aggregate.tsv} write it: its value, or {@code -} for none. */
@@ -686,8 +702,8 @@ final class ReplayDriver {
 	}
 
 	/**
-	 * The route settings a sample ran with, the last four columns of {@code summary.tsv} and {@code aggregate.tsv}
-	 * (agent spec, "Replay of recorded tool outputs"; odd/tasks/qwen-dev.md T3): the model, its thinking setting
+	 * The route settings a sample ran with, the last four columns of {@code aggregate.tsv} and the four before
+	 * {@code summary.tsv}'s candidates (agent spec, "Replay of recorded tool outputs"; odd/tasks/qwen-dev.md T3): the model, its thinking setting
 	 * ({@code on}, {@code off} or {@code default}, see {@link ModelRoute#thinking}), the report's answer cap and the
 	 * report's deadline, written in seconds with an {@code s}. They are the route's effective values, overridden or
 	 * not, so a line is attributable to the model and the settings that wrote it. Config 0 calls no model: its model is

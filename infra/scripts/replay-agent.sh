@@ -15,6 +15,7 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
   infra/scripts/replay-agent.sh --mode decision --view sheets   # the dossier as one fact sheet per service
   infra/scripts/replay-agent.sh --mode decision --view sheets --report assessed   # each service's role first
+  infra/scripts/replay-agent.sh --route local --mode decision --report hybrid   # Config H: the model picks a candidate
   infra/scripts/replay-agent.sh --route rules --mode decision   # Config 0: the rules alone, no model (ADR-016)
   infra/scripts/replay-agent.sh --route local --mode decision --model qwen3.5:9b --think on \
     --report-cap 2048 --report-timeout 1800   # another local model, thinking, with its own report cap and deadline
@@ -25,7 +26,8 @@ recorded tool outputs").
   --split NAME                   decision: the recordings to replay, dev (default), holdout, stress or probe
   --repeats M                    decision: runs of each recording, 1 to 999 (default 1)
   --view tables|sheets           decision: how the dossier is written for the model (default tables)
-  --report plain|assessed        decision: which report the model writes (default plain); assessed needs --view sheets
+  --report plain|assessed|hybrid decision: which report the model writes (default plain); assessed needs --view
+                                 sheets; hybrid (Config H) picks among the rules' candidates, local or cloud only
   --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
   --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
   --think on|off                 local: send Ollama's think field with this value (default: no think field)
@@ -62,8 +64,12 @@ service, each after the services it calls, with the rows seen only in the previo
 kintsugi.agent.decision.report: plain, the default, is the report of every mode; assessed first asks for the role of
 each service (ORIGIN, AFFECTED or UNAFFECTED), each citing a line of its own sheet, and code checks the roles against
 the call graph. assessed with the tables stops the run here, before Maven, since its checks read the sheets' line
-owners. Every line of summary.tsv and aggregate.tsv names the view and the report, so a result is attributable to its
-variant.
+owners. hybrid, Config H (ADR-019; odd/tasks/hybrid.md), lists the rules' candidates (RulesDiagnosis.candidates) and
+asks the model to pick one or UNKNOWN; it takes either view and is refused on the rules route, which calls no model.
+Every line of summary.tsv and aggregate.tsv names the view and the report, so a result is attributable to its
+variant. The last column of summary.tsv, candidates, holds the rules' candidates as service|category pairs in order,
+joined by ';': on rules lines those of the dossier the rules diagnosed, on hybrid lines the list the report task gave
+the model (empty when it had none); it is empty on every other line.
 
 --model, --think, --report-cap and --report-timeout override the local route for this run only (agent spec, "Routes",
 "Answer caps" and "Budgets"; ADR-017; odd/tasks/qwen-dev.md), and are refused on any other route. They reach the agent
@@ -71,8 +77,9 @@ as KINTSUGI_AGENT_MODEL_NAME, KINTSUGI_AGENT_MODEL_THINK (true or false), KINTSU
 KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT; an option not given clears its variable, so the run never takes a value the
 shell left, and the agent's default applies. With thinking on, Ollama counts the thinking tokens against the cap, so
 set the cap and the deadline from a calibration. The report deadline stays within the incident's 45-minute budget. The
-last four columns of summary.tsv and aggregate.tsv record each sample's model, think (on, off, or default when no field
-was sent; off on the cloud route, which disables thinking; - for rules), report cap and report deadline.
+last four columns of aggregate.tsv, and the four before candidates in summary.tsv, record each sample's model, think
+(on, off, or default when no field was sent; off on the cloud route, which disables thinking; - for rules), report cap
+and report deadline.
 
 Explorer and dossier samples pool the fault's stress recordings, the ones they were measured on, the first one in the
 sample's mode served first, so recordings imported into dev, holdout or probe never change them; --split, --repeats,
@@ -161,8 +168,11 @@ if [[ "$mode" == decision ]]; then
   [[ "$view" == tables || "$view" == sheets ]] || { echo "Unknown view '$view'; choose tables or sheets" >&2; exit 2; }
   # The agent's own default, DecisionReport.DEFAULT (test-lib.sh checks that they agree).
   report=${report-plain}
-  [[ "$report" == plain || "$report" == assessed ]] \
-    || { echo "Unknown report '$report'; choose plain or assessed" >&2; exit 2; }
+  [[ "$report" == plain || "$report" == assessed || "$report" == hybrid ]] \
+    || { echo "Unknown report '$report'; choose plain, assessed or hybrid" >&2; exit 2; }
+  # Config H (ADR-019): the model picks among the rules' candidates, so the rules route, with no model, has no use for it.
+  [[ "$report" != hybrid || "$route" != rules ]] || { echo "--report hybrid applies to --route local or cloud only," \
+    "not rules: Config H has a model choose among the rules' candidates, and Config 0 calls no model" >&2; exit 2; }
   # The agent's own rule (DecisionReport.checkView), checked here so the run stops before Maven and docker.
   [[ "$report" != assessed || "$view" == sheets ]] || { echo "--report assessed needs --view sheets, got $view: the" \
     "assessed report's checks read the service that owns each line of the sheets" >&2; exit 2; }

@@ -550,7 +550,16 @@ expect "dossier mode refuses --report, which only decision mode reads" \
   "--report applies to decision mode only: explorer and dossier mode always ask for the plain report"$'\n'"exit 2"
 expect "an unknown report exits 2 on the option itself" \
   "$(replay_agent --mode decision --view sheets --report rich; echo "exit $?")" \
-  "Unknown report 'rich'; choose plain or assessed"$'\n'"exit 2"
+  "Unknown report 'rich'; choose plain, assessed or hybrid"$'\n'"exit 2"
+# Config H (ADR-019; hybrid T4): the model picks among the rules' candidates, so the rules route, which calls no model,
+# refuses the hybrid report; so do explorer and dossier mode, which read no report option.
+expect "the rules route refuses the hybrid report before Maven" \
+  "$(replay_agent --route rules --mode decision --report hybrid; echo "exit $?")" \
+  "--report hybrid applies to --route local or cloud only, not rules: Config H has a model choose among the rules'\
+ candidates, and Config 0 calls no model"$'\n'"exit 2"
+expect "dossier mode refuses --report hybrid, which only decision mode reads" \
+  "$(replay_agent --mode dossier --report hybrid; echo "exit $?")" \
+  "--report applies to decision mode only: explorer and dossier mode always ask for the plain report"$'\n'"exit 2"
 expect "the assessed report with the tables, the default view, stops the run before Maven" \
   "$(replay_agent --mode decision --report assessed; echo "exit $?")" \
   "--report assessed needs --view sheets, got tables: the assessed report's checks read the service that owns each\
@@ -593,6 +602,11 @@ assessed_run=$(replay_agent --mode decision --view sheets --report assessed --fa
 expect "decision mode takes --report assessed with the sheets, and the run stops at the Ollama check" "$?" 2
 expect "the run names its report" "$(grep -F '....  ' <<<"$assessed_run")" \
   "....  decision mode, split dev, view sheets, report assessed: 2 recording(s) of F1, each replayed 1 time(s): 2\
+ samples"
+hybrid_run=$(replay_agent --mode decision --report hybrid --faults F1)
+expect "the local route takes --report hybrid in either view, and the run stops at the Ollama check" "$?" 2
+expect "the hybrid run names its report" "$(grep -F '....  ' <<<"$hybrid_run")" \
+  "....  decision mode, split dev, view tables, report hybrid: 2 recording(s) of F1, each replayed 1 time(s): 2\
  samples"
 expect "a chosen fault with no recording in the split stops the run before Maven" \
   "$(replay_agent --mode decision --split holdout --faults F1,F3; echo "exit $?")" \

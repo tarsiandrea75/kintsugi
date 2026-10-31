@@ -212,6 +212,16 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * @return the status it ended with, or null when the incident was not {@code RUNNING}
 	 */
 	IncidentStatus run(UUID incidentId) {
+		Outcome outcome = runToOutcome(incidentId);
+		return outcome == null ? null : outcome.status();
+	}
+
+	/**
+	 * Runs the incident as {@link #run} does, and returns with its status the rules' candidates its report task listed,
+	 * which the stored report does not hold: the replay driver writes them to {@code summary.tsv} (hybrid T4).
+	 * @return the run's outcome, or null when the incident was not {@code RUNNING}
+	 */
+	Outcome runToOutcome(UUID incidentId) {
 		Optional<OpenIncident> open;
 		try {
 			open = this.incidents.findRunning(incidentId);
@@ -245,7 +255,14 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			reason = "unexpected error: " + describe(unexpected);
 		}
 		finish(run, status, reason, report);
-		return status;
+		return new Outcome(status, run.candidates == null ? List.of() : run.candidates);
+	}
+
+	/**
+	 * How a run ended: its status, and the rules' candidates a hybrid run's report task listed, in order; empty when
+	 * the run asked for another report, its gathering gave no dossier, or the rules proposed none.
+	 */
+	record Outcome(IncidentStatus status, List<RulesCandidate> candidates) {
 	}
 
 	private String investigate(Run run) {

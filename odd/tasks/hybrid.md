@@ -61,7 +61,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T1 ADR-019, the vision amendment, and this document. Route: inline (docs). Commit `8ba6a38`; passive docs, structural readback only.
 - [x] T2 `RulesDiagnosis.candidates`, tests first: golden dossiers, ordering, cap 5, no duplicates, healthy is empty, and `candidates[0]` equals `diagnose()` when it is not UNKNOWN. The agent spec's Config 0 requirement gets a candidates scenario. Route: delegated writer.
 - [x] T3 The `hybrid` decision report, tests first: the prompt block, the membership check, retry then `INVALID_REPORT`, the empty list giving UNKNOWN with no call, production still closed to `route=rules`. The agent spec's "Decision mode" and "The report" requirements. Route: delegated writer.
-- [ ] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
+- [x] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
 - [ ] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
 - [ ] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
 - [ ] T7 The lab dev plan, committed before the run. Route: inline.
@@ -120,6 +120,15 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
     - WARNING R3-empty-candidates-unproved-on-partial-dossier (`AgentLoop.java:259-262`): when the gathering yields a partial dossier, the rules may propose nothing, and H answers UNKNOWN with no call. The empty-list test does not cover a partial dossier.
     - SUGGESTIONs: R3-candidate-cap-unproved (it cannot bind with the lab's 4 services), R3-either-view-test-proves-construction-only, R3-no-candidate-report-fields-unasserted.
 
+- 2026-10-31: T4 done. Route: delegated writer (script, driver, loop, docs, spec).
+  - `replay-agent.sh --report hybrid` works for local and cloud. With `--route rules` it exits 2, and outside decision mode the existing check refuses it.
+  - `summary.tsv` gains a last column, `candidates`. Rules rows compute it from the same `Dossier` they diagnose. Hybrid rows take the list the run used: `AgentLoop.runToOutcome(UUID)` returns the status and `Run.candidates`, and `run(UUID)` delegates to it. `aggregate.tsv` is unchanged.
+  - The scorer tolerates the extra column (`csv.DictReader`), so `scoring.py` is unchanged.
+  - RED: ReplayDriverTest failed to compile, and `test-lib.sh` failed on the new message. GREEN: ReplayDriverTest 31, full suite 609 tests, 0 failures; `test-lib.sh` 160 PASS (parent re-ran it); evals 66 passed.
+  - Rules smoke on dev (`replay-20261031T131039Z-rules`): verdicts identical to `replay-20261031T123404Z-rules`.
+  - Candidates on dev: F1 `gateway-mock|DEPENDENCY_LATENCY` first, then `payment-service`, and in one case also `order-service`. F2 `gateway-mock|DEPENDENCY_REJECTING` alone. F3 `order-service|CONFIGURATION` alone. The truth is in every list (recall 15/15), and on F2 and F3 the list has a single entry. On dev, H can only lose to the rules by answering UNKNOWN or an invalid report, or by leaving the first candidate on F1.
+  - Follow-ups: `ReplayDriver.rulesOnly(..., HYBRID)` is guarded only by the script; there is no script test for `--route cloud --report hybrid`, because it could start a paid run.
+
 ## Next step
 
-T4.
+T5.
