@@ -184,3 +184,59 @@ def test_a_fault_row_with_no_answer_lowers_coverage(tmp_path):
     assert pooled.ac1 == pytest.approx(1 / 4)
     assert pooled.coverage == pytest.approx(2 / 4)
     assert pooled.selective == pytest.approx(1 / 2)
+
+
+SECOND = "payment-service|DEPENDENCY_LATENCY"
+
+
+def write_candidates_tsv(path, route, report, rows):
+    """A summary.tsv with route, report and the trailing candidates column (hybrid T4)."""
+    header = HEADER + ["view", "report", "candidates"]
+    lines = ["\t".join(header)]
+    for fault, truth, reported, recording, candidates in rows:
+        values = [fault, "decision", route, "1", "COMPLETED", truth, reported, "-", "33", "0", "1.00", "0", "0", "0",
+                  "0.1", "dev", recording, "tables", report, candidates]
+        lines.append("\t".join(values))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def recall_rows():
+    return [
+        ("F1", TRUTH, TRUTH, "r1-F1", f"{TRUTH};{SECOND}"),
+        ("F1", TRUTH, SECOND, "r2-F1", f"{SECOND};{TRUTH}"),
+        ("F1", TRUTH, "UNKNOWN|UNKNOWN", "r3-F1", ""),
+        ("F2", TRUTH, SECOND, "r1-F2", SECOND),
+        ("H", "NONE|NONE", "UNKNOWN|UNKNOWN", "r1-H", ""),
+    ]
+
+
+def test_reader_parses_candidates_on_rules_rows(tmp_path):
+    rows = read_summary(write_candidates_tsv(tmp_path / "summary.tsv", "rules", "plain", recall_rows()))
+    assert rows[0].candidates == (TRUTH, SECOND)
+    assert rows[2].candidates == ()
+
+
+def test_candidate_recall_counts_fault_cases_whose_truth_is_listed(tmp_path):
+    rows = read_summary(write_candidates_tsv(tmp_path / "summary.tsv", "local", "hybrid", recall_rows()))
+    [score] = summarize(rows)
+    f1, f2 = score.faults
+    assert (f1.recalled, f1.candidate_recall) == (2, pytest.approx(2 / 3))
+    assert (f2.recalled, f2.candidate_recall) == (0, 0)
+    assert (score.pooled.recalled, score.pooled.n) == (2, 4)
+
+
+def test_candidate_recall_does_not_apply_to_other_rows(tmp_path):
+    rows = read_summary(write_candidates_tsv(tmp_path / "summary.tsv", "local", "plain", recall_rows()))
+    assert rows[0].candidates is None
+    [score] = summarize(rows)
+    assert score.pooled.recalled is None
+    assert score.pooled.candidate_recall is None
+
+
+def test_candidate_recall_does_not_apply_without_the_column(tmp_path):
+    [row] = read_summary(write_tsv(tmp_path / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1")],
+                                   view="tables", report="plain"))
+    assert row.candidates is None
+    [score] = summarize([row])
+    assert score.faults[0].candidate_recall is None

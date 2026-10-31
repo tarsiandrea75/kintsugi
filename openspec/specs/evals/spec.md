@@ -77,6 +77,28 @@ AC@1 MUST count an abstention as not correct. Coverage MUST be the share of faul
 - Given a COMPLETED row with truth `NONE|NONE` reporting `gateway-mock|UNKNOWN`
 - Then it is a false alarm
 
+### REQ-7a Candidate recall
+`summary.tsv` MAY end with a `candidates` column: `service|category` pairs joined by `;`, an empty string being an empty list. It MUST be read only on rows whose `route` is `rules` or whose `report` is `hybrid`; on other rows, and in a file without the column, candidate recall MUST NOT apply. Where it applies, candidate recall MUST be, per fault and pooled, the share of fault rows whose truth is among the candidates (ADR-019: H's ceiling). Healthy rows MUST NOT enter it. Where it does not apply, the report and `scores.tsv` MUST show nothing for it, so an older input scores exactly as before.
+
+#### Scenario: Rules rows
+- Given a rules `summary.tsv` whose F1 rows list the truth in 2 of 3 candidate lists, one of them empty
+- When `score` runs
+- Then the F1 line ends with `recall 67%` and `scores.tsv` has `candidate_recall` 0.6667 for F1
+
+#### Scenario: A plain report
+- Given a `summary.tsv` with route `local`, report `plain` and a `candidates` column
+- When `score` runs
+- Then no fault line shows recall and its `candidate_recall` cells are empty
+
+#### Scenario: An older TSV without candidates
+- Given a `summary.tsv` without the `candidates` column
+- When `score` runs
+- Then recall does not apply and the report is the one written before the column existed
+
+#### Scenario: The scores.tsv column
+- When `score --out DIR` runs
+- Then `scores.tsv` ends with a `candidate_recall` column, four decimals where recall applies and empty otherwise, healthy rows included
+
 ### REQ-8 TSV input
 The scorer MUST read the replay driver's `summary.tsv`, given as the file or its run directory. A case MUST be keyed by (`split`, `recording`). The config MUST be the `--label` given for that input, else `route-mode-view`. A missing `view` column MUST read as `-`. A file lacking any of `fault`, `mode`, `route`, `status`, `truth`, `reported`, `split`, `recording` MUST be an error naming the columns. A path holding no `summary.tsv` MUST be an error naming it.
 

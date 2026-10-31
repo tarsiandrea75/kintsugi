@@ -181,3 +181,27 @@ def test_score_rejects_iterations_below_one_at_parse_time(tmp_path, capsys):
     error = error_of(["score", str(local), "--iterations", "0"], capsys)
     assert error.code == 2
     assert "--iterations" in capsys.readouterr().err
+
+
+def test_score_reports_candidate_recall_only_where_it_applies(tmp_path, capsys):
+    from test_scoring import recall_rows, write_candidates_tsv
+
+    rules, plain = tmp_path / "rules", tmp_path / "plain"
+    rules.mkdir()
+    plain.mkdir()
+    write_candidates_tsv(rules / "summary.tsv", "rules", "plain", recall_rows())
+    write_candidates_tsv(plain / "summary.tsv", "local", "plain", recall_rows())
+    out_dir = tmp_path / "out"
+    main(["score", "--label", "0", str(rules), "--label", "Q", str(plain), "--iterations", "50", "--out", str(out_dir)])
+    out = capsys.readouterr().out
+    assert "0  F1       1/3   AC@1  33%  [6%, 79%]  recall 67%" in out
+    assert "  coverage 75%  selective 33%  recall 50%" in out
+    assert "recall" not in "".join(line for line in out.splitlines() if line.startswith("Q "))
+    with (out_dir / "scores.tsv").open() as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        assert reader.fieldnames[-1] == "candidate_recall"
+        scores = {(s["config"], s["fault"]): s["candidate_recall"] for s in reader}
+    assert scores["0", "F1"] == "0.6667"
+    assert scores["0", "pooled"] == "0.5000"
+    assert scores["0", "healthy"] == ""
+    assert scores["Q", "F1"] == ""

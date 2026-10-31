@@ -62,7 +62,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T2 `RulesDiagnosis.candidates`, tests first: golden dossiers, ordering, cap 5, no duplicates, healthy is empty, and `candidates[0]` equals `diagnose()` when it is not UNKNOWN. The agent spec's Config 0 requirement gets a candidates scenario. Route: delegated writer.
 - [x] T3 The `hybrid` decision report, tests first: the prompt block, the membership check, retry then `INVALID_REPORT`, the empty list giving UNKNOWN with no call, production still closed to `route=rules`. The agent spec's "Decision mode" and "The report" requirements. Route: delegated writer.
 - [x] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
-- [ ] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
+- [x] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
 - [ ] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
 - [ ] T7 The lab dev plan, committed before the run. Route: inline.
 - [ ] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
@@ -135,6 +135,14 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
     - R2-either-view-test-name-overstates-coverage: the test's name claims more coverage than it has.
     - R3-hybrid-script-acceptance-partly-unproved: the script test proves only the local route's acceptance.
 
+- 2026-10-31: T5 done. Route: delegated writer (scorer, cli, tests, spec: 2+ non-trivial files), not inline as first planned.
+  - `Row.candidates` is read only for `route` rules or `report` hybrid, and only when the column exists.
+  - `FaultScore.recalled` and `candidate_recall`; `report.txt` shows `recall x%`, and `scores.tsv` gains a last column `candidate_recall`. Evals spec REQ-7a "Candidate recall".
+  - A label that mixes rows with and without candidates gets no recall (accepted: a config has one route and one report).
+  - RED: 5 failed, 66 passed. GREEN: 72 passed (parent re-ran it).
+  - Backward compatibility: `docs/benchmark.md` regenerated from the committed results is byte-identical (parent check with `--out ../docs/benchmark.md`, since the header prints that path). The committed `inputs/*-summary.tsv` re-score to their committed `report.txt`.
+  - Smoke on the T4 rules dev run: recall 100% on F1, F2 and F3; AC@1 10/15.
+
 ## Next step
 
-T5.
+T6: the `stress` calibration of H with Qon.

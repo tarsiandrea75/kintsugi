@@ -73,6 +73,8 @@ def _report(inputs, scores, pairs, holm_p, seed, iterations):
             if fault is score.pooled:
                 selective = "-" if fault.selective is None else _pct(fault.selective)
                 line += f"  coverage {_pct(fault.coverage)}  selective {selective}"
+            if fault.candidate_recall is not None:
+                line += f"  recall {_pct(fault.candidate_recall)}"
             lines.append(line)
         if score.healthy:
             h = score.healthy
@@ -108,16 +110,18 @@ def _write(out, inputs, scores, pairs, holm_p, report):
         for fault in score.faults + ([score.pooled] if score.pooled else []):
             low, high = fault.ci
             selective = "" if fault.selective is None else f"{fault.selective:.4f}"
+            recall = "" if fault.candidate_recall is None else f"{fault.candidate_recall:.4f}"
             score_rows.append([score.config, fault.fault, fault.n, fault.correct, fault.abstained,
-                               f"{fault.ac1:.4f}", f"{low:.4f}", f"{high:.4f}", f"{fault.coverage:.4f}", selective, "", "", "", ""])
+                               f"{fault.ac1:.4f}", f"{low:.4f}", f"{high:.4f}", f"{fault.coverage:.4f}", selective, "", "", "", "",
+                               recall])
         if score.healthy:
             h = score.healthy
             low, high = h.ci
             score_rows.append([score.config, "healthy", h.n, h.correct, "", "", "", "", "", "",
-                               h.false_alarms, f"{h.false_alarm_rate:.4f}", f"{low:.4f}", f"{high:.4f}"])
+                               h.false_alarms, f"{h.false_alarm_rate:.4f}", f"{low:.4f}", f"{high:.4f}", ""])
     _write_tsv(out / "scores.tsv", ["config", "fault", "n", "correct", "abstained", "ac1", "wilson_low",
                                     "wilson_high", "coverage", "selective", "false_alarms", "false_alarm_rate",
-                                    "fa_wilson_low", "fa_wilson_high"], score_rows)
+                                    "fa_wilson_low", "fa_wilson_high", "candidate_recall"], score_rows)
     _write_tsv(out / "paired.tsv", ["first", "second", "cases", "only_first", "only_second", "mcnemar_p", "holm_p",
                                     "diff", "boot_low", "boot_high"],
                [[p.first, p.second, p.cases, "" if p.only_first is None else p.only_first,

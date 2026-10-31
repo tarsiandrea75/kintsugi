@@ -115,3 +115,17 @@ def test_benchmark_reports_a_missing_file_with_exit_2(tmp_path, monkeypatch, cap
     (path / "paired.tsv").unlink()
     assert main(["benchmark", "--out", "b.md", "results/r"]) == 2
     assert "paired.tsv" in capsys.readouterr().err
+
+
+def test_benchmark_ignores_the_candidate_recall_column(tmp_path, monkeypatch):
+    # scores.tsv gained a trailing candidate_recall column (hybrid T5); the document does not show it yet.
+    monkeypatch.chdir(tmp_path)
+    lines = SCORES.splitlines()
+    extended = "\n".join([lines[0] + "\tcandidate_recall"] + [line + "\t" * (14 - line.count("\t")) + "\t0.8000"
+                                                             for line in lines[1:]]) + "\n"
+    result_dir(tmp_path, "old")
+    result_dir(tmp_path, "new", scores=extended)
+    main(["benchmark", "--out", "old.md", "results/old"])
+    main(["benchmark", "--out", "new.md", "results/new"])
+    old = (tmp_path / "old.md").read_text().replace("old", "X")
+    assert (tmp_path / "new.md").read_text().replace("new", "X") == old

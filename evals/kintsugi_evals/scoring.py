@@ -20,6 +20,10 @@ UNKNOWN_ANSWER = "UNKNOWN|UNKNOWN"
 HEALTHY_TRUTH = "NONE|NONE"
 NO_REPORT = "none"
 
+# Rows whose candidates column is meaningful (hybrid T4): the rules' list, and the list a hybrid report chose from.
+CANDIDATE_ROUTE = "rules"
+CANDIDATE_REPORT = "hybrid"
+
 REQUIRED = ("fault", "mode", "route", "status", "truth", "reported", "split", "recording")
 
 
@@ -56,6 +60,8 @@ class Row:
     reported: str
     outcome: str
     report: str = "-"
+    # The candidate (service|category) pairs, or None where candidate recall does not apply.
+    candidates: tuple = None
 
     @property
     def case(self):
@@ -71,12 +77,20 @@ def summary_path(path):
     return path / "summary.tsv" if path.is_dir() else path
 
 
+def parse_candidates(raw, route, report):
+    """The candidates of a rules or hybrid row; None for other rows or a file from before the column."""
+    if raw is None or (route != CANDIDATE_ROUTE and report != CANDIDATE_REPORT):
+        return None
+    return tuple(raw.split(";")) if raw else ()
+
+
 def read_summary(path, label=None):
     """Rows of one summary.tsv (a file or the run directory holding it).
 
     The config is the label when given, else route-mode-view, with -report appended when the file has a report
     column (added after view in service-assessment T2r). A missing view or report column reads as "-", so a file
-    from before either column keeps its config name.
+    from before either column keeps its config name. A trailing candidates column (hybrid T4) is parsed for rules
+    and hybrid rows only, so candidate recall applies to them alone.
     """
     path = summary_path(path)
     if not path.is_file():
@@ -93,7 +107,8 @@ def read_summary(path, label=None):
             config = label or f"{raw['route']}-{raw['mode']}-{view}" + (f"-{report}" if "report" in raw else "")
             rows.append(Row(config, raw["fault"], raw["mode"], raw["route"], view, raw["split"], raw["recording"],
                             raw["status"], raw["truth"], raw["reported"],
-                            outcome(raw["status"], raw["truth"], raw["reported"]), report))
+                            outcome(raw["status"], raw["truth"], raw["reported"]), report,
+                            parse_candidates(raw.get("candidates"), raw["route"], report)))
     return rows
 
 
@@ -105,6 +120,12 @@ class FaultScore:
     abstained: int
     # Fault rows with no answer at all: not COMPLETED, or no report (ADR-015, "Coverage").
     unanswered: int = 0
+    # Fault rows whose truth is among the candidates; None when candidate recall does not apply (ADR-019).
+    recalled: int = None
+
+    @property
+    def candidate_recall(self):
+        return None if self.recalled is None else self.recalled / self.n
 
     @property
     def ac1(self):
@@ -150,11 +171,19 @@ class ConfigScore:
     healthy: HealthyScore
 
 
+def _recalled(rows):
+    """Fault rows whose truth is a candidate, when every row carries candidates; else None."""
+    if any(r.candidates is None for r in rows):
+        return None
+    return sum(r.truth in r.candidates for r in rows)
+
+
 def _fault_score(name, rows):
     return FaultScore(name, len(rows), sum(r.outcome == CORRECT for r in rows),
                       sum(r.outcome == ABSTAIN for r in rows),
                       sum(r.outcome == MISS and (r.status != "COMPLETED" or r.reported in ("", NO_REPORT))
-                          for r in rows))
+                          for r in rows),
+                      _recalled(rows))
 
 
 def summarize(rows):
