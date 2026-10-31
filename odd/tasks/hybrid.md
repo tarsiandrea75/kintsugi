@@ -63,7 +63,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T3 The `hybrid` decision report, tests first: the prompt block, the membership check, retry then `INVALID_REPORT`, the empty list giving UNKNOWN with no call, production still closed to `route=rules`. The agent spec's "Decision mode" and "The report" requirements. Route: delegated writer.
 - [x] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
 - [x] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
-- [ ] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
+- [x] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
 - [ ] T7 The lab dev plan, committed before the run. Route: inline.
 - [ ] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
 
@@ -144,6 +144,12 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - Smoke on the T4 rules dev run: recall 100% on F1, F2 and F3; AC@1 10/15.
   - Commit `86b822d`. Review assess (base `4715600`): medium, `under_budget`; the slice stays pending.
 
+- 2026-10-31: T6 done. Route: inline commands. Run `replay-20261031T131815Z-local` on `518c3d9`: H with Qon, cap 4096, deadline 2700 s so neither binds, 3 `stress` recordings. All samples COMPLETED with one report call each and one candidate each.
+  - Report call: 732 s, 749 s and 1561 s; prompt about 4,440 tokens; completion 304-365 tokens as Ollama reports them.
+  - The 1561 s call is longer than Qon's 1200 s deadline from `qwen-dev`, which was set from a longest call of 801 s. Thinking time varies more than that calibration showed.
+  - Only timing and token columns were read for the calibration. Printing step metadata also showed the first 40 characters of each report summary; no verdict column was read. These are `stress` recordings, not dev or holdout.
+  - Settings for the dev plan: cap 4096 (it does not bind). Deadline 2100 s: 1561 s × 1.35 for a slower day (the factor `qwen-dev` used), rounded up. A second attempt then fits the 45 min incident budget only when the first took under 600 s. Every calibration sample needed one call, so a slow single call is the larger risk.
+
 ## Next step
 
-T6: the `stress` calibration of H with Qon.
+T7: the lab dev plan.
