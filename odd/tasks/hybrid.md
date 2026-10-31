@@ -40,8 +40,9 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - **Candidates (rules).** `RulesDiagnosis.candidates(Dossier)` is a pure function returning `List<RulesCandidate>`, 0 to 5 items, each `(service, category, rule, facts)`, with no duplicate service. Order:
   1. `diagnose()`'s verdict, when it is not UNKNOWN;
   2. the other R-REACH callers, by failure count;
-  3. the other abnormal services found by R-DOWN's assessment, by refusing share, then latency ratio, then service order;
-  4. the remaining services whose `Assessment` is not healthy, in the same order.
+  3. the other abnormal services found by R-DOWN's assessment, by refusing share, then latency ratio, then service order.
+
+  Services that are unhealthy but neither slow nor refusing (restarts, WARN/ERROR lines only) are not proposed. The rules have no category for them: ADR-016 rules out RESOURCE_EXHAUSTION, and a pair with category UNKNOWN cannot be picked under T3's membership check. Decided at T2 (2026-10-31).
 
   Categories follow the rule that would name each service: a refusing service gets DEPENDENCY_REJECTING, a slow one DEPENDENCY_LATENCY, and R-REACH keeps its own category. A healthy dossier gives an empty list. `diagnose()` stays as it is; candidates reuse its private helpers, and nothing it returns changes.
 - **The hybrid report (agent).** `DecisionReport.HYBRID` sits beside `PLAIN` and `ASSESSED`, selected by `kintsugi.agent.decision.report=hybrid`.
@@ -57,8 +58,8 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 
 ## Tasks
 
-- [ ] T1 ADR-019, the vision amendment, and this document. Route: inline (docs).
-- [ ] T2 `RulesDiagnosis.candidates`, tests first: golden dossiers, ordering, cap 5, no duplicates, healthy is empty, and `candidates[0]` equals `diagnose()` when it is not UNKNOWN. The agent spec's Config 0 requirement gets a candidates scenario. Route: delegated writer.
+- [x] T1 ADR-019, the vision amendment, and this document. Route: inline (docs). Commit `8ba6a38`; passive docs, structural readback only.
+- [x] T2 `RulesDiagnosis.candidates`, tests first: golden dossiers, ordering, cap 5, no duplicates, healthy is empty, and `candidates[0]` equals `diagnose()` when it is not UNKNOWN. The agent spec's Config 0 requirement gets a candidates scenario. Route: delegated writer.
 - [ ] T3 The `hybrid` decision report, tests first: the prompt block, the membership check, retry then `INVALID_REPORT`, the empty list giving UNKNOWN with no call, production still closed to `route=rules`. The agent spec's "Decision mode" and "The report" requirements. Route: delegated writer.
 - [ ] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
 - [ ] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
@@ -95,6 +96,11 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
 
   The vision forbade rules in the agent's answer; the human approved the amendment (ADR-019).
 
+- 2026-10-31: T2 done. Route: delegated writer (rules code, tests, spec). `RulesCandidate` is new. `RulesDiagnosis.candidates(Dossier)` implements order steps 1–3. `diagnose()` moved into a private `verdict()` with its body unchanged; `reach()` takes the first of `reachCallers()` under the same comparator; the walk's comparator became `BY_ABNORMALITY`. Agent spec: new requirement "Rules candidates (Config H)" with 4 scenarios.
+  - RED: `RulesDiagnosisTest` failed to compile (46 missing symbols). GREEN: 27 tests, 0 failures; full `./mvnw -q test` exit 0, 599 tests, 0 failures.
+  - AC1 on recordings: the Config 0 replays over dev and holdout (`replay-20261031T123404Z-rules`, `replay-20261031T123411Z-rules`) give the same verdict per case as the committed `0-summary.tsv` inputs.
+  - Design change: step 4 was dropped (see Design). The cap of 5 cannot bind in the lab, which has 4 services in `CallGraph.SERVICES`; it binds on RCAEval.
+
 ## Next step
 
-T2.
+T3.

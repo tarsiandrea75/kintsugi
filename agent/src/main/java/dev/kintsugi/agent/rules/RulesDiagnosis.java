@@ -72,6 +72,15 @@ public final class RulesDiagnosis {
 
 	private static final LatencySeries NO_LATENCY = new LatencySeries(false, List.of());
 
+	/** Config H's cap on the candidates (ADR-019). */
+	static final int MAX_CANDIDATES = 5;
+
+	/** The walk's order among abnormal services: the larger refusing share, then the larger ratio, then services order. */
+	private static final Comparator<Assessment> BY_ABNORMALITY = Comparator
+		.comparingDouble((Assessment a) -> a.refusing() ? -a.share() : 0)
+		.thenComparingDouble(a -> -a.ratio())
+		.thenComparing(a -> order(a.service()));
+
 	private final Dossier dossier;
 
 	private final List<TrafficRow> rows;
@@ -88,12 +97,43 @@ public final class RulesDiagnosis {
 
 	/** The verdict of the first rule that fires on {@code dossier}. */
 	public static RulesVerdict diagnose(Dossier dossier) {
+		return new RulesDiagnosis(dossier).verdict();
+	}
+
+	/**
+	 * Config H's proposals on {@code dossier} (ADR-019), 0 to {@value #MAX_CANDIDATES}, no service twice, in this order:
+	 * {@link #diagnose}'s verdict when it is not UNKNOWN; the other R-REACH callers, by failure count then services
+	 * order; the other abnormal (slow or refusing) services, anywhere on the call graph, in the walk's order. Each keeps
+	 * the category of the rule that would name it. {@link #diagnose} itself is unchanged.
+	 */
+	public static List<RulesCandidate> candidates(Dossier dossier) {
 		RulesDiagnosis diagnosis = new RulesDiagnosis(dossier);
-		RulesVerdict reach = diagnosis.reach();
+		Map<String, RulesCandidate> candidates = new LinkedHashMap<>();
+		RulesVerdict verdict = diagnosis.verdict();
+		if (!UNKNOWN.equals(verdict.service())) {
+			candidates.put(verdict.service(), candidate(verdict));
+		}
+		diagnosis.reachCallers().forEach(caller -> candidates.putIfAbsent(caller.service(), candidate(caller)));
+		CallGraph.SERVICES.stream()
+			.map(diagnosis::assess)
+			.filter(Assessment::abnormal)
+			.sorted(BY_ABNORMALITY)
+			.forEach(a -> candidates.putIfAbsent(a.service(),
+					new RulesCandidate(a.service(), a.refusing() ? REJECTING : LATENCY, DOWN, a.abnormalFacts())));
+		return candidates.values().stream().limit(MAX_CANDIDATES).toList();
+	}
+
+	private static RulesCandidate candidate(RulesVerdict verdict) {
+		return new RulesCandidate(verdict.service(), verdict.category(), verdict.rule(), verdict.facts());
+	}
+
+	/** The verdict of the first rule that fires. */
+	private RulesVerdict verdict() {
+		RulesVerdict reach = reach();
 		if (reach != null) {
 			return reach;
 		}
-		RulesVerdict down = diagnosis.down();
+		RulesVerdict down = down();
 		if (down != null) {
 			return down;
 		}
@@ -105,6 +145,12 @@ public final class RulesDiagnosis {
 
 	/** R-REACH: the caller with the most connection failures to healthy callees, ties in services order. */
 	private RulesVerdict reach() {
+		List<RulesVerdict> callers = reachCallers();
+		return callers.isEmpty() ? null : callers.get(0);
+	}
+
+	/** Every caller R-REACH could name, the most connection failures to healthy callees first, ties in services order. */
+	private List<RulesVerdict> reachCallers() {
 		Map<String, Long> failures = new LinkedHashMap<>();
 		Map<String, List<String>> facts = new HashMap<>();
 		for (Edge edge : CallGraph.EDGES) {
@@ -129,9 +175,9 @@ public final class RulesDiagnosis {
 		}
 		return failures.keySet()
 			.stream()
-			.min(Comparator.comparing((String caller) -> -failures.get(caller)).thenComparing(RulesDiagnosis::order))
+			.sorted(Comparator.comparing((String caller) -> -failures.get(caller)).thenComparing(RulesDiagnosis::order))
 			.map(caller -> new RulesVerdict(caller, CONFIGURATION, REACH, facts.get(caller)))
-			.orElse(null);
+			.toList();
 	}
 
 	/** R-DOWN: from each entry service, down while the callee is slow or refusing; the last one reached. */
@@ -147,9 +193,7 @@ public final class RulesDiagnosis {
 					.filter(callee -> !visited.contains(callee))
 					.map(this::assess)
 					.filter(Assessment::abnormal)
-					.min(Comparator.comparingDouble((Assessment a) -> a.refusing() ? -a.share() : 0)
-						.thenComparingDouble(a -> -a.ratio())
-						.thenComparing(a -> order(a.service())))
+					.min(BY_ABNORMALITY)
 					.orElse(null);
 				if (next == null) {
 					break;

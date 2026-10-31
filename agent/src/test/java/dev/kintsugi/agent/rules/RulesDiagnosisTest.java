@@ -1,6 +1,7 @@
 package dev.kintsugi.agent.rules;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -275,6 +276,81 @@ class RulesDiagnosisTest {
 		assertThat(RulesDiagnosis.diagnose(new Lab().latency("order-service", "/orders", 0.08, 9.0).dossier()))
 			.extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("order-service", "DEPENDENCY_LATENCY");
+	}
+
+	@Test
+	void theFirstCandidateIsTheVerdictOnEveryGoldenDossierWhereTheRulesAnswer() {
+		// odd/tasks/hybrid.md AC2: the rules' verdict first, at most 5, no duplicate service.
+		for (String set : List.of("f1", "f3")) {
+			Dossier dossier = golden(set, "healthy");
+			RulesVerdict verdict = RulesDiagnosis.diagnose(dossier);
+			List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier);
+			assertThat(candidates).as(set).isNotEmpty().hasSizeLessThanOrEqualTo(5);
+			assertThat(candidates.get(0)).as(set)
+				.isEqualTo(new RulesCandidate(verdict.service(), verdict.category(), verdict.rule(), verdict.facts()));
+			assertThat(candidates).extracting(RulesCandidate::service).doesNotHaveDuplicates();
+		}
+	}
+
+	@Test
+	void theHealthyGoldenDossierHasNoCandidate() {
+		assertThat(RulesDiagnosis.candidates(golden("healthy"))).isEmpty();
+		assertThat(RulesDiagnosis.candidates(new Lab().dossier())).isEmpty();
+	}
+
+	@Test
+	void theCandidatesDoNotChangeTheVerdict() {
+		Dossier dossier = golden("f1", "healthy");
+		RulesVerdict before = RulesDiagnosis.diagnose(dossier);
+		RulesDiagnosis.candidates(dossier);
+		assertThat(RulesDiagnosis.diagnose(dossier)).isEqualTo(before);
+	}
+
+	@Test
+	void theOtherReachCallersFollowTheVerdictByFailureCountThenTheAbnormalServices() {
+		List<RulesCandidate> candidates = RulesDiagnosis.candidates(new Lab()
+			.clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "ConnectException", 2)
+			.clientRow("payment-service", "gateway-mock", "/authorize", "CLIENT_ERROR", "ConnectException", 3)
+			.latency("inventory-service", "/reservations", 0.02, 9.0)
+			.dossier());
+		assertThat(candidates).extracting(RulesCandidate::service, RulesCandidate::category, RulesCandidate::rule)
+			.containsExactly(tuple("payment-service", "CONFIGURATION", "R-REACH"),
+					tuple("order-service", "CONFIGURATION", "R-REACH"),
+					tuple("inventory-service", "DEPENDENCY_LATENCY", "R-DOWN"));
+		assertThat(candidates.get(1).facts()).anySatisfy(fact -> assertThat(fact).contains("ConnectException"));
+		assertThat(candidates.get(2).facts()).anySatisfy(fact -> assertThat(fact).contains("/reservations"));
+	}
+
+	@Test
+	void theOtherAbnormalServicesComeByRefusingShareThenLatencyRatioNotServicesOrder() {
+		// The walk: order-service refuses, then inventory-service refuses (share 0.2) over payment-service (slow only).
+		Lab lab = new Lab().serverRow("order-service", "/orders", "503", 3)
+			.serverRow("order-service", "/orders", "201", 3)
+			.serverRow("inventory-service", "/reservations", "503", 3)
+			.serverRow("inventory-service", "/reservations", "201", 12)
+			.latency("payment-service", "/payments", 0.01, 9.0)
+			.latency("gateway-mock", "/authorize", 0.1, 0.6);
+		RulesVerdict verdict = RulesDiagnosis.diagnose(lab.dossier());
+		List<RulesCandidate> candidates = RulesDiagnosis.candidates(lab.dossier());
+		assertThat(candidates).hasSizeLessThanOrEqualTo(5)
+			.extracting(RulesCandidate::service, RulesCandidate::category, RulesCandidate::rule)
+			.containsExactly(tuple(verdict.service(), verdict.category(), verdict.rule()),
+					tuple("order-service", "DEPENDENCY_REJECTING", "R-DOWN"),
+					tuple("payment-service", "DEPENDENCY_LATENCY", "R-DOWN"),
+					tuple("gateway-mock", "DEPENDENCY_LATENCY", "R-DOWN"));
+		assertThat(candidates.get(0).service()).isEqualTo("inventory-service");
+		assertThat(candidates).extracting(RulesCandidate::service).doesNotHaveDuplicates();
+		assertThat(RulesDiagnosis.candidates(lab.dossier())).as("deterministic").isEqualTo(candidates);
+	}
+
+	@Test
+	void anAbnormalServiceTheWalkNeverReachesIsACandidateWhenTheRulesAbstain() {
+		// gateway-mock is slow, but payment-service is not, so diagnose abstains.
+		Dossier dossier = new Lab().latency("gateway-mock", "/authorize", 0.01, 8.9).dossier();
+		assertNone(dossier);
+		assertThat(RulesDiagnosis.candidates(dossier))
+			.extracting(RulesCandidate::service, RulesCandidate::category, RulesCandidate::rule)
+			.containsExactly(tuple("gateway-mock", "DEPENDENCY_LATENCY", "R-DOWN"));
 	}
 
 	private static void assertNone(Dossier dossier) {

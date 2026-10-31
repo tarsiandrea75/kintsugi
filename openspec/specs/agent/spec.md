@@ -759,6 +759,35 @@ It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a d
 - WHEN `AgentRoute.of` reads it, or the agent starts
 - THEN both fail with `kintsugi.agent.route must be local or cloud, got "rules"`
 
+### Requirement: Rules candidates (Config H)
+
+`RulesDiagnosis.candidates(Dossier)` MUST give Config H's proposals for one typed `Dossier` ([ADR-019](../../../docs/adr/ADR-019-hybrid-config.md); [feature document](../../../odd/tasks/hybrid.md)): a list of 0 to 5 `RulesCandidate` of `service`, `category`, `rule` and `facts`, with no service twice. It is a pure, deterministic function of the record, like `diagnose`, and reuses its assessment and thresholds. Its order is:
+1. `diagnose`'s verdict, when it is not `UNKNOWN`, as it is;
+2. the other callers `R-REACH` could name, by failure count, ties in services order, each `<caller>|CONFIGURATION` by `R-REACH`;
+3. the other abnormal services anywhere on the call graph, slow or refusing as `R-DOWN` defines them, by refusing share, then latency ratio, then services order (the walk's own order), each `DEPENDENCY_REJECTING` when refusing, else `DEPENDENCY_LATENCY`, by `R-DOWN`.
+
+`diagnose` MUST stay unchanged: Config 0's verdicts and thresholds are frozen at `5797d16` (ADR-016).
+
+#### Scenario: The verdict comes first (hybrid T2)
+- GIVEN the F1 and F3 golden dossiers
+- WHEN their candidates are computed
+- THEN the first candidate is `diagnose`'s verdict, with its rule and facts, and no service appears twice
+
+#### Scenario: A healthy dossier has no candidate (hybrid T2)
+- GIVEN the healthy golden dossier
+- WHEN its candidates are computed
+- THEN the list is empty
+
+#### Scenario: The rest follow by rule, then refusing share, then latency ratio (hybrid T2)
+- GIVEN a dossier where `order-service` and `inventory-service` refuse, `payment-service` is slow with a ratio of 900 and `gateway-mock` with a ratio of 6
+- WHEN its candidates are computed
+- THEN they are `inventory-service|DEPENDENCY_REJECTING` (the verdict), `order-service|DEPENDENCY_REJECTING`, `payment-service|DEPENDENCY_LATENCY` and `gateway-mock|DEPENDENCY_LATENCY`, the last three by `R-DOWN`
+
+#### Scenario: The rules abstain but a service is abnormal (hybrid T2)
+- GIVEN a dossier where only `gateway-mock` is slow, so the walk never reaches it and `diagnose` gives `UNKNOWN|UNKNOWN`
+- WHEN its candidates are computed
+- THEN the list is `gateway-mock|DEPENDENCY_LATENCY` by `R-DOWN`
+
 ### Requirement: Evidence dossier gathering
 
 `DossierGatherer` MUST build the evidence dossier of an incident (ADR-011, [feature document](../../../odd/tasks/evidence-dossier.md)) through the `LabTools` port, the same path to mcp-tools as the loop's calls. For an incident window of N minutes (the incident's `sinceMinutes`) it uses two windows: the **incident window**, `sinceMinutes` N, and the **previous window**, the N minutes just before it, `sinceMinutes` 2N with `untilMinutesAgo` N. It MUST make the same calls, with the same arguments, in this order, for every incident, whatever the symptom or any output says:
