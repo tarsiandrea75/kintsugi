@@ -64,7 +64,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
 - [x] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
 - [x] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
-- [ ] T7 The lab dev plan, committed before the run. Route: inline.
+- [x] T7 The lab dev plan, committed before the run. Route: inline.
 - [ ] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
 
 ## Acceptance criteria
@@ -150,6 +150,8 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - Only timing and token columns were read for the calibration. Printing step metadata also showed the first 40 characters of each report summary; no verdict column was read. These are `stress` recordings, not dev or holdout.
   - Settings for the dev plan: cap 4096 (it does not bind). Deadline 2100 s: 1561 s × 1.35 for a slower day (the factor `qwen-dev` used), rounded up. A second attempt then fits the 45 min incident budget only when the first took under 600 s. Every calibration sample needed one call, so a slow single call is the larger risk.
 
+- 2026-10-31: T7 done. The plan `evals/plans/2026-10-31-hybrid-dev.md` is committed with this entry before the dev run (human go-ahead for T7 and T8). It sets H against the committed 0 and Qon dev inputs. It is a mechanics check with no decision rule on the configs.
+
 ## Next step
 
-T7: the lab dev plan.
+T8: the H dev run.
