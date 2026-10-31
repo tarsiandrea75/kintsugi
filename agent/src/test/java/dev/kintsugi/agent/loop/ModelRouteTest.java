@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
@@ -216,7 +217,7 @@ class ModelRouteTest {
 	 */
 	@Test
 	void theAssessedSchemaKeepsItsOrderOnBothRoutes() {
-		String schema = Schemas.ASSESSED_REPORT;
+		String schema = Schemas.assessedReport(LAB);
 		JsonNode sent = JsonMapper.shared().readTree(((AnthropicChatOptions) this.cloud.options(768,
 				Duration.ofSeconds(90), List.of(), schema)).getOutputSchema());
 

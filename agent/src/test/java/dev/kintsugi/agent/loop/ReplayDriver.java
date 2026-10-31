@@ -1,5 +1,7 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -293,10 +295,10 @@ final class ReplayDriver {
 		Clock clock = clockAt(parsed.startedAt());
 		long start = System.nanoTime();
 		Dossier dossier = new DossierGatherer(tools, clock).gather(parsed.sinceMinutes());
-		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier);
+		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, LAB);
 		double seconds = (System.nanoTime() - start) / 1e9;
 		// The candidates a hybrid run would list on the same dossier (hybrid T4); the verdict above is unchanged.
-		List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier);
+		List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier, LAB);
 
 		AgentMode mode = AgentMode.DECISION;
 		String reported = verdict.service() + "|" + verdict.category();
@@ -373,7 +375,7 @@ final class ReplayDriver {
 		UUID id = open(primary.symptom(), primary.sinceMinutes(), clock.instant());
 		AgentLoop.Outcome outcome;
 		long start = System.nanoTime();
-		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, mode,
+		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, LAB, mode,
 				this.decisionView, this.decisionReport)) {
 			outcome = loop.runToOutcome(id);
 		}

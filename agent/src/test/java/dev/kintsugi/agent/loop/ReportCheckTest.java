@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static dev.kintsugi.agent.loop.FakeLabTools.fixture;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
@@ -18,7 +19,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.lab.ToolOutcome;
@@ -646,7 +646,7 @@ class ReportCheckTest {
 		ServiceSheets.Rendered gap = new ServiceSheets.Rendered(text, SHEETS.owners());
 
 		ReportCheck.Result result = ReportCheck.checkAssessed(
-				Answers.json(assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF)), gap);
+				Answers.json(assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF)), gap, LAB);
 
 		assertThat(result.errors()).containsExactly("assessments.gateway-mock.line 3 is a line of gateway-mock whose "
 				+ "text is not in the sheets; cite another line of its own sheet or of its part of \"Seen only in the "
@@ -690,7 +690,7 @@ class ReportCheckTest {
 
 	@Test
 	void theAssessedSchemaAsksForTheAssessmentsFirstOnePerServiceInSheetOrderAndNoEvidence() {
-		JsonNode schema = JsonMapper.shared().readTree(Schemas.ASSESSED_REPORT);
+		JsonNode schema = JsonMapper.shared().readTree(Schemas.assessedReport(LAB));
 		List<String> order = List.of("assessments", "summary", "rootCauseService", "rootCauseCategory", "confidence");
 
 		assertThat(schema.get("properties").propertyNames()).containsExactlyElementsOf(order);
@@ -698,12 +698,12 @@ class ReportCheckTest {
 		assertThat(ReportCheck.ASSESSED_FIELDS).containsExactlyElementsOf(order);
 		assertThat(schema.get("additionalProperties").booleanValue()).isFalse();
 		JsonNode assessments = schema.at("/properties/assessments");
-		assertThat(assessments.get("properties").propertyNames()).containsExactlyElementsOf(CallGraph.SERVICES)
+		assertThat(assessments.get("properties").propertyNames()).containsExactlyElementsOf(LAB.leafFirst())
 			.containsExactly("gateway-mock", "inventory-service", "payment-service", "order-service");
 		assertThat(assessments.get("required")).extracting(JsonNode::asString)
-			.containsExactlyElementsOf(CallGraph.SERVICES);
+			.containsExactlyElementsOf(LAB.leafFirst());
 		assertThat(assessments.get("additionalProperties").booleanValue()).isFalse();
-		for (String service : CallGraph.SERVICES) {
+		for (String service : LAB.leafFirst()) {
 			JsonNode assessment = assessments.get("properties").get(service);
 			assertThat(assessment.get("properties").propertyNames()).as(service).containsExactly("role", "line", "why");
 			assertThat(assessment.get("required")).extracting(JsonNode::asString).containsExactly("role", "line", "why");
@@ -785,7 +785,7 @@ class ReportCheckTest {
 	}
 
 	private static ReportCheck.Result checkAssessed(String answer) {
-		return ReportCheck.checkAssessed(Answers.json(answer), SHEETS);
+		return ReportCheck.checkAssessed(Answers.json(answer), SHEETS, LAB);
 	}
 
 	private static List<String> errors(String answer) {

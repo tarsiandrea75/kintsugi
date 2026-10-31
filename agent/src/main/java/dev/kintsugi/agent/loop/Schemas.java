@@ -6,14 +6,14 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import dev.kintsugi.agent.dossier.CallGraph;
+import dev.kintsugi.agent.dossier.Topology;
 
 /**
  * The JSON schema of the report, sent with its call through {@code OllamaChatOptions.outputSchema} (agent spec, "The
  * report"). Ollama constrains the answer with it, when the model honours it; code checks every answer against the same
  * rules anyway ({@link ReportCheck}). The plan has no schema sent: it travels in the text of a call that offers tools,
  * and Ollama cannot constrain an answer by a schema and offer tools in the same call ({@link PlanCheck} checks it).
- * Decision mode may ask for the assessed report instead, with its own schema ({@link #ASSESSED_REPORT}).
+ * Decision mode may ask for the assessed report instead, with its own schema ({@link #assessedReport}).
  */
 final class Schemas {
 
@@ -28,16 +28,19 @@ final class Schemas {
 	 */
 	private static final String DOSSIER_REPORT = JSON.writeValueAsString(report(true));
 
+	private Schemas() {
+	}
+
 	/**
 	 * The schema of the assessed report (service-assessment T2), decision mode's with the sheets when
-	 * {@code kintsugi.agent.decision.report} is {@code assessed}: first the assessments, one per lab service in sheet
-	 * order, leaf first ({@link CallGraph#SERVICES}), each {@code {role, line, why}}; then the summary, the cause and the
-	 * confidence, as in the plain report, and no evidence, which code derives from the assessments. A {@code line} and a
-	 * {@code why} follow an evidence item's rules. The local route's grammar writes the properties in this order.
+	 * {@code kintsugi.agent.decision.report} is {@code assessed}: first the assessments, one per service of
+	 * {@code topology} in sheet order, leaf first ({@link Topology#leafFirst()}), each {@code {role, line, why}}; then
+	 * the summary, the cause and the confidence, as in the plain report, and no evidence, which code derives from the
+	 * assessments. A {@code line} and a {@code why} follow an evidence item's rules. The local route's grammar writes
+	 * the properties in this order.
 	 */
-	static final String ASSESSED_REPORT = JSON.writeValueAsString(assessedReport());
-
-	private Schemas() {
+	static String assessedReport(Topology topology) {
+		return JSON.writeValueAsString(assessedReportNode(topology.leafFirst()));
 	}
 
 	/** The report schema of {@code mode}. */
@@ -73,9 +76,9 @@ final class Schemas {
 		return report;
 	}
 
-	private static ObjectNode assessedReport() {
-		ObjectNode assessments = object(CallGraph.SERVICES);
-		for (String service : CallGraph.SERVICES) {
+	private static ObjectNode assessedReportNode(List<String> services) {
+		ObjectNode assessments = object(services);
+		for (String service : services) {
 			ObjectNode assessment = object(ReportCheck.ASSESSMENT_FIELDS);
 			ObjectNode fields = assessment.withObject("properties");
 			fields.set("role", enumOf(ReportCheck.Role.VALUES));

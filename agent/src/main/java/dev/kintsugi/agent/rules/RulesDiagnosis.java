@@ -10,8 +10,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import dev.kintsugi.agent.dossier.CallGraph;
-import dev.kintsugi.agent.dossier.CallGraph.Edge;
 import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.Dossier.LatencyPoints;
 import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
@@ -21,14 +19,16 @@ import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
 import dev.kintsugi.agent.dossier.Dossier.UriLatency;
 import dev.kintsugi.agent.dossier.Gathered;
+import dev.kintsugi.agent.dossier.Topology;
+import dev.kintsugi.agent.dossier.Topology.Edge;
 
 /**
- * Config 0: a rules-only diagnosis over the typed dossier and the call graph, exactly as ADR-016 states it. It runs the
- * rules the prompt gives the model, in their order (R-REACH, R-DOWN, R-NONE), so the paired difference between a model
- * route and this baseline measures what the model adds over its own prompt.
+ * Config 0: a rules-only diagnosis over the typed dossier and the topology's call graph, exactly as ADR-016 states it.
+ * It runs the rules the prompt gives the model, in their order (R-REACH, R-DOWN, R-NONE), so the paired difference
+ * between a model route and this baseline measures what the model adds over its own prompt.
  * <p>
- * It is a pure function of the record: no Spring, no I/O, no clock, no model, and never the rendered text, so the
- * dossier's view cannot change its answer. It is a baseline, never the agent's answer.
+ * It is a pure function of the record and the topology: no Spring, no I/O, no clock, no model, and never the rendered
+ * text, so the dossier's view cannot change its answer. It is a baseline, never the agent's answer.
  */
 public final class RulesDiagnosis {
 
@@ -76,28 +76,35 @@ public final class RulesDiagnosis {
 	static final int MAX_CANDIDATES = 5;
 
 	/** The walk's order among abnormal services: the larger refusing share, then the larger ratio, then services order. */
-	private static final Comparator<Assessment> BY_ABNORMALITY = Comparator
+	private final Comparator<Assessment> byAbnormality = Comparator
 		.comparingDouble((Assessment a) -> a.refusing() ? -a.share() : 0)
 		.thenComparingDouble(a -> -a.ratio())
 		.thenComparing(a -> order(a.service()));
 
 	private final Dossier dossier;
 
+	private final Topology topology;
+
+	/** The services leaf first, the services order of every tie. */
+	private final List<String> services;
+
 	private final List<TrafficRow> rows;
 
 	private final Map<String, Assessment> assessments = new HashMap<>();
 
-	private RulesDiagnosis(Dossier dossier) {
+	private RulesDiagnosis(Dossier dossier, Topology topology) {
 		this.dossier = dossier;
+		this.topology = topology;
+		this.services = topology.leafFirst();
 		this.rows = ok(dossier.traffic().incident(), List.<TrafficRow>of())
 			.stream()
 			.filter(row -> !actuator(row.uri()))
 			.toList();
 	}
 
-	/** The verdict of the first rule that fires on {@code dossier}. */
-	public static RulesVerdict diagnose(Dossier dossier) {
-		return new RulesDiagnosis(dossier).verdict();
+	/** The verdict of the first rule that fires on {@code dossier}, over {@code topology}'s call graph. */
+	public static RulesVerdict diagnose(Dossier dossier, Topology topology) {
+		return new RulesDiagnosis(dossier, topology).verdict();
 	}
 
 	/**
@@ -106,18 +113,18 @@ public final class RulesDiagnosis {
 	 * order; the other abnormal (slow or refusing) services, anywhere on the call graph, in the walk's order. Each keeps
 	 * the category of the rule that would name it. {@link #diagnose} itself is unchanged.
 	 */
-	public static List<RulesCandidate> candidates(Dossier dossier) {
-		RulesDiagnosis diagnosis = new RulesDiagnosis(dossier);
+	public static List<RulesCandidate> candidates(Dossier dossier, Topology topology) {
+		RulesDiagnosis diagnosis = new RulesDiagnosis(dossier, topology);
 		Map<String, RulesCandidate> candidates = new LinkedHashMap<>();
 		RulesVerdict verdict = diagnosis.verdict();
 		if (!UNKNOWN.equals(verdict.service())) {
 			candidates.put(verdict.service(), candidate(verdict));
 		}
 		diagnosis.reachCallers().forEach(caller -> candidates.putIfAbsent(caller.service(), candidate(caller)));
-		CallGraph.SERVICES.stream()
+		diagnosis.services.stream()
 			.map(diagnosis::assess)
 			.filter(Assessment::abnormal)
-			.sorted(BY_ABNORMALITY)
+			.sorted(diagnosis.byAbnormality)
 			.forEach(a -> candidates.putIfAbsent(a.service(),
 					new RulesCandidate(a.service(), a.refusing() ? REJECTING : LATENCY, DOWN, a.abnormalFacts())));
 		return candidates.values().stream().limit(MAX_CANDIDATES).toList();
@@ -153,7 +160,7 @@ public final class RulesDiagnosis {
 	private List<RulesVerdict> reachCallers() {
 		Map<String, Long> failures = new LinkedHashMap<>();
 		Map<String, List<String>> facts = new HashMap<>();
-		for (Edge edge : CallGraph.EDGES) {
+		for (Edge edge : this.topology.edges()) {
 			if (edge.caller() == null) {
 				continue;
 			}
@@ -175,7 +182,7 @@ public final class RulesDiagnosis {
 		}
 		return failures.keySet()
 			.stream()
-			.sorted(Comparator.comparing((String caller) -> -failures.get(caller)).thenComparing(RulesDiagnosis::order))
+			.sorted(Comparator.comparing((String caller) -> -failures.get(caller)).thenComparing(this::order))
 			.map(caller -> new RulesVerdict(caller, CONFIGURATION, REACH, facts.get(caller)))
 			.toList();
 	}
@@ -188,12 +195,12 @@ public final class RulesDiagnosis {
 			Set<String> visited = new HashSet<>(List.of(entry));
 			String current = entry;
 			while (true) {
-				Assessment next = CallGraph.calls(current)
+				Assessment next = this.topology.calls(current)
 					.stream()
 					.filter(callee -> !visited.contains(callee))
 					.map(this::assess)
 					.filter(Assessment::abnormal)
-					.min(BY_ABNORMALITY)
+					.min(this.byAbnormality)
 					.orElse(null);
 				if (next == null) {
 					break;
@@ -211,9 +218,9 @@ public final class RulesDiagnosis {
 	}
 
 	/** The services the external client calls, in services order. */
-	private static List<String> entries() {
-		return CallGraph.SERVICES.stream()
-			.filter(service -> CallGraph.calledBy(service).contains(CallGraph.EXTERNAL_CLIENT))
+	private List<String> entries() {
+		return this.services.stream()
+			.filter(service -> this.topology.calledBy(service).contains(Topology.EXTERNAL_CLIENT))
 			.toList();
 	}
 
@@ -273,7 +280,7 @@ public final class RulesDiagnosis {
 
 	/** The callers' client rows to {@code service} on the call graph's edges, in the incident window. */
 	private List<TrafficRow> clientRowsTo(String service) {
-		return CallGraph.EDGES.stream()
+		return this.topology.edges().stream()
 			.filter(edge -> edge.caller() != null && edge.target().equals(service))
 			.flatMap(edge -> this.rows.stream().filter(edge::callerRow))
 			.toList();
@@ -331,8 +338,8 @@ public final class RulesDiagnosis {
 		return rows.stream().mapToLong(TrafficRow::count).sum();
 	}
 
-	private static int order(String service) {
-		int index = CallGraph.SERVICES.indexOf(service);
+	private int order(String service) {
+		int index = this.services.indexOf(service);
 		return index < 0 ? Integer.MAX_VALUE : index;
 	}
 

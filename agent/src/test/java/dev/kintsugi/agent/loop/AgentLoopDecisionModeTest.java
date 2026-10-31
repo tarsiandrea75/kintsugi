@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static dev.kintsugi.agent.loop.AgentLoopDossierModeTest.dossierFixture;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
@@ -42,7 +43,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.AgentDatabase;
-import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.DossierView;
@@ -366,7 +366,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theSheetsViewGivesTheReportCallTheSheetsWhoseLinesAreCitedAsTheTablesAre() {
 		Clock clock = fixedClock();
-		ServiceSheets.Rendered sheets = ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15));
+		ServiceSheets.Rendered sheets = ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15), LAB);
 		// The first line gateway-mock owns: its place in the call graph.
 		int line = sheets.owners().indexOf("gateway-mock") + 1;
 		this.model.text(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(line)));
@@ -388,7 +388,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theTablesViewIsTheDefaultAndKeepsTodaysDossierByteForByte() {
 		Clock clock = fixedClock();
-		String today = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15)));
+		String today = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15), LAB));
 		this.model.text(unknownReport()).text(unknownReport());
 
 		// The loop of the constructor without a view, as every caller built it before the setting.
@@ -439,7 +439,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(prompt.getInstructions().get(1).getText()).isEqualTo(Prompts.dossier(sheets.text()));
 		assertThat(last(prompt)).isEqualTo(Prompts.assessedReport(
 				new Prompts.State(Phase.CONCLUDE, 0, 0, null, AgentMode.DECISION.phases(), true), List.of()));
-		assertThat(schema(prompt)).isEqualTo(Schemas.ASSESSED_REPORT);
+		assertThat(schema(prompt)).isEqualTo(Schemas.assessedReport(LAB));
 		assertThat(step(2)).containsEntry("kind", "REPORT").containsEntry("summary", "valid");
 		// The stored report keeps the checked assessments and the evidence code derived from them: the ORIGIN's line,
 		// quoted by code, cited as the dossier is, so that storage and scoring read it as a plain report's.
@@ -449,7 +449,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo("CONFIGURATION");
 		assertThat(stored.get("summary").asString()).isEqualTo("what the sheets show");
 		assertThat(stored.get("stepsUsed").asInt()).isEqualTo(2);
-		assertThat(stored.get("assessments").propertyNames()).containsExactlyInAnyOrderElementsOf(CallGraph.SERVICES);
+		assertThat(stored.get("assessments").propertyNames()).containsExactlyInAnyOrderElementsOf(LAB.leafFirst());
 		assertThat(stored.at("/assessments/order-service/role").asString()).isEqualTo("ORIGIN");
 		int line = firstLine(sheets, "order-service");
 		JsonNode evidence = stored.get("evidence");
@@ -484,7 +484,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(last(this.model.prompts().get(0))).doesNotContain("Your previous report was rejected");
 		assertThat(last(this.model.prompts().get(1))).contains("\n\nYour previous report was rejected:\n- " + error
 				+ "\nWrite the report again, fixing every error.");
-		assertThat(schema(this.model.prompts().get(1))).isEqualTo(Schemas.ASSESSED_REPORT);
+		assertThat(schema(this.model.prompts().get(1))).isEqualTo(Schemas.assessedReport(LAB));
 		assertThat(step(3)).containsEntry("summary", "valid");
 	}
 
@@ -532,13 +532,13 @@ class AgentLoopDecisionModeTest {
 		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
 		LoopSettings settings = new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5));
 		assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(),
-				"decision", "tables", "assessed"))
+				LAB, "decision", "tables", "assessed"))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessage(needsSheets);
 		// Explorer and dossier mode apply neither setting, so the pair does not stop them.
 		for (AgentMode mode : List.of(AgentMode.EXPLORER, AgentMode.DOSSIER)) {
-			new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(), mode.value(), "tables",
-					"assessed")
+			new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(), LAB, mode.value(),
+					"tables", "assessed")
 				.close();
 		}
 	}
@@ -578,7 +578,7 @@ class AgentLoopDecisionModeTest {
 		for (AgentMode mode : AgentMode.values()) {
 			for (String report : List.of("", "rich")) {
 				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
-						fixedClock(), mode.value(), "sheets", report))
+						fixedClock(), LAB, mode.value(), "sheets", report))
 					.as("%s, \"%s\"", mode.value(), report)
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessage(
@@ -615,7 +615,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void theViewIsReadInDecisionModeOnly() {
 		Clock clock = fixedClock();
-		String tables = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15)));
+		String tables = Prompts.dossier(DossierRenderer.render(new DossierGatherer(lab(), clock).gather(15), LAB));
 		this.model.quiet().quiet().text(unknownReport());
 		this.loop = loop(AgentMode.DOSSIER, DossierView.SHEETS, clock);
 
@@ -641,7 +641,7 @@ class AgentLoopDecisionModeTest {
 		for (AgentMode mode : AgentMode.values()) {
 			for (String view : List.of("", "charts")) {
 				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
-						fixedClock(), mode.value(), view, DecisionReport.DEFAULT))
+						fixedClock(), LAB, mode.value(), view, DecisionReport.DEFAULT))
 					.as("%s, \"%s\"", mode.value(), view)
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessage("kintsugi.agent.decision.view must be tables or sheets, got \"" + view + "\"");
@@ -805,7 +805,7 @@ class AgentLoopDecisionModeTest {
 
 	/** The candidates the rules propose on the dossier {@code lab} gives on {@code clock}. */
 	private static List<RulesCandidate> candidates(FakeLabTools lab, Clock clock) {
-		return RulesDiagnosis.candidates(new DossierGatherer(lab, clock).gather(15));
+		return RulesDiagnosis.candidates(new DossierGatherer(lab, clock).gather(15), LAB);
 	}
 
 	/** A decision loop over {@code lab} that writes its dossier in {@code view} and asks for the hybrid report. */
@@ -813,8 +813,8 @@ class AgentLoopDecisionModeTest {
 		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
 		return new AgentLoop(this.incidents,
 				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), lab,
-				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, AgentMode.DECISION, view,
-				DecisionReport.HYBRID);
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, LAB, AgentMode.DECISION,
+				view, DecisionReport.HYBRID);
 	}
 
 	/**
@@ -854,7 +854,7 @@ class AgentLoopDecisionModeTest {
 		CallTimeouts timeouts = new CallTimeouts(deadline, deadline);
 		return new AgentLoop(this.incidents,
 				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
-				new LoopSettings(12, timeBudget, Duration.ofSeconds(5)), clock, mode);
+				new LoopSettings(12, timeBudget, Duration.ofSeconds(5)), clock, LAB, mode);
 	}
 
 	/** A loop in {@code mode} whose dossier, in decision mode, is written in {@code view}. */
@@ -862,7 +862,7 @@ class AgentLoopDecisionModeTest {
 		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
 		return new AgentLoop(this.incidents,
 				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
-				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, mode, view);
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, LAB, mode, view);
 	}
 
 	/** A loop in {@code mode} that, in decision mode, writes its dossier in {@code view} and asks for {@code report}. */
@@ -870,12 +870,12 @@ class AgentLoopDecisionModeTest {
 		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
 		return new AgentLoop(this.incidents,
 				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
-				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, mode, view, report);
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, LAB, mode, view, report);
 	}
 
 	/** The sheets a decision run of this test's lab writes on {@code clock}, with the owner of each line. */
 	private static ServiceSheets.Rendered sheets(Clock clock) {
-		return ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15));
+		return ServiceSheets.render(new DossierGatherer(lab(), clock).gather(15), LAB);
 	}
 
 	/** The number of the first line {@code service} owns in {@code sheets}: its place in the call graph. */
@@ -888,7 +888,7 @@ class AgentLoopDecisionModeTest {
 	 * others UNAFFECTED, which every rule of the assessed report allows.
 	 */
 	private static String[] originAt(ServiceSheets.Rendered sheets, String origin) {
-		return CallGraph.SERVICES.stream()
+		return LAB.leafFirst().stream()
 			.map(service -> assessment(service, service.equals(origin) ? "ORIGIN" : "UNAFFECTED",
 					firstLine(sheets, service)))
 			.toArray(String[]::new);

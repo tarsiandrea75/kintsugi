@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.rules;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -46,7 +47,7 @@ class RulesDiagnosisTest {
 
 	@Test
 	void theF1GoldenDossierIsGatewayMockLatencyByTheDownRule() {
-		RulesVerdict verdict = RulesDiagnosis.diagnose(golden("f1", "healthy"));
+		RulesVerdict verdict = RulesDiagnosis.diagnose(golden("f1", "healthy"), LAB);
 		assertThat(verdict.service()).isEqualTo("gateway-mock");
 		assertThat(verdict.category()).isEqualTo("DEPENDENCY_LATENCY");
 		assertThat(verdict.rule()).isEqualTo("R-DOWN");
@@ -55,7 +56,7 @@ class RulesDiagnosisTest {
 
 	@Test
 	void theF3GoldenDossierIsOrderServiceConfigurationByTheReachRule() {
-		RulesVerdict verdict = RulesDiagnosis.diagnose(golden("f3"));
+		RulesVerdict verdict = RulesDiagnosis.diagnose(golden("f3"), LAB);
 		assertThat(verdict.service()).isEqualTo("order-service");
 		assertThat(verdict.category()).isEqualTo("CONFIGURATION");
 		assertThat(verdict.rule()).isEqualTo("R-REACH");
@@ -64,7 +65,7 @@ class RulesDiagnosisTest {
 
 	@Test
 	void theHealthyGoldenDossierIsUnknownByTheNoneRule() {
-		RulesVerdict verdict = RulesDiagnosis.diagnose(golden("healthy"));
+		RulesVerdict verdict = RulesDiagnosis.diagnose(golden("healthy"), LAB);
 		assertThat(verdict.service()).isEqualTo("UNKNOWN");
 		assertThat(verdict.category()).isEqualTo("UNKNOWN");
 		assertThat(verdict.rule()).isEqualTo("R-NONE");
@@ -76,10 +77,10 @@ class RulesDiagnosisTest {
 		// diagnose takes the record and no view; rendering the same record in either view leaves the verdict as it was.
 		for (String set : List.of("f1", "f3", "healthy")) {
 			Dossier dossier = golden(set, "healthy");
-			RulesVerdict before = RulesDiagnosis.diagnose(dossier);
+			RulesVerdict before = RulesDiagnosis.diagnose(dossier, LAB);
 			for (DossierView view : DossierView.values()) {
-				assertThat(view.render(dossier)).isNotBlank();
-				assertThat(RulesDiagnosis.diagnose(dossier)).as("%s after %s", set, view).isEqualTo(before);
+				assertThat(view.render(dossier, LAB)).isNotBlank();
+				assertThat(RulesDiagnosis.diagnose(dossier, LAB)).as("%s after %s", set, view).isEqualTo(before);
 			}
 		}
 	}
@@ -87,7 +88,7 @@ class RulesDiagnosisTest {
 	@Test
 	void aUriAtExactlyTwiceItsBaselineAndHalfASecondIsSlow() {
 		RulesVerdict verdict = RulesDiagnosis.diagnose(new Lab().latency("payment-service", "/payments", 0.25, 0.5)
-			.dossier());
+			.dossier(), LAB);
 		assertThat(verdict).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("payment-service", "DEPENDENCY_LATENCY", "R-DOWN");
 		assertThat(verdict.facts()).anySatisfy(fact -> assertThat(fact).contains("/payments"));
@@ -112,7 +113,7 @@ class RulesDiagnosisTest {
 		assertThat(RulesDiagnosis.diagnose(new Lab().clientRow("order-service", "payment-service", "/payments",
 				"CLIENT_ERROR", "HttpTimeoutException", 3)
 			.serverRow("payment-service", "/payments", "201", 3)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("payment-service", "DEPENDENCY_LATENCY", "R-DOWN");
 		assertNone(new Lab().clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR",
 				"HttpTimeoutException", 2)
@@ -131,7 +132,7 @@ class RulesDiagnosisTest {
 		// no error answer, so it is slow by its timeouts and not refusing.
 		assertThat(RulesDiagnosis.diagnose(new Lab()
 			.clientRow("order-service", "payment-service", "/payments", "504", "HttpTimeoutException", 3)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("payment-service", "DEPENDENCY_LATENCY");
 	}
 
@@ -140,7 +141,7 @@ class RulesDiagnosisTest {
 		// 3 of 15: exactly 20 %.
 		assertThat(RulesDiagnosis.diagnose(new Lab().serverRow("payment-service", "/payments", "503", 3)
 			.serverRow("payment-service", "/payments", "201", 12)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("payment-service", "DEPENDENCY_REJECTING", "R-DOWN");
 		// 3 of 16: under 20 %.
 		assertNone(new Lab().serverRow("payment-service", "/payments", "503", 3)
@@ -157,7 +158,7 @@ class RulesDiagnosisTest {
 		assertThat(RulesDiagnosis.diagnose(new Lab()
 			.clientRow("order-service", "payment-service", "/payments", "503", "none", 3)
 			.clientRow("order-service", "payment-service", "/payments", "201", "none", 2)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("payment-service", "DEPENDENCY_REJECTING");
 		assertNone(new Lab().clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "none", 5)
 			.dossier());
@@ -184,7 +185,7 @@ class RulesDiagnosisTest {
 			.clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "ConnectException", 1)
 			.failServices()
 			.failLogs("payment-service")
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("order-service", "CONFIGURATION", "R-REACH");
 	}
 
@@ -192,7 +193,7 @@ class RulesDiagnosisTest {
 	void aConnectionFailureToAnUnhealthyCalleeIsNotAConfigurationOfTheCaller() {
 		Lab base = new Lab().clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR",
 				"java.nio.channels.ClosedChannelException", 4);
-		assertThat(RulesDiagnosis.diagnose(base.dossier()).rule()).isEqualTo("R-REACH");
+		assertThat(RulesDiagnosis.diagnose(base.dossier(), LAB).rule()).isEqualTo("R-REACH");
 		assertNone(base.copy().restart("payment-service").dossier());
 		assertNone(base.copy().logs("payment-service", "WARN", 1).dossier());
 		assertNone(base.copy().logs("payment-service", "ERROR", 1).dossier());
@@ -203,7 +204,7 @@ class RulesDiagnosisTest {
 		RulesVerdict verdict = RulesDiagnosis.diagnose(new Lab()
 			.clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "UnknownHostException", 1)
 			.latency("inventory-service", "/reservations", 0.02, 9.0)
-			.dossier());
+			.dossier(), LAB);
 		assertThat(verdict).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("order-service", "CONFIGURATION", "R-REACH");
 	}
@@ -213,19 +214,19 @@ class RulesDiagnosisTest {
 		Lab lab = new Lab()
 			.clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "ConnectException", 2)
 			.clientRow("payment-service", "gateway-mock", "/authorize", "CLIENT_ERROR", "ConnectException", 3);
-		assertThat(RulesDiagnosis.diagnose(lab.dossier()).service()).isEqualTo("payment-service");
+		assertThat(RulesDiagnosis.diagnose(lab.dossier(), LAB).service()).isEqualTo("payment-service");
 		Lab tied = new Lab()
 			.clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "ConnectException", 3)
 			.clientRow("payment-service", "gateway-mock", "/authorize", "CLIENT_ERROR", "ConnectException", 3);
-		// payment-service comes before order-service in CallGraph.SERVICES.
-		assertThat(RulesDiagnosis.diagnose(tied.dossier()).service()).isEqualTo("payment-service");
+		// payment-service comes before order-service in the lab topology's leafFirst().
+		assertThat(RulesDiagnosis.diagnose(tied.dossier(), LAB).service()).isEqualTo("payment-service");
 	}
 
 	@Test
 	void aComponentBothRefusingAndSlowIsRejecting() {
 		assertThat(RulesDiagnosis.diagnose(new Lab().serverRow("payment-service", "/payments", "503", 5)
 			.latency("payment-service", "/payments", 0.05, 9.0)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("payment-service", "DEPENDENCY_REJECTING");
 	}
 
@@ -234,15 +235,15 @@ class RulesDiagnosisTest {
 		// inventory-service refuses, payment-service is only slow: the refusing share decides.
 		assertThat(RulesDiagnosis.diagnose(new Lab().serverRow("inventory-service", "/reservations", "503", 3)
 			.latency("payment-service", "/payments", 0.05, 9.0)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("inventory-service", "DEPENDENCY_REJECTING");
 		// Both only slow: the larger ratio decides.
 		assertThat(RulesDiagnosis.diagnose(new Lab().latency("inventory-service", "/reservations", 0.1, 0.6)
 			.latency("payment-service", "/payments", 0.1, 0.9)
-			.dossier()).service()).isEqualTo("payment-service");
+			.dossier(), LAB).service()).isEqualTo("payment-service");
 		assertThat(RulesDiagnosis.diagnose(new Lab().latency("inventory-service", "/reservations", 0.1, 0.9)
 			.latency("payment-service", "/payments", 0.1, 0.6)
-			.dossier()).service()).isEqualTo("inventory-service");
+			.dossier(), LAB).service()).isEqualTo("inventory-service");
 	}
 
 	@Test
@@ -253,7 +254,7 @@ class RulesDiagnosisTest {
 			.latency("payment-service", "/payments", 0.05, 9.0)
 			.serverRow("inventory-service", "/reservations", "503", 3)
 			.serverRow("inventory-service", "/reservations", "201", 12)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("inventory-service", "DEPENDENCY_REJECTING");
 	}
 
@@ -262,7 +263,7 @@ class RulesDiagnosisTest {
 		// The callee has no server rows, and the only client rows to it are connection failures with a numeric status.
 		assertThat(RulesDiagnosis.diagnose(new Lab()
 			.clientRow("order-service", "payment-service", "/payments", "503", "ConnectException", 3)
-			.dossier())).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
+			.dossier(), LAB)).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("order-service", "CONFIGURATION", "R-REACH");
 	}
 
@@ -270,10 +271,10 @@ class RulesDiagnosisTest {
 	void theWalkGoesDownToTheLastSlowComponentAndStopsAtTheEntryWhenOnlyItIsSlow() {
 		assertThat(RulesDiagnosis.diagnose(new Lab().latency("payment-service", "/payments", 0.05, 9.0)
 			.latency("gateway-mock", "/authorize", 0.01, 8.9)
-			.dossier()).service()).isEqualTo("gateway-mock");
+			.dossier(), LAB).service()).isEqualTo("gateway-mock");
 		// gateway-mock is slow, but payment-service is not, so the walk never reaches it.
 		assertNone(new Lab().latency("gateway-mock", "/authorize", 0.01, 8.9).dossier());
-		assertThat(RulesDiagnosis.diagnose(new Lab().latency("order-service", "/orders", 0.08, 9.0).dossier()))
+		assertThat(RulesDiagnosis.diagnose(new Lab().latency("order-service", "/orders", 0.08, 9.0).dossier(), LAB))
 			.extracting(RulesVerdict::service, RulesVerdict::category)
 			.containsExactly("order-service", "DEPENDENCY_LATENCY");
 	}
@@ -283,8 +284,8 @@ class RulesDiagnosisTest {
 		// odd/tasks/hybrid.md AC2: the rules' verdict first, at most 5, no duplicate service.
 		for (String set : List.of("f1", "f3")) {
 			Dossier dossier = golden(set, "healthy");
-			RulesVerdict verdict = RulesDiagnosis.diagnose(dossier);
-			List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier);
+			RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, LAB);
+			List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier, LAB);
 			assertThat(candidates).as(set).isNotEmpty().hasSizeLessThanOrEqualTo(5);
 			assertThat(candidates.get(0)).as(set)
 				.isEqualTo(new RulesCandidate(verdict.service(), verdict.category(), verdict.rule(), verdict.facts()));
@@ -294,16 +295,16 @@ class RulesDiagnosisTest {
 
 	@Test
 	void theHealthyGoldenDossierHasNoCandidate() {
-		assertThat(RulesDiagnosis.candidates(golden("healthy"))).isEmpty();
-		assertThat(RulesDiagnosis.candidates(new Lab().dossier())).isEmpty();
+		assertThat(RulesDiagnosis.candidates(golden("healthy"), LAB)).isEmpty();
+		assertThat(RulesDiagnosis.candidates(new Lab().dossier(), LAB)).isEmpty();
 	}
 
 	@Test
 	void theCandidatesDoNotChangeTheVerdict() {
 		Dossier dossier = golden("f1", "healthy");
-		RulesVerdict before = RulesDiagnosis.diagnose(dossier);
-		RulesDiagnosis.candidates(dossier);
-		assertThat(RulesDiagnosis.diagnose(dossier)).isEqualTo(before);
+		RulesVerdict before = RulesDiagnosis.diagnose(dossier, LAB);
+		RulesDiagnosis.candidates(dossier, LAB);
+		assertThat(RulesDiagnosis.diagnose(dossier, LAB)).isEqualTo(before);
 	}
 
 	@Test
@@ -312,7 +313,7 @@ class RulesDiagnosisTest {
 			.clientRow("order-service", "payment-service", "/payments", "CLIENT_ERROR", "ConnectException", 2)
 			.clientRow("payment-service", "gateway-mock", "/authorize", "CLIENT_ERROR", "ConnectException", 3)
 			.latency("inventory-service", "/reservations", 0.02, 9.0)
-			.dossier());
+			.dossier(), LAB);
 		assertThat(candidates).extracting(RulesCandidate::service, RulesCandidate::category, RulesCandidate::rule)
 			.containsExactly(tuple("payment-service", "CONFIGURATION", "R-REACH"),
 					tuple("order-service", "CONFIGURATION", "R-REACH"),
@@ -330,8 +331,8 @@ class RulesDiagnosisTest {
 			.serverRow("inventory-service", "/reservations", "201", 12)
 			.latency("payment-service", "/payments", 0.01, 9.0)
 			.latency("gateway-mock", "/authorize", 0.1, 0.6);
-		RulesVerdict verdict = RulesDiagnosis.diagnose(lab.dossier());
-		List<RulesCandidate> candidates = RulesDiagnosis.candidates(lab.dossier());
+		RulesVerdict verdict = RulesDiagnosis.diagnose(lab.dossier(), LAB);
+		List<RulesCandidate> candidates = RulesDiagnosis.candidates(lab.dossier(), LAB);
 		assertThat(candidates).hasSizeLessThanOrEqualTo(5)
 			.extracting(RulesCandidate::service, RulesCandidate::category, RulesCandidate::rule)
 			.containsExactly(tuple(verdict.service(), verdict.category(), verdict.rule()),
@@ -340,7 +341,7 @@ class RulesDiagnosisTest {
 					tuple("gateway-mock", "DEPENDENCY_LATENCY", "R-DOWN"));
 		assertThat(candidates.get(0).service()).isEqualTo("inventory-service");
 		assertThat(candidates).extracting(RulesCandidate::service).doesNotHaveDuplicates();
-		assertThat(RulesDiagnosis.candidates(lab.dossier())).as("deterministic").isEqualTo(candidates);
+		assertThat(RulesDiagnosis.candidates(lab.dossier(), LAB)).as("deterministic").isEqualTo(candidates);
 	}
 
 	@Test
@@ -348,13 +349,13 @@ class RulesDiagnosisTest {
 		// gateway-mock is slow, but payment-service is not, so diagnose abstains.
 		Dossier dossier = new Lab().latency("gateway-mock", "/authorize", 0.01, 8.9).dossier();
 		assertNone(dossier);
-		assertThat(RulesDiagnosis.candidates(dossier))
+		assertThat(RulesDiagnosis.candidates(dossier, LAB))
 			.extracting(RulesCandidate::service, RulesCandidate::category, RulesCandidate::rule)
 			.containsExactly(tuple("gateway-mock", "DEPENDENCY_LATENCY", "R-DOWN"));
 	}
 
 	private static void assertNone(Dossier dossier) {
-		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier);
+		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, LAB);
 		assertThat(verdict).extracting(RulesVerdict::service, RulesVerdict::category, RulesVerdict::rule)
 			.containsExactly("UNKNOWN", "UNKNOWN", "R-NONE");
 		assertThat(verdict.facts()).isNotEmpty();

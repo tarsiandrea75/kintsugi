@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.call;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -489,7 +490,7 @@ class ReplayDriverTest {
 		assertThat(decision.report()).hasValue(DecisionReport.ASSESSED);
 		assertThat(this.model.prompts()).hasSize(2)
 			.allSatisfy(prompt -> assertThat(((StructuredOutputChatOptions) prompt.getOptions()).getOutputSchema())
-				.isEqualTo(Schemas.ASSESSED_REPORT));
+				.isEqualTo(Schemas.assessedReport(LAB)));
 		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tassessed" + LOCAL_LINE_END);
 		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1))
 			.startsWith("F1\tdecision\tlocal\tstress\tsheets\tassessed\t1\t1\t0/1\t");

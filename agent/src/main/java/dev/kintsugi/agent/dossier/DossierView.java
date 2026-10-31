@@ -42,11 +42,14 @@ public enum DossierView {
 		return name().toLowerCase(Locale.ROOT);
 	}
 
-	/** The dossier written in this view: the text the dossier message holds after its introduction. */
-	public String render(Dossier dossier) {
+	/**
+	 * The dossier written in this view over {@code topology}: the text the dossier message holds after its
+	 * introduction.
+	 */
+	public String render(Dossier dossier, Topology topology) {
 		return switch (this) {
-			case TABLES -> DossierRenderer.render(dossier);
-			case SHEETS -> ServiceSheets.render(dossier).text();
+			case TABLES -> DossierRenderer.render(dossier, topology);
+			case SHEETS -> ServiceSheets.render(dossier, topology).text();
 		};
 	}
 

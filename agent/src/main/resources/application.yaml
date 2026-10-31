@@ -61,6 +61,12 @@ kintsugi:
     # compose healthcheck inside the container, localhost:18086 and 127.0.0.1:18086 for the host (infra/scripts). A new
     # service name or port needs this list changed too. An empty list stops the start.
     allowed-hosts: agent:8086,localhost:8086,localhost:18086,127.0.0.1:18086
+    # The topology of the system the agent diagnoses (odd/tasks/topology-data.md): its services, datastores, call edges
+    # and the owners of the state tables and event sources, as a Spring resource location. The dossier views, the
+    # rules, the checks and the assessed report's schema read it. It is loaded and checked at startup: a missing file,
+    # an unknown name, a cycle or a foreign owner stops the start. The default is the lab's file,
+    # Topology.DEFAULT_LOCATION, written here.
+    topology: ${KINTSUGI_AGENT_TOPOLOGY:classpath:topology/lab.json}
     # How the loop gathers its evidence (agent spec, "Dossier mode", "Decision mode"; ADR-010, "Amended in T5a"):
     # explorer, the ADR-010 loop where the model picks every call from TRIAGE on; dossier, where code first gathers the
     # evidence dossier (ADR-011), the model reads it before INVESTIGATE and KNOWLEDGE, and TRIAGE is skipped; or

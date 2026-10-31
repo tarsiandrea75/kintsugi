@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 
 import dev.kintsugi.agent.dossier.DossierView;
+import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.lab.LabTools;
 
@@ -54,14 +55,14 @@ class LoopConfig {
 	 * The view and the report are checked in every mode, although only decision mode applies them, so any other value,
 	 * an empty one included ({@code KINTSUGI_AGENT_DECISION_VIEW=}, which the default does not replace), stops an
 	 * explorer or dossier start too: a typo fails at once, not in a later decision run. The assessed report with the
-	 * tables stops a decision start only.
+	 * tables stops a decision start only. The loop reads the one {@link Topology} the agent loaded at startup.
 	 */
 	@Bean
 	AgentLoop agentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock, @Value("${kintsugi.agent.mode:explorer}") String mode,
+			Clock clock, Topology topology, @Value("${kintsugi.agent.mode:explorer}") String mode,
 			@Value("${" + DossierView.PROPERTY + ":" + DossierView.DEFAULT + "}") String decisionView,
 			@Value("${" + DecisionReport.PROPERTY + ":" + DecisionReport.DEFAULT + "}") String decisionReport) {
-		return new AgentLoop(incidents, router, labTools, settings, clock, AgentMode.of(mode),
+		return new AgentLoop(incidents, router, labTools, settings, clock, topology, AgentMode.of(mode),
 				DossierView.of(decisionView), DecisionReport.of(decisionReport));
 	}
 

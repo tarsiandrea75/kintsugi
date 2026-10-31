@@ -10,8 +10,10 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import org.springframework.core.io.Resource;
 
@@ -19,7 +21,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import dev.kintsugi.agent.dossier.CallGraph.Edge;
+import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
 
 /**
  * A system's topology as data (odd/tasks/topology-data.md): its services in display order, its datastores, the
@@ -36,6 +38,18 @@ import dev.kintsugi.agent.dossier.CallGraph.Edge;
  */
 public record Topology(List<String> services, List<String> datastores, List<Edge> edges,
 		Map<String, String> tableOwners, Map<String, String> sourceOwners) {
+
+	/**
+	 * The property that names the topology file, a Spring resource location; the agent loads it once, at startup
+	 * ({@code TopologyConfig}).
+	 */
+	public static final String PROPERTY = "kintsugi.agent.topology";
+
+	/** The property's value when it is not set: the lab's file. */
+	public static final String DEFAULT_LOCATION = "classpath:topology/lab.json";
+
+	/** How a caller from outside the system is named: the caller of an edge whose {@code caller} is null. */
+	public static final String EXTERNAL_CLIENT = "external client";
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -72,12 +86,26 @@ public record Topology(List<String> services, List<String> datastores, List<Edge
 	public static Topology load(InputStream in, String origin) {
 		try {
 			JsonNode root = JSON.readTree(in);
+			if (root == null || root.isMissingNode()) {
+				throw new IllegalArgumentException("the file is empty");
+			}
+			if (!root.isObject()) {
+				throw new IllegalArgumentException("the file must hold a JSON object");
+			}
 			List<Edge> edges = new ArrayList<>();
-			for (JsonNode edge : field(root, "edges")) {
+			int n = 0;
+			for (JsonNode edge : field(root, "edges", JsonNode::isArray, "an array")) {
+				n++;
+				if (!edge.isObject()) {
+					throw new IllegalArgumentException("edge " + n + " is not an object");
+				}
 				JsonNode caller = edge.path("caller");
-				edges.add(new Edge(caller.isNull() || caller.isMissingNode() ? null : text(caller, "caller"),
-						text(edge.path("target"), "target"), text(edge.path("method"), "method"),
-						text(edge.path("uri"), "uri")));
+				if (caller.isMissingNode()) {
+					throw new IllegalArgumentException(
+							"edge " + n + ": missing field 'caller' (null for the external client)");
+				}
+				edges.add(new Edge(caller.isNull() ? null : text(caller, "caller"), text(edge.path("target"), "target"),
+						text(edge.path("method"), "method"), text(edge.path("uri"), "uri")));
 			}
 			return new Topology(names(root, "services"), names(root, "datastores"), edges, owners(root, "tableOwners"),
 					owners(root, "sourceOwners"));
@@ -105,13 +133,13 @@ public record Topology(List<String> services, List<String> datastores, List<Edge
 	}
 
 	/**
-	 * The callers of {@code service}, in edge order: services, and {@link CallGraph#EXTERNAL_CLIENT} for an edge whose
+	 * The callers of {@code service}, in edge order: services, and {@link #EXTERNAL_CLIENT} for an edge whose
 	 * caller is outside the system; none for a name outside the system.
 	 */
 	public List<String> calledBy(String service) {
 		return this.edges.stream()
 			.filter(edge -> edge.target().equals(service))
-			.map(edge -> edge.caller() == null ? CallGraph.EXTERNAL_CLIENT : edge.caller())
+			.map(edge -> edge.caller() == null ? EXTERNAL_CLIENT : edge.caller())
 			.toList();
 	}
 
@@ -150,6 +178,10 @@ public record Topology(List<String> services, List<String> datastores, List<Edge
 		}
 		Set<String> names = new HashSet<>();
 		for (String name : concat(services, datastores)) {
+			if (UNKNOWN.equals(name)) {
+				throw new IllegalArgumentException(
+						"'" + UNKNOWN + "' is the report's unknown cause, not a component name");
+			}
 			if (!names.add(name)) {
 				throw new IllegalArgumentException("duplicate name '" + name + "'");
 			}
@@ -207,17 +239,21 @@ public record Topology(List<String> services, List<String> datastores, List<Edge
 		return all;
 	}
 
-	private static JsonNode field(JsonNode root, String name) {
+	/** The field {@code name} of {@code root}, which must be {@code type}: {@code kind} names the type in the error. */
+	private static JsonNode field(JsonNode root, String name, Predicate<JsonNode> type, String kind) {
 		JsonNode node = root.path(name);
 		if (node.isMissingNode() || node.isNull()) {
 			throw new IllegalArgumentException("missing field '" + name + "'");
+		}
+		if (!type.test(node)) {
+			throw new IllegalArgumentException("'" + name + "' must be " + kind);
 		}
 		return node;
 	}
 
 	private static List<String> names(JsonNode root, String field) {
 		List<String> names = new ArrayList<>();
-		for (JsonNode name : field(root, field)) {
+		for (JsonNode name : field(root, field, JsonNode::isArray, "an array of names")) {
 			names.add(text(name, field));
 		}
 		return names;
@@ -225,7 +261,8 @@ public record Topology(List<String> services, List<String> datastores, List<Edge
 
 	private static Map<String, String> owners(JsonNode root, String field) {
 		Map<String, String> owners = new LinkedHashMap<>();
-		for (Map.Entry<String, JsonNode> entry : field(root, field).properties()) {
+		for (Map.Entry<String, JsonNode> entry : field(root, field, JsonNode::isObject, "an object of owners")
+			.properties()) {
 			owners.put(entry.getKey(), text(entry.getValue(), field + "." + entry.getKey()));
 		}
 		return owners;
@@ -236,6 +273,34 @@ public record Topology(List<String> services, List<String> datastores, List<Edge
 			throw new IllegalArgumentException("'" + what + "' is not a string");
 		}
 		return node.asString();
+	}
+
+	/**
+	 * One traffic edge: the caller's client calls and the target's server requests with this method and uri.
+	 *
+	 * @param caller the calling service, or {@code null} when the caller is outside the system
+	 */
+	public record Edge(String caller, String target, String method, String uri) {
+
+		public Edge {
+			Objects.requireNonNull(target, "target");
+			Objects.requireNonNull(method, "method");
+			Objects.requireNonNull(uri, "uri");
+		}
+
+		/** Whether {@code row} is this edge's caller-side row: the caller's client call to the target. */
+		public boolean callerRow(TrafficRow row) {
+			return this.caller != null && "client".equals(row.side()) && this.caller.equals(row.service())
+					&& this.target.equals(row.clientName()) && this.method.equals(row.method())
+					&& this.uri.equals(row.uri());
+		}
+
+		/** Whether {@code row} is this edge's server-side row: the target's answer to this method and uri. */
+		public boolean serverRow(TrafficRow row) {
+			return "server".equals(row.side()) && this.target.equals(row.service()) && this.method.equals(row.method())
+					&& this.uri.equals(row.uri());
+		}
+
 	}
 
 }

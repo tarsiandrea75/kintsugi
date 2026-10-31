@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.call;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
@@ -261,7 +262,8 @@ class AgentLoopDossierModeTest {
 	@Test
 	void theDefaultLoopIsExplorerMode() {
 		this.model.quiet().quiet().quiet().text(unknownReport());
-		this.loop = new AgentLoop(this.incidents, router(Duration.ofSeconds(5)), this.lab, settings(), Clock.systemUTC());
+		this.loop = new AgentLoop(this.incidents, router(Duration.ofSeconds(5)), this.lab, settings(), Clock.systemUTC(),
+				LAB);
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 
@@ -373,7 +375,7 @@ class AgentLoopDossierModeTest {
 
 	private IncidentStatus run(AgentMode mode, LabTools labTools, Duration callTimeout) {
 		if (this.loop == null) {
-			this.loop = new AgentLoop(this.incidents, router(callTimeout), labTools, settings(), Clock.systemUTC(),
+			this.loop = new AgentLoop(this.incidents, router(callTimeout), labTools, settings(), Clock.systemUTC(), LAB,
 					mode);
 		}
 		return this.loop.run(this.id);

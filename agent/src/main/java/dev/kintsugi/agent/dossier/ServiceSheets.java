@@ -12,7 +12,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import dev.kintsugi.agent.dossier.CallGraph.Edge;
+import dev.kintsugi.agent.dossier.Topology.Edge;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
@@ -29,7 +29,7 @@ import dev.kintsugi.agent.dossier.DossierRenderer.Row;
 /**
  * Writes a {@link Dossier} as one fact sheet per lab service, leaf first (agent spec, "Evidence dossier rendering", the
  * sheets; odd/tasks/service-assessment.md T1): the facts {@link DossierRenderer} writes as tables by data source,
- * regrouped by the service each belongs to, in {@link CallGraph#SERVICES} order, each service after the services it
+ * regrouped by the service each belongs to, in {@link Topology#leafFirst()} order, each service after the services it
  * calls, so that a reader can weigh one service at a time next to the call graph. Like the tables it writes facts only,
  * in the tables' own words where they say the same thing, numbers every citable line with the same {@code D<n> }
  * prefix, so {@link DossierRenderer#line} reads the sheets too, and gives the same text for the same dossier. It also
@@ -38,14 +38,14 @@ import dev.kintsugi.agent.dossier.DossierRenderer.Row;
  * <p>
  * A fact belongs to a service by the data: restarts, latency and logs carry their service; a traffic row on the client
  * side belongs to its caller ({@code service}), with the callee in {@code clientName}, and one on the server side to
- * the callee; a state table or an event source belongs to the service {@link CallGraph} names for it. A sheet holds,
+ * the callee; a state table or an event source belongs to the service the {@link Topology} names for it. A sheet holds,
  * in order: the service's place in the graph, its restarts, its inbound requests, the latency of its uris but
  * {@code /actuator/*}, its outbound calls per edge, its log signatures, and the tables and events it owns. A count row
  * whose incident count is 0 while its previous count is above 0 is written in the last section, "Seen only in the
  * previous window", under its service, which still owns it. The tables' caps hold per block. A failed call that covers
  * every service ({@code service_restarts}, {@code traffic_counts}) is one fact line of the header; any other is one line
  * in its service's sheet. What no lab service owns, a traffic row of no lab service or a state table or an event source
- * {@link CallGraph} names no owner for, is kept under "Other rows", owned by the header, every row in place.
+ * the {@link Topology} names no owner for, is kept under "Other rows", owned by the header, every row in place.
  */
 public final class ServiceSheets {
 
@@ -81,42 +81,43 @@ public final class ServiceSheets {
 
 	}
 
-	/** The sheets of {@code dossier}, ending with a newline. */
-	public static Rendered render(Dossier dossier) {
+	/** The sheets of {@code dossier} over {@code topology}'s services, ending with a newline. */
+	public static Rendered render(Dossier dossier, Topology topology) {
+		List<String> services = topology.leafFirst();
 		Out out = new Out();
 		header(out, dossier);
 		List<ServiceLogs> logs = dossier.logs()
 			.stream()
-			.filter(service -> CallGraph.SERVICES.contains(service.service()))
-			.sorted(Comparator.comparingInt(service -> CallGraph.SERVICES.indexOf(service.service())))
+			.filter(service -> services.contains(service.service()))
+			.sorted(Comparator.comparingInt(service -> services.indexOf(service.service())))
 			.toList();
 		// Handed out in the sheets' order, so the leaf's levels come first when the section's cap binds.
 		Map<LevelLogs, Integer> shown = DossierRenderer.shownSignatures(logs);
 		Map<String, List<String>> later = new LinkedHashMap<>();
-		for (String service : CallGraph.SERVICES) {
+		for (String service : services) {
 			out.section("## " + service);
 			Sheet sheet = Sheet.of(service, out);
-			sheet.line("- calls: " + names(CallGraph.calls(service)) + "; called by: "
-					+ names(CallGraph.calledBy(service)) + ".");
+			sheet.line("- calls: " + names(topology.calls(service)) + "; called by: "
+					+ names(topology.calledBy(service)) + ".");
 			restarts(sheet, dossier.services());
 			inbound(sheet, dossier.traffic());
 			latency(sheet, dossier.latency());
-			outbound(sheet, dossier.traffic());
+			outbound(sheet, dossier.traffic(), topology.edges());
 			logs(sheet, logs, shown);
 			for (TableStates table : dossier.states()) {
-				if (CallGraph.ownerOfTable(table.table()).filter(service::equals).isPresent()) {
+				if (topology.ownerOfTable(table.table()).filter(service::equals).isPresent()) {
 					states(sheet, table);
 				}
 			}
 			for (SourceEvents source : dossier.events()) {
-				if (CallGraph.ownerOfSource(source.source()).filter(service::equals).isPresent()) {
+				if (topology.ownerOfSource(source.source()).filter(service::equals).isPresent()) {
 					events(sheet, source);
 				}
 			}
 			later.put(service, sheet.later);
 		}
 		lastSection(out, later);
-		others(out, dossier);
+		others(out, dossier, topology);
 		return new Rendered(out.text(), out.owners);
 	}
 
@@ -170,9 +171,9 @@ public final class ServiceSheets {
 	 * callee alone, since the graph has one edge per caller and callee and the callee's inbound rows name the uri; then
 	 * one block for any other call, with its callee, method and uri, written only when there is one.
 	 */
-	private static void outbound(Sheet sheet, Compared<List<TrafficRow>> traffic) {
+	private static void outbound(Sheet sheet, Compared<List<TrafficRow>> traffic, List<Edge> edges) {
 		String service = sheet.service;
-		for (Edge edge : CallGraph.EDGES) {
+		for (Edge edge : edges) {
 			if (service.equals(edge.caller())) {
 				block(sheet, "outbound to " + edge.target(), traffic,
 						trafficRows(traffic, edge::callerRow,
@@ -185,7 +186,7 @@ public final class ServiceSheets {
 		block(sheet, "outbound", traffic,
 				trafficRows(traffic,
 						row -> "client".equals(row.side()) && service.equals(row.service())
-								&& CallGraph.EDGES.stream().noneMatch(edge -> edge.callerRow(row)),
+								&& edges.stream().noneMatch(edge -> edge.callerRow(row)),
 						row -> Arrays.asList(row.clientName(), row.method(), row.uri(), row.status(), row.outcome(),
 								row.exception())),
 				labels -> words("to " + cell(labels.get(0)), cell(labels.get(1)), cell(labels.get(2)),
@@ -337,25 +338,25 @@ public final class ServiceSheets {
 
 	/**
 	 * What no lab service owns, under "Other rows", written only when there is one: the traffic rows of no lab service,
-	 * with all their labels, then the state tables and the event sources {@link CallGraph} names no owner for, each as
-	 * a sheet writes it, but with every row in place, since the last section is per service. {@code traffic_counts}
-	 * reads the lab's four services only, and every table and source the gatherer reads has its owner (a test checks
-	 * it), so a name missing from the graph costs a sheet its facts, never the rendering.
+	 * with all their labels, then the state tables and the event sources the {@link Topology} names no owner for,
+	 * each as a sheet writes it, but with every row in place, since the last section is per service.
+	 * {@code traffic_counts} reads the lab's four services only, and every table and source the gatherer reads has its
+	 * owner (a test checks it), so a name missing from the graph costs a sheet its facts, never the rendering.
 	 */
-	private static void others(Out out, Dossier dossier) {
+	private static void others(Out out, Dossier dossier, Topology topology) {
 		Compared<List<TrafficRow>> traffic = dossier.traffic();
 		List<Row> rows = trafficRows(traffic,
 				row -> !(("server".equals(row.side()) || "client".equals(row.side()))
-						&& CallGraph.SERVICES.contains(row.service())),
+						&& topology.services().contains(row.service())),
 				row -> Arrays.asList(row.side(), row.service(), row.clientName(), row.method(), row.uri(), row.status(),
 						row.outcome(), row.exception()));
 		List<TableStates> tables = dossier.states()
 			.stream()
-			.filter(table -> CallGraph.ownerOfTable(table.table()).isEmpty())
+			.filter(table -> topology.ownerOfTable(table.table()).isEmpty())
 			.toList();
 		List<SourceEvents> sources = dossier.events()
 			.stream()
-			.filter(source -> CallGraph.ownerOfSource(source.source()).isEmpty())
+			.filter(source -> topology.ownerOfSource(source.source()).isEmpty())
 			.toList();
 		if (rows.isEmpty() && tables.isEmpty() && sources.isEmpty()) {
 			return;

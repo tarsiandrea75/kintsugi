@@ -18,7 +18,7 @@ import java.util.function.Predicate;
 
 import tools.jackson.databind.json.JsonMapper;
 
-import dev.kintsugi.agent.dossier.CallGraph.Edge;
+import dev.kintsugi.agent.dossier.Topology.Edge;
 import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.EventGroup;
@@ -42,9 +42,9 @@ import dev.kintsugi.agent.dossier.Dossier.UriLatency;
  * word that judges a value. Every section and every fixed row is written for every dossier, in a fixed order, whether
  * its values are zero, empty or missing; a failed call is one fact line in its section. The same dossier always gives
  * the same text: rows are sorted by count then label, numbers are plain integers, times are ISO-8601 UTC, and nothing
- * reads the default locale or time zone. The traffic edges are {@link CallGraph#EDGES}, the first without its caller's
- * side, since its caller is outside the lab. {@link ServiceSheets} writes the same facts per service and shares the
- * helpers here, so both state a fact in the same words.
+ * reads the default locale or time zone. The traffic edges are the {@link Topology}'s, an edge without a caller
+ * written without its caller's side, since its caller is outside the system. {@link ServiceSheets} writes the same
+ * facts per service and shares the helpers here, so both state a fact in the same words.
  */
 public final class DossierRenderer {
 
@@ -137,19 +137,19 @@ public final class DossierRenderer {
 	/** An edge's heading in the traffic section. */
 	private static String heading(Edge edge) {
 		String route = edge.target() + " " + edge.method() + " " + edge.uri();
-		return edge.caller() == null ? CallGraph.EXTERNAL_CLIENT + " -> " + route + " (server side only)"
+		return edge.caller() == null ? Topology.EXTERNAL_CLIENT + " -> " + route + " (server side only)"
 				: edge.caller() + " -> " + route;
 	}
 
-	/** The dossier as Markdown, ending with a newline. */
-	public static String render(Dossier dossier) {
+	/** The dossier as Markdown, with {@code topology}'s traffic edges, ending with a newline. */
+	public static String render(Dossier dossier, Topology topology) {
 		Out out = new Out();
 		header(out, dossier);
 		services(out, dossier.services());
 		for (TableStates table : dossier.states()) {
 			states(out, table);
 		}
-		traffic(out, dossier.traffic());
+		traffic(out, dossier.traffic(), topology.edges());
 		latency(out, dossier.latency());
 		logs(out, dossier.logs());
 		events(out, dossier.events());
@@ -221,13 +221,13 @@ public final class DossierRenderer {
 				row -> List.of(samples.getOrDefault(row.labels(), NO_VALUE)));
 	}
 
-	private static void traffic(Out out, Compared<List<TrafficRow>> traffic) {
+	private static void traffic(Out out, Compared<List<TrafficRow>> traffic, List<Edge> edges) {
 		out.section("## Traffic");
 		failedWindows(out, traffic);
 		out.line("Requests per edge from traffic_counts, which leaves out rows of count 0. \"" + NO_ROWS
 				+ "\": none returned for that side in either window.");
 		List<String> sideHeaders = List.of("side", "status", "outcome", "exception");
-		for (Edge edge : CallGraph.EDGES) {
+		for (Edge edge : edges) {
 			out.section("### " + heading(edge));
 			List<Row> rows = new ArrayList<>();
 			int hidden = 0;
@@ -250,7 +250,7 @@ public final class DossierRenderer {
 		}
 		out.section("### Other rows");
 		List<Row> others = rows(traffic, list -> list.stream()
-			.filter(row -> CallGraph.EDGES.stream().noneMatch(edge -> edge.callerRow(row) || edge.serverRow(row)))
+			.filter(row -> edges.stream().noneMatch(edge -> edge.callerRow(row) || edge.serverRow(row)))
 			.map(row -> Map.entry(Arrays.asList(row.side(), row.service(), row.clientName(), row.method(), row.uri(),
 					row.status(), row.outcome(), row.exception()), row.count()))
 			.toList());

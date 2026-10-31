@@ -1,11 +1,9 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.core.io.ClassPathResource;
-
-import dev.kintsugi.agent.dossier.Topology;
 
 /**
  * The report's service enum derives from the topology (odd/tasks/topology-data.md T2): the lab file's causes equal
@@ -15,7 +13,7 @@ class CausesTopologyTest {
 
 	@Test
 	void theLabFileCausesAreTheReportServiceEnum() {
-		assertThat(Topology.load(new ClassPathResource("topology/lab.json")).causes()).isEqualTo(Causes.SERVICES);
+		assertThat(LAB.causes()).isEqualTo(Causes.SERVICES);
 	}
 
 }

@@ -47,6 +47,7 @@ import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.dossier.ServiceSheets;
+import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentRunner;
 import dev.kintsugi.agent.incident.IncidentStatus;
@@ -137,6 +138,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	private final DossierGatherer gatherer;
 
+	/** The system the loop diagnoses: the services and call graph its dossier views, rules and checks read. */
+	private final Topology topology;
+
+	/** The assessed report's schema over {@link #topology}'s services, written once. */
+	private final String assessedSchema;
+
 	/** How decision mode writes its dossier; the other modes write the tables ({@link AgentMode#viewFrom}). */
 	private final DossierView decisionView;
 
@@ -148,14 +155,14 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/** An explorer-mode loop. */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock) {
-		this(incidents, router, labTools, settings, clock, AgentMode.EXPLORER);
+			Clock clock, Topology topology) {
+		this(incidents, router, labTools, settings, clock, topology, AgentMode.EXPLORER);
 	}
 
 	/** A loop in {@code mode} whose decision-mode dossier, if any, is written as the tables, the default view. */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock, AgentMode mode) {
-		this(incidents, router, labTools, settings, clock, mode, DossierView.TABLES);
+			Clock clock, Topology topology, AgentMode mode) {
+		this(incidents, router, labTools, settings, clock, topology, mode, DossierView.TABLES);
 	}
 
 	/**
@@ -164,8 +171,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * @throws NullPointerException when {@code decisionView} is null, in every mode, rather than in a later gathering
 	 */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock, AgentMode mode, DossierView decisionView) {
-		this(incidents, router, labTools, settings, clock, mode, decisionView, DecisionReport.PLAIN);
+			Clock clock, Topology topology, AgentMode mode, DossierView decisionView) {
+		this(incidents, router, labTools, settings, clock, topology, mode, decisionView, DecisionReport.PLAIN);
 	}
 
 	/**
@@ -175,7 +182,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * @throws IllegalArgumentException in decision mode, for the assessed report with any view but the sheets
 	 */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
-			Clock clock, AgentMode mode, DossierView decisionView, DecisionReport decisionReport) {
+			Clock clock, Topology topology, AgentMode mode, DossierView decisionView, DecisionReport decisionReport) {
+		this.topology = Objects.requireNonNull(topology, "topology");
+		this.assessedSchema = Schemas.assessedReport(topology);
 		this.decisionView = Objects.requireNonNull(decisionView, NULL_VIEW);
 		this.decisionReport = Objects.requireNonNull(decisionReport, NULL_REPORT);
 		// Checked before any thread is started: the assessed report reads the sheets' line owners.
@@ -371,10 +380,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			Dossier dossier = future.get(limit.toNanos(), TimeUnit.NANOSECONDS);
 			DossierView view = run.mode.viewFrom(this.decisionView).orElse(DossierView.TABLES);
 			// The sheets are kept with the service that owns each line, which the assessed report's checks read (T2).
-			run.sheets = view == DossierView.SHEETS ? ServiceSheets.render(dossier) : null;
-			run.dossierText = run.sheets == null ? view.render(dossier) : run.sheets.text();
+			run.sheets = view == DossierView.SHEETS ? ServiceSheets.render(dossier, this.topology) : null;
+			run.dossierText = run.sheets == null ? view.render(dossier, this.topology) : run.sheets.text();
 			// The hybrid report's candidates, from the typed record, never the text, so either view gives the same.
-			run.candidates = report(run) == DecisionReport.HYBRID ? RulesDiagnosis.candidates(dossier) : null;
+			run.candidates = report(run) == DecisionReport.HYBRID ? RulesDiagnosis.candidates(dossier, this.topology)
+					: null;
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
 		}
@@ -628,9 +638,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					: candidates != null ? Prompts.hybridReport(state, errors, run.toolSteps.values(), candidates)
 							: Prompts.report(state, errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(),
-					assessed ? Schemas.ASSESSED_REPORT : Schemas.report(run.mode));
+					assessed ? this.assessedSchema : Schemas.report(run.mode));
 			JsonNode report = Answers.json(answer.text());
-			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets)
+			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets, this.topology)
 					: candidates != null
 							? ReportCheck.checkHybrid(report, run.toolSteps, run.mode, run.dossierText, candidates)
 							: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);

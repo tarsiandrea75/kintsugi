@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
@@ -25,7 +26,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.AgentDatabase;
-import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.LabTools;
 
@@ -95,15 +95,15 @@ class AssessedReportRequestTest {
 			assertThat(format.get("properties").propertyNames()).containsExactlyElementsOf(FIELDS);
 			assertThat(format.get("required")).extracting(JsonNode::asString).containsExactlyElementsOf(FIELDS);
 			JsonNode assessments = format.at("/properties/assessments");
-			assertThat(assessments.get("properties").propertyNames()).containsExactlyElementsOf(CallGraph.SERVICES);
+			assertThat(assessments.get("properties").propertyNames()).containsExactlyElementsOf(LAB.leafFirst());
 			assertThat(assessments.get("required")).extracting(JsonNode::asString)
-				.containsExactlyElementsOf(CallGraph.SERVICES);
-			for (String service : CallGraph.SERVICES) {
+				.containsExactlyElementsOf(LAB.leafFirst());
+			for (String service : LAB.leafFirst()) {
 				assertThat(assessments.at("/properties/" + service + "/properties").propertyNames()).as(service)
 					.containsExactly("role", "line", "why");
 			}
 			// The schema the loop built, every property in its place, once read back from the wire.
-			assertThat(JSON.writeValueAsString(format)).isEqualTo(Schemas.ASSESSED_REPORT);
+			assertThat(JSON.writeValueAsString(format)).isEqualTo(Schemas.assessedReport(LAB));
 		});
 	}
 

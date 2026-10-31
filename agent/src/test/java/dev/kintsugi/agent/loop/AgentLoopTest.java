@@ -1,5 +1,6 @@
 package dev.kintsugi.agent.loop;
 
+import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.call;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.plan;
@@ -1129,7 +1130,7 @@ class AgentLoopTest {
 		CallTimeouts deadlines = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
 		this.loop = new AgentLoop(this.incidents, task -> new AnthropicRoute("claude-haiku-5-5", this.model,
 				deadlines, CAPS), this.lab, settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
-				Clock.systemUTC());
+				Clock.systemUTC(), LAB);
 
 		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
 
@@ -1178,7 +1179,7 @@ class AgentLoopTest {
 
 	private AgentLoop loop(LoopSettings settings, CallTimeouts callTimeouts) {
 		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeouts, CAPS);
-		return new AgentLoop(this.incidents, router, this.lab, settings, Clock.systemUTC());
+		return new AgentLoop(this.incidents, router, this.lab, settings, Clock.systemUTC(), LAB);
 	}
 
 	private static UUID open(UUID id, String status) {

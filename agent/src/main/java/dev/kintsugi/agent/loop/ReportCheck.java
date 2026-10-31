@@ -15,9 +15,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.ServiceSheets;
+import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
@@ -238,19 +238,21 @@ final class ReportCheck {
 	 * <b>Citation</b>, each assessment's line is a line of the sheets its own service owns, in its sheet or in its part
 	 * of the last section; then, once every service is assessed: <b>One origin</b>, at most one ORIGIN, and none only
 	 * when every service is UNAFFECTED and both causes are UNKNOWN; <b>Graph</b>, an AFFECTED service calls an ORIGIN
-	 * or AFFECTED service ({@link CallGraph#calls}); <b>Answer</b>, {@code rootCauseService} is the ORIGIN. A valid report's evidence is derived by code: the lines of the ORIGIN and AFFECTED services,
-	 * in sheet order, each an item citing the dossier with its quote filled in, as a plain report's verified dossier
-	 * item is, so that storage and scoring read it as they read a plain report. When every service is UNAFFECTED, the
-	 * report has no evidence.
+	 * or AFFECTED service ({@link Topology#calls}); <b>Answer</b>, {@code rootCauseService} is the ORIGIN. A valid
+	 * report's evidence is derived by code: the lines of the ORIGIN and AFFECTED services, in sheet order, each an
+	 * item citing the dossier with its quote filled in, as a plain report's verified dossier item is, so that storage
+	 * and scoring read it as they read a plain report. When every service is UNAFFECTED, the report has no evidence.
 	 * @param sheets the sheets the model read, with the service that owns each numbered line
+	 * @param topology the services to assess, leaf first, and the call graph the Graph rule reads
 	 */
-	static Result checkAssessed(JsonNode report, ServiceSheets.Rendered sheets) {
+	static Result checkAssessed(JsonNode report, ServiceSheets.Rendered sheets, Topology topology) {
+		List<String> services = topology.leafFirst();
 		if (report == null || !report.isObject()) {
 			return invalid(List.of(NOT_AN_OBJECT));
 		}
 		List<String> errors = new ArrayList<>();
 		unexpected(report, Set.copyOf(ASSESSED_FIELDS), "", errors);
-		Map<String, Assessment> assessments = assessments(report.get("assessments"), errors);
+		Map<String, Assessment> assessments = assessments(report.get("assessments"), services, errors);
 		causesAndConfidence(report, errors);
 		// Each cited line's text, by service, for the derived evidence: a line that is owned but not in the text is a
 		// Citation error, never a lookup that fails later.
@@ -258,9 +260,9 @@ final class ReportCheck {
 		assessments.values()
 			.forEach(assessment -> cited(assessment, sheets, errors)
 				.ifPresent(quote -> quotes.put(assessment.service(), quote)));
-		if (assessments.size() == CallGraph.SERVICES.size()) {
+		if (assessments.size() == services.size()) {
 			// The graph rules read every service's role, so they wait for Coverage and each assessment's schema.
-			graphRules(assessments, report, errors);
+			graphRules(assessments, report, topology, errors);
 		}
 		if (!errors.isEmpty()) {
 			return invalid(errors);
@@ -280,15 +282,15 @@ final class ReportCheck {
 	 * The assessments of {@code node} whose schema holds, by service in sheet order, adding to {@code errors} each rule
 	 * the object breaks: it holds every lab service once and no other name (Coverage), each {@code {role, line, why}}.
 	 */
-	private static Map<String, Assessment> assessments(JsonNode node, List<String> errors) {
+	private static Map<String, Assessment> assessments(JsonNode node, List<String> services, List<String> errors) {
 		Map<String, Assessment> assessments = new LinkedHashMap<>();
 		if (node == null || !node.isObject()) {
 			errors.add("assessments must be an object with one {role, line, why} per service: "
-					+ String.join(", ", CallGraph.SERVICES));
+					+ String.join(", ", services));
 			return assessments;
 		}
-		unexpected(node, Set.copyOf(CallGraph.SERVICES), "assessments.", errors);
-		for (String service : CallGraph.SERVICES) {
+		unexpected(node, Set.copyOf(services), "assessments.", errors);
+		for (String service : services) {
 			JsonNode assessment = node.get(service);
 			if (assessment == null) {
 				errors.add("assessments." + service + " is missing: assess every service once");
@@ -354,7 +356,8 @@ final class ReportCheck {
 	 * One origin, Graph and Answer, over the assessments of every service, in sheet order: each adds an error naming
 	 * the claims that break it. They check the report against its own roles and the call graph, never against a cause.
 	 */
-	private static void graphRules(Map<String, Assessment> assessments, JsonNode report, List<String> errors) {
+	private static void graphRules(Map<String, Assessment> assessments, JsonNode report, Topology topology,
+			List<String> errors) {
 		List<String> origins = withRole(assessments, Role.ORIGIN);
 		List<String> affected = withRole(assessments, Role.AFFECTED);
 		String service = report.path("rootCauseService").asString("");
@@ -371,7 +374,7 @@ final class ReportCheck {
 					+ service + "\" and \"" + category + "\"");
 		}
 		for (String name : affected) {
-			List<String> calls = CallGraph.calls(name);
+			List<String> calls = topology.calls(name);
 			if (calls.stream().noneMatch(callee -> assessments.get(callee).role() != Role.UNAFFECTED)) {
 				String called = calls.isEmpty() ? "calls no service"
 						: "calls no ORIGIN or AFFECTED service (it calls " + String.join(", ", calls.stream()
