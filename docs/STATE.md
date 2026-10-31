@@ -12,7 +12,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 - Holdout-1, read once: rules (0) 10/15, AC@1 67% [42%, 85%]; local granite4.1:8b (A) 2/15, 13% [4%, 38%], 4 samples timed out (coverage 73%); cloud claude-haiku-5-5 (D) 15/15, 100% [80%, 100%].
 - The rules beat the local model (A − 0 −53 points, Holm p = 0.077), the cloud beats the rules (+33, Holm p = 0.077). 0 and A are disjoint: an oracle choosing between them reaches 12/15.
 - Added 2026-10-31: qwen3.5:9b with thinking (Qon) read holdout-1 once: 12/15, 80% [55%, 93%]; Qon − A +67 points (Holm p = 0.032), Qon − 0 +13 (p = 0.62), Qon − D −20 (p = 0.5).
-- Still open under M2's dates, not part of its check: topology as data, the RCAEval converter.
+- Still open under M2's dates, not part of its check: the RCAEval converter. Topology as data closed on 2026-10-31 (`odd/tasks/topology-data.md`).
 
 ## Last action
 
@@ -25,8 +25,9 @@ This session (journal `docs/journal/2026-10-30-01.md`), all on local branches, n
 ## Next action
 
 1. Done 2026-10-31 (`odd/tasks/qwen-dev.md`): qwen3.5:9b on dev, 8/15 with and without thinking (A 5/15, 0 10/15); Qon passed ADR-015's keep rule against A and read holdout-1: 12/15. The human chose Qon as the M3 hybrid's local model (ADR-018); granite stays the local default.
-2. In M3: Config H, the hybrid (ADR-019, vision amended): `odd/tasks/hybrid.md` on `feat/hybrid`, T1–T8 done; the feature is complete (journal `docs/journal/2026-10-31-02.md`). Lab dev mechanics check passed: H 13/15, 87% [62%, 96%], against 0 10/15 and Qon 8/15 (`evals/results/2026-10-31-hybrid-dev/`). F2 and F3 lists held only the truth; on F1, the only real choice, the model kept the rules' first candidate 3/5 and picked the caller twice. Next: the stop-rule measurement H − 0 on RCAEval dev, which waits for the converter and topology-as-data. Follow-ups in the feature document: a partial dossier gives empty candidates; a `rulesOnly` HYBRID guard; a script-level test for the cloud route.
-3. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
+2. In M3: Config H, the hybrid (ADR-019, vision amended): `odd/tasks/hybrid.md` on `feat/hybrid`, T1–T8 done; the feature is complete (journal `docs/journal/2026-10-31-02.md`). Lab dev mechanics check passed: H 13/15, 87% [62%, 96%], against 0 10/15 and Qon 8/15 (`evals/results/2026-10-31-hybrid-dev/`). F2 and F3 lists held only the truth; on F1, the only real choice, the model kept the rules' first candidate 3/5 and picked the caller twice. Next: the stop-rule measurement H − 0 on RCAEval dev, which waits for the converter. Follow-ups in the feature document: a partial dossier gives empty candidates; a `rulesOnly` HYBRID guard; a script-level test for the cloud route.
+3. Done 2026-10-31: topology as data (`odd/tasks/topology-data.md`, chain `feat/topology-data` → `-01-call-sites` → `-02-derived`). The agent loads its topology from `kintsugi.agent.topology` (default `classpath:topology/lab.json`); `CallGraph` and the hard-coded lists are gone; the lab's goldens, prompt and schemas are byte-identical, and Config 0's verdicts and candidates are unchanged on dev and holdout. **Next: the RCAEval converter** (it writes one topology file per system; the feature document lists the lab-wording follow-ups it inherits). It needs the human's go-ahead to download the dataset.
+4. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
 
 ## Local branch chains (not pushed)
 

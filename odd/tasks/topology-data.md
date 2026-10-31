@@ -60,7 +60,7 @@ With topology as data, the converter can write one topology file per RCAEval sys
 - [x] T2 `Topology`, the lab file and the loader, tests first: the loaded lab topology equals today's `CallGraph`, `DossierGatherer` and `Causes` constants and orders, and the validation failures (unknown name, cycle, foreign owner, missing file). No call site changes yet. Route: delegated writer.
 - [x] T3 The call sites read a `Topology`: `ServiceSheets`, `DossierRenderer`, `ReportCheck`, `RulesDiagnosis`, `Schemas` and the Spring wiring. `CallGraph`'s constants are removed. All goldens stay byte-identical and the Config 0 tests stay green. Agent spec: the sheets and Coverage/Graph requirements say the graph is loaded from data. Route: delegated writer.
 - [x] T4 `DossierGatherer`'s lists, `Causes.SERVICES` and the `Prompts` system message derive from the topology, tests first (byte-identical prompt and schema). Agent spec: the system-message requirement. Route: delegated writer.
-- [ ] T5 Closing check: the Config 0 replay over dev and holdout gives the same verdicts and candidates as before, then STATE, the journal and the backup. Route: inline commands.
+- [x] T5 Closing check: the Config 0 replay over dev and holdout gives the same verdicts and candidates as before, then STATE, the journal and the backup. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -134,6 +134,12 @@ With topology as data, the converter can write one topology file per RCAEval sys
   - The parent checked that both system-message pins contain today's sentence verbatim, and re-ran the pins, `TopologyDerivationTest` and `RulesDiagnosisTest`: green. No file under `agent/src/test/resources/dossier` changed.
   - Commit `df86db4`. Review of `be3f4ad..df86db4`: medium, `slice_budget_reached`; one lens (reliability), approved and acknowledged. Two non-blocking findings, of which the capture gave only id and location: WARNING R3-001 (`Prompts.java:254-258`, the components and call-path rendering), SUGGESTION R3-002 (`Prompts.java:29`, `ROLE`). The parent's reading, not the reviewer's text: the component sentence joins services with plain commas but lists datastores with "and", so a non-lab topology reads unevenly; `ROLE` still says "a small online shop", which is lab wording that an RCAEval system (Train Ticket) does not fit. Both are follow-ups for the converter feature, together with the "Order states"/"Payment states" headings in `DossierRenderer`.
 
+- 2026-10-31, T5 (route: inline commands): Config 0 replays on `df86db4`, `--route rules --mode decision --view tables`.
+  - Dev `replay-20261031T212606Z-rules`: verdicts identical to the committed `evals/results/2026-10-30-config0-dev/inputs/0-summary.tsv`; candidates identical to the pre-feature `replay-20261031T131039Z-rules` (hybrid T4 smoke).
+  - Holdout `replay-20261031T212615Z-rules`: verdicts identical to the committed `evals/results/2026-10-30-holdout1-lab/inputs/0-summary.tsv`. No earlier holdout run had candidates, so the parent replayed holdout on the pre-feature commit `e8c4731` (`replay-20261031T212629Z-rules`): candidates identical.
+  - Compared per recording, 15 rows each. AC1-AC4 met: goldens and pins byte-identical (T3, T4), Config 0 verdicts and candidates unchanged (here), no topology literal left in `agent/src/main` outside `topology/lab.json` (T4's `rg` list), invalid files fail at load (T2, T3).
+  - Follow-ups for the converter feature: `ROLE`'s "small online shop", the component-sentence wording for non-lab topologies, `DossierRenderer`'s "Order states"/"Payment states" headings, plus the T3 review follow-ups (the default location written twice, logs of an unknown service dropped silently, the case-sensitive `UNKNOWN` check).
+
 ## Next step
 
-T5: the Config 0 replay over dev and holdout, compared with the committed verdicts and the earlier candidates.
+The feature is complete on the chain `feat/topology-data` → `-01-call-sites` → `-02-derived`. Next under M2: the RCAEval converter, which writes one topology file per system.
