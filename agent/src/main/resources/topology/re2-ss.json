@@ -1,0 +1,20 @@
+{
+  "services": ["front-end", "carts", "catalogue", "orders", "payment", "queue-master", "rabbitmq", "session", "shipping", "user"],
+  "datastores": [],
+  "edges": [
+    {"caller": null, "target": "front-end", "method": "CALL", "uri": "/"},
+    {"caller": "front-end", "target": "carts", "method": "CALL", "uri": "/"},
+    {"caller": "front-end", "target": "catalogue", "method": "CALL", "uri": "/"},
+    {"caller": "front-end", "target": "orders", "method": "CALL", "uri": "/"},
+    {"caller": "front-end", "target": "session", "method": "CALL", "uri": "/"},
+    {"caller": "front-end", "target": "user", "method": "CALL", "uri": "/"},
+    {"caller": "orders", "target": "carts", "method": "CALL", "uri": "/"},
+    {"caller": "orders", "target": "payment", "method": "CALL", "uri": "/"},
+    {"caller": "orders", "target": "shipping", "method": "CALL", "uri": "/"},
+    {"caller": "orders", "target": "user", "method": "CALL", "uri": "/"},
+    {"caller": "shipping", "target": "rabbitmq", "method": "CALL", "uri": "/"},
+    {"caller": "queue-master", "target": "rabbitmq", "method": "CALL", "uri": "/"}
+  ],
+  "tableOwners": {},
+  "sourceOwners": {}
+}

@@ -1,0 +1,24 @@
+{
+  "services": ["frontend", "adservice", "cartservice", "checkoutservice", "currencyservice", "emailservice", "paymentservice", "productcatalogservice", "recommendationservice", "redis", "shippingservice"],
+  "datastores": [],
+  "edges": [
+    {"caller": null, "target": "frontend", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "adservice", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "cartservice", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "checkoutservice", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "currencyservice", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "productcatalogservice", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "recommendationservice", "method": "CALL", "uri": "/"},
+    {"caller": "frontend", "target": "shippingservice", "method": "CALL", "uri": "/"},
+    {"caller": "checkoutservice", "target": "cartservice", "method": "CALL", "uri": "/"},
+    {"caller": "checkoutservice", "target": "currencyservice", "method": "CALL", "uri": "/"},
+    {"caller": "checkoutservice", "target": "emailservice", "method": "CALL", "uri": "/"},
+    {"caller": "checkoutservice", "target": "paymentservice", "method": "CALL", "uri": "/"},
+    {"caller": "checkoutservice", "target": "productcatalogservice", "method": "CALL", "uri": "/"},
+    {"caller": "checkoutservice", "target": "shippingservice", "method": "CALL", "uri": "/"},
+    {"caller": "recommendationservice", "target": "productcatalogservice", "method": "CALL", "uri": "/"},
+    {"caller": "cartservice", "target": "redis", "method": "CALL", "uri": "/"}
+  ],
+  "tableOwners": {},
+  "sourceOwners": {}
+}

@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -228,6 +229,92 @@ class TopologyTest {
 	@Test
 	void malformedJsonFails() {
 		assertInvalid("{\"services\": [", "fixture");
+	}
+
+	// The RCAEval topology files (odd/tasks/rcaeval-converter.md T2): services from the metric prefixes, edges from the
+	// pinned upstream manifests and sources, one CALL / edge per caller -> target pair.
+
+	@Test
+	void theRe2ObFileHasOnlineBoutiquesServicesAndManifestEdges() {
+		Topology ob = Topology.load(new ClassPathResource("topology/re2-ob.json"));
+		assertThat(ob.services()).containsExactly("frontend", "adservice", "cartservice", "checkoutservice",
+				"currencyservice", "emailservice", "paymentservice", "productcatalogservice", "recommendationservice",
+				"redis", "shippingservice");
+		assertThat(ob.datastores()).isEmpty();
+		assertThat(ob.edges()).hasSize(16).allSatisfy(edge -> {
+			assertThat(edge.method()).isEqualTo("CALL");
+			assertThat(edge.uri()).isEqualTo("/");
+		});
+		assertThat(ob.edges().getFirst()).isEqualTo(new Edge(null, "frontend", "CALL", "/"));
+		assertThat(ob.calls("frontend")).containsExactly("adservice", "cartservice", "checkoutservice",
+				"currencyservice", "productcatalogservice", "recommendationservice", "shippingservice");
+		assertThat(ob.calls("checkoutservice")).containsExactly("cartservice", "currencyservice", "emailservice",
+				"paymentservice", "productcatalogservice", "shippingservice");
+		assertThat(ob.calls("recommendationservice")).containsExactly("productcatalogservice");
+		assertThat(ob.calls("cartservice")).containsExactly("redis");
+		assertThat(ob.statusTables()).isEmpty();
+		assertThat(ob.eventSources()).isEmpty();
+	}
+
+	@Test
+	void theRe2SsFileHasSockShopsServicesAndSourceEdges() {
+		Topology ss = Topology.load(new ClassPathResource("topology/re2-ss.json"));
+		assertThat(ss.services()).containsExactly("front-end", "carts", "catalogue", "orders", "payment",
+				"queue-master", "rabbitmq", "session", "shipping", "user");
+		assertThat(ss.datastores()).isEmpty();
+		assertThat(ss.edges()).hasSize(12).allSatisfy(edge -> {
+			assertThat(edge.method()).isEqualTo("CALL");
+			assertThat(edge.uri()).isEqualTo("/");
+		});
+		assertThat(ss.edges().getFirst()).isEqualTo(new Edge(null, "front-end", "CALL", "/"));
+		assertThat(ss.calls("front-end")).containsExactly("carts", "catalogue", "orders", "session", "user");
+		assertThat(ss.calls("orders")).containsExactly("carts", "payment", "shipping", "user");
+		assertThat(ss.calls("shipping")).containsExactly("rabbitmq");
+		assertThat(ss.calls("queue-master")).containsExactly("rabbitmq");
+		assertThat(ss.calledBy("rabbitmq")).containsExactly("shipping", "queue-master");
+		assertThat(ss.statusTables()).isEmpty();
+		assertThat(ss.eventSources()).isEmpty();
+	}
+
+	@Test
+	void theRe2ObServicesAreTheNormalizedMetricPrefixes() {
+		// The prefixes of the simple_metrics.csv headers of RE2-OB/*/1 (the union over the 30 repetition-1 files).
+		List<String> prefixes = List.of("adservice", "cartservice", "checkoutservice", "currencyservice",
+				"emailservice", "frontend", "frontend-external", "istio-init", "paymentservice", "productcatalogservice",
+				"recommendationservice", "redis", "shippingservice");
+		assertThat(Topology.load(new ClassPathResource("topology/re2-ob.json")).services())
+			.isEqualTo(displayOrder("frontend", normalized(prefixes)));
+	}
+
+	@Test
+	void theRe2SsServicesAreTheNormalizedMetricPrefixes() {
+		// The prefixes of the one RE2-SS header read: RE2-SS/carts_cpu/1/simple_metrics.csv, first line only.
+		List<String> prefixes = List.of("carts", "carts-db", "catalogue", "catalogue-db", "front-end", "orders",
+				"orders-db", "payment", "queue-master", "rabbitmq", "rabbitmq-exporter", "session-db", "shipping", "user",
+				"user-db");
+		assertThat(Topology.load(new ClassPathResource("topology/re2-ss.json")).services())
+			.isEqualTo(displayOrder("front-end", normalized(prefixes)));
+	}
+
+	/**
+	 * The services RCAEval's evaluator names for {@code prefixes} ({@code to_service}: the part before the first
+	 * underscore, {@code -db} folded), minus the prefixes that are no component of the application: a Kubernetes
+	 * Service alias of the frontend, Istio's init container and a Prometheus exporter sidecar.
+	 */
+	private static List<String> normalized(List<String> prefixes) {
+		List<String> notComponents = List.of("frontend-external", "istio-init", "rabbitmq-exporter");
+		return prefixes.stream()
+			.filter(prefix -> !notComponents.contains(prefix))
+			.map(prefix -> prefix.split("_")[0].replace("-db", ""))
+			.distinct()
+			.toList();
+	}
+
+	/** The display order of the RCAEval files: the entry service first, then the others alphabetically. */
+	private static List<String> displayOrder(String entry, List<String> services) {
+		return Stream
+			.concat(Stream.of(entry), services.stream().filter(s -> !s.equals(entry)).sorted())
+			.toList();
 	}
 
 	private static Topology load(String json) {

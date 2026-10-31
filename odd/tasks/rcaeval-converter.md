@@ -87,7 +87,7 @@ Without the converter, every number is on a lab one person built and tuned again
 ## Tasks
 
 - [x] T1 ADR-020, the vision fix ("ADR-017 will pin" → ADR-020) and this document. Route: inline (docs). The human confirmed the design and the category map on 2026-10-31. Passive docs, structural readback only.
-- [ ] T2 The topology files for RE2-OB and RE2-SS, from the pinned upstream manifests, with the OB cross-check on repetition 1's traces recorded. `TopologyTest` loads both. Route: delegated writer.
+- [x] T2 The topology files for RE2-OB and RE2-SS, from the pinned upstream manifests, with the OB cross-check on repetition 1's traces recorded. `TopologyTest` loads both. Route: delegated writer.
 - [ ] T3 The converter core, tests first on a synthetic fixture: case discovery, windows, metrics → `query_metric`, logs → `count_logs`/`search_logs`, empty restarts, the incident JSON and `recordings.tsv`, the leakage grep. Route: delegated writer.
 - [ ] T4 Traces → `traffic_counts` (OB), tests first. Route: delegated writer.
 - [ ] T5 Replay plumbing and scorer, tests first:
@@ -123,7 +123,36 @@ Without the converter, every number is on a lab one person built and tuned again
 ## Progress
 
 - 2026-10-31: research (one worker, primary sources: the RCAEval repository at `dc9f487`/tag `1.11.0`, the Zenodo, Figshare and Hugging Face APIs, arXiv 2412.17015, issues #16, #67 and #70) and exploration of the replay seam (one read-only explorer). The human authorized the dataset download. `RE2-OB.zip` and `RE2-SS.zip` are downloading into `~/data/rcaeval` with an md5 check. The branch `feat/rcaeval-converter` was created from `24af8d5`.
+- 2026-10-31, T2 (route: delegated writer; trigger: two non-trivial data files, a script and two test files, with upstream research). `re2-ob.json` and `re2-ss.json` written, `TopologyTest` loads both.
+  - **Upstream pins** (shallow clones of the default branches, outside the repository):
+    - Online Boutique: `GoogleCloudPlatform/microservices-demo` `main` at `c7cb6d5bfd6ea3aed768634ebbcb98cb7a523712`.
+    - Sock Shop deploy: `microservices-demo/microservices-demo` `master` at `9dff06fae4981921caec6a62393a6ebfce4b3e3f`.
+    - Sock Shop sources, `master`: `front-end` `52dee656f4423be041619bbb090205f912e00113`, `orders` `546a10c92d1ff9998c21f3849f5b95a0f14430a0`, `shipping` `9c0fbfa31895dd029d44d3434de93f64cd71f87b`, `queue-master` `7dc33721c765e5af415c9d244d84637ff2d510cd`, `carts` `f4e80051668c6a83359c41b03a27baefa590adc8`.
+    - RCAEval `1.11.0` (`dc9f487`) for the name normalization: `RCAEval/benchmark/scoring.py` `to_service` = `name.split("_")[0].replace("-db", "")`.
+  - **Services** are the `simple_metrics.csv` prefixes, lowercased and normalized by `to_service`, minus three prefixes that name no application component:
+    - `frontend-external` (OB): the frontend's LoadBalancer Service, metrics `error` and `workload` only; RCAEval's own `drop_extra` (`RCAEval/io/time_series.py`) drops it.
+    - `istio-init` (OB): Istio's init container, in 1 of the 30 repetition-1 headers.
+    - `rabbitmq-exporter` (SS): the Prometheus exporter sidecar in the `rabbitmq` pod (`complete-demo.yaml:605`).
+    - `redis` (OB, the `redis-cart` pod's container) and `session` (SS, `session-db` folded by `to_service`) carry metrics, so they are services, the targets of their callers' edges. `carts-db`, `catalogue-db`, `orders-db` and `user-db` fold into their services.
+  - **Display order:** the entry service first, then the others alphabetically. **Datastores:** `[]`, because every datastore that survives normalization (`redis`, `session`, `rabbitmq`) carries metrics and has a caller, and an edge cannot target a datastore.
+  - **Edge convention:** one edge per caller → target pair, every edge `"method": "CALL"`, `"uri": "/"`; the entry edge has `"caller": null`. T4 aggregates the traces per caller → callee pair to match it. Calls to a folded datastore (`carts` → `carts-db`) become self-edges and are dropped. `tableOwners` and `sourceOwners` are `{}`.
+  - **OB edges** (15 plus the entry), from the `*_ADDR` env vars of `kubernetes-manifests/`:
+    - `frontend` → `productcatalogservice`, `currencyservice`, `cartservice`, `recommendationservice`, `shippingservice`, `checkoutservice`, `adservice` (`frontend.yaml:69-81`). `SHOPPING_ASSISTANT_SERVICE_ADDR` (`:83`) is omitted: no `shoppingassistantservice` prefix in the dataset, a later addition.
+    - `checkoutservice` → `productcatalogservice`, `shippingservice`, `paymentservice`, `emailservice`, `currencyservice`, `cartservice` (`checkoutservice.yaml:57-67`).
+    - `recommendationservice` → `productcatalogservice` (`recommendationservice.yaml:60`).
+    - `cartservice` → `redis` (`cartservice.yaml:50`, `REDIS_ADDR=redis-cart:6379`; the `redis-cart` Deployment at `:90-92`).
+  - **SS edges** (11 plus the entry). The manifest states no service calls, so the sources at the pins are the evidence:
+    - `front-end` → `catalogue`, `carts`, `orders`, `user` (`front-end/api/endpoints.js:18-26`); → `session` (`front-end/config.js:16`, `RedisStore({host: "session-db"})`).
+    - `orders` → `payment` (`OrdersConfigurationProperties.java:11-12`, `/paymentAuth`), → `shipping` (`:15-16`, `/shipping`); → `user` and `carts` through the customer, address, card and items links the front-end puts in the order (`front-end/api/orders/index.js:60-74`) and `OrdersController.java:61-71` fetches.
+    - `shipping` → `rabbitmq` and `queue-master` → `rabbitmq` (`spring.rabbitmq.host=rabbitmq` in each `application.properties:2`). Both are client connections to the broker; `queue-master` consumes, so it has no caller.
+    - Folded and dropped: `carts` → `carts-db`, `orders` → `orders-db` (`application.properties:2`), `user` → `user-db` (`complete-demo.yaml:789-790`), `catalogue` → `catalogue-db` (not checked in the catalogue source; it folds into a self-edge either way). No edge is unverified.
+  - **Holdout reads:** RE2-OB repetition 1 only (the 30 `simple_metrics.csv` headers and the 30 `traces.csv`, service names and parent links only). Outside repetition 1: directory listings, and the first line of exactly one file, `RE2-SS/carts_cpu/1/simple_metrics.csv`. No other RE2-SS or RE2-OB repetition 2–3 file was opened.
+  - **AC3, the OB cross-check:** `python3 -I evals/kintsugi_evals/rcaeval/trace_edges.py ~/data/rcaeval/RE2-OB/*/1` (1 min 7 s, 67 MB peak) prints 9 pairs from 30 directories: `checkoutservice` → `currencyservice`, `emailservice`, `paymentservice`, `productcatalogservice`; `frontendservice` → `checkoutservice`, `currencyservice`, `productcatalogservice`, `recommendationservice`; `recommendationservice` → `productcatalogservice`.
+    - The traces name the frontend `frontendservice`, the metrics `frontend`. With that alias, all 9 pairs are file edges: **AC3 holds**.
+    - 6 file edges are absent from the traces, because only seven services emit spans (`checkoutservice`, `currencyservice`, `emailservice`, `frontendservice`, `paymentservice`, `productcatalogservice`, `recommendationservice`): `cartservice`, `shippingservice`, `adservice` and `redis` do not, so their incoming edges are unseen.
+    - T4 must map `frontendservice` to `frontend` when it builds `traffic_counts`.
+  - Checks: `evals/.venv/bin/python -m pytest -q tests/test_trace_edges.py` RED (collection error, module missing), then GREEN 4 passed; the full evals suite 76 passed; `./mvnw -q test -Dtest=TopologyTest` exit 0, 37 tests, 0 failures.
 
 ## Next step
 
-T2: the topology files, once `RE2-OB.zip` is downloaded and verified.
+T3: the converter core (branch `feat/rcaeval-converter-01-core`). Carried from T2: T4 must alias the trace name `frontendservice` to `frontend`. The extra components RCAEval's `drop_extra` removes (`redis`, `rabbitmq`, `queue-master`, `session`) stay as services. They are never a root cause in RE2, so keeping them makes the agent's choice harder, not easier; the evaluator scores whatever service is named.
