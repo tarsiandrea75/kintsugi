@@ -131,6 +131,9 @@ With topology as data, the converter can write one topology file per RCAEval sys
   - AC3: `rg -n '"(gateway-mock|payment-service|order-service|inventory-service|postgres)"' agent/src/main` hits only `topology/lab.json` (the data). `rg -n 'gateway-mock|payment-service|order-service|inventory-service' agent/src/main/java` hits only `Prompts.java:244-246`, the Javadoc example of the rendering rule. Outside the pattern: `DossierRenderer.java:205-206` maps the `orders` and `payments` tables to the headings "Order states" and "Payment states" (default "States"), a lab-specific label left as a follow-up; `Summarizers.java:226` reads an mcp-tools output `kind`, not topology.
   - Agent spec: the gathering requirement says the lists come from the topology; "What one call sees" states the rendering rule and the lab text byte for byte; the report's `rootCauseService` row is the topology's causes; new scenario "Another topology changes the system message (topology-data T4)".
 
+  - The parent checked that both system-message pins contain today's sentence verbatim, and re-ran the pins, `TopologyDerivationTest` and `RulesDiagnosisTest`: green. No file under `agent/src/test/resources/dossier` changed.
+  - Commit `df86db4`. Review of `be3f4ad..df86db4`: medium, `slice_budget_reached`; one lens (reliability), approved and acknowledged. Two non-blocking findings, of which the capture gave only id and location: WARNING R3-001 (`Prompts.java:254-258`, the components and call-path rendering), SUGGESTION R3-002 (`Prompts.java:29`, `ROLE`). The parent's reading, not the reviewer's text: the component sentence joins services with plain commas but lists datastores with "and", so a non-lab topology reads unevenly; `ROLE` still says "a small online shop", which is lab wording that an RCAEval system (Train Ticket) does not fit. Both are follow-ups for the converter feature, together with the "Order states"/"Payment states" headings in `DossierRenderer`.
+
 ## Next step
 
-The parent's T4 check and commit, then T5.
+T5: the Config 0 replay over dev and holdout, compared with the committed verdicts and the earlier candidates.
