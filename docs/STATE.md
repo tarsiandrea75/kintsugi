@@ -24,8 +24,8 @@ This session (journal `docs/journal/2026-10-30-01.md`), all on local branches, n
 
 ## Next action
 
-1. Done 2026-10-31 (`odd/tasks/qwen-dev.md`): qwen3.5:9b on dev, 8/15 with and without thinking (A 5/15, 0 10/15); Qon passed ADR-015's keep rule against A and read holdout-1: 12/15. For the human to decide: whether Qon replaces granite as the local model (an ADR) and as the M3 hybrid's model.
-2. In M3: the hybrid (rules propose, the LLM picks and explains), measured as hybrid − Config 0 on RCAEval.
+1. Done 2026-10-31 (`odd/tasks/qwen-dev.md`): qwen3.5:9b on dev, 8/15 with and without thinking (A 5/15, 0 10/15); Qon passed ADR-015's keep rule against A and read holdout-1: 12/15. The human chose Qon as the M3 hybrid's local model (ADR-018); granite stays the local default.
+2. In M3: the hybrid (rules propose, Qon picks and explains), measured as hybrid − Config 0 on RCAEval. First step: a feature document with its design.
 3. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
 
 ## Local branch chains (not pushed)
