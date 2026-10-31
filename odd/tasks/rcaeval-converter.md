@@ -215,6 +215,14 @@ Without the converter, every number is on a lab one person built and tuned again
 
   - The parent re-ran the full evals suite (108 passed) and `RcaevalRecordingTest` (green). Accepted notes: the blinded file name is an unsalted hash, so it can be reversed by enumerating the 90 case names; the agent never reads file names, so this is recorded, not fixed. The regeneration command leaves a `converter-report.tsv` in the fixture directory, which must be deleted by hand (a follow-up for T5's docs).
 
+  - Commit `4b96b26`. Review of `527aeff..4b96b26`: medium, `slice_budget_reached`; one lens (reliability), approved and acknowledged. Non-blocking findings:
+    - WARNING R3-failed-run-leaves-unscanned-output (`convert.py:304-317`): a run that fails part way leaves recordings that the leakage guard never scanned. Taken into T4: write to a temporary directory and move it into place only after the scan passes.
+    - WARNING R3-leak-removal-unasserted (`test_rcaeval_convert.py:360-363`): the test does not assert that the recordings are removed on a leak. Taken into T4.
+    - SUGGESTION R3-log-decoding-depends-on-locale (`convert.py:216`): files are opened without an explicit encoding. Taken into T4: `encoding="utf-8"`.
+    - WARNING R3-malformed-input-traceback (`cli.py:229-230`): malformed input ends in a traceback, not a message. Follow-up.
+    - SUGGESTION R3-holdout-and-ss-paths-unexercised (`convert.py:309`): the holdout and Sock Shop paths have no test. Follow-up, before the holdout plans.
+    - SUGGESTION R3-replay-verdict-assertion-is-weak (`RcaevalRecordingTest.java:54-59`): the test only checks that `diagnose` returns. Follow-up; T6 runs the rules for real.
+
 ## Next step
 
-T4: traces → `traffic_counts` for OB, with the T2 review items (one shared alias table, `frontendservice` → `frontend`; a non-zero exit from `trace_edges` when it finds no pair).
+T4: traces → `traffic_counts` for OB, with the T2 review items (one shared alias table, `frontendservice` → `frontend`; a non-zero exit from `trace_edges` when it finds no pair) and the three T3 review items above.
