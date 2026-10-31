@@ -36,8 +36,8 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 - [x] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
 - [x] T5 The dev plan, committed before the dev runs. Route: inline.
 - [x] T6 The dev runs and the scored result; reading; STATE. Route: inline commands.
-- [ ] T7 The Qon holdout-1 plan `evals/plans/2026-10-31-qwen-holdout1.md`, committed before the run (human go-ahead 2026-10-31). Route: inline.
-- [ ] T8 The Qon holdout-1 run, its score, and `docs/benchmark.md` regenerated with the new result. Route: inline commands.
+- [x] T7 The Qon holdout-1 plan `evals/plans/2026-10-31-qwen-holdout1.md`, committed before the run (human go-ahead 2026-10-31). Route: inline.
+- [x] T8 The Qon holdout-1 run, its score, and `docs/benchmark.md` regenerated with the new result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -86,6 +86,13 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
 
 - 2026-10-31: the human approved a holdout-1 read of Qon; T7 and T8 added. T7 done: the plan, committed with this entry before the run.
 
+- 2026-10-31: T8 done. Run `replay-20261031T035319Z-local` on `8feda61` (agent code unchanged since `5a5f9ca`), 03:53-07:14 UTC, complete, none discarded: 15 samples, holdout, tables, plain, qwen3.5:9b, think on, 4096, 1200 s; all COMPLETED, max sample 1250 s. Scored into `evals/results/2026-10-31-qwen-holdout1/`; `docs/benchmark.md` regenerated from both holdout result directories, byte-identical on a second run (sha256 `0f56c77c…`).
+  - Qon 12/15, AC@1 80% [55%, 93%], coverage 100%: F1 4/5, F2 3/5, F3 5/5.
+  - Qon − A +67 points, Holm p = 0.032 (the first significant local difference); Qon − 0 +13, Holm p = 0.62; Qon − D −20, Holm p = 0.5.
+  - Per-fault net: against A F1 +4, F2 +1, F3 +5; against 0 F1 −1, F2 +3, F3 0. Oracle of 0 and Qon 13/15.
+  - Misses: `payment-service|DEPENDENCY_LATENCY` (the caller, the usual local error), F2 `gateway-mock|RESOURCE_EXHAUSTION` and `gateway-mock|CONFIGURATION` (right service, wrong category).
+  - Caution: F1 was 1/5 on dev and 4/5 here. With 5 cases per fault the per-fault numbers move a lot between splits; the pooled interval [55%, 93%] is the honest summary.
+
 ## Next step
 
-T8.
+Feature closed. The human decides what the result changes: the M3 hybrid's local model (Qon instead of granite), and whether Qon becomes the local default (needs its own ADR, per ADR-017).

@@ -1,0 +1,5 @@
+label	source	sha256	rows
+0	results/2026-10-30-holdout1-lab/inputs/0-summary.tsv	2ef73d269e13d937befd382b7e8d7f064bf96523e30fc382619445fa068fb71d	15
+A	results/2026-10-30-holdout1-lab/inputs/A-summary.tsv	b54217a07dbeb20a4c672fcf99e139f1d3297b869c2fd7819dc8897f8c95efaa	15
+D	results/2026-10-30-holdout1-lab/inputs/D-summary.tsv	016ceea6d0107776f119b3e3f866aa13eb87dbbf57f532ed2512d5f4444c10b0	15
+Qon	../infra/scripts/out/replay-20261031T035319Z-local	9a6c58e2a9c51bb71aa591d901548f8c071caac2357eacacfae5420dd7874672	15

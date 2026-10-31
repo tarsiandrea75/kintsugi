@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report
+F1	decision	local	1	TIMED_OUT	gateway-mock|DEPENDENCY_LATENCY	none	MISS	33	0	1.00	0	-	-	656.4	holdout	verify-agent-20261024T162555Z-r2-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3217	355	570.9	holdout	verify-agent-20261024T162555Z-r4-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3378	345	559.8	holdout	verify-agent-20261024T162555Z-r6-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3364	322	529.2	holdout	verify-agent-20261024T162555Z-r8-F1	tables	plain
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3249	434	467.4	holdout	verify-agent-20261024T162555Z-r10-F1	tables	plain
+F2	decision	local	1	TIMED_OUT	gateway-mock|DEPENDENCY_REJECTING	none	MISS	33	0	1.00	0	-	-	606.7	holdout	verify-agent-20261024T162555Z-r2-F2	tables	plain
+F2	decision	local	1	TIMED_OUT	gateway-mock|DEPENDENCY_REJECTING	none	MISS	33	0	1.00	0	-	-	605.8	holdout	verify-agent-20261024T162555Z-r4-F2	tables	plain
+F2	decision	local	1	TIMED_OUT	gateway-mock|DEPENDENCY_REJECTING	none	MISS	33	0	1.00	0	-	-	611.2	holdout	verify-agent-20261024T162555Z-r6-F2	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3286	436	563.1	holdout	verify-agent-20261024T162555Z-r8-F2	tables	plain
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3281	451	492.8	holdout	verify-agent-20261024T162555Z-r10-F2	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3110	435	480.0	holdout	verify-agent-20261024T162555Z-r2-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3240	376	564.5	holdout	verify-agent-20261024T162555Z-r4-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3123	344	477.4	holdout	verify-agent-20261024T162555Z-r6-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3232	342	427.2	holdout	verify-agent-20261024T162555Z-r8-F3	tables	plain
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	payment-service|DEPENDENCY_REJECTING	MISS	33	0	1.00	0	3112	345	515.4	holdout	verify-agent-20261024T162555Z-r10-F3	tables	plain

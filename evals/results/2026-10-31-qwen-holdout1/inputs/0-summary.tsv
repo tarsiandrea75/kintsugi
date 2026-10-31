@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report
+F1	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	0	0	0.1	holdout	verify-agent-20261024T162555Z-r2-F1	tables	plain
+F1	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r4-F1	tables	plain
+F1	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r6-F1	tables	plain
+F1	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r8-F1	tables	plain
+F1	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r10-F1	tables	plain
+F2	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r2-F2	tables	plain
+F2	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r4-F2	tables	plain
+F2	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r6-F2	tables	plain
+F2	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r8-F2	tables	plain
+F2	decision	rules	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	UNKNOWN|UNKNOWN	MISS	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r10-F2	tables	plain
+F3	decision	rules	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r2-F3	tables	plain
+F3	decision	rules	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r4-F3	tables	plain
+F3	decision	rules	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r6-F3	tables	plain
+F3	decision	rules	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r8-F3	tables	plain
+F3	decision	rules	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	0	0	0.0	holdout	verify-agent-20261024T162555Z-r10-F3	tables	plain

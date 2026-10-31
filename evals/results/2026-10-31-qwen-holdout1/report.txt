@@ -1,0 +1,26 @@
+0: route rules, mode decision, view tables; 15 fault cases, 0 healthy
+0  F1       5/5   AC@1 100%  [57%, 100%]
+0  F2       0/5   AC@1   0%  [0%, 43%]
+0  F3       5/5   AC@1 100%  [57%, 100%]
+0  pooled  10/15  AC@1  67%  [42%, 85%]  coverage 67%  selective 100%
+A: route local, mode decision, view tables; 15 fault cases, 0 healthy
+A  F1       0/5   AC@1   0%  [0%, 43%]
+A  F2       2/5   AC@1  40%  [12%, 77%]
+A  F3       0/5   AC@1   0%  [0%, 43%]
+A  pooled   2/15  AC@1  13%  [4%, 38%]  coverage 73%  selective 18%
+D: route cloud, mode decision, view tables; 15 fault cases, 0 healthy
+D  F1       5/5   AC@1 100%  [57%, 100%]
+D  F2       5/5   AC@1 100%  [57%, 100%]
+D  F3       5/5   AC@1 100%  [57%, 100%]
+D  pooled  15/15  AC@1 100%  [80%, 100%]  coverage 100%  selective 100%
+Qon: route local, mode decision, view tables; 15 fault cases, 0 healthy
+Qon  F1       4/5   AC@1  80%  [38%, 96%]
+Qon  F2       3/5   AC@1  60%  [23%, 88%]
+Qon  F3       5/5   AC@1 100%  [57%, 100%]
+Qon  pooled  12/15  AC@1  80%  [55%, 93%]  coverage 100%  selective 80%
+A - 0: 15 cases, A only 2, 0 only 10, exact McNemar p = 0.039 (Holm 0.15); difference -53 points, cluster bootstrap 95% [-87, -13] (seed 1, 10000 resamples)
+D - 0: 15 cases, D only 5, 0 only 0, exact McNemar p = 0.062 (Holm 0.19); difference +33 points, cluster bootstrap 95% [+13, +60] (seed 1, 10000 resamples)
+Qon - 0: 15 cases, Qon only 3, 0 only 1, exact McNemar p = 0.62 (Holm 0.62); difference +13 points, cluster bootstrap 95% [-13, +40] (seed 1, 10000 resamples)
+D - A: 15 cases, D only 13, A only 0, exact McNemar p = 0.00024 (Holm 0.0015); difference +87 points, cluster bootstrap 95% [+67, +100] (seed 1, 10000 resamples)
+Qon - A: 15 cases, Qon only 11, A only 1, exact McNemar p = 0.0063 (Holm 0.032); difference +67 points, cluster bootstrap 95% [+33, +93] (seed 1, 10000 resamples)
+Qon - D: 15 cases, Qon only 0, D only 3, exact McNemar p = 0.25 (Holm 0.5); difference -20 points, cluster bootstrap 95% [-40, +0] (seed 1, 10000 resamples)
