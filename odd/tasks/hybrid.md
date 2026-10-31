@@ -114,6 +114,12 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
     - The stored report does not hold the candidates; T4 adds them to the replay output.
     - The loop tests use F3 with healthy restarts (one candidate). Two candidates are covered in ReportCheckTest.
 
+- 2026-10-31: native review of the slice `ccb7a40..5cff0b2` (T2 and T3; medium, `slice_budget_reached`): consent granted, one lens (reliability), approved and acknowledged (lineage `review-108c1c23b85d453e`).
+  - Fixed: R3-spec-contradicts-no-candidate-behavior (the spec said a decision run makes 1 or 2 model calls; it now adds "or none with the hybrid report and no candidate") and R3-state-next-action-stale.
+  - Follow-ups, informational:
+    - WARNING R3-empty-candidates-unproved-on-partial-dossier (`AgentLoop.java:259-262`): when the gathering yields a partial dossier, the rules may propose nothing, and H answers UNKNOWN with no call. The empty-list test does not cover a partial dossier.
+    - SUGGESTIONs: R3-candidate-cap-unproved (it cannot bind with the lab's 4 services), R3-either-view-test-proves-construction-only, R3-no-candidate-report-fields-unasserted.
+
 ## Next step
 
 T4.
