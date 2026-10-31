@@ -1,0 +1,16 @@
+fault	mode	route	sample	status	truth	reported	verdict	recorded	unrecorded	coverage	conflicts	promptTokens	completionTokens	seconds	split	recording	view	report	model	think	reportCap	reportTimeout
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3755	393	384.6	dev	verify-agent-20261024T162555Z-r1-F1	tables	plain	qwen3.5:9b	off	512	1200s
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	gateway-mock|DEPENDENCY_LATENCY	MATCH	33	0	1.00	0	3764	216	347.3	dev	verify-agent-20261024T162555Z-r3-F1	tables	plain	qwen3.5:9b	off	512	1200s
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3764	382	393.7	dev	verify-agent-20261024T162555Z-r5-F1	tables	plain	qwen3.5:9b	off	512	1200s
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3745	384	384.6	dev	verify-agent-20261024T162555Z-r7-F1	tables	plain	qwen3.5:9b	off	512	1200s
+F1	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_LATENCY	payment-service|DEPENDENCY_LATENCY	MISS	33	0	1.00	0	3922	395	420.6	dev	verify-agent-20261024T162555Z-r9-F1	tables	plain	qwen3.5:9b	off	512	1200s
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|RESOURCE_EXHAUSTION	MISS	33	0	1.00	0	3831	245	383.7	dev	verify-agent-20261024T162555Z-r1-F2	tables	plain	qwen3.5:9b	off	512	1200s
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3833	232	386.1	dev	verify-agent-20261024T162555Z-r3-F2	tables	plain	qwen3.5:9b	off	512	1200s
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3842	248	340.6	dev	verify-agent-20261024T162555Z-r5-F2	tables	plain	qwen3.5:9b	off	512	1200s
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|RESOURCE_EXHAUSTION	MISS	33	0	1.00	0	3819	252	357.7	dev	verify-agent-20261024T162555Z-r7-F2	tables	plain	qwen3.5:9b	off	512	1200s
+F2	decision	local	1	COMPLETED	gateway-mock|DEPENDENCY_REJECTING	gateway-mock|DEPENDENCY_REJECTING	MATCH	33	0	1.00	0	3846	306	362.9	dev	verify-agent-20261024T162555Z-r9-F2	tables	plain	qwen3.5:9b	off	512	1200s
+F3	decision	local	1	INVALID_REPORT	order-service|CONFIGURATION	none	MISS	33	0	1.00	0	7220	445	466.3	dev	verify-agent-20261024T162555Z-r1-F3	tables	plain	qwen3.5:9b	off	512	1200s
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	3764	253	334.0	dev	verify-agent-20261024T162555Z-r3-F3	tables	plain	qwen3.5:9b	off	512	1200s
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	3756	394	387.0	dev	verify-agent-20261024T162555Z-r5-F3	tables	plain	qwen3.5:9b	off	512	1200s
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	3760	259	355.1	dev	verify-agent-20261024T162555Z-r7-F3	tables	plain	qwen3.5:9b	off	512	1200s
+F3	decision	local	1	COMPLETED	order-service|CONFIGURATION	order-service|CONFIGURATION	MATCH	33	0	1.00	0	3774	245	333.2	dev	verify-agent-20261024T162555Z-r9-F3	tables	plain	qwen3.5:9b	off	512	1200s

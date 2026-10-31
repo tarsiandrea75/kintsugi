@@ -35,7 +35,7 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 - [x] T3 Replay overrides (`--model`, `--think`, `--report-cap`, `--report-timeout`), recorded per sample; tests first; agent spec "Routes"/"Answer caps". Route: delegated writer.
 - [x] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
 - [x] T5 The dev plan, committed before the dev runs. Route: inline.
-- [ ] T6 The dev runs and the scored result; reading; STATE. Route: inline commands.
+- [x] T6 The dev runs and the scored result; reading; STATE. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -74,6 +74,14 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
 - 2026-10-30: T4 done. Calibration on `stress` (timing and token columns only, no verdicts read): thinking off, longest report call 527 s, 2 of 3 samples needed a second report attempt; thinking on, longest call 801 s, one call each. Numbers in the plan.
 - 2026-10-30: T5 done, `evals/plans/2026-10-30-qwen-dev.md`, committed before any dev run: Qoff (cap 512, 1200 s) and Qon (cap 4096, 1200 s) against the committed 0 and A dev inputs; ADR-015 keep rule against A.
 
+- 2026-10-31: T6 done. Both runs on `5a5f9ca`, complete, none discarded: Qoff `replay-20261030T180936Z-local` (about 1.5 h, max sample 466 s, 1 `INVALID_REPORT`), Qon `replay-20261030T194329Z-local` (about 4.5 h, max sample 1252 s, no timeout). Each `summary.tsv`: 15 samples, dev, tables, plain, model/think/cap/deadline as planned. Scored into `evals/results/2026-10-30-qwen-dev/`:
+  - 0 10/15; A 5/15 [15%, 58%]; Qoff 8/15, 53% [30%, 75%], coverage 93%; Qon 8/15, 53% [30%, 75%], coverage 100%.
+  - Per-fault net against A: Qoff F1 +1, F2 −2, F3 +4 (pooled +3); Qon F1 +1, F2 −1, F3 +3 (pooled +3). McNemar Holm p = 1 for every pair.
+  - Keep rule (ADR-015, against A): Qoff fails (F2 −2); **Qon passes** (+3 pooled, no class below −1). By the plan, Qon is the one worth a holdout read.
+  - Against 0: both −2 pooled; F1 is still the local route's wall (4 of 5 answer `payment-service|DEPENDENCY_LATENCY`, the caller of the real culprit, as granite does).
+  - Complementarity with 0, descriptive: Qon right where 0 is not in 4 cases (all F2), 0 right where Qon is not in 6; an oracle of 0 and Qon reaches 14/15 (0 and Qoff 13/15; 0 and A 15/15 on dev).
+  - Thinking bought no accuracy here (Qon − Qoff 0, 3 cases each way) at about 3 times the time.
+
 ## Next step
 
-T6: the two dev runs, one after the other, then the score.
+Feature closed. A holdout read of Qon needs its own plan; holdout-1 has not been read by Qon.

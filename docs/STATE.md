@@ -23,9 +23,9 @@ This session (journal `docs/journal/2026-10-30-01.md`), all on local branches, n
 
 ## Next action
 
-1. The qwen3.5:9b dev experiment, with and without thinking, under its own committed plan, against Config 0 and A on dev (agreed 2026-10-30).
+1. Done 2026-10-31 (`odd/tasks/qwen-dev.md`): qwen3.5:9b on dev, 8/15 with and without thinking (A 5/15, 0 10/15). Thinking on passes ADR-015's keep rule against A; off fails it (F2 −2). Next for the human to decide: a holdout-1 read of Qon under its own plan (about 4.5 h of CPU), or go straight to the hybrid.
 2. In M3: the hybrid (rules propose, the LLM picks and explains), measured as hybrid − Config 0 on RCAEval.
-3. Before any further local run: the local timeout. Holdout samples averaged about 540 s against about 405 s on dev, and 4 hit the 600 s cap.
+3. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
 
 ## Local branch chains (not pushed)
 

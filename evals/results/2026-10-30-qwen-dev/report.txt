@@ -1,0 +1,26 @@
+0: route rules, mode decision, view tables; 15 fault cases, 0 healthy
+0  F1       5/5   AC@1 100%  [57%, 100%]
+0  F2       0/5   AC@1   0%  [0%, 43%]
+0  F3       5/5   AC@1 100%  [57%, 100%]
+0  pooled  10/15  AC@1  67%  [42%, 85%]  coverage 67%  selective 100%
+A: route local, mode decision, view -; 15 fault cases, 0 healthy
+A  F1       0/5   AC@1   0%  [0%, 43%]
+A  F2       5/5   AC@1 100%  [57%, 100%]
+A  F3       0/5   AC@1   0%  [0%, 43%]
+A  pooled   5/15  AC@1  33%  [15%, 58%]  coverage 100%  selective 33%
+Qoff: route local, mode decision, view tables; 15 fault cases, 0 healthy
+Qoff  F1       1/5   AC@1  20%  [4%, 62%]
+Qoff  F2       3/5   AC@1  60%  [23%, 88%]
+Qoff  F3       4/5   AC@1  80%  [38%, 96%]
+Qoff  pooled   8/15  AC@1  53%  [30%, 75%]  coverage 93%  selective 57%
+Qon: route local, mode decision, view tables; 15 fault cases, 0 healthy
+Qon  F1       1/5   AC@1  20%  [4%, 62%]
+Qon  F2       4/5   AC@1  80%  [38%, 96%]
+Qon  F3       3/5   AC@1  60%  [23%, 88%]
+Qon  pooled   8/15  AC@1  53%  [30%, 75%]  coverage 100%  selective 53%
+A - 0: 15 cases, A only 5, 0 only 10, exact McNemar p = 0.3 (Holm 1); difference -33 points, cluster bootstrap 95% [-73, +20] (seed 1, 10000 resamples)
+Qoff - 0: 15 cases, Qoff only 3, 0 only 5, exact McNemar p = 0.73 (Holm 1); difference -13 points, cluster bootstrap 95% [-53, +27] (seed 1, 10000 resamples)
+Qon - 0: 15 cases, Qon only 4, 0 only 6, exact McNemar p = 0.75 (Holm 1); difference -13 points, cluster bootstrap 95% [-53, +27] (seed 1, 10000 resamples)
+Qoff - A: 15 cases, Qoff only 5, A only 2, exact McNemar p = 0.45 (Holm 1); difference +20 points, cluster bootstrap 95% [-13, +53] (seed 1, 10000 resamples)
+Qon - A: 15 cases, Qon only 4, A only 1, exact McNemar p = 0.38 (Holm 1); difference +20 points, cluster bootstrap 95% [-7, +47] (seed 1, 10000 resamples)
+Qon - Qoff: 15 cases, Qon only 3, Qoff only 3, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [-33, +33] (seed 1, 10000 resamples)
