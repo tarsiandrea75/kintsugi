@@ -161,6 +161,7 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - F1: H kept the rules' first candidate (the truth) 3 times out of 5. In r1 and r7 it picked `payment-service`, the second candidate, the caller: the same miss Qon makes alone.
   - Report time per sample 675-1660 s, median 850 s, total about 4.1 h.
   - Reading. On F2 and F3 every list had one candidate, the truth, so H's gain there comes from the rules' proposals, not from the model's choice. F1 is the only fault with a real choice, and there the model lost 2 of 5 that the rules' first candidate had right. On these 15 cases, "take the first candidate" (the fallback ADR-019 rejected for measurement) would score 15/15. Dev has been read many times, so this is no claim; it says where to look on RCAEval: whether the model adds anything when the list has more than one entry.
+  - Commit `5fc7224`. Review of `4715600..5fc7224` (T5-T8): medium, `slice_budget_reached`; one lens (reliability), approved with no findings and acknowledged (`review-ee0ba94db473e384`).
 
 ## Next step
 
