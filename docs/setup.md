@@ -537,6 +537,33 @@ python3 -m kintsugi_evals score \
 - `--seed` (default 1) and `--iterations` (default 10000) set the bootstrap.
 - Commit the plan to `evals/plans/` before the run (template `evals/plans/TEMPLATE.md`) and the result to `evals/results/<date>-<name>/` after it.
 
+### Convert RCAEval cases
+
+The offline track reads the RCAEval RE2 dataset ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md)). The data stays outside the repository, about 11 GB extracted. Download Zenodo record [14590730](https://doi.org/10.5281/zenodo.14590730) and check the md5s before unzipping:
+
+```bash
+mkdir -p ~/data/rcaeval && cd ~/data/rcaeval
+curl -LO https://zenodo.org/records/14590730/files/RE2-OB.zip
+curl -LO https://zenodo.org/records/14590730/files/RE2-SS.zip
+md5sum RE2-OB.zip RE2-SS.zip
+# b9e23f8842c404b396ffd2becff15de4  RE2-OB.zip
+# bd747a8fc7c5be00c613e13fbf9dd74b  RE2-SS.zip
+unzip -q RE2-OB.zip && unzip -q RE2-SS.zip
+export KINTSUGI_RCAEVAL_DIR=~/data/rcaeval     # the converter's default root
+```
+
+Convert from `evals/`. Run it with `python3 -I`, as for any code that reads downloaded data, so nothing in the current directory is imported:
+
+```bash
+cd evals
+python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli import main; sys.exit(main(sys.argv[1:]))' \
+  convert-rcaeval --system re2-ob --rep 1
+```
+
+- It writes one blinded `<hash>.json` per case, `recordings.tsv` (the truth is only there) and `converter-report.tsv` to `evals/out/rcaeval/re2-ob-rep1/` (git-ignored); `--out` sets another directory, `--case NAME` converts only that case (repeatable).
+- Only RE2-OB repetition 1 is `dev`. Repetitions 2-3 (holdout A) and RE2-SS (holdout B) are refused unless `--allow-holdout A` or `--allow-holdout B` names them, which only a committed holdout plan may do.
+- The conversion fails if a recording holds a fault word, a case name or a category outside the logs' own text; fault words in log text are counted in `converter-report.tsv`.
+
 ### Reset a volume
 
 Init scripts (`infra/postgres/init/`, `infra/knowledge-db/init/`) run only when their volume is empty. When one changes after the volume was created (for example when the `agent` database was added to `knowledge-db`), or when a volume's state is broken, delete that one volume and start the lab again:

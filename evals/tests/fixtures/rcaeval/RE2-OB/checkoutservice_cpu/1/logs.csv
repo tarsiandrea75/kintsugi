@@ -1,0 +1,37 @@
+time,timestamp,container_name,message,level,req_path,error,cluster_id,log_template
+00:00,1699999900000000000,frontend,failed to get product recommendations,warning,,,1,failed to get product recommendations
+00:00,1699999999999999999,frontend,request error before the window,error,,,1,request error before the window
+00:00,1700000000000000000,frontend,request error at the window start,error,,,1,request error at the window start
+00:00,1700000010000000000,frontend,failed to retrieve ads 0,warning,,,1,failed to retrieve ads 0
+00:00,1700000011000000000,frontend,failed to retrieve ads 1,warning,,,1,failed to retrieve ads 1
+00:00,1700000012000000000,frontend,failed to retrieve ads 2,warning,,,1,failed to retrieve ads 2
+00:00,1700000013000000000,frontend,failed to retrieve ads 3,warning,,,1,failed to retrieve ads 3
+00:00,1700000014000000000,frontend,failed to retrieve ads 4,warning,,,1,failed to retrieve ads 4
+00:00,1700000015000000000,frontend,failed to retrieve ads 5,warning,,,1,failed to retrieve ads 5
+00:00,1700000016000000000,frontend,failed to retrieve ads 6,warning,,,1,failed to retrieve ads 6
+00:00,1700000017000000000,frontend,failed to retrieve ads 7,warning,,,1,failed to retrieve ads 7
+00:00,1700000018000000000,frontend,failed to retrieve ads 8,warning,,,1,failed to retrieve ads 8
+00:00,1700000019000000000,frontend,failed to retrieve ads 9,warning,,,1,failed to retrieve ads 9
+00:00,1700000020000000000,frontend,failed to retrieve ads 10,warning,,,1,failed to retrieve ads 10
+00:00,1700000021000000000,frontend,failed to retrieve ads 11,warning,,,1,failed to retrieve ads 11
+00:00,1700000022000000000,frontend,failed to retrieve ads 12,warning,,,1,failed to retrieve ads 12
+00:00,1700000023000000000,frontend,failed to retrieve ads 13,warning,,,1,failed to retrieve ads 13
+00:00,1700000024000000000,frontend,failed to retrieve ads 14,warning,,,1,failed to retrieve ads 14
+00:00,1700000025000000000,frontend,failed to retrieve ads 15,warning,,,1,failed to retrieve ads 15
+00:00,1700000026000000000,frontend,failed to retrieve ads 16,warning,,,1,failed to retrieve ads 16
+00:00,1700000027000000000,frontend,failed to retrieve ads 17,warning,,,1,failed to retrieve ads 17
+00:00,1700000028000000000,frontend,failed to retrieve ads 18,warning,,,1,failed to retrieve ads 18
+00:00,1700000029000000000,frontend,failed to retrieve ads 19,warning,,,1,failed to retrieve ads 19
+00:00,1700000030000000000,frontend,failed to retrieve ads 20,warning,,,1,failed to retrieve ads 20
+00:00,1700000031000000000,frontend,failed to retrieve ads 21,warning,,,1,failed to retrieve ads 21
+00:00,1700000050123456789,frontend,request error,error,,,1,request error
+00:00,1700000060000000000,frontend,home,info,,,1,home
+00:00,1700000061500000000,cartservice,Exception while reading the cart,,,,1,Exception while reading the cart
+00:00,1700000062000000000,cartservice,GetCartAsync called with userId=1,,,,1,GetCartAsync called with userId=1
+00:00,1700000063120000000,recommendationservice,Traceback (most recent call last):,,,,1,Traceback (most recent call last):
+00:00,1700000064000000000,checkoutservice,retrying the order after a short delay,warning,,,1,retrying the order after a short delay
+00:00,1700000065000000000,emailservice,warning: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,,,,1,warning: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+00:00,1700000066000000000,redis,1:M 14 Nov 2023 22:14:26.000 # WARNING overcommit_memory is set to 0,,,,1,1:M 14 Nov 2023 22:14:26.000 # WARNING overcommit_memory is set to 0
+00:00,1700000067000000000,frontend-external,an unknown container warning,warning,,,1,an unknown container warning
+00:00,1700000068000000000,paymentservice,charge failed,ERROR,,,1,charge failed
+00:00,1700000600000000000,frontend,request error at the window end,error,,,1,request error at the window end

@@ -1,6 +1,6 @@
 # Spec: evals (the scorer)
 
-The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`) from `evals/`.
+The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`, and `convert-rcaeval`, which writes the agent's replay input from RCAEval, REQ-11) from `evals/`.
 
 ## Requirements
 
@@ -144,3 +144,39 @@ The CLI MUST exit with a one-line message, not a traceback, when an input is mis
 - Given a directory with no `paired.tsv`
 - When `benchmark` runs on it
 - Then it exits with status 2, prints one line naming the missing file, and writes nothing
+
+### REQ-11 RCAEval converter
+`python -m kintsugi_evals convert-rcaeval --system re2-ob|re2-ss --rep N` MUST turn each case directory `<root>/RE2-<SYS>/<service>_<fault>/<N>/` into one replay recording the unchanged agent reads, plus one `recordings.tsv` row (`fault mode route truth file incident split`), under `--out` (default `evals/out/rcaeval/<system>-rep<N>/`, git-ignored) ([ADR-020](../../../docs/adr/ADR-020-rcaeval-dataset-converter.md)). The root MUST default to `$KINTSUGI_RCAEVAL_DIR`, else `~/data/rcaeval`. A recording MUST hold `id`, the system's one fixed `symptom`, `sinceMinutes` 10, `startedAt` = inject time + 10 minutes, and one `DOSSIER` step whose calls are exactly those `DossierGatherer` makes for the system's topology file, with the arguments it sends:
+- `query_metric latency_avg` per service from `<service>_latency-50` (seconds), resampled to the lab's 21 s step for 20 minutes, each point the mean of the rows in (t - 21 s, t], `NaN` when none has a value, and no series for a service without the column;
+- `count_logs` and `search_logs` per service and level (WARN, ERROR) from `logs.csv` in [inject, inject + 10 min): the level column when it names one, else a whole word of the message (error, exception, traceback, fatal, panic: ERROR; warn, warning: WARN); `search_logs` gives the newest 20 lines, each cut at 1000 characters with `[truncated]`;
+- `service_restarts` and `traffic_counts` (previous and incident) with no items.
+
+The truth, `<service>|<category>` by ADR-020's map, MUST appear only in `recordings.tsv`; the file name MUST be a 16-hex-digit sha256 of `RE2-<SYS>/<case>/<N>` and the incident id a UUID from the same hash. The same input MUST give the same bytes. Only RE2-OB repetition 1 is `dev`; any other repetition, and RE2-SS, is a holdout the converter MUST refuse, before reading any case file or creating `--out`, unless `--allow-holdout A` (RE2-OB repetitions 2-3) or `--allow-holdout B` (RE2-SS) names it; its rows then carry the split `holdout`.
+
+After writing, the converter MUST scan every recording it wrote. A fault word (cpu, mem, disk, delay, loss, socket, whole word, case-insensitive, `_` breaking words) outside `untrustedText`, or a case directory name or a category anywhere, MUST fail the conversion and remove its recordings. Fault words inside `untrustedText`, the system's own log text, MUST be counted in `converter-report.tsv`, not fail: rewriting a log line would falsify the evidence, and the leak guarded against is the converter's own. The report also lists metric prefixes and log containers outside the topology.
+
+#### Scenario: The windows
+- Given a case whose `inject_time.txt` holds 1700000000
+- When it is converted
+- Then `startedAt` is `2023-11-14T22:23:20Z`, `sinceMinutes` is 10, and the latency points run from 1699999400 to 1700000597 every 21 s, 58 points
+
+#### Scenario: The truth only in the manifest
+- Given the case `checkoutservice_cpu`
+- When it is converted
+- Then its `recordings.tsv` row has fault `cpu`, truth `checkoutservice|RESOURCE_EXHAUSTION` and split `dev`, and its recording holds neither the case name nor the category
+
+#### Scenario: A holdout is refused
+- Given `--system re2-ob --rep 2` without `--allow-holdout A`
+- When `convert-rcaeval` runs
+- Then it exits naming holdout A, reads no case file and creates no output directory
+
+#### Scenario: The leakage guard
+- Given a symptom that says "disk"
+- When a case is converted
+- Then the conversion fails naming the fault word and keeps no recording
+- And a log line saying "delay" is kept as is in `untrustedText` and counted in `converter-report.tsv`
+
+#### Scenario: The agent replays a converted recording
+- Given the recording `agent/src/test/resources/rcaeval/` holds, converted from the synthetic fixture and checked byte for byte against a fresh conversion
+- When `DossierGatherer` gathers with the RE2-OB topology at its `startedAt`
+- Then no call is answered `not recorded in this replay`, and `RulesDiagnosis.diagnose` returns a verdict

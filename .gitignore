@@ -30,3 +30,6 @@ Thumbs.db
 
 # verify-agent.sh results (full incident JSON and run logs)
 infra/scripts/out/
+
+# Converted RCAEval recordings (reproducible from the pinned dataset, ADR-020)
+evals/out/

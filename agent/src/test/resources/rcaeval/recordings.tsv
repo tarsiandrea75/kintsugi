@@ -1,0 +1,2 @@
+fault	mode	route	truth	file	incident	split
+cpu	decision	none	checkoutservice|RESOURCE_EXHAUSTION	4490c7f4fb1d2bf7.json	4490c7f4-fb1d-4bf7-929e-e9de5232add0	dev

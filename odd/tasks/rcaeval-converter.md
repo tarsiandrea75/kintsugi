@@ -89,7 +89,7 @@ Without the converter, every number is on a lab one person built and tuned again
 
 - [x] T1 ADR-020, the vision fix ("ADR-017 will pin" → ADR-020) and this document. Route: inline (docs). The human confirmed the design and the category map on 2026-10-31. Passive docs, structural readback only.
 - [x] T2 The topology files for RE2-OB and RE2-SS, from the pinned upstream manifests, with the OB cross-check on repetition 1's traces recorded. `TopologyTest` loads both. Route: delegated writer.
-- [ ] T3 The converter core, tests first on a synthetic fixture: case discovery, windows, metrics → `query_metric`, logs → `count_logs`/`search_logs`, empty restarts, the incident JSON and `recordings.tsv`, the leakage grep. Route: delegated writer.
+- [x] T3 The converter core, tests first on a synthetic fixture: case discovery, windows, metrics → `query_metric`, logs → `count_logs`/`search_logs`, empty restarts, the incident JSON and `recordings.tsv`, the leakage grep. Route: delegated writer.
 - [ ] T4 Traces → `traffic_counts` (OB), tests first. Route: delegated writer.
 - [ ] T5 Replay plumbing and scorer, tests first:
   - `ReplayDriver` reads the topology property;
@@ -159,7 +159,62 @@ Without the converter, every number is on a lab one person built and tuned again
     - WARNING R3-holdout-read-contradicts-constraints: answered by the amended Constraints above.
     - SUGGESTION R3-silent-empty-extraction-passes (`trace_edges.py:52-58`): an empty extraction exits successfully. Taken into T4: a non-zero exit when no pair is found.
     - SUGGESTION R3-ss-services-proved-from-one-header (`TopologyTest.java:289-297`): RE2-OB headers vary across cases (15 distinct sets in repetition 1), so one SS header may miss services. Follow-up for the holdout-B plan: before that read, a header-only check over every RE2-SS case confirms the services, and the converter reports any metric prefix missing from the topology.
+- 2026-10-31, T3 (route: delegated writer; trigger: two new modules, the CLI, a test module with a fixture tree, a Java test and the spec). The converter core is written; traffic stays empty for T4.
+  - **Files:**
+    - `evals/kintsugi_evals/rcaeval/convert.py` (the case → recording conversion);
+    - `evals/kintsugi_evals/rcaeval/leakage.py` (the guard);
+    - `evals/kintsugi_evals/cli.py` (`convert-rcaeval`);
+    - `evals/tests/test_rcaeval_convert.py` and `evals/tests/fixtures/rcaeval/RE2-OB/` (synthetic: `checkoutservice_cpu/1`, `currencyservice_delay/1`, a holdout `checkoutservice_cpu/2` with only `inject_time.txt`, and a stray `multi-source-data/`);
+    - `agent/src/test/resources/rcaeval/` (the converter's output for the fixture's `checkoutservice_cpu`) and `RcaevalRecordingTest`;
+    - evals spec REQ-11, `docs/setup.md` "Convert RCAEval cases", `.gitignore` `evals/out/`.
+  - **Calls:** exactly `DossierGatherer`'s for a topology without owners (58 for RE2-OB):
+    - `service_restarts {sinceMinutes: 10}`;
+    - `traffic_counts {20, untilMinutesAgo 10}` and `{10}`;
+    - per service, `query_metric {metric: latency_avg, service, sinceMinutes: 20}`;
+    - per service and level, `count_logs {service, level, sinceMinutes: 10}` and `search_logs` with `limit: 20`.
+
+    They come in topology-file order, not `gatherOrder()`: `ReplayLabTools` matches by tool and sorted arguments, so order does not count.
+  - **Latency unit: seconds, factor 1.** `latency-50` is Istio's sidecar latency (`metrics_postprocess.log` names the source `<svc>_istio-latency-50`). Evidence from repetition 1 only, comparing the 10 minutes before and after the injection:
+    - In `productcatalogservice_delay`, `recommendationservice`'s own spans (`traces.csv`, µs) rise from 3.5 to 203.7 ms, and its `latency-50` from 0.0075 to 0.175. `frontendservice`'s spans rise from 3.5 to 202.6 ms, its `latency-50` from 0.055 to 1.45.
+    - In `currencyservice_delay`, `currencyservice`'s `latency-50` rises from 0.0041 to 0.1004 (+0.096, a ~100 ms injected network delay), while its spans stay at 0.14 ms.
+    - Read as milliseconds, the sidecar latency would be shorter than the spans it wraps (0.175 ms against 203 ms), so the unit is seconds.
+    - The values are p50, not a mean. The call keeps the lab's name, `latency_avg`, because the gatherer asks for it.
+  - **Resampling:**
+    - The step is mcp-tools' `MetricCatalog.stepSeconds(20)` = 21 s: 58 points from `startedAt` − 1200 s to `startedAt` − 3 s.
+    - Each point is the mean of the 1 s rows in (t − 21 s, t], as a Prometheus point looks back; a bucket with no finite value is `"NaN"`.
+    - The first incident point (inject + 9 s) mixes 12 s of the previous window, less than the lab's 60 s rate window does.
+    - A service with no `<svc>_latency-50` column (`redis` in RE2-OB) gets `returned: 0`.
+    - The data covers inject ± 720 s at 1 s, so both windows are full.
+  - **Log level rule.** `logs.csv` has a `level` column (`time,timestamp,container_name,message,level,req_path,error,cluster_id,log_template`), set by most services and blank for `cartservice`, `redis`, tracebacks and some export errors (tally over the 30 repetition-1 `logs.csv`, levels and containers only). The rule:
+    - the column decides when set: `warn`/`warning` → WARN; `error`/`err`/`fatal`/`critical`/`crit`/`severe`/`panic` → ERROR; anything else (info, debug) → neither;
+    - a blank column is read from the message: a whole word error, exception, traceback, fatal or panic → ERROR, else warn or warning → WARN.
+
+    The window is [inject, inject + 10 min) on the nanosecond `timestamp`. `search_logs` gives the newest 20 lines, each cut at 1000 characters plus `[truncated]`, with `truncated` true when a returned line was cut, as mcp-tools does. `timestamp` is printed as Java's `Instant.toString()`. Containers map to services with `trace_edges.normalize`; others are dropped and reported.
+  - **Symptoms** (one per system, in `convert.SYMPTOMS`): RE2-OB "Users of the online shop see degraded responses from frontend."; RE2-SS "Users of the online shop see degraded responses from front-end."
+  - **Manifest:**
+    - `fault` is the RCAEval fault, `mode` `decision`, `route` `none` (no model route recorded it), and `truth` `<service>|<category>` by ADR-020's map.
+    - `file` is `<16 hex of sha256("RE2-<SYS>/<case>/<rep>")>.json`, relative to the output directory, and `incident` a version-4 UUID from the same digest.
+    - `split` is `dev` for RE2-OB repetition 1. Otherwise it is `holdout`, and only when `--allow-holdout A` (RE2-OB repetitions 2-3) or `B` (RE2-SS) names it; without that, the converter refuses before reading a case file or creating `--out`.
+  - **Leakage rule** (`leakage.py`):
+    - Strict, failing the conversion and removing its recordings: a fault word (cpu, mem, disk, delay, loss, socket; whole word, case-insensitive, `_` breaking words, so `x_mem_y` hits and `overcommit_memory` does not) anywhere outside `untrustedText`, with nested JSON strings parsed; and a case directory name or a category anywhere, `untrustedText` included.
+    - Fault words inside `untrustedText` are counted in `converter-report.tsv`, never masked and never fatal. That text is the system's own log line, which the agent reads as data; rewriting it would falsify the evidence, and the leak guarded against is the converter's own (a name, a label, a sentence it writes).
+    - The report also lists metric prefixes and log containers outside the topology (T2's suggestion), the three known extras excepted.
+  - **Determinism:** the same input gives the same bytes (test). The JSON keys are in a fixed order, compact inside, indented outside.
+  - **RED/GREEN:**
+    - RED: `evals/.venv/bin/python -m pytest -q tests/test_rcaeval_convert.py`, a collection error (`cannot import name 'convert'`).
+    - GREEN: 32 passed. The full evals suite: 108 passed (76 + 32).
+    - `./mvnw -q test -Dtest=RcaevalRecordingTest,TopologyTest`: exit 0, `RcaevalRecordingTest` 1/1 (58 calls, none unrecorded, no conflict, `RulesDiagnosis.diagnose` returns), `TopologyTest` 37/37.
+  - **AC1 check:** `test_the_agents_copy_is_the_converters_output` regenerates the committed recording and `recordings.tsv` from the fixture and compares bytes. To regenerate, run from `evals/`: `.venv/bin/python -m kintsugi_evals convert-rcaeval --root tests/fixtures/rcaeval --system re2-ob --rep 1 --case checkoutservice_cpu --out ../agent/src/test/resources/rcaeval`, then delete the `converter-report.tsv` it writes there.
+  - **Real-data sanity** (repetition 1, `--case checkoutservice_cpu --case productcatalogservice_delay`, under `python3 -I`, output in the session scratchpad): 2 recordings of about 40 KB, 58 calls each, 10 latency series of 58 points (no `NaN`, none for `redis`), no WARN or ERROR line in either incident window, no untrusted fault word, no unknown prefix or container; 0.8 s.
+  - **Data reads (dev only):**
+    - the header and values of `checkoutservice_cpu/1` (`simple_metrics.csv`, `logs.csv`, `metrics.csv`, `metrics_postprocess.log`);
+    - the `latency-50` values and `traces.csv` durations of five `*_cpu/1` cases and of `currencyservice_delay/1` and `productcatalogservice_delay/1`;
+    - the `level` and `container_name` tally over the 30 repetition-1 `logs.csv`, with one example message per group and an error-word check on blank-level messages.
+
+    No repetition 2-3 or RE2-SS file was opened.
+
+  - The parent re-ran the full evals suite (108 passed) and `RcaevalRecordingTest` (green). Accepted notes: the blinded file name is an unsalted hash, so it can be reversed by enumerating the 90 case names; the agent never reads file names, so this is recorded, not fixed. The regeneration command leaves a `converter-report.tsv` in the fixture directory, which must be deleted by hand (a follow-up for T5's docs).
 
 ## Next step
 
-T3: the converter core (branch `feat/rcaeval-converter-01-core`). Carried from T2: T4 must alias the trace name `frontendservice` to `frontend`. The extra components RCAEval's `drop_extra` removes (`redis`, `rabbitmq`, `queue-master`, `session`) stay as services. They are never a root cause in RE2, so keeping them makes the agent's choice harder, not easier; the evaluator scores whatever service is named.
+T4: traces → `traffic_counts` for OB, with the T2 review items (one shared alias table, `frontendservice` → `frontend`; a non-zero exit from `trace_edges` when it finds no pair).

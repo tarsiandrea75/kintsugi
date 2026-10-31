@@ -1,0 +1,2 @@
+time,timestamp,container_name,message,level,req_path,error,cluster_id,log_template
+00:00,1700003630000000000,frontend,failed to convert currency,warning,,,1,failed to convert currency

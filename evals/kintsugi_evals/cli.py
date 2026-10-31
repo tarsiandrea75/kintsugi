@@ -2,11 +2,14 @@
 
 Prints the report and, with --out, writes report.txt, scores.tsv, paired.tsv, inputs.tsv and a
 copy of every input summary.tsv, so the result regenerates from committed files alone.
+
+`python -m kintsugi_evals convert-rcaeval` turns RCAEval RE2 cases into replay recordings (ADR-020).
 """
 
 import argparse
 import csv
 import hashlib
+import os
 import re
 import shutil
 import sys
@@ -55,6 +58,17 @@ def _parser():
     bench = commands.add_parser("benchmark", help="render docs/benchmark.md from committed result dirs")
     bench.add_argument("--out", required=True, help="the Markdown file to write")
     bench.add_argument("dirs", nargs="+", help="result dirs written by score --out, in document order")
+    rca = commands.add_parser("convert-rcaeval", help="convert RCAEval RE2 cases into replay recordings")
+    rca.add_argument("--root", help="the extracted dataset, holding RE2-OB/ and RE2-SS/ "
+                                    "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
+    rca.add_argument("--system", required=True, choices=["re2-ob", "re2-ss"])
+    rca.add_argument("--rep", required=True, type=int, help="the repetition, 1 to 3")
+    rca.add_argument("--out", help="the recordings directory (default: evals/out/rcaeval/<system>-rep<rep>/)")
+    rca.add_argument("--allow-holdout", metavar="NAME", help="convert holdout NAME (A: RE2-OB repetitions 2-3, "
+                                                              "B: RE2-SS), only under its committed plan")
+    rca.add_argument("--case", action="append", dest="cases", metavar="NAME",
+                     help="convert only this case directory, e.g. checkoutservice_cpu; repeatable")
+    rca.add_argument("--topology", help="the topology file (default: the agent's topology/<system>.json)")
     return parser
 
 
@@ -204,6 +218,23 @@ def benchmark(args):
     return 0
 
 
+def convert_rcaeval(args):
+    from .rcaeval import convert, leakage
+
+    root = args.root or os.environ.get("KINTSUGI_RCAEVAL_DIR") or "~/data/rcaeval"
+    out = args.out or convert.REPO / "evals" / "out" / "rcaeval" / f"{args.system}-rep{args.rep}"
+    try:
+        summary = convert.convert(root, args.system, args.rep, out, allow_holdout=args.allow_holdout,
+                                  cases=args.cases, topology=args.topology)
+    except (convert.HoldoutRefused, leakage.LeakageError, ValueError, OSError) as error:
+        raise SystemExit(f"convert-rcaeval: {error}") from None
+    print(f"converted {summary.cases} cases of {convert.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
+          f"(split {summary.split}) to {summary.out}; fault words in untrustedText: {summary.untrusted_hits} "
+          f"(converter-report.tsv)")
+    return 0
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
-    return benchmark(args) if args.command == "benchmark" else score(args)
+    commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval}
+    return commands.get(args.command, score)(args)
