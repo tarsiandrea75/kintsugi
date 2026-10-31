@@ -57,6 +57,8 @@ import dev.kintsugi.agent.lab.LabToolsUnavailableException;
 import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.AgentMode.DossierGathering;
+import dev.kintsugi.agent.rules.RulesCandidate;
+import dev.kintsugi.agent.rules.RulesDiagnosis;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -97,6 +99,17 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/** Why a loop, or a replay driver, is not built without a decision view. */
 	static final String NULL_VIEW = "decisionView must not be null: DossierView.TABLES is the default view";
+
+	/**
+	 * The {@code REPORT} step's summary when a hybrid run's rules propose no candidate (hybrid T3; ADR-019): the run
+	 * ends with both causes UNKNOWN and calls no model, not even the warm-up.
+	 */
+	static final String NO_CANDIDATE = "valid; no candidate: the rules proposed none, so both causes are UNKNOWN and "
+			+ "no model was called";
+
+	/** The stored summary of that report. */
+	static final String NO_CANDIDATE_SUMMARY = "The rules proposed no candidate from the dossier's facts, so both "
+			+ "causes are UNKNOWN; no model was called.";
 
 	/** Why a loop is not built without a decision report. */
 	static final String NULL_REPORT = "decisionReport must not be null: DecisionReport.PLAIN is the default report";
@@ -243,6 +256,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		DossierGathering gathering = run.mode.dossierGathering();
 		if (gathering == DossierGathering.BEFORE_WARM_UP) {
 			dossier(run);
+			if (run.candidates != null && run.candidates.isEmpty()) {
+				// Config H with nothing to choose from: UNKNOWN, before the warm-up, so the model is never asked.
+				return noCandidate(run);
+			}
 		}
 		warmUp(run);
 		if (gathering == DossierGathering.AFTER_WARM_UP) {
@@ -339,6 +356,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			// The sheets are kept with the service that owns each line, which the assessed report's checks read (T2).
 			run.sheets = view == DossierView.SHEETS ? ServiceSheets.render(dossier) : null;
 			run.dossierText = run.sheets == null ? view.render(dossier) : run.sheets.text();
+			// The hybrid report's candidates, from the typed record, never the text, so either view gives the same.
+			run.candidates = report(run) == DecisionReport.HYBRID ? RulesDiagnosis.candidates(dossier) : null;
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
 		}
@@ -575,24 +594,29 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * The report: one call without tools, constrained by the report schema, checked in code, with one retry. Decision
 	 * mode asks for the assessed report when {@code kintsugi.agent.decision.report} says so and the run has the sheets
 	 * (T2); a gathering that gave no dossier leaves no line to assess, so such a run asks for the plain report, which
-	 * can then be valid only with both causes UNKNOWN, as with the plain setting.
+	 * can then be valid only with both causes UNKNOWN, as with the plain setting. The hybrid report (hybrid T3) is the
+	 * plain one with the rules' candidates in its task and a cause checked against them; a gathering that gave no
+	 * dossier gives no candidates, so such a run too asks for the plain report.
 	 */
 	private String conclude(Run run) {
 		// The report is written from the evidence, not from the last phase's plan (T5c8).
 		run.plan = null;
-		boolean assessed = run.sheets != null
-				&& run.mode.reportFrom(this.decisionReport).orElse(DecisionReport.PLAIN) == DecisionReport.ASSESSED;
+		boolean assessed = run.sheets != null && report(run) == DecisionReport.ASSESSED;
+		List<RulesCandidate> candidates = run.candidates;
 		List<String> errors = List.of();
 		for (int attempt = 1; attempt <= 2; attempt++) {
 			List<Message> messages = run.opening(0);
 			Prompts.State state = run.state(Phase.CONCLUDE, 0);
 			messages.add(new UserMessage(assessed ? Prompts.assessedReport(state, errors)
-					: Prompts.report(state, errors, run.toolSteps.values())));
+					: candidates != null ? Prompts.hybridReport(state, errors, run.toolSteps.values(), candidates)
+							: Prompts.report(state, errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(),
 					assessed ? Schemas.ASSESSED_REPORT : Schemas.report(run.mode));
 			JsonNode report = Answers.json(answer.text());
 			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets)
-					: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);
+					: candidates != null
+							? ReportCheck.checkHybrid(report, run.toolSteps, run.mode, run.dossierText, candidates)
+							: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText);
 			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
 				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one. The
@@ -610,6 +634,29 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			}
 		}
 		throw new RunEnd(IncidentStatus.INVALID_REPORT, REPORT_INVALID);
+	}
+
+	/** The report this run asks for: the setting in decision mode, the plain report in the others. */
+	private DecisionReport report(Run run) {
+		return run.mode.reportFrom(this.decisionReport).orElse(DecisionReport.PLAIN);
+	}
+
+	/**
+	 * A hybrid run whose rules proposed no candidate (hybrid T3; ADR-019): no model is called, and the run completes
+	 * with both causes UNKNOWN, no evidence and a confidence of 0, stored as a valid plain report is. Its one
+	 * {@code REPORT} step, with no model and no answer, says why ({@link #NO_CANDIDATE}).
+	 */
+	private String noCandidate(Run run) {
+		ObjectNode report = JSON.createObjectNode();
+		report.put("summary", NO_CANDIDATE_SUMMARY);
+		report.putArray("evidence");
+		report.put("rootCauseService", Causes.UNKNOWN);
+		report.put("rootCauseCategory", Causes.UNKNOWN);
+		report.put("confidence", 0.0);
+		write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), null, null, null, null, null, null, null,
+				null, NO_CANDIDATE, null, 0, now()));
+		ReportCheck.Result checked = new ReportCheck.Result(List.of(), List.of(), List.of(), NO_CANDIDATE_SUMMARY);
+		return stored(run, report, checked, false);
 	}
 
 	/**
@@ -883,6 +930,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		 * assessed report is checked against (service-assessment T2); null otherwise.
 		 */
 		ServiceSheets.Rendered sheets;
+
+		/**
+		 * The rules' candidates a hybrid run's report task lists and its check reads (hybrid T3; ADR-019), possibly
+		 * none; null when the run asks for another report or its gathering gave no dossier.
+		 */
+		List<RulesCandidate> candidates;
 
 		/** Every tool step, refusals included, by step number: what the evidence check reads. */
 		final Map<Integer, ToolStep> toolSteps = new LinkedHashMap<>();

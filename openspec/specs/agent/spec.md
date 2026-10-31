@@ -737,7 +737,7 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 2. **R-DOWN**, the F1 and F2 rule: from the entry service, follow `CallGraph.calls` down while the next callee is slow (incident mean latency at least 2× the previous window's and at least 0.5 s, or at least 3 timeouts in its callers' rows) or refusing (answers with a numeric status of at least 400 are at least 20% of its answers, and at least 3). The verdict is the last such component, `DEPENDENCY_REJECTING` when it is refusing, else `DEPENDENCY_LATENCY`.
 3. **R-NONE**: no rule fires. The verdict is `UNKNOWN|UNKNOWN`.
 
-It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a discriminator: a recorded limit. Config 0 is a baseline, never the agent's answer: only replay's `rules` route runs it ("Replay of recorded tool outputs"), and `AgentRoute`, `ModelRoute`, `RouteEnvironmentPostProcessor` and `LoopConfig` stay closed to it, so `kintsugi.agent.route=rules` stops the start as any unknown route does ("Routes"). A threshold change needs a new ADR revision, and its dev result is exploratory.
+It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a discriminator: a recorded limit. Config 0 is a baseline, never the agent's answer: only replay's `rules` route runs it, and the rules enter the agent only as the hybrid report's proposer ("The hybrid report (Config H)", [ADR-019](../../../docs/adr/ADR-019-hybrid-config.md)) ("Replay of recorded tool outputs"), and `AgentRoute`, `ModelRoute`, `RouteEnvironmentPostProcessor` and `LoopConfig` stay closed to it, so `kintsugi.agent.route=rules` stops the start as any unknown route does ("Routes"). A threshold change needs a new ADR revision, and its dev result is exploratory.
 
 #### Scenario: The golden dossiers (rules-baseline T2)
 - GIVEN the F1, F3 and healthy golden dossiers of the `dossier/` fixtures
@@ -1023,7 +1023,7 @@ In decision mode (`kintsugi.agent.mode` = `decision`, set by `KINTSUGI_AGENT_MOD
 1. the mode, route and model recorded on the incident ("Routes");
 2. the dossier, gathered, rendered and recorded as in dossier mode (one `DOSSIER` step with the dossier message, bounded by the `ACT` call deadline; "Dossier mode"), but at the incident's opening, before the warm-up;
 3. the warm-up, on the local route only ("The warm-up"), on the `ACT` route as in the other modes: in M2 one route serves both tasks, so it loads the model the report uses. A warm-up that fails ends the run `FAILED` after the `DOSSIER` step;
-4. one `REPORT` call in `CONCLUDE`, with the one retry of "Evidence is checked" after an invalid report; a second invalid report ends the run `INVALID_REPORT`;
+4. one `REPORT` call in `CONCLUDE`, with the one retry of "Evidence is checked" after an invalid report; a second invalid report ends the run `INVALID_REPORT`. With the hybrid report and no candidate, the run ends after the `DOSSIER` step instead, with no warm-up and no model call ("The hybrid report (Config H)");
 5. the stored report, with `mode` `decision`.
 
 It MUST make no `TRIAGE`, `INVESTIGATE` or `KNOWLEDGE` call: no `ACT` step, no tool offered to the model, and no lab call but the dossier's. Its tool budget is 0, and a run makes 1 or 2 model calls.
@@ -1032,7 +1032,7 @@ The report call MUST read what a dossier-mode report call reads when no drill-do
 
 The dossier's view is `kintsugi.agent.decision.view` **(service-assessment T1)**, set by `KINTSUGI_AGENT_DECISION_VIEW`: `tables`, the default, writes the tables ("Evidence dossier rendering"), so the dossier message is today's, byte for byte; `sheets` writes the per-service sheets in their place, after the same introduction, its citing sentence included, and a report cites their lines as it cites the tables'. Any other value stops the agent's start, naming the property: `kintsugi.agent.decision.view must be tables or sheets, got "<value>"`. Only decision mode applies it: explorer mode has no dossier, and dossier mode always writes the tables. Its value is checked in every mode, though **(service-assessment T1r)**, so any other value, an empty one included (`KINTSUGI_AGENT_DECISION_VIEW=` binds `""`, since the default `tables` replaces only a variable that is not set), stops an explorer or dossier start too: a typo fails at once, not in a later decision run. A replay sets it per run (`replay-agent.sh --view`, decision mode only) and records it with each sample ("Replay of recorded tool outputs"); so does the report (`replay-agent.sh --report`, **service-assessment T2r**). Why a setting whose default is today's dossier: the feature's first measurement (M0) reads today's prompt, and each variant is then measured against it on the same recordings.
 
-The report is `kintsugi.agent.decision.report` **(service-assessment T2)**, set by `KINTSUGI_AGENT_DECISION_REPORT`: `plain`, the default, asks for the report of "The report", so the report call's instruction and schema are today's, byte for byte, in either view; `assessed` asks for the assessed report ("The assessed report") in its place. Any other value stops the agent's start, naming the property: `kintsugi.agent.decision.report must be plain or assessed, got "<value>"`, checked in every mode as the view is, an empty value included. The assessed report needs the sheets, since its checks read the owner of each line: in decision mode, `assessed` with the view `tables` stops the start with `kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got tables: the assessed report's checks read the service that owns each line of the sheets`. Only decision mode applies it: explorer and dossier mode always ask for the plain report, and the pair does not stop their start. A gathering that gives no dossier leaves no line to assess, so such a run asks for the plain report, which can then be valid only with both causes `UNKNOWN`, as with `plain`. Why a setting whose default is today's report: as for the view, M0 reads today's prompt, and V1 (`sheets` with `plain`) and V2 (`sheets` with `assessed`) are each measured against it.
+The report is `kintsugi.agent.decision.report` **(service-assessment T2)**, set by `KINTSUGI_AGENT_DECISION_REPORT`: `plain`, the default, asks for the report of "The report", so the report call's instruction and schema are today's, byte for byte, in either view; `assessed` asks for the assessed report ("The assessed report") in its place; `hybrid` **(hybrid T3)** asks for the hybrid report ("The hybrid report (Config H)"), in either view. Any other value stops the agent's start, naming the property: `kintsugi.agent.decision.report must be plain, assessed or hybrid, got "<value>"`, checked in every mode as the view is, an empty value included. The assessed report needs the sheets, since its checks read the owner of each line: in decision mode, `assessed` with the view `tables` stops the start with `kintsugi.agent.decision.report=assessed needs kintsugi.agent.decision.view=sheets, got tables: the assessed report's checks read the service that owns each line of the sheets`. Only decision mode applies it: explorer and dossier mode always ask for the plain report, and the pair does not stop their start. A gathering that gives no dossier leaves no line to assess, so such a run asks for the plain report, which can then be valid only with both causes `UNKNOWN`, as with `plain`. Why a setting whose default is today's report: as for the view, M0 reads today's prompt, and V1 (`sheets` with `plain`) and V2 (`sheets` with `assessed`) are each measured against it.
 
 Why the dossier first: its windows end when it is gathered ("Evidence dossier gathering"); gathered before the warm-up, they end at the incident's opening, not after a model load of varying length. The incident's time budget still starts when the warm-up ends ("The warm-up"), so it neither counts nor bounds the gathering: the `ACT` call deadline alone does. Why the mode: a local dossier-mode replay sample took 1,500 to 1,900 s, 75% of it in `INVESTIGATE` and `KNOWLEDGE`, whose drill-down calls a replay mostly could not answer; one report call measures the diagnosis in about 30 s on the cloud route, and its replay makes no unrecorded call. Why the real state lines: in replay, dossier-mode report calls also carried the drill-down evidence, so they were never byte-identical to this call, and decision runs are compared with each other; a line claiming phases that never ran and 6 calls left would be false input to the model.
 
@@ -1123,12 +1123,51 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 #### Scenario: Any other report stops the start in every mode (service-assessment T2)
 - GIVEN `KINTSUGI_AGENT_DECISION_REPORT` set to `rich`, or set and empty
 - WHEN the agent starts in any mode
-- THEN the start stops with `kintsugi.agent.decision.report must be plain or assessed, got "rich"`, or `got ""` for the empty value
+- THEN the start stops with `kintsugi.agent.decision.report must be plain, assessed or hybrid, got "rich"`, or `got ""` for the empty value
 
 #### Scenario: An assessed run without a dossier asks for the plain report (service-assessment T2)
 - GIVEN the assessed report, and a gathering that gives no dossier
 - WHEN the report call is built
 - THEN its schema and task are the plain report's, with `Citable toolCallIds: none.`, and a report with both causes `UNKNOWN` completes the run
+
+### Requirement: The hybrid report (Config H)
+
+With `kintsugi.agent.decision.report` = `hybrid` (`KINTSUGI_AGENT_DECISION_REPORT=hybrid`), decision mode MUST ask the model to choose among the rules' candidates **(hybrid T3)** ([ADR-019](../../../docs/adr/ADR-019-hybrid-config.md); [feature document](../../../odd/tasks/hybrid.md)). Once the dossier is gathered, code computes `RulesDiagnosis.candidates` from the typed `Dossier` ("Rules candidates (Config H)"), never from the rendered text, so either view gives the same list.
+
+- **No candidate.** The run ends `COMPLETED` before the warm-up, with no model call. Its one `REPORT` step has no model and no answer, and its summary is `valid; no candidate: the rules proposed none, so both causes are UNKNOWN and no model was called`. The stored report is that of "The report", with both causes `UNKNOWN`, no evidence and a confidence of 0.
+- **Candidates.** The report call is the plain report's ("The report"), with the same system message, dossier message and schema. Its instruction is the plain one, `Citable toolCallIds: dossier.` included, followed by the block `Candidates the rules propose from the dossier's facts, in their order:`, one numbered line per candidate (`<n>. <service>|<category>, by <rule>: <facts joined by "; ">`), and the choice: `Pick exactly one candidate: write its rootCauseService and rootCauseCategory as listed, or both UNKNOWN when the evidence supports none of them. Say in the summary why you picked it, and cite the dossier lines that support it.` A retry's errors follow the block.
+- **The check.** Every rule of "Evidence is checked" holds, and one more: `rootCauseService|rootCauseCategory` MUST be a listed pair or `UNKNOWN|UNKNOWN`. Otherwise the report is invalid with `rootCauseService|rootCauseCategory <pair> is not a listed candidate: name one of <pairs joined by ", ">, or UNKNOWN|UNKNOWN`, listed with any other error. The retry and `INVALID_REPORT` are those of decision mode; there is no fallback to a candidate (ADR-019).
+- **No dossier.** A gathering that gives no dossier gives no candidates, so the run asks for the plain report, which can then be valid only with both causes `UNKNOWN`, as the assessed report does.
+
+Only decision mode applies it: explorer and dossier mode ask for the plain report. Why a closed list: a choice the code can check keeps H − 0 the model's own contribution, and an empty list leaves the model nothing to add, so it is not asked.
+
+#### Scenario: The candidates follow the plain task (hybrid T3)
+- GIVEN the hybrid report, and a dossier on which the rules propose `order-service|CONFIGURATION` by `R-REACH`
+- WHEN the report call is built
+- THEN its instruction is the plain report's, then the candidate block numbering that candidate with its rule and facts, then the choice, and its schema is the plain report's
+- AND a report naming `order-service|CONFIGURATION` and citing the dossier completes the run with that cause
+
+#### Scenario: A pair outside the list is retried, then invalid (hybrid T3)
+- GIVEN the hybrid report, and two answers naming `postgres|DEPENDENCY_LATENCY`, which is not listed
+- WHEN the run checks them
+- THEN the first `REPORT` step's summary is `invalid: rootCauseService|rootCauseCategory postgres|DEPENDENCY_LATENCY is not a listed candidate: name one of order-service|CONFIGURATION, or UNKNOWN|UNKNOWN`, and the retry is told so
+- AND the second ends the run `INVALID_REPORT` after 2 model calls, while a retry with both causes `UNKNOWN` completes it
+
+#### Scenario: A listed service with another category is outside the list (hybrid T3)
+- GIVEN the candidates `order-service|CONFIGURATION` and `payment-service|DEPENDENCY_LATENCY`
+- WHEN a report names `order-service|DEPENDENCY_LATENCY`
+- THEN it is invalid with the membership error; a report breaking another rule too gets both errors
+
+#### Scenario: No candidate, no model call (hybrid T3)
+- GIVEN the hybrid report, and a dossier with no connection failure and no slow or refusing service
+- WHEN an incident runs
+- THEN it ends `COMPLETED` with steps `DOSSIER` and `REPORT`, no warm-up and no model call, and its stored report has both causes `UNKNOWN` and no evidence
+
+#### Scenario: Decision mode only, either view (hybrid T3)
+- GIVEN the hybrid report
+- WHEN the agent starts in decision mode with `tables` or `sheets`, or an incident runs in dossier mode
+- THEN the start goes on in either view, and the dossier-mode report call is the plain report's, with no candidate block
+- AND a hybrid run whose gathering gave no dossier asks for the plain report
 
 ### Requirement: Summaries built in code
 

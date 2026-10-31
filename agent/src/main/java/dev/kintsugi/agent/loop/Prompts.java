@@ -7,6 +7,7 @@ import java.util.List;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.lab.Phase;
+import dev.kintsugi.agent.rules.RulesCandidate;
 
 /**
  * The texts the model reads (agent spec, "Untrusted text is data", "Summaries built in code", "What one call sees").
@@ -150,6 +151,19 @@ final class Prompts {
 			builds it from the lines of the ORIGIN and AFFECTED services.""";
 
 	/**
+	 * The hybrid report's candidate block (hybrid T3; ADR-019): this heading, the numbered candidates, then the closed
+	 * choice, one listed pair or UNKNOWN, explained. The choice states the rule {@link ReportCheck#checkHybrid} checks,
+	 * so that a first answer can follow it.
+	 */
+	private static final String HYBRID_CANDIDATES = "Candidates the rules propose from the dossier's facts, in their "
+			+ "order:";
+
+	private static final String HYBRID_CHOICE = """
+			Pick exactly one candidate: write its rootCauseService and rootCauseCategory as listed, or both UNKNOWN \
+			when the evidence supports none of them. Say in the summary why you picked it, and cite the dossier lines \
+			that support it.""";
+
+	/**
 	 * The warm-up's only message. It loads the model before the run; its answer is not read, and it holds nothing
 	 * about the incident.
 	 */
@@ -263,6 +277,27 @@ final class Prompts {
 	 */
 	static String assessedReport(State state, List<String> errors) {
 		return state.text() + "\n\n" + ASSESSED_REPORT_TASK + retry("report", errors);
+	}
+
+	/**
+	 * The instruction of a hybrid report call (hybrid T3; ADR-019): decision mode, when
+	 * {@code kintsugi.agent.decision.report} is {@code hybrid} and the rules proposed at least one candidate. It is the
+	 * plain report's instruction, then the candidates numbered in the rules' order, each its pair, rule and facts, then
+	 * the rule {@link ReportCheck#checkHybrid} checks: one listed pair or UNKNOWN. {@code errors} come last, as for the
+	 * plain report.
+	 * @param candidates the rules' candidates, at least one
+	 */
+	static String hybridReport(State state, List<String> errors, Collection<ToolStep> toolSteps,
+			List<RulesCandidate> candidates) {
+		StringBuilder block = new StringBuilder("\n\n").append(HYBRID_CANDIDATES);
+		for (int i = 0; i < candidates.size(); i++) {
+			RulesCandidate candidate = candidates.get(i);
+			block.append('\n').append(i + 1).append(". ").append(ReportCheck.pair(candidate)).append(", by ")
+				.append(candidate.rule()).append(": ").append(String.join("; ", candidate.facts()));
+		}
+		block.append('\n').append(HYBRID_CHOICE);
+		return state.text() + "\n\n" + REPORT_TASK + (state.dossier() ? REPORT_DOSSIER : "")
+				+ citable(toolSteps, state.dossier()) + block + retry("report", errors);
 	}
 
 	private static String citable(Collection<ToolStep> toolSteps, boolean dossier) {

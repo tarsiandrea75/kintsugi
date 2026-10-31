@@ -6,7 +6,8 @@ import dev.kintsugi.agent.dossier.DossierView;
 
 /**
  * Which report decision mode asks for, {@code kintsugi.agent.decision.report} (agent spec, "Decision mode", "The
- * report"; odd/tasks/service-assessment.md T2). Explorer and dossier mode always ask for the plain report.
+ * report"; odd/tasks/service-assessment.md T2; odd/tasks/hybrid.md T3). Explorer and dossier mode always ask for the
+ * plain report.
  */
 public enum DecisionReport {
 
@@ -17,7 +18,13 @@ public enum DecisionReport {
 	 * The assessed report: first the role of each lab service, each citing a line of its own sheet, then the summary
 	 * and the cause. Code checks the roles against the call graph and derives the evidence from them.
 	 */
-	ASSESSED;
+	ASSESSED,
+
+	/**
+	 * The hybrid report, Config H (ADR-019): the plain report, with the rules' candidates listed in its task, and a
+	 * cause that must be one of them or UNKNOWN. With no candidate the run is UNKNOWN and calls no model.
+	 */
+	HYBRID;
 
 	/** The property that selects the report; only decision mode applies it, though every start checks its value. */
 	public static final String PROPERTY = "kintsugi.agent.decision.report";
@@ -30,7 +37,8 @@ public enum DecisionReport {
 
 	/**
 	 * The report named by the property's value.
-	 * @throws IllegalArgumentException for any value but {@code plain} or {@code assessed}, naming the property
+	 * @throws IllegalArgumentException for any value but {@code plain}, {@code assessed} or {@code hybrid}, naming the
+	 * property
 	 */
 	public static DecisionReport of(String value) {
 		for (DecisionReport report : values()) {
@@ -38,7 +46,7 @@ public enum DecisionReport {
 				return report;
 			}
 		}
-		throw new IllegalArgumentException(PROPERTY + " must be plain or assessed, got \"" + value + "\"");
+		throw new IllegalArgumentException(PROPERTY + " must be plain, assessed or hybrid, got \"" + value + "\"");
 	}
 
 	/** The value of the property. */
@@ -48,7 +56,8 @@ public enum DecisionReport {
 
 	/**
 	 * Checks that decision mode can ask for this report when it writes its dossier in {@code view}: the assessed report
-	 * needs the sheets, since its checks read the service that owns each line.
+	 * needs the sheets, since its checks read the service that owns each line; the plain and hybrid reports take either
+	 * view, the hybrid one reading the typed dossier, never its text.
 	 * @throws IllegalArgumentException for the assessed report with any other view, naming both properties
 	 */
 	public void checkView(DossierView view) {

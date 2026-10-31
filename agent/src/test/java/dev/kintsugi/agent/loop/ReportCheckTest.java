@@ -22,6 +22,7 @@ import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.lab.ToolOutcome;
+import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -720,6 +721,53 @@ class ReportCheckTest {
 		for (String field : List.of("summary", "rootCauseService", "rootCauseCategory", "confidence")) {
 			assertThat(schema.at("/properties/" + field)).as(field).isEqualTo(plain.get(field));
 		}
+	}
+
+	@Test
+	void aHybridReportNamingAListedCandidateIsCheckedAsAPlainOne() {
+		ReportCheck.Result result = checkHybrid(report("order-service", "CONFIGURATION", dossierEvidence(17)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
+			.containsExactly("| client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |");
+	}
+
+	@Test
+	void aHybridReportWithBothCausesUnknownIsValid() {
+		ReportCheck.Result result = checkHybrid(report("UNKNOWN", "UNKNOWN"));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).isEmpty();
+	}
+
+	@Test
+	void aHybridReportNamingAPairOutsideTheListIsInvalidAndTheErrorNamesTheAllowedPairs() {
+		// The service is listed, but with another category: the pair, not the service, must be listed.
+		ReportCheck.Result result = checkHybrid(report("order-service", "DEPENDENCY_LATENCY", dossierEvidence(17)));
+
+		assertThat(result.errors()).containsExactly(HYBRID_OUTSIDE.formatted("order-service|DEPENDENCY_LATENCY"));
+		assertThat(result.evidence()).isNull();
+	}
+
+	@Test
+	void aHybridReportBreakingAnotherRuleGetsBothErrorsForTheRetry() {
+		ReportCheck.Result result = checkHybrid(report("postgres", "RESOURCE_EXHAUSTION"));
+
+		assertThat(result.errors()).containsExactly("evidence must hold 1 to 5 items unless both causes are UNKNOWN",
+				HYBRID_OUTSIDE.formatted("postgres|RESOURCE_EXHAUSTION"));
+	}
+
+	/** The candidates of the hybrid checks: two, in the order the rules propose them. */
+	private static final List<RulesCandidate> CANDIDATES = List.of(
+			new RulesCandidate("order-service", "CONFIGURATION", "R-REACH", List.of("a connection failure")),
+			new RulesCandidate("payment-service", "DEPENDENCY_LATENCY", "R-DOWN", List.of("slow")));
+
+	/** The membership error for those candidates, with the pair the report named. */
+	private static final String HYBRID_OUTSIDE = "rootCauseService|rootCauseCategory %s is not a listed candidate: "
+			+ "name one of order-service|CONFIGURATION, payment-service|DEPENDENCY_LATENCY, or UNKNOWN|UNKNOWN";
+
+	private static ReportCheck.Result checkHybrid(String answer) {
+		return ReportCheck.checkHybrid(Answers.json(answer), STEPS, AgentMode.DECISION, DOSSIER, CANDIDATES);
 	}
 
 	/** A step that ran, with its fixture's output and the summary the loop builds from it. */

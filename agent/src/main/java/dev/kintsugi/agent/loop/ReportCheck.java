@@ -18,6 +18,7 @@ import tools.jackson.databind.node.ObjectNode;
 import dev.kintsugi.agent.dossier.CallGraph;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.ServiceSheets;
+import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -198,6 +199,35 @@ final class ReportCheck {
 		}
 		String text = storedSummary(report, dropped);
 		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text);
+	}
+
+	/**
+	 * Checks a hybrid report (hybrid T3; ADR-019): every rule of {@link #check}, then one more, that
+	 * {@code rootCauseService|rootCauseCategory} is the pair of one of {@code candidates} or {@code UNKNOWN|UNKNOWN}. A
+	 * pair outside the list is an error like the others, naming the allowed pairs, so it gets the same one retry.
+	 * @param candidates the rules' candidates the report task listed, at least one
+	 */
+	static Result checkHybrid(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
+			List<RulesCandidate> candidates) {
+		Result checked = check(report, toolSteps, mode, dossier);
+		if (report == null || !report.isObject()) {
+			return checked;
+		}
+		String named = report.path("rootCauseService").asString("") + "|"
+				+ report.path("rootCauseCategory").asString("");
+		List<String> pairs = candidates.stream().map(ReportCheck::pair).toList();
+		if (pairs.contains(named) || named.equals(Causes.UNKNOWN + "|" + Causes.UNKNOWN)) {
+			return checked;
+		}
+		List<String> errors = new ArrayList<>(checked.errors());
+		errors.add("rootCauseService|rootCauseCategory " + named + " is not a listed candidate: name one of "
+				+ String.join(", ", pairs) + ", or " + Causes.UNKNOWN + "|" + Causes.UNKNOWN);
+		return invalid(errors);
+	}
+
+	/** A candidate's {@code service|category}, as the report task lists it and a hybrid report must name it. */
+	static String pair(RulesCandidate candidate) {
+		return candidate.service() + "|" + candidate.category();
 	}
 
 	/**

@@ -48,8 +48,9 @@ class LoopConfig {
 	 * {@code decision} (decision-instrument). Decision mode writes its dossier in the view of
 	 * {@code kintsugi.agent.decision.view} (service-assessment T1): {@code tables}, the default
 	 * ({@link DossierView#DEFAULT}), or {@code sheets}; and asks for the report of {@code kintsugi.agent.decision.report}
-	 * (T2): {@code plain}, the default ({@link DecisionReport#DEFAULT}), or {@code assessed}, which needs the sheets. The
-	 * other modes ignore both. Any other value of any of the three stops the agent's start with the property's name.
+	 * (T2): {@code plain}, the default ({@link DecisionReport#DEFAULT}), {@code assessed}, which needs the sheets, or
+	 * {@code hybrid} (hybrid T3), which takes either view. The other modes ignore both. Any other value of any of the
+	 * three stops the agent's start with the property's name.
 	 * The view and the report are checked in every mode, although only decision mode applies them, so any other value,
 	 * an empty one included ({@code KINTSUGI_AGENT_DECISION_VIEW=}, which the default does not replace), stops an
 	 * explorer or dossier start too: a typo fails at once, not in a later decision run. The assessed report with the

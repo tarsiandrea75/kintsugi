@@ -50,6 +50,8 @@ import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.Phase;
+import dev.kintsugi.agent.rules.RulesCandidate;
+import dev.kintsugi.agent.rules.RulesDiagnosis;
 
 /**
  * Decision mode (agent spec, "Decision mode"; odd/tasks/decision-instrument.md T1): code gathers the evidence dossier
@@ -579,7 +581,8 @@ class AgentLoopDecisionModeTest {
 						fixedClock(), mode.value(), "sheets", report))
 					.as("%s, \"%s\"", mode.value(), report)
 					.isInstanceOf(IllegalArgumentException.class)
-					.hasMessage("kintsugi.agent.decision.report must be plain or assessed, got \"" + report + "\"");
+					.hasMessage(
+							"kintsugi.agent.decision.report must be plain, assessed or hybrid, got \"" + report + "\"");
 			}
 		}
 	}
@@ -588,14 +591,16 @@ class AgentLoopDecisionModeTest {
 	void theReportIsSelectedByItsVariableAndIsPlainByDefault() throws IOException {
 		assertThat(DecisionReport.of("plain")).isEqualTo(DecisionReport.PLAIN);
 		assertThat(DecisionReport.of("assessed")).isEqualTo(DecisionReport.ASSESSED);
+		assertThat(DecisionReport.of("hybrid")).isEqualTo(DecisionReport.HYBRID);
 		assertThat(List.of(DecisionReport.values())).extracting(DecisionReport::value)
-			.containsExactly("plain", "assessed");
+			.containsExactly("plain", "assessed", "hybrid");
 		assertThatThrownBy(() -> DecisionReport.of("rich")).isInstanceOf(IllegalArgumentException.class)
-			.hasMessage("kintsugi.agent.decision.report must be plain or assessed, got \"rich\"");
+			.hasMessage("kintsugi.agent.decision.report must be plain, assessed or hybrid, got \"rich\"");
 		// The default of the @Value bindings, and the one application.yaml writes as a literal.
 		assertThat(DecisionReport.of(DecisionReport.DEFAULT)).isEqualTo(DecisionReport.PLAIN);
 		assertThat(boundReport(Map.of())).isEqualTo(DecisionReport.DEFAULT);
 		assertThat(boundReport(Map.of("KINTSUGI_AGENT_DECISION_REPORT", "assessed"))).isEqualTo("assessed");
+		assertThat(boundReport(Map.of("KINTSUGI_AGENT_DECISION_REPORT", "hybrid"))).isEqualTo("hybrid");
 	}
 
 	@Test
@@ -667,8 +672,174 @@ class AgentLoopDecisionModeTest {
 		assertThat(boundView(Map.of("KINTSUGI_AGENT_DECISION_VIEW", "sheets"))).isEqualTo("sheets");
 	}
 
+	/**
+	 * The hybrid report (hybrid T3; ADR-019): the plain report's task, schema and checks, with the rules' candidates
+	 * listed after the citable ids, and a cause that must be one of them or UNKNOWN.
+	 */
+	@Test
+	void aHybridRunListsTheRulesCandidatesAfterThePlainTaskAndStoresTheListedPairItNames() {
+		Clock clock = fixedClock();
+		List<RulesCandidate> candidates = candidates(hybridLab(), clock);
+		assertThat(candidates).isNotEmpty();
+		RulesCandidate first = candidates.getFirst();
+		this.model.text(report(first.service(), first.category(), dossierEvidence(1)));
+		this.loop = loop(hybridLab(), DossierView.TABLES, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		Prompt prompt = this.model.prompts().getFirst();
+		StringBuilder block = new StringBuilder("\n\nCandidates the rules propose from the dossier's facts, in their ")
+			.append("order:");
+		for (int i = 0; i < candidates.size(); i++) {
+			RulesCandidate candidate = candidates.get(i);
+			block.append("\n").append(i + 1).append(". ").append(candidate.service()).append("|")
+				.append(candidate.category()).append(", by ").append(candidate.rule()).append(": ")
+				.append(String.join("; ", candidate.facts()));
+		}
+		block.append("\nPick exactly one candidate: write its rootCauseService and rootCauseCategory as listed, or "
+				+ "both UNKNOWN when the evidence supports none of them. Say in the summary why you picked it, and cite "
+				+ "the dossier lines that support it.");
+		assertThat(last(prompt)).isEqualTo(PLAIN_INSTRUCTION + block);
+		assertThat(schema(prompt)).isEqualTo(PLAIN_SCHEMA);
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
+		JsonNode stored = storedReport();
+		assertThat(stored.get("rootCauseService").asString()).isEqualTo(first.service());
+		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo(first.category());
+	}
+
+	@Test
+	void aHybridReportOutsideTheListIsRetriedOnceThenEndsTheRunInvalidReport() {
+		Clock clock = fixedClock();
+		String allowed = candidates(hybridLab(), clock).stream()
+			.map(candidate -> candidate.service() + "|" + candidate.category())
+			.collect(java.util.stream.Collectors.joining(", "));
+		// postgres is in no rule's reach: it is never a candidate.
+		String outside = "rootCauseService|rootCauseCategory postgres|DEPENDENCY_LATENCY is not a listed candidate: "
+				+ "name one of " + allowed + ", or UNKNOWN|UNKNOWN";
+		this.model.text(report("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1)))
+			.text(report("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1)));
+		this.loop = loop(hybridLab(), DossierView.TABLES, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.INVALID_REPORT);
+
+		assertThat(this.model.calls()).isEqualTo(2);
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE", "REPORT:CONCLUDE");
+		assertThat(step(2).get("summary")).isEqualTo("invalid: " + outside);
+		assertThat(last(this.model.prompts().get(1))).contains("Your previous report was rejected:\n- " + outside)
+			.contains("Candidates the rules propose");
+		assertThat(failureReason()).isEqualTo(AgentLoop.REPORT_INVALID);
+	}
+
+	@Test
+	void aHybridRetryWithBothCausesUnknownCompletesTheRun() {
+		Clock clock = fixedClock();
+		this.model.text(report("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1))).text(unknownReport());
+		this.loop = loop(hybridLab(), DossierView.SHEETS, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.model.calls()).isEqualTo(2);
+		assertThat(storedReport().get("rootCauseService").asString()).isEqualTo("UNKNOWN");
+		assertThat(storedReport().get("rootCauseCategory").asString()).isEqualTo("UNKNOWN");
+	}
+
+	@Test
+	void aHybridRunWithNoCandidateIsUnknownWithNoModelCall() {
+		FakeLabTools quiet = noCandidateLab();
+		Clock clock = fixedClock();
+		assertThat(candidates(noCandidateLab(), clock)).isEmpty();
+		this.loop = loop(quiet, DossierView.TABLES, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		// No warm-up and no report call: the model is never asked.
+		assertThat(this.model.calls()).isZero();
+		assertThat(this.model.warmUps()).isEmpty();
+		assertThat(quiet.calls()).hasSize(33);
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
+		assertThat(step(2).get("summary")).isEqualTo(AgentLoop.NO_CANDIDATE);
+		JsonNode stored = storedReport();
+		assertThat(stored.get("rootCauseService").asString()).isEqualTo("UNKNOWN");
+		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo("UNKNOWN");
+		assertThat(stored.get("evidence")).isEmpty();
+		assertThat(stored.get("mode").asString()).isEqualTo("decision");
+		assertThat(stored.get("stepsUsed").asInt()).isEqualTo(2);
+	}
+
+	@Test
+	void aHybridRunWhoseGatheringGaveNoDossierAsksForThePlainReport() {
+		// No dossier, so no candidate can be computed: the plain report, with nothing to cite, as the assessed one.
+		this.lab.breaks(new NoClassDefFoundError("dev/kintsugi/Missing"));
+		this.model.text(unknownReport());
+		this.loop = loop(AgentMode.DECISION, DossierView.TABLES, DecisionReport.HYBRID, fixedClock());
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		Prompt prompt = this.model.prompts().get(0);
+		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DECISION));
+		assertThat(last(prompt)).contains("Citable toolCallIds: none.").doesNotContain("Candidates");
+	}
+
+	@Test
+	void theHybridReportAppliesInDecisionModeOnlyAndInEitherView() {
+		Clock clock = fixedClock();
+		this.model.quiet().quiet().text(unknownReport());
+		this.loop = loop(AgentMode.DOSSIER, DossierView.TABLES, DecisionReport.HYBRID, clock);
+
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		Prompt prompt = this.model.prompts().getLast();
+		assertThat(last(prompt)).doesNotContain("Candidates");
+		assertThat(schema(prompt)).isEqualTo(Schemas.report(AgentMode.DOSSIER));
+		assertThat(AgentMode.DOSSIER.reportFrom(DecisionReport.HYBRID)).isEmpty();
+		assertThat(AgentMode.EXPLORER.reportFrom(DecisionReport.HYBRID)).isEmpty();
+		// It reads the typed dossier, never the rendered text, so either view takes it.
+		for (DossierView view : DossierView.values()) {
+			loop(AgentMode.DECISION, view, DecisionReport.HYBRID, clock).close();
+		}
+	}
+
 	private IncidentStatus run(AgentMode mode) {
 		return run(mode, Clock.systemUTC());
+	}
+
+	/** The candidates the rules propose on the dossier {@code lab} gives on {@code clock}. */
+	private static List<RulesCandidate> candidates(FakeLabTools lab, Clock clock) {
+		return RulesDiagnosis.candidates(new DossierGatherer(lab, clock).gather(15));
+	}
+
+	/** A decision loop over {@code lab} that writes its dossier in {@code view} and asks for the hybrid report. */
+	private AgentLoop loop(FakeLabTools lab, DossierView view, Clock clock) {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		return new AgentLoop(this.incidents,
+				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), lab,
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, AgentMode.DECISION, view,
+				DecisionReport.HYBRID);
+	}
+
+	/**
+	 * This test's F3 lab with no restart in the incident window, so that payment-service is healthy and R-REACH names
+	 * order-service: the rules propose one candidate, {@code order-service|CONFIGURATION}.
+	 */
+	private static FakeLabTools hybridLab() {
+		return lab().answer("service_restarts", resource("/dossier/healthy/service_restarts.json"));
+	}
+
+	/**
+	 * A lab with the healthy traffic of the golden dossiers: no connection failure, and no slow or refusing service, so
+	 * the rules propose no candidate.
+	 */
+	private static FakeLabTools noCandidateLab() {
+		return new FakeLabTools().answer("traffic_counts", resource("/dossier/healthy/traffic_counts-incident.json"));
+	}
+
+	private static String resource(String path) {
+		try (var in = AgentLoopDecisionModeTest.class.getResourceAsStream(path)) {
+			return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).strip();
+		}
+		catch (IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
 	}
 
 	private IncidentStatus run(AgentMode mode, Clock clock) {

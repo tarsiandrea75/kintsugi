@@ -60,7 +60,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 
 - [x] T1 ADR-019, the vision amendment, and this document. Route: inline (docs). Commit `8ba6a38`; passive docs, structural readback only.
 - [x] T2 `RulesDiagnosis.candidates`, tests first: golden dossiers, ordering, cap 5, no duplicates, healthy is empty, and `candidates[0]` equals `diagnose()` when it is not UNKNOWN. The agent spec's Config 0 requirement gets a candidates scenario. Route: delegated writer.
-- [ ] T3 The `hybrid` decision report, tests first: the prompt block, the membership check, retry then `INVALID_REPORT`, the empty list giving UNKNOWN with no call, production still closed to `route=rules`. The agent spec's "Decision mode" and "The report" requirements. Route: delegated writer.
+- [x] T3 The `hybrid` decision report, tests first: the prompt block, the membership check, retry then `INVALID_REPORT`, the empty list giving UNKNOWN with no call, production still closed to `route=rules`. The agent spec's "Decision mode" and "The report" requirements. Route: delegated writer.
 - [ ] T4 Replay `--report hybrid` and the `candidates` column, tests first. Rules rows write their candidates. Docs in `docs/setup.md`. Route: delegated writer.
 - [ ] T5 Scorer candidate recall, tests first, and the evals spec. Route: inline or delegated, decided at the task.
 - [ ] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
@@ -102,6 +102,18 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - Commit `d96320b`. Review assess (base `ccb7a40`): medium, `review_due` false, `under_budget`; the slice stays pending.
   - Design change: step 4 was dropped (see Design). The cap of 5 cannot bind in the lab, which has 4 services in `CallGraph.SERVICES`; it binds on RCAEval.
 
+- 2026-10-31: T3 done. Route: delegated writer (loop code, tests, spec). `DecisionReport.HYBRID` (`kintsugi.agent.decision.report=hybrid`).
+  - `AgentLoop.dossier()` keeps `RulesDiagnosis.candidates` in `Run.candidates`.
+  - An empty list ends the run COMPLETED as `UNKNOWN|UNKNOWN`, with no warm-up and no model call: decision mode gathers before the warm-up.
+  - `Prompts.hybridReport` adds the numbered candidate block to the plain task.
+  - `ReportCheck.checkHybrid` rejects a pair outside the list; the existing single retry and `INVALID_REPORT` apply.
+  - Agent spec: "Decision mode" updated, and a new requirement "The hybrid report (Config H)" with 5 scenarios.
+  - RED: 12 missing symbols. GREEN: AgentLoopDecisionModeTest 35, ReportCheckTest 65, 0 failures; full suite 607 tests, 0 failures. The T2 baseline was 597, not 599 (the writer measured HEAD `959a23a` in a scratch worktree), so T3 adds 10 tests. Parent spot check: both classes green.
+  - Accepted choices:
+    - When the gathering gives no dossier there is no list. The run then asks for the plain report, which can only be valid as UNKNOWN, mirroring ASSESSED.
+    - The stored report does not hold the candidates; T4 adds them to the replay output.
+    - The loop tests use F3 with healthy restarts (one candidate). Two candidates are covered in ReportCheckTest.
+
 ## Next step
 
-T3.
+T4.
