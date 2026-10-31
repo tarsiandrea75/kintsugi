@@ -129,6 +129,12 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - Candidates on dev: F1 `gateway-mock|DEPENDENCY_LATENCY` first, then `payment-service`, and in one case also `order-service`. F2 `gateway-mock|DEPENDENCY_REJECTING` alone. F3 `order-service|CONFIGURATION` alone. The truth is in every list (recall 15/15), and on F2 and F3 the list has a single entry. On dev, H can only lose to the rules by answering UNKNOWN or an invalid report, or by leaving the first candidate on F1.
   - Follow-ups: `ReplayDriver.rulesOnly(..., HYBRID)` is guarded only by the script; there is no script test for `--route cloud --report hybrid`, because it could start a paid run.
 
+- 2026-10-31: native review of `5cff0b2..4715600` (T4, high risk): consent granted, four lenses, approved and acknowledged (lineage `review-a49d8aeb95880378`).
+  - Fixed: R2-state-next-action-names-finished-task and R3-state-next-action-stale-after-t4 (STATE's next action).
+  - Follow-ups (SUGGESTIONs on `test-lib.sh:606-607`):
+    - R2-either-view-test-name-overstates-coverage: the test's name claims more coverage than it has.
+    - R3-hybrid-script-acceptance-partly-unproved: the script test proves only the local route's acceptance.
+
 ## Next step
 
 T5.
