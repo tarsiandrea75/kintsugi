@@ -142,6 +142,7 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - RED: 5 failed, 66 passed. GREEN: 72 passed (parent re-ran it).
   - Backward compatibility: `docs/benchmark.md` regenerated from the committed results is byte-identical (parent check with `--out ../docs/benchmark.md`, since the header prints that path). The committed `inputs/*-summary.tsv` re-score to their committed `report.txt`.
   - Smoke on the T4 rules dev run: recall 100% on F1, F2 and F3; AC@1 10/15.
+  - Commit `86b822d`. Review assess (base `4715600`): medium, `under_budget`; the slice stays pending.
 
 ## Next step
 
