@@ -99,6 +99,7 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
 - 2026-10-31: T2 done. Route: delegated writer (rules code, tests, spec). `RulesCandidate` is new. `RulesDiagnosis.candidates(Dossier)` implements order steps 1–3. `diagnose()` moved into a private `verdict()` with its body unchanged; `reach()` takes the first of `reachCallers()` under the same comparator; the walk's comparator became `BY_ABNORMALITY`. Agent spec: new requirement "Rules candidates (Config H)" with 4 scenarios.
   - RED: `RulesDiagnosisTest` failed to compile (46 missing symbols). GREEN: 27 tests, 0 failures; full `./mvnw -q test` exit 0, 599 tests, 0 failures.
   - AC1 on recordings: the Config 0 replays over dev and holdout (`replay-20261031T123404Z-rules`, `replay-20261031T123411Z-rules`) give the same verdict per case as the committed `0-summary.tsv` inputs.
+  - Commit `d96320b`. Review assess (base `ccb7a40`): medium, `review_due` false, `under_budget`; the slice stays pending.
   - Design change: step 4 was dropped (see Design). The cap of 5 cannot bind in the lab, which has 4 services in `CallGraph.SERVICES`; it binds on RCAEval.
 
 ## Next step
