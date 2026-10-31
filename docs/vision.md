@@ -84,7 +84,7 @@ RCAEval is MIT-licensed: 735 cases on 3 systems written by others, with 17 publi
 - Windows: 10 minutes on each side of `inject_time`, as the published baselines get them. The lab keeps hiding the fault's start (ADR-011); the difference is documented.
 - Healthy pseudo-cases come from windows before the injection.
 - The truth never reaches the agent.
-- A Python converter under `evals/` turns the case files into the case dossier the agent reads. ADR-017 will pin the dataset revision, amend ADR-001's boundary for the converter and fix the category map.
+- A Python converter under `evals/` turns the case files into the case dossier the agent reads. [ADR-020](adr/ADR-020-rcaeval-dataset-converter.md) pins the dataset revision, amends ADR-001's boundary for the converter and fixes the category map.
 
 ## 3. Architecture
 
