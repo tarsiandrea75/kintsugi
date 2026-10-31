@@ -36,6 +36,8 @@ If thinking lifts a 9B model toward the rules, the local route has a future with
 - [x] T4 Calibration on `stress`: one decision run per thinking setting; the report's time and answer length set the cap and deadline. Route: inline commands.
 - [x] T5 The dev plan, committed before the dev runs. Route: inline.
 - [x] T6 The dev runs and the scored result; reading; STATE. Route: inline commands.
+- [ ] T7 The Qon holdout-1 plan `evals/plans/2026-10-31-qwen-holdout1.md`, committed before the run (human go-ahead 2026-10-31). Route: inline.
+- [ ] T8 The Qon holdout-1 run, its score, and `docs/benchmark.md` regenerated with the new result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -82,6 +84,8 @@ Forecast about 450 authored lines (ADR 60, scorer 60, overrides with tests and s
   - Complementarity with 0, descriptive: Qon right where 0 is not in 4 cases (all F2), 0 right where Qon is not in 6; an oracle of 0 and Qon reaches 14/15 (0 and Qoff 13/15; 0 and A 15/15 on dev).
   - Thinking bought no accuracy here (Qon − Qoff 0, 3 cases each way) at about 3 times the time.
 
+- 2026-10-31: the human approved a holdout-1 read of Qon; T7 and T8 added. T7 done: the plan, committed with this entry before the run.
+
 ## Next step
 
-Feature closed. A holdout read of Qon needs its own plan; holdout-1 has not been read by Qon.
+T8.
