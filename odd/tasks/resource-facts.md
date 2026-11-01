@@ -57,7 +57,7 @@ Add resource facts (CPU, memory, open files and sockets, per service) to the evi
 ## Tasks
 
 - [x] T1 ADR-021 (Config 0R, R-RES and its threshold, the metrics, the leakage check, what 0R − 0 and HR − 0R measure), this document. Route: inline (docs).
-- [ ] T2 Lab metrics, tests first: `MetricCatalog` gains the three metrics, the tool's description lists them; the mcp-tools spec. Route: delegated writer.
+- [x] T2 Lab metrics, tests first: `MetricCatalog` gains the three metrics, the tool's description lists them; the mcp-tools spec. Route: delegated writer.
 - [ ] T3 Converter, tests first: the three metrics from `_cpu`, `_mem`, `_socket`, in the fixture and the regenerated agent recording; the leakage guard; evals spec REQ-11. Route: delegated writer.
 - [ ] T4 Gatherer and dossier, tests first: the per-service calls, `Dossier.resources`, the renderer and sheets; the RCAEval fixture replays with no unrecorded call; the lab goldens updated where the dossier text changes, and Config 0's verdicts unchanged. Agent spec. Route: delegated writer.
 - [ ] T5 Config 0R, tests first: R-RES, `candidates()` under v2, the rules-version setting, `replay-agent.sh --rules`; golden proof that v1 is unchanged. Agent spec, `docs/setup.md`. Route: delegated writer.
@@ -88,7 +88,8 @@ Add resource facts (CPU, memory, open files and sockets, per service) to the evi
 
 - 2026-11-01: document created after a read-only exploration (vision M3, the gatherer, `MetricCatalog`, the converter, `RulesDiagnosis`) and a live Prometheus check of the three lab metrics. Only the header line of one RE2-OB dev file was read.
 - 2026-11-01: T1 done (inline, docs only). ADR-021 fixes k = 2, the max guard and the usable-window rule before any resource series is read. `cpu_usage` became `processor_usage`, because the converter's guard rejects the `cpu` token. Commit `docs(adr): fix Config 0R and the R-RES threshold in ADR-021`; native assessment medium, under budget (pending in the slice).
+- 2026-11-01: T2 done (delegated writer). Three `MetricCatalog` entries (`sum by (service)` over `process_cpu_usage`, `jvm_memory_used_bytes`, `process_files_open_files`), the `query_metric` description with units, two tests (RED 2 failures, then GREEN), the mcp-tools spec. mcp-tools 259 tests and agent 663 tests pass. Left for T3: `agent/src/test/resources/mcp-outputs/tools-list.json` still holds the old `query_metric` description (a static fixture no test compares).
 
 ## Next step
 
-T2, lab metrics (delegated writer).
+T3, the converter (delegated writer), on `feat/resource-facts-01-converter`; it also re-records `tools-list.json`.

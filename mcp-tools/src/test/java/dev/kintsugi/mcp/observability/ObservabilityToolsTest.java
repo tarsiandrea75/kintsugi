@@ -25,6 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
 import dev.kintsugi.mcp.config.BackendProperties;
 import dev.kintsugi.mcp.tool.ToolCallRunner;
 
+import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
@@ -251,6 +252,31 @@ class ObservabilityToolsTest {
 		assertThat(MetricCatalog.byId("latency_max").query("gateway-mock", 30)).isEqualTo(
 				"max by (service, uri) (http_server_requests_seconds_max{service=\"gateway-mock\",uri!~\"/admin(/.*)?\"})");
 		assertThat(MetricCatalog.byId("lab_orders").query("order-service", 30)).doesNotContain("uri");
+	}
+
+	@Test
+	void resourceMetricsReadOneSeriesPerService() {
+		// ADR-021: the resource facts read CPU, memory and file descriptors of each service.
+		assertThat(MetricCatalog.ids()).contains("processor_usage", "memory_used", "open_files");
+		assertThat(MetricCatalog.byId("processor_usage").query("order-service", 20))
+			.isEqualTo("sum by (service) (process_cpu_usage{service=\"order-service\"})");
+		assertThat(MetricCatalog.byId("memory_used").query("payment-service", 20))
+			.isEqualTo("sum by (service) (jvm_memory_used_bytes{service=\"payment-service\"})");
+		assertThat(MetricCatalog.byId("open_files").query(null, 20))
+			.isEqualTo("sum by (service) (process_files_open_files"
+					+ "{service=~\"order-service|payment-service|inventory-service|gateway-mock\"})");
+	}
+
+	@Test
+	void queryMetricDescriptionGivesTheResourceUnits() throws Exception {
+		String description = ObservabilityTools.class
+			.getMethod("queryMetric", String.class, String.class, Integer.class)
+			.getAnnotation(McpTool.class)
+			.description();
+		assertThat(description).contains("processor_usage (share of the host, 0 to 1)")
+			.contains("memory_used (bytes, all JVM memory areas summed)")
+			.contains("open_files (open file descriptors, sockets included)")
+			.contains("units differ by source");
 	}
 
 	// service_restarts

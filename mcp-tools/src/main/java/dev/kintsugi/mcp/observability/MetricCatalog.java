@@ -52,7 +52,16 @@ public enum MetricCatalog {
 			"sum by (service) (rate(hikaricp_connections_timeout_total{{sel}}[{w}]))"),
 
 	CLIENT_REQUEST_OUTCOMES("client_request_outcomes", "sum by (service, client_name, outcome, exception)"
-			+ " (rate(http_client_requests_seconds_count{{http}}[{w}]))");
+			+ " (rate(http_client_requests_seconds_count{{http}}[{w}]))"),
+
+	/** The process's CPU as a 0-1 share of the host (ADR-021). */
+	PROCESSOR_USAGE("processor_usage", "sum by (service) (process_cpu_usage{{sel}})"),
+
+	/** JVM memory in bytes, every area and pool summed into one series per service (ADR-021). */
+	MEMORY_USED("memory_used", "sum by (service) (jvm_memory_used_bytes{{sel}})"),
+
+	/** Every open file descriptor of the process, sockets included (ADR-021). */
+	OPEN_FILES("open_files", "sum by (service) (process_files_open_files{{sel}})");
 
 	/**
 	 * The URIs of the lab's control plane: the fault-injector applies F1 and F2 through gateway-mock's

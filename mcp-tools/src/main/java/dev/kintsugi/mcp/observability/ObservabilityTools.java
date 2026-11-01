@@ -136,7 +136,10 @@ public class ObservabilityTools {
 			+ " counted), latency_avg and latency_max (seconds), lab_orders and lab_payments (stored rows per"
 			+ " status), gateway_authorize_inflight, hikaricp_connections_active, hikaricp_connections_idle,"
 			+ " hikaricp_connections_pending, hikaricp_connections_max, hikaricp_connections_timeout_rate,"
-			+ " client_request_outcomes (outgoing calls per second by client, outcome and exception).")
+			+ " client_request_outcomes (outgoing calls per second by client, outcome and exception),"
+			+ " processor_usage (share of the host, 0 to 1), memory_used (bytes, all JVM memory areas summed),"
+			+ " open_files (open file descriptors, sockets included). Resource units differ by source, so compare a"
+			+ " resource series with its own earlier values, not with a fixed number.")
 	public CallToolResult queryMetric(@McpToolParam(description = "One of the metric names listed above.") String metric,
 			@McpToolParam(description = "Optional; " + SERVICE + " Omit for every service.",
 					required = false) String service,

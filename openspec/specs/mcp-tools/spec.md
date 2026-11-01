@@ -75,8 +75,13 @@ Each name maps to one PromQL template. Names come from the "Lab — Faults" dash
 | `hikaricp_connections_active`, `_idle`, `_pending`, `_max` | `sum by (service) (hikaricp_connections_<kind>{<sel>})` |
 | `hikaricp_connections_timeout_rate` | `sum by (service) (rate(hikaricp_connections_timeout_total{<sel>}[<w>]))` |
 | `client_request_outcomes` | `sum by (service, client_name, outcome, exception) (rate(http_client_requests_seconds_count{<http>}[<w>]))` |
+| `processor_usage` | `sum by (service) (process_cpu_usage{<sel>})` |
+| `memory_used` | `sum by (service) (jvm_memory_used_bytes{<sel>})` |
+| `open_files` | `sum by (service) (process_files_open_files{<sel>})` |
 
 There is no latency p95: the lab services publish no `http_server_requests_seconds_bucket` histogram, so `latency_avg` and `latency_max` stand in for it.
+
+The resource metrics (ADR-021) give one series per service: `processor_usage` is the process's CPU as a 0–1 share of the host, `memory_used` is JVM memory in bytes with every area summed, and `open_files` counts every open file descriptor, sockets included. Their units differ by source (a replayed dataset's CPU is its exporter's unit, and its `open_files` is a socket count), so a caller compares a resource series only with its own earlier values; `query_metric`'s description MUST give the units and say that they differ by source.
 
 `error_rate` counts server responses with a 5xx status only. A 4xx refusal, and a call the caller gave up on, are not in it, so it can stay flat while a dependency is slow or refuses; `query_metric`'s description MUST say so **(T5c8)**.
 
@@ -203,7 +208,7 @@ A runbook chunk's `section` is its heading, so it is runbook text and untrusted 
 The descriptions MUST point a caller at the signals the lab actually emits **(T5c8)**:
 
 - `search_logs` and `count_logs`: the lab services log failures at WARN, so a caller filters on `WARN` or gives no level, not `ERROR`; gateway-mock logs its decisions at INFO, so a caller searches gateway-mock with no level filter **(T5c9)**; logs exist only for order-service, payment-service, inventory-service and gateway-mock, and postgres has no logs to search **(T5c10)**;
-- `query_metric`: `error_rate` counts 5xx server responses only;
+- `query_metric`: `error_rate` counts 5xx server responses only; `processor_usage`, `memory_used` and `open_files` are listed with their units (0–1 share of the host, bytes, file descriptors with sockets included), and resource units differ by source;
 - `search_runbooks`: its `query` example is a neutral symptom, `orders stay pending after checkout`, that names no component.
 
 Why (T5c7): in the fourth full agent run every log query used `level=ERROR` and returned nothing, since no lab service logs at ERROR; `error_rate` read 0 while the gateway was slow or refusing; and the only example query named payments, the component the agent then blamed in every report. Why gateway-mock is named (T5c9): in the fifth run, after the T5c8 text, the agent still searched gateway-mock with `level=WARN` and got 0 lines, because its decisions (`latency_ms=`, `answered=429`) are INFO lines. Why postgres is named (T5c10): every incident of the sixth run called `count_logs service=postgres` and spent a tool call on `INVALID_PARAMETER`; the `service` parameter accepts only the four services whose lines reach Loki. The descriptions describe the lab's logging and metrics, never a cause the lab may be put through.
@@ -215,6 +220,17 @@ Why (T5c7): in the fourth full agent run every log query used `level=ERROR` and 
 - AND they list the services that have logs and say that postgres has no logs to search
 - AND `query_metric`'s says that `error_rate` counts 5xx server responses only
 - AND `search_runbooks`' `query` description does not name payments
+
+#### Scenario: Resource metrics described with their units
+- WHEN a client lists the tools
+- THEN `query_metric`'s description lists `processor_usage` as a share of the host from 0 to 1, `memory_used` in bytes with all JVM memory areas summed, and `open_files` as open file descriptors, sockets included
+- AND it says that resource units differ by source
+
+#### Scenario: Resource metric query
+- GIVEN `query_metric` with `metric` = `memory_used` and `service` = `payment-service`
+- WHEN the tool runs
+- THEN the PromQL is `sum by (service) (jvm_memory_used_bytes{service="payment-service"})`
+- AND with `service` omitted, `open_files` reads `sum by (service) (process_files_open_files{service=~"order-service|payment-service|inventory-service|gateway-mock"})`
 
 ### Requirement: Every tool call is recorded
 
