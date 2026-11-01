@@ -1,7 +1,5 @@
 package dev.kintsugi.agent.loop;
 
-import static dev.kintsugi.agent.dossier.LabTopology.LAB;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -29,6 +27,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.springframework.boot.io.ApplicationResourceLoader;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,6 +37,7 @@ import tools.jackson.databind.node.ObjectNode;
 import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.DossierGatherer;
 import dev.kintsugi.agent.dossier.DossierView;
+import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.ReplayLabTools;
@@ -73,6 +73,11 @@ import dev.kintsugi.agent.rules.RulesVerdict;
  * gathers the same dossier over the same tools and clock, diagnoses it with {@link RulesDiagnosis} and is scored by the
  * same rule. It needs no router, no loop and no database ({@link #rulesOnly}), and production knows no such route: it
  * exists here only, as a baseline, never as the agent's answer.
+ *
+ * <p>
+ * The gatherer, the rules and the loop read the topology of {@code kintsugi.agent.topology}, as the agent does, the
+ * lab's by default ({@link #topology}; odd/tasks/rcaeval-converter.md T5): an RCAEval recording replays on its
+ * system's file, since the dossier's calls follow the topology's services.
  */
 final class ReplayDriver {
 
@@ -135,6 +140,9 @@ final class ReplayDriver {
 	/** Which report a decision sample asks for; explorer and dossier samples ignore it. */
 	private final DecisionReport decisionReport;
 
+	/** The system's topology, which the gatherer, the rules and the loop read. */
+	private final Topology topology;
+
 	/** Each recording, parsed and checked once. */
 	private final Map<Recording, Parsed> parsed = new HashMap<>();
 
@@ -164,9 +172,17 @@ final class ReplayDriver {
 	 * @param decisionReport which report a decision sample asks for
 	 * @throws NullPointerException when {@code decisionView} or {@code decisionReport} is null, before any sample, as
 	 * the loop refuses them
+	 * @throws IllegalArgumentException when {@code kintsugi.agent.topology} names a missing or invalid file
 	 */
 	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
 			Path recordings, Path toolsList, DossierView decisionView, DecisionReport decisionReport) {
+		this(router, settings, incidents, admin, recordings, toolsList, decisionView, decisionReport,
+				topology(System::getProperty));
+	}
+
+	private ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
+			Path recordings, Path toolsList, DossierView decisionView, DecisionReport decisionReport,
+			Topology topology) {
 		this.decisionView = Objects.requireNonNull(decisionView, AgentLoop.NULL_VIEW);
 		this.decisionReport = Objects.requireNonNull(decisionReport, AgentLoop.NULL_REPORT);
 		this.router = router;
@@ -175,16 +191,36 @@ final class ReplayDriver {
 		this.admin = admin;
 		this.recordings = recordings;
 		this.toolsList = toolsList;
+		this.topology = Objects.requireNonNull(topology);
 		this.cases = ReplayCases.read(recordings);
+	}
+
+	/**
+	 * The topology a replay run reads: the file {@code property} names under {@link Topology#PROPERTY}, a Spring
+	 * resource location as the agent takes it ({@code classpath:topology/re2-ob.json}, or a {@code file:} URL), else
+	 * {@link Topology#DEFAULT_LOCATION}, the lab's. {@link Topology#load} reads and checks it, as at the agent's start.
+	 * @param property a property's value, null when it is not set: the driver passes {@code System::getProperty}
+	 * @throws IllegalArgumentException naming the file when it is missing, unreadable or invalid
+	 */
+	static Topology topology(Function<String, String> property) {
+		String location = Objects.requireNonNullElse(property.apply(Topology.PROPERTY), Topology.DEFAULT_LOCATION);
+		return Topology.load(ApplicationResourceLoader.get().getResource(location));
 	}
 
 	/**
 	 * A driver for the {@code rules} route only: no router, no loop settings and no database, since a rules sample
 	 * calls no model and opens no incident. Its model samples refuse to run ({@link #sample}, {@link #decisionSample}).
+	 * It reads the topology of {@code kintsugi.agent.topology} ({@link #topology}).
 	 */
 	static ReplayDriver rulesOnly(Path recordings, Path toolsList, DossierView decisionView,
 			DecisionReport decisionReport) {
-		return new ReplayDriver(null, null, null, null, recordings, toolsList, decisionView, decisionReport);
+		return rulesOnly(recordings, toolsList, decisionView, decisionReport, topology(System::getProperty));
+	}
+
+	/** A driver for the {@code rules} route only, as {@link #rulesOnly} above, over {@code topology}. */
+	static ReplayDriver rulesOnly(Path recordings, Path toolsList, DossierView decisionView,
+			DecisionReport decisionReport, Topology topology) {
+		return new ReplayDriver(null, null, null, null, recordings, toolsList, decisionView, decisionReport, topology);
 	}
 
 	/**
@@ -294,11 +330,11 @@ final class ReplayDriver {
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), List.of(parsed.incident()));
 		Clock clock = clockAt(parsed.startedAt());
 		long start = System.nanoTime();
-		Dossier dossier = new DossierGatherer(tools, clock, LAB).gather(parsed.sinceMinutes());
-		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, LAB);
+		Dossier dossier = new DossierGatherer(tools, clock, this.topology).gather(parsed.sinceMinutes());
+		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, this.topology);
 		double seconds = (System.nanoTime() - start) / 1e9;
 		// The candidates a hybrid run would list on the same dossier (hybrid T4); the verdict above is unchanged.
-		List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier, LAB);
+		List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier, this.topology);
 
 		AgentMode mode = AgentMode.DECISION;
 		String reported = verdict.service() + "|" + verdict.category();
@@ -375,7 +411,7 @@ final class ReplayDriver {
 		UUID id = open(primary.symptom(), primary.sinceMinutes(), clock.instant());
 		AgentLoop.Outcome outcome;
 		long start = System.nanoTime();
-		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, LAB, mode,
+		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, this.topology, mode,
 				this.decisionView, this.decisionReport)) {
 			outcome = loop.runToOutcome(id);
 		}

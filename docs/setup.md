@@ -571,6 +571,26 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
   ```
 
   It takes the pairs from client spans (an `operationName` of `hipstershop.<Name>Service/<Method>`) and from parent links, with the same names as the converter (`frontendservice` is `frontend`), marks each pair `edge` or `NOT AN EDGE`, and exits 1 when a pair is not an edge or no pair is found.
+- The agent's test copy in `agent/src/test/resources/rcaeval/` is the converter's output on the synthetic fixture. To regenerate it, run from `evals/` `.venv/bin/python -m kintsugi_evals convert-rcaeval --root tests/fixtures/rcaeval --system re2-ob --rep 1 --case checkoutservice_cpu --out ../agent/src/test/resources/rcaeval`, then delete the `converter-report.tsv` it leaves in that directory: it is not part of the fixture.
+
+### Replay RCAEval cases
+
+Replay the converted cases with `--dataset re2-ob` ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md), `odd/tasks/rcaeval-converter.md`), then score them on the service only:
+
+```bash
+# 1. Convert (above): writes evals/out/rcaeval/re2-ob-rep1/.
+# 2. Replay, here Config 0, from the repository root:
+REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision
+# 3. Score from evals/: RCAEval's AC@1 names the root-cause service only.
+cd evals
+python3 -m kintsugi_evals score --service-only --label 0 ../infra/scripts/out/replay-<time>-rules
+```
+
+- `REPLAY_DIR` is required for `re2-ob`: it names the converter's output directory, which stays outside the repository. Without it the script exits 2.
+- The faults are RCAEval's fault types, `cpu`, `mem`, `disk`, `delay`, `loss` and `socket` (all six by default; `--faults cpu,delay` chooses), and the truth in `recordings.tsv` is `<service>|<category>` by ADR-020's map.
+- The test JVM gets `-Dkintsugi.agent.topology=classpath:topology/re2-ob.json`, so the gatherer, the rules and the loop read Online Boutique's topology. A lab run (`--dataset lab`, the default) gets the lab's file, as before.
+- Decision mode only: the converter writes one decision case per RCAEval case, in `dev` (repetition 1), or in `holdout` only under a committed holdout plan.
+- `score --service-only` counts a report correct when its service is the truth's, whatever its category, still with Wilson 95% CIs; the report's first line per config ends with `; AC@1 on the service only`. Without the flag the scorer compares the whole `service|category`.
 
 ### Reset a volume
 

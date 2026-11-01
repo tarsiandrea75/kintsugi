@@ -31,15 +31,30 @@ def is_healthy(truth):
     return truth == HEALTHY_TRUTH
 
 
-def outcome(status, truth, reported):
-    """The outcome of one row: correct, miss, abstain (fault answered UNKNOWN) or false_alarm."""
+def service_of(answer):
+    """The service part of a service|category pair."""
+    return answer.split("|", 1)[0]
+
+
+def names_truth(truth, answer, service_only=False):
+    """Whether an answer names the truth: the whole pair, or with service_only its service part alone."""
+    return service_of(answer) == service_of(truth) if service_only else answer == truth
+
+
+def outcome(status, truth, reported, service_only=False):
+    """The outcome of one row: correct, miss, abstain (fault answered UNKNOWN) or false_alarm.
+
+    With service_only (rcaeval-converter T5), a fault row is correct when the reported service is the truth's,
+    whatever the category: RCAEval's AC@1 names the root-cause service only. Abstentions and healthy rows keep
+    their rule.
+    """
     completed = status == "COMPLETED"
     has_cause = completed and reported not in ("", NO_REPORT, UNKNOWN_ANSWER)
     if is_healthy(truth):
         if completed and reported == UNKNOWN_ANSWER:
             return CORRECT
         return FALSE_ALARM if has_cause else MISS
-    if completed and reported == truth:
+    if completed and reported != UNKNOWN_ANSWER and names_truth(truth, reported, service_only):
         return CORRECT
     if completed and reported == UNKNOWN_ANSWER:
         return ABSTAIN
@@ -62,6 +77,8 @@ class Row:
     report: str = "-"
     # The candidate (service|category) pairs, or None where candidate recall does not apply.
     candidates: tuple = None
+    # Scored on the service part of the truth only (--service-only).
+    service_only: bool = False
 
     @property
     def case(self):
@@ -84,13 +101,14 @@ def parse_candidates(raw, route, report):
     return tuple(raw.split(";")) if raw else ()
 
 
-def read_summary(path, label=None):
+def read_summary(path, label=None, service_only=False):
     """Rows of one summary.tsv (a file or the run directory holding it).
 
     The config is the label when given, else route-mode-view, with -report appended when the file has a report
     column (added after view in service-assessment T2r). A missing view or report column reads as "-", so a file
     from before either column keeps its config name. A trailing candidates column (hybrid T4) is parsed for rules
-    and hybrid rows only, so candidate recall applies to them alone.
+    and hybrid rows only, so candidate recall applies to them alone. With service_only, each row and its
+    candidate recall are scored on the service part of the truth only.
     """
     path = summary_path(path)
     if not path.is_file():
@@ -107,8 +125,8 @@ def read_summary(path, label=None):
             config = label or f"{raw['route']}-{raw['mode']}-{view}" + (f"-{report}" if "report" in raw else "")
             rows.append(Row(config, raw["fault"], raw["mode"], raw["route"], view, raw["split"], raw["recording"],
                             raw["status"], raw["truth"], raw["reported"],
-                            outcome(raw["status"], raw["truth"], raw["reported"]), report,
-                            parse_candidates(raw.get("candidates"), raw["route"], report)))
+                            outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
+                            parse_candidates(raw.get("candidates"), raw["route"], report), service_only))
     return rows
 
 
@@ -175,7 +193,7 @@ def _recalled(rows):
     """Fault rows whose truth is a candidate, when every row carries candidates; else None."""
     if any(r.candidates is None for r in rows):
         return None
-    return sum(r.truth in r.candidates for r in rows)
+    return sum(any(names_truth(r.truth, c, r.service_only) for c in r.candidates) for r in rows)
 
 
 def _fault_score(name, rows):

@@ -240,3 +240,45 @@ def test_candidate_recall_does_not_apply_without_the_column(tmp_path):
     assert row.candidates is None
     [score] = summarize([row])
     assert score.faults[0].candidate_recall is None
+
+
+# --service-only (rcaeval-converter T5): RCAEval's AC@1 names the root-cause service only (vision §5).
+
+def test_service_only_compares_the_service_part():
+    assert outcome("COMPLETED", TRUTH, "gateway-mock|RESOURCE_EXHAUSTION", service_only=True) == CORRECT
+    assert outcome("COMPLETED", TRUTH, "gateway-mock|UNKNOWN", service_only=True) == CORRECT
+    assert outcome("COMPLETED", TRUTH, "payment-service|DEPENDENCY_LATENCY", service_only=True) == MISS
+    assert outcome("FAILED", TRUTH, TRUTH, service_only=True) == MISS
+
+
+def test_service_only_keeps_abstentions_and_healthy_cases():
+    assert outcome("COMPLETED", TRUTH, "UNKNOWN|UNKNOWN", service_only=True) == ABSTAIN
+    assert outcome("COMPLETED", "NONE|NONE", "UNKNOWN|UNKNOWN", service_only=True) == CORRECT
+    assert outcome("COMPLETED", "NONE|NONE", "gateway-mock|UNKNOWN", service_only=True) == FALSE_ALARM
+
+
+def test_the_default_still_compares_service_and_category():
+    assert outcome("COMPLETED", TRUTH, "gateway-mock|RESOURCE_EXHAUSTION") == MISS
+
+
+def test_read_summary_service_only_scores_the_service(tmp_path):
+    path = write_tsv(tmp_path / "summary.tsv", [
+        ("cpu", "COMPLETED", "checkoutservice|RESOURCE_EXHAUSTION", "checkoutservice|DEPENDENCY_LATENCY", "a"),
+        ("cpu", "COMPLETED", "checkoutservice|RESOURCE_EXHAUSTION", "frontend|RESOURCE_EXHAUSTION", "b"),
+    ])
+    assert [r.outcome for r in read_summary(path)] == [MISS, MISS]
+    assert [r.outcome for r in read_summary(path, service_only=True)] == [CORRECT, MISS]
+    [score] = summarize(read_summary(path, service_only=True))
+    assert (score.pooled.correct, score.pooled.n) == (1, 2)
+
+
+def test_service_only_candidate_recall_matches_the_service(tmp_path):
+    path = tmp_path / "summary.tsv"
+    path.write_text("\t".join(HEADER + ["view", "report", "candidates"]) + "\n" + "\t".join(
+        ["cpu", "decision", "rules", "1", "COMPLETED", "checkoutservice|RESOURCE_EXHAUSTION",
+         "frontend|DEPENDENCY_LATENCY", "-", "58", "0", "1.00", "0", "0", "0", "0.1", "dev", "a", "tables", "plain",
+         "frontend|DEPENDENCY_LATENCY;checkoutservice|DEPENDENCY_LATENCY"]) + "\n")
+    [default] = summarize(read_summary(path))
+    [service] = summarize(read_summary(path, service_only=True))
+    assert default.pooled.recalled == 0
+    assert service.pooled.recalled == 1

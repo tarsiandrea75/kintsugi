@@ -91,7 +91,7 @@ Without the converter, every number is on a lab one person built and tuned again
 - [x] T2 The topology files for RE2-OB and RE2-SS, from the pinned upstream manifests, with the OB cross-check on repetition 1's traces recorded. `TopologyTest` loads both. Route: delegated writer.
 - [x] T3 The converter core, tests first on a synthetic fixture: case discovery, windows, metrics → `query_metric`, logs → `count_logs`/`search_logs`, empty restarts, the incident JSON and `recordings.tsv`, the leakage grep. Route: delegated writer.
 - [x] T4 Traces → `traffic_counts` (OB), tests first. Route: delegated writer.
-- [ ] T5 Replay plumbing and scorer, tests first:
+- [x] T5 Replay plumbing and scorer, tests first:
   - `ReplayDriver` reads the topology property;
   - `replay-agent.sh` gets `--dataset re2-ob`, a recordings directory and the topology;
   - the scorer gets `--service-only`;
@@ -286,6 +286,32 @@ Without the converter, every number is on a lab one person built and tuned again
     - R3-publish-step-is-not-all-or-nothing (`convert.py:324-326`): the move into `--out` is per file, not one rename.
     - R3-replay-edge-assertion-proves-one-row (`RcaevalRecordingTest.java:60-61`): the Java test proves only one traffic row.
 
+- 2026-11-01, T5 (route: delegated writer; trigger: Java, a shell script, the Python scorer, tests and three docs). The replay plumbing and the scorer; T5 stays open for the parent's check and review.
+  - **Files:**
+    - `ReplayDriver.java` (the topology), the new `ReplayTopologyTest.java` (6 tests);
+    - `infra/scripts/replay-agent.sh` (`--dataset`), `infra/scripts/test-lib.sh` (9 cases);
+    - `evals/kintsugi_evals/scoring.py` and `cli.py` (`--service-only`), `evals/tests/test_scoring.py` (5 tests) and `test_cli.py` (1 test);
+    - agent spec ("Replay of recorded tool outputs": a topology paragraph and three scenarios), evals spec REQ-7b, `docs/setup.md` ("Replay RCAEval cases", and the fixture regeneration note with its `converter-report.tsv` deletion).
+  - **Driver topology:** `ReplayDriver.topology(property)` loads the file named by `kintsugi.agent.topology` with `Topology.load` over Spring Boot's `ApplicationResourceLoader` (`classpath:` and `file:` locations; the test covers both), else `Topology.DEFAULT_LOCATION`, the lab's. The public constructors and `rulesOnly` read `System::getProperty`; a `rulesOnly` overload takes a `Topology` for tests. The gatherer, `RulesDiagnosis.diagnose`/`candidates` and `AgentLoop` read the driver's topology; `LabTopology.LAB` is no longer imported. `TopologyConfig` was not changed: the bean already reads the same property, so in `ReplayRunTest` the Spring context and the driver agree.
+  - **`replay-agent.sh --dataset lab|re2-ob`** (default `lab`):
+    - the recordings directory is the existing `REPLAY_DIR` (no new flag), required for `re2-ob` and refused with exit 2 when unset;
+    - `re2-ob` faults are `cpu mem disk delay loss socket` (all six by default), `lab` keeps `F1 F2 F3`;
+    - `re2-ob` is decision mode only (the converter writes no `stress` recording, so explorer and dossier have nothing to pool);
+    - the JVM always gets `-Dkintsugi.agent.topology=<dataset's file>`: `classpath:topology/lab.json`, the agent's default, for lab, so a lab run cannot pick up a `KINTSUGI_AGENT_TOPOLOGY` left in the shell; `classpath:topology/re2-ob.json` for re2-ob;
+    - an re2-ob run prints `dataset re2-ob: topology ..., recordings ...` before the case count; lab output is unchanged.
+    - `ReplayCases` and the manifest parsing needed no change: the converter's 7 columns and `dev` split are read as is.
+  - **`score --service-only`:** `outcome(..., service_only)` compares the part before `|`; `UNKNOWN|UNKNOWN` stays an abstention, healthy rows keep their rule, and candidate recall matches a candidate's service. `Row` carries the flag. Each config's first report line ends with `; AC@1 on the service only`; without the flag the output is byte-identical (the existing CLI tests pass unchanged). `scores.tsv` has no new column: `report.txt` names the scope.
+  - **RED/GREEN:**
+    - evals: RED 5 failed, 38 passed (`unrecognized arguments: --service-only`, `outcome() got an unexpected keyword argument 'service_only'`); GREEN the full suite 132 passed (126 + 6).
+    - Java: RED, `ReplayTopologyTest` does not compile (`cannot find symbol` for `ReplayDriver.topology` and the 5-argument `rulesOnly`); GREEN 6/6, with `ReplayDriverTest` 31/31 and `RcaevalRecordingTest` 1/1.
+    - test-lib: RED `FAIL  an unknown dataset exits 2 and names the two datasets` (actual `Unknown option: --dataset`); GREEN `PASS  169 cases`.
+  - **Checks:**
+    - `cd agent && ./mvnw -q test`: exit 0; surefire reports 661 tests, 0 failures, 0 errors (a stale `RulesReplayTest` report from the replay runs excluded).
+    - `infra/scripts/test-lib.sh`: `PASS  169 cases`.
+    - **AC5:** `infra/scripts/replay-agent.sh --route rules --mode decision --split holdout` (the holdout Config 0 run behind `replay-20261031T212629Z-rules`) wrote `replay-20261101T003319Z-rules`: `summary.tsv` identical to the baseline in every column but `seconds` (verdicts and candidates included), `aggregate.tsv` byte-identical, and the 15 incident files identical apart from `id` and `startedAt`. F1 5/5, F2 0/5, F3 5/5, as before.
+    - **re2-ob dry path:** `REPLAY_DIR=agent/src/test/resources/rcaeval infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision --faults cpu`: exit 0, `replay-20261101T003339Z-rules`, one sample, 58 calls recorded, 0 unrecorded, coverage 1.00, reported `UNKNOWN|UNKNOWN` (the synthetic fixture fires no rule). `score --service-only --label 0` on it: `0  pooled   0/1   AC@1   0%  [0%, 79%]  coverage 0%  selective -  recall 0%`.
+  - **Data reads:** none; only the committed fixtures.
+
 ## Next step
 
-T5: the replay plumbing and the scorer (branch `feat/rcaeval-converter-02-replay`).
+T6: convert RE2-OB repetition 1 and run Config 0 on the 30 dev cases under a committed plan (branch `feat/rcaeval-converter-02-replay`).

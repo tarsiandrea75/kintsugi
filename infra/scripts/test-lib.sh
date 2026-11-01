@@ -621,6 +621,40 @@ expect "a manifest line the driver refuses stops the run before Maven" \
   "$(replay_agent_over "$bad_dir" --mode decision --faults F1; echo "exit $?")" \
   "a manifest line has the split 'test', not dev, holdout, stress or probe: $bad_line"$'\n'"exit 2"
 
+# --dataset (odd/tasks/rcaeval-converter.md T5): re2-ob replays the RCAEval converter's recordings, whose faults are
+# RCAEval's, from a recordings directory that must be named, in decision mode only. The committed converter output
+# (agent/src/test/resources/rcaeval/) holds one dev case of cpu. Checked before Maven, as above.
+rcaeval_dir="$REPO_DIR/agent/src/test/resources/rcaeval"
+expect "an unknown dataset exits 2 and names the two datasets" \
+  "$(replay_agent --dataset re2-tt --mode decision; echo "exit $?")" \
+  "Unknown dataset 're2-tt'; choose lab or re2-ob"$'\n'"exit 2"
+expect "the lab dataset keeps the lab's faults" \
+  "$(replay_agent --dataset lab --mode decision --faults cpu; echo "exit $?")" \
+  "Unknown fault 'cpu'; choose from F1 F2 F3"$'\n'"exit 2"
+expect "re2-ob takes RCAEval's faults, not the lab's" \
+  "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode decision --faults F1; echo "exit $?")" \
+  "Unknown fault 'F1'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"
+expect "re2-ob replays decision mode only" \
+  "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode dossier; echo "exit $?")" \
+  "--dataset re2-ob replays decision mode only, not dossier: the converter writes one decision case per RCAEval\
+ case and no stress recordings"$'\n'"exit 2"
+expect "re2-ob needs its recordings directory, which has no default" \
+  "$(env -u REPLAY_DIR PATH="$STUB_DIR:$PATH" "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" --route local \
+    --dataset re2-ob --mode decision 2>&1; echo "exit $?")" \
+  "--dataset re2-ob needs REPLAY_DIR, the converter's output directory (convert-rcaeval --out); the recordings stay\
+ outside the repository"$'\n'"exit 2"
+expect "re2-ob's default faults are all six, so a directory without them stops the run before Maven" \
+  "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode decision | grep -vF '....  dataset'; echo "exit $?")" \
+  "no decision or dossier recording of mem, disk, delay, loss, socket in split dev of $rcaeval_dir/recordings.tsv\
+"$'\n'"exit 2"
+rcaeval_run=$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode decision --faults cpu)
+expect "re2-ob's options pass over the converter's manifest, and the run stops at the Ollama check" "$?" 2
+expect "the re2-ob run names its dataset and topology" "$(grep -F 'dataset' <<<"$rcaeval_run")" \
+  "....  dataset re2-ob: topology classpath:topology/re2-ob.json, recordings $rcaeval_dir"
+expect "the re2-ob run counts the converter's case" "$(grep -F 'decision mode' <<<"$rcaeval_run")" \
+  "....  decision mode, split dev, view tables, report plain: 1 recording(s) of cpu, each replayed 1 time(s): 1\
+ samples"
+
 # record-replay.sh: a round run imported split by split into a temporary replay directory (REPLAY_DIR), never the
 # committed one. Round 1 holds a clean F3 (the check-recordings fixture) and the 2026-10-19 F2, whose windows fail the
 # check; round 2 another clean F3.

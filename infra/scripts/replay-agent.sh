@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Replays the recorded faults through the real agent loop and scores every sample (odd/tasks/replay-harness.md T4,
-# odd/tasks/decision-instrument.md T3, odd/tasks/service-assessment.md T1 and T2r). Run with --help.
+# odd/tasks/decision-instrument.md T3, odd/tasks/service-assessment.md T1 and T2r, odd/tasks/rcaeval-converter.md T5).
+# Run with --help.
 set -euo pipefail
 
 usage() {
@@ -19,7 +20,10 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --route rules --mode decision   # Config 0: the rules alone, no model (ADR-016)
   infra/scripts/replay-agent.sh --route local --mode decision --model qwen3.5:9b --think on \
     --report-cap 2048 --report-timeout 1800   # another local model, thinking, with its own report cap and deadline
+  REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules \
+    --mode decision   # Config 0 on the RCAEval converter's RE2-OB recordings
 
+  --dataset lab|re2-ob           the recorded system (default lab); re2-ob needs REPLAY_DIR and decision mode
   --route cloud|local|rules      the model's route (default cloud), or rules: Config 0, decision mode only
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
   --samples N                    explorer and dossier: samples per fault and mode, 1 to 999 (default 1)
@@ -28,7 +32,8 @@ recorded tool outputs").
   --view tables|sheets           decision: how the dossier is written for the model (default tables)
   --report plain|assessed|hybrid decision: which report the model writes (default plain); assessed needs --view
                                  sheets; hybrid (Config H) picks among the rules' candidates, local or cloud only
-  --faults F1,F2,F3              the recorded faults to replay (default F1,F2,F3)
+  --faults F1,F2,F3              the recorded faults to replay (default: the dataset's, F1,F2,F3 for lab and
+                                 cpu,mem,disk,delay,loss,socket for re2-ob)
   --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
   --think on|off                 local: send Ollama's think field with this value (default: no think field)
   --report-cap N                 local: the report's answer cap, num_predict, 1 to 99999 tokens (default 512)
@@ -81,6 +86,15 @@ last four columns of aggregate.tsv, and the four before candidates in summary.ts
 (on, off, or default when no field was sent; off on the cloud route, which disables thinking; - for rules), report cap
 and report deadline.
 
+--dataset re2-ob replays the RCAEval converter's RE2-OB recordings (ADR-020; odd/tasks/rcaeval-converter.md;
+docs/setup.md, "Replay RCAEval cases"). Their faults are RCAEval's fault types, cpu, mem, disk, delay, loss and socket,
+and their truth is <service>|<category>. The recordings stay outside the repository, so REPLAY_DIR must name the
+converter's output directory (convert-rcaeval --out); there is no default. The test JVM gets
+-Dkintsugi.agent.topology=classpath:topology/re2-ob.json, so the gatherer, the rules and the loop read Online
+Boutique's topology; lab runs get classpath:topology/lab.json, the agent's default, whatever KINTSUGI_AGENT_TOPOLOGY
+holds. The converter writes decision cases only (dev, or holdout under its plan), so re2-ob takes decision mode only.
+RCAEval's AC@1 names the service only: score its runs with python -m kintsugi_evals score --service-only.
+
 Explorer and dossier samples pool the fault's stress recordings, the ones they were measured on, the first one in the
 sample's mode served first, so recordings imported into dev, holdout or probe never change them; --split, --repeats,
 --view and --report are refused there, as --samples is in decision mode.
@@ -92,7 +106,8 @@ and both stay available to inspect that, not to score the agent.
 COST: on the cloud route every sample is paid model calls. Run it only with the human's go-ahead, and record the cost.
 The cloud route needs ANTHROPIC_API_KEY, from the shell or infra/.env; it reaches Maven through the environment only
 and is never printed. The local route needs Ollama serving granite4.1:8b, or the --model given. Both need docker (Testcontainers' Postgres).
-REPLAY_DIR, when set, names the replay directory instead (used to try the options on a temporary manifest).
+REPLAY_DIR, when set, names the replay directory instead (used to try the options on a temporary manifest); re2-ob
+needs it.
 Exit codes: 0 when every sample ran (a MISS is a measurement), 1 when the run failed, 2 on a bad option, a missing
 key or a missing model, and in decision mode on a missing recording or a manifest line the driver refuses.
 EOF
@@ -100,22 +115,29 @@ EOF
 
 OLLAMA=http://127.0.0.1:11434
 MODEL=granite4.1:8b
-ALL_FAULTS=(F1 F2 F3)
+# The recorded faults and the topology of each dataset: the lab's, and RCAEval RE2-OB's fault types (ADR-020).
+LAB_FAULTS=(F1 F2 F3)
+RE2_FAULTS=(cpu mem disk delay loss socket)
+LAB_TOPOLOGY=classpath:topology/lab.json
+RE2_OB_TOPOLOGY=classpath:topology/re2-ob.json
 # The most samples one cloud run may make (about $0.005 each on claude-haiku-5-5, ADR-012).
 MAX_CLOUD_SAMPLES=60
 
+dataset=lab
 route=cloud
 mode=dossier
-faults=F1,F2,F3
 # Unset until given: decision mode refuses --samples, and the other modes refuse --split, --repeats, --view and
 # --report; every route but local refuses --model, --think, --report-cap and --report-timeout.
-unset samples split repeats view report model think report_cap report_timeout
+# --faults defaults to the dataset's faults.
+unset samples split repeats view report model think report_cap report_timeout faults
 while (( $# )); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --route|--mode|--samples|--split|--repeats|--view|--report|--faults|--model|--think|--report-cap|--report-timeout)
+    --dataset|--route|--mode|--samples|--split|--repeats|--view|--report|--faults|--model|--think|--report-cap\
+    |--report-timeout)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
       set -- "$1=$2" "${@:3}" ;;
+    --dataset=*) dataset=${1#*=}; shift ;;
     --route=*) route=${1#*=}; shift ;;
     --mode=*) mode=${1#*=}; shift ;;
     --samples=*) samples=${1#*=}; shift ;;
@@ -131,12 +153,20 @@ while (( $# )); do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+case "$dataset" in
+  lab) ALL_FAULTS=("${LAB_FAULTS[@]}"); topology=$LAB_TOPOLOGY ;;
+  re2-ob) ALL_FAULTS=("${RE2_FAULTS[@]}"); topology=$RE2_OB_TOPOLOGY ;;
+  *) echo "Unknown dataset '$dataset'; choose lab or re2-ob" >&2; exit 2 ;;
+esac
+faults=${faults-$(IFS=,; echo "${ALL_FAULTS[*]}")}
 [[ "$route" == cloud || "$route" == local || "$route" == rules ]] \
   || { echo "Unknown route '$route'; choose cloud, local or rules" >&2; exit 2; }
 [[ "$mode" == explorer || "$mode" == dossier || "$mode" == decision || "$mode" == both ]] \
   || { echo "Unknown mode '$mode'; choose explorer, dossier, decision or both" >&2; exit 2; }
 [[ "$route" != rules || "$mode" == decision ]] || { echo "--route rules replays decision mode only, not $mode:" \
   "Config 0 diagnoses the gathered dossier and has no explorer or dossier loop" >&2; exit 2; }
+[[ "$dataset" == lab || "$mode" == decision ]] || { echo "--dataset $dataset replays decision mode only, not $mode:" \
+  "the converter writes one decision case per RCAEval case and no stress recordings" >&2; exit 2; }
 # The local route's overrides (odd/tasks/qwen-dev.md T3), checked before anything runs.
 for option in model think report_cap report_timeout; do
   [[ -z "${!option+given}" || "$route" == local ]] || { echo "--${option//_/-} applies to --route local only, not" \
@@ -198,6 +228,10 @@ for fault in "${selected[@]}"; do
   seen+="$fault "
 done
 
+# The converted recordings live outside the repository (ADR-020), so an RCAEval run names its directory.
+[[ "$dataset" == lab || -n "${REPLAY_DIR:-}" ]] || { echo "--dataset $dataset needs REPLAY_DIR, the converter's" \
+  "output directory (convert-rcaeval --out); the recordings stay outside the repository" >&2; exit 2; }
+
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -206,6 +240,7 @@ MANIFEST="$REPLAY_DIR/recordings.tsv"
 [[ -f "$MANIFEST" ]] || { echo "No recordings manifest $MANIFEST" >&2; exit 2; }
 # Maven runs in agent/, so the test gets the directory as an absolute path.
 REPLAY_DIR=$(cd "$REPLAY_DIR" && pwd)
+[[ "$dataset" == lab ]] || info "dataset $dataset: topology $topology, recordings $REPLAY_DIR"
 
 if [[ "$mode" == decision ]]; then
   # The cases, one line each, listed by ReplayCases, the class ReplayRunTest picks them with, run from its source by the
@@ -286,7 +321,7 @@ replay_test=$([[ "$route" == rules ]] && echo RulesReplayTest || echo ReplayRunT
 status=0
 (cd "$REPO_DIR/agent" && ./mvnw -q test -Preplay "-Dtest=$replay_test" \
   "-Dreplay.route=$route" "-Dreplay.mode=$mode" "-Dreplay.faults=$faults" "${options[@]}" \
-  "-Dreplay.recordings=$REPLAY_DIR" "-Dreplay.out=$OUT_DIR") || status=$?
+  "-Dreplay.recordings=$REPLAY_DIR" "-Dreplay.out=$OUT_DIR" "-Dkintsugi.agent.topology=$topology") || status=$?
 
 echo "out: $OUT_DIR"
 if [[ -f "$OUT_DIR/summary.tsv" ]]; then

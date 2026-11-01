@@ -55,6 +55,8 @@ def _parser():
     score.add_argument("--out", help="write the result files to this directory")
     score.add_argument("--seed", type=int, default=DEFAULT_SEED, help="cluster bootstrap seed")
     score.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
+    score.add_argument("--service-only", action="store_true",
+                       help="score AC@1 on the service part of the truth only (RCAEval's AC@1, ADR-020)")
     bench = commands.add_parser("benchmark", help="render docs/benchmark.md from committed result dirs")
     bench.add_argument("--out", required=True, help="the Markdown file to write")
     bench.add_argument("dirs", nargs="+", help="result dirs written by score --out, in document order")
@@ -72,14 +74,15 @@ def _parser():
     return parser
 
 
-def _report(inputs, scores, pairs, holm_p, seed, iterations):
+def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False):
     lines = []
     for (label, source, rows), score in zip(inputs, scores):
         first = rows[0]
         faulty = score.pooled.n if score.pooled else 0
         healthy = score.healthy.n if score.healthy else 0
+        scope = "; AC@1 on the service only" if service_only else ""
         lines.append(f"{score.config}: route {first.route}, mode {first.mode}, view {first.view}; "
-                     f"{faulty} fault cases, {healthy} healthy")
+                     f"{faulty} fault cases, {healthy} healthy{scope}")
         for fault in score.faults + ([score.pooled] if score.pooled else []):
             low, high = fault.ci
             line = (f"{score.config}  {fault.fault:<7} {fault.correct:>2}/{fault.n:<2}  AC@1 {_pct(fault.ac1):>4}  "
@@ -179,7 +182,7 @@ def _score(args):
         raise SystemExit("score needs at least one replay dir")
     inputs = []
     for label, path in sources:
-        rows = read_summary(path, label=label)
+        rows = read_summary(path, label=label, service_only=args.service_only)
         if not rows:
             raise SystemExit(f"{path} holds no rows")
         inputs.append((rows[0].config, path, rows))
@@ -193,7 +196,7 @@ def _score(args):
     holm_p = [None] * len(pairs)
     for i, adjusted in zip(tested, holm([pairs[i].mcnemar_p for i in tested])):
         holm_p[i] = adjusted
-    report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations)
+    report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations, args.service_only)
     sys.stdout.write(report)
     if args.out:
         _write(Path(args.out), inputs, scores, pairs, holm_p, report)

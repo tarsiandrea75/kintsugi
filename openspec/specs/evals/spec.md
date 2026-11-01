@@ -77,6 +77,25 @@ AC@1 MUST count an abstention as not correct. Coverage MUST be the share of faul
 - Given a COMPLETED row with truth `NONE|NONE` reporting `gateway-mock|UNKNOWN`
 - Then it is a false alarm
 
+### REQ-7b Service-only AC@1 (rcaeval-converter T5)
+`score --service-only` MUST score every fault row on the service part of its truth: a COMPLETED row is correct when the service before `|` in `reported` is the truth's, whatever the category, because RCAEval's AC@1 names the root-cause service only (vision §5, ADR-020). `UNKNOWN|UNKNOWN` MUST stay an abstention, healthy rows MUST keep REQ-7's rule, and candidate recall (REQ-7a) MUST count a row whose candidates hold the truth's service. AC@1 MUST still be reported per fault and pooled with its Wilson 95% interval, coverage and selective accuracy, and each config's first report line MUST end with `; AC@1 on the service only`. Without the flag, scoring and the report MUST be unchanged.
+
+#### Scenario: The right service with another category
+- GIVEN a COMPLETED row with truth `checkoutservice|RESOURCE_EXHAUSTION` reporting `checkoutservice|DEPENDENCY_LATENCY`
+- WHEN `score --service-only` runs
+- THEN the row is correct
+- AND without `--service-only` it is a miss
+
+#### Scenario: Service-only AC@1 with its Wilson interval
+- GIVEN three fault rows: `cpu` reporting the truth's service with another category, `cpu` reporting another service, and `delay` reporting the truth
+- WHEN `score --service-only --label 0` runs
+- THEN it prints `0  pooled   2/3   AC@1  67%  [21%, 94%]` and `0  cpu      1/2   AC@1  50%`, and the config's line ends with `; AC@1 on the service only`
+
+#### Scenario: Abstention under service-only
+- GIVEN a COMPLETED fault row reporting `UNKNOWN|UNKNOWN`
+- WHEN `score --service-only` runs
+- THEN it is an abstention, as in REQ-7
+
 ### REQ-7a Candidate recall
 `summary.tsv` MAY end with a `candidates` column: `service|category` pairs joined by `;`, an empty string being an empty list. It MUST be read only on rows whose `route` is `rules` or whose `report` is `hybrid`; on other rows, and in a file without the column, candidate recall MUST NOT apply. Where it applies, candidate recall MUST be, per fault and pooled, the share of fault rows whose truth is among the candidates (ADR-019: H's ceiling). Healthy rows MUST NOT enter it. Where it does not apply, the report and `scores.tsv` MUST show nothing for it, so an older input scores exactly as before.
 

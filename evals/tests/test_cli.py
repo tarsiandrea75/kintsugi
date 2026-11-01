@@ -205,3 +205,23 @@ def test_score_reports_candidate_recall_only_where_it_applies(tmp_path, capsys):
     assert scores["0", "pooled"] == "0.5000"
     assert scores["0", "healthy"] == ""
     assert scores["Q", "F1"] == ""
+
+
+def test_score_service_only_scores_the_service_with_a_wilson_ci(tmp_path, capsys):
+    run = tmp_path / "rules"
+    run.mkdir()
+    truth = "checkoutservice|RESOURCE_EXHAUSTION"
+    write_tsv(run / "summary.tsv", [
+        ("cpu", "COMPLETED", truth, "checkoutservice|DEPENDENCY_LATENCY", "a"),
+        ("cpu", "COMPLETED", truth, "frontend|RESOURCE_EXHAUSTION", "b"),
+        ("delay", "COMPLETED", "currencyservice|DEPENDENCY_LATENCY", "currencyservice|DEPENDENCY_LATENCY", "c"),
+    ])
+    assert main(["score", "--label", "0", str(run)]) == 0
+    default = capsys.readouterr().out
+    assert "0  pooled   1/3   AC@1  33%" in default
+    assert "service" not in default
+    assert main(["score", "--service-only", "--label", "0", str(run)]) == 0
+    out = capsys.readouterr().out
+    assert "0: route cloud, mode decision, view -; 3 fault cases, 0 healthy; AC@1 on the service only" in out
+    assert "0  pooled   2/3   AC@1  67%  [21%, 94%]" in out
+    assert "0  cpu      1/2   AC@1  50%" in out
