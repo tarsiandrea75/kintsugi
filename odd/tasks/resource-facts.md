@@ -19,7 +19,7 @@ Add resource facts (CPU, memory, open files and sockets, per service) to the evi
 ## Scope
 
 - In:
-  - three `query_metric` metrics in the lab catalog: `cpu_usage`, `memory_used`, `open_files`;
+  - three `query_metric` metrics in the lab catalog: `processor_usage`, `memory_used`, `open_files`;
   - the converter's answers for them from `_cpu`, `_mem`, `_socket`;
   - the gatherer's per-service resource calls, the dossier section and its rendering;
   - Config 0R (one new rule, R-RES) behind a rules-version setting, and HR using 0R's candidates;
@@ -34,7 +34,7 @@ Add resource facts (CPU, memory, open files and sockets, per service) to the evi
 
 - Config 0's verdicts on lab dev, lab holdout and RE2-OB dev stay identical (goldens and replays).
 - The thresholds of R-RES are fixed in ADR-021 **before** any converted resource series is read. The dev results are exploratory (ADR-016:5).
-- Leakage: no fault word or case name in a recording; resource metric names are generic (`cpu_usage`, not `cpu`-fault vocabulary beyond what the lab tool already names). The converter's leakage guard is checked against the new names in T3.
+- Leakage: no fault word or case name in a recording; resource metric names pass the converter's leakage guard unchanged (`processor_usage`, not `cpu_usage`, whose `cpu` token the guard rejects; ADR-021). T3 checks the guard on the new names.
 - Python runs on downloaded data with `python3 -I`. Holdouts untouched.
 
 ## Design
@@ -43,20 +43,20 @@ Add resource facts (CPU, memory, open files and sockets, per service) to the evi
 
   | Metric | Lab (PromQL over the `service` label) | RE2-OB column |
   |---|---|---|
-  | `cpu_usage` | `process_cpu_usage` | `<svc>_cpu` |
+  | `processor_usage` | `process_cpu_usage` | `<svc>_cpu` |
   | `memory_used` | `sum(jvm_memory_used_bytes)` | `<svc>_mem` |
   | `open_files` | `process_files_open_files` | `<svc>_socket` |
 
   Units differ between the tracks (lab CPU is a 0–1 share, RE2-OB's is the exporter's), so the rule uses only within-series ratios. `open_files` on the lab counts all file descriptors, sockets included; on RE2-OB it is the socket count. The metric description says so.
 - **Gatherer:** after the latency loop, per service and per metric, one `query_metric` call; points are split at `incident.from()` into previous and incident windows, as latency is. A new `Dossier` component `resources` (per service, per metric, `Gathered<Series>`), rendered as one table per service with the previous and incident means. A failed call is a failed fact, as everywhere.
 - **Lab recordings:** the committed lab cases have no resource calls, so they replay them as `not recorded`. The resource facts are then failed, R-RES cannot fire, and 0R equals 0 on the lab. The replays' `unrecorded` and `coverage` columns rise; the scorer's AC@1 does not read them.
-- **R-RES (Config 0R only):** runs after R-REACH and R-DOWN and before R-NONE, so 0R answers exactly where 0 does and can only replace an abstention. A service is resource-abnormal when one of its three series has an incident mean at least `k` times its previous mean, with both windows at least half full. The most abnormal service by that ratio is the verdict, category `RESOURCE_EXHAUSTION`. `k` and any tie rule are fixed in ADR-021 from first principles, before any resource series is read.
-- **candidates():** under 0R, resource-abnormal services join the list after the existing entries, ranked by ratio, still capped at 5. Under 0, unchanged.
+- **R-RES (Config 0R only):** runs after R-REACH and R-DOWN and before R-NONE, so 0R answers exactly where 0 does and can only replace an abstention. A series is resource-abnormal when both windows are usable, its incident mean is at least k = 2 times its previous mean, and above its previous max (ADR-021, Definitions). The service with the largest ratio is the verdict, category `RESOURCE_EXHAUSTION`; ties go to topology order.
+- **candidates():** under 0R, resource-abnormal services join the list after the existing entries, ranked by ratio, not repeated when already listed, still capped at 5. Under 0, unchanged.
 - **Selection:** a `rules` version (`v1` = Config 0, `v2` = 0R), passed like the topology (`kintsugi.agent.rules`, default `v1`), recorded in `summary.tsv`'s `model` column (`rules-v1` already appears there), and `replay-agent.sh --rules v1|v2`. HR is the `hybrid` report with `--rules v2`.
 
 ## Tasks
 
-- [ ] T1 ADR-021 (Config 0R, R-RES and its threshold, the metrics, the leakage check, what 0R − 0 and HR − 0R measure), this document. Route: inline (docs).
+- [x] T1 ADR-021 (Config 0R, R-RES and its threshold, the metrics, the leakage check, what 0R − 0 and HR − 0R measure), this document. Route: inline (docs).
 - [ ] T2 Lab metrics, tests first: `MetricCatalog` gains the three metrics, the tool's description lists them; the mcp-tools spec. Route: delegated writer.
 - [ ] T3 Converter, tests first: the three metrics from `_cpu`, `_mem`, `_socket`, in the fixture and the regenerated agent recording; the leakage guard; evals spec REQ-11. Route: delegated writer.
 - [ ] T4 Gatherer and dossier, tests first: the per-service calls, `Dossier.resources`, the renderer and sheets; the RCAEval fixture replays with no unrecorded call; the lab goldens updated where the dossier text changes, and Config 0's verdicts unchanged. Agent spec. Route: delegated writer.
@@ -87,7 +87,8 @@ Add resource facts (CPU, memory, open files and sockets, per service) to the evi
 ## Progress
 
 - 2026-11-01: document created after a read-only exploration (vision M3, the gatherer, `MetricCatalog`, the converter, `RulesDiagnosis`) and a live Prometheus check of the three lab metrics. Only the header line of one RE2-OB dev file was read.
+- 2026-11-01: T1 done (inline, docs only). ADR-021 fixes k = 2, the max guard and the usable-window rule before any resource series is read. `cpu_usage` became `processor_usage`, because the converter's guard rejects the `cpu` token. Commit `docs(adr): fix Config 0R and the R-RES threshold in ADR-021`; native assessment medium, under budget (pending in the slice).
 
 ## Next step
 
-T1, after the human confirms the design.
+T2, lab metrics (delegated writer).
