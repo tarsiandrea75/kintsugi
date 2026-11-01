@@ -26,7 +26,7 @@ import dev.kintsugi.agent.rules.RulesVerdict;
 
 /**
  * AC1 of odd/tasks/rcaeval-converter.md: a recording the RCAEval converter wrote replays through the unchanged
- * gatherer. The recording under {@code rcaeval/} is the converter's output on the synthetic fixture
+ * gatherer, its resource calls (resource-facts AC2) included. The recording under {@code rcaeval/} is the converter's output on the synthetic fixture
  * ({@code evals/tests/fixtures/rcaeval/}, no real data); {@code test_rcaeval_convert.py} regenerates it and fails on
  * any byte of drift.
  */
@@ -52,7 +52,7 @@ class RcaevalRecordingTest {
 		assertThat(dossier.calls()).extracting(ToolResult::rawOutput)
 			.noneMatch(output -> output.startsWith(ReplayLabTools.NOT_RECORDED));
 		assertThat(tools.unrecordedCalls()).isZero();
-		assertThat(tools.recordedCalls()).isEqualTo(dossier.calls().size()).isEqualTo(3 + 5 * 11);
+		assertThat(tools.recordedCalls()).isEqualTo(dossier.calls().size()).isEqualTo(3 + 8 * 11);
 		assertThat(tools.conflicts()).isZero();
 		// T4: the fixture's traces give incident traffic whose client rows sit on the topology's edges.
 		assertThat(dossier.traffic().incident()).isInstanceOf(Gathered.Ok.class);

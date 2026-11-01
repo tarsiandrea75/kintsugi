@@ -315,13 +315,13 @@ class ReportCheckTest {
 
 	@Test
 	void aDossierLineThatDoesNotExistIsDropped() {
-		// The golden F3 dossier numbers its lines D1 to D49.
-		assertThat(DOSSIER).contains("\nD49 ").doesNotContain("\nD50 ");
+		// The golden F3 dossier numbers its lines D1 to D54.
+		assertThat(DOSSIER).contains("\nD54 ").doesNotContain("\nD55 ");
 		ReportCheck.Result result = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
-				evidence(3, "status_summary", 3), dossierEvidence(50)));
+				evidence(3, "status_summary", 3), dossierEvidence(55)));
 
 		assertThat(result.errors()).isEmpty();
-		assertThat(result.dropped()).containsExactly("evidence[1]: line 50 is not in the dossier");
+		assertThat(result.dropped()).containsExactly("evidence[1]: line 55 is not in the dossier");
 		assertThat(result.evidence()).extracting(item -> item.get("toolCallId").asString()).containsExactly("3");
 	}
 
@@ -367,11 +367,11 @@ class ReportCheckTest {
 	@Test
 	void aReportWhoseOnlyEvidenceIsADroppedDossierItemFollowsTheNoEvidenceLeftRule() {
 		ReportCheck.Result rejected = checkInDossierMode(report("payment-service", "DEPENDENCY_REJECTING",
-				dossierEvidence(50)));
-		assertThat(rejected.errors()).containsExactly("evidence[0]: line 50 is not in the dossier");
+				dossierEvidence(55)));
+		assertThat(rejected.errors()).containsExactly("evidence[0]: line 55 is not in the dossier");
 		assertThat(rejected.evidence()).isNull();
 
-		ReportCheck.Result unknown = checkInDossierMode(report("UNKNOWN", "UNKNOWN", dossierEvidence(50)));
+		ReportCheck.Result unknown = checkInDossierMode(report("UNKNOWN", "UNKNOWN", dossierEvidence(55)));
 		assertThat(unknown.errors()).isEmpty();
 		assertThat(unknown.evidence()).isEmpty();
 	}

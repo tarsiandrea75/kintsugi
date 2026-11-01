@@ -38,7 +38,7 @@ class LabGatherOrderPinTest {
 			.containsExactly("order-service", "payment-service", "inventory-service", "gateway-mock");
 		assertThat(dossier.states()).extracting(TableStates::table).containsExactly("orders", "payments");
 		assertThat(dossier.events()).extracting(SourceEvents::source).containsExactly("order", "payment", "reservation");
-		assertThat(dossier.calls()).hasSize(33);
+		assertThat(dossier.calls()).hasSize(45);
 	}
 
 	private static Dossier gather() {

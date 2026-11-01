@@ -53,7 +53,10 @@ class TopologyDerivationTest {
 
 		new DossierGatherer(lab, Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC), CHAIN).gather(10);
 
-		assertThat(calls).filteredOn(call -> call.startsWith("query_metric"))
+		assertThat(calls).filteredOn(call -> call.startsWith("query_metric") && call.contains("\"latency_avg\""))
+			.extracting(call -> JSON.readTree(call.substring(call.indexOf(' '))).path("service").asString())
+			.containsExactly("a", "b", "c");
+		assertThat(calls).filteredOn(call -> call.startsWith("query_metric") && call.contains("\"open_files\""))
 			.extracting(call -> JSON.readTree(call.substring(call.indexOf(' '))).path("service").asString())
 			.containsExactly("a", "b", "c");
 		assertThat(calls).filteredOn(call -> call.startsWith("status_summary"))

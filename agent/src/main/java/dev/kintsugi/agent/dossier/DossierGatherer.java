@@ -22,6 +22,9 @@ import dev.kintsugi.agent.dossier.Dossier.LatencyPoints;
 import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
+import dev.kintsugi.agent.dossier.Dossier.MetricSeries;
+import dev.kintsugi.agent.dossier.Dossier.ResourceSeries;
+import dev.kintsugi.agent.dossier.Dossier.ServiceResources;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
@@ -49,6 +52,12 @@ public final class DossierGatherer {
 
 	/** The {@code query_metric} metric of the latency section: server-side seconds per request, by service and uri. */
 	public static final String LATENCY_METRIC = "latency_avg";
+
+	/**
+	 * The {@code query_metric} metrics of the resources section, in the order gathered and written (ADR-021, "The
+	 * metrics"): the processor, the memory and the open files of each service, in its source's units.
+	 */
+	public static final List<String> RESOURCE_METRICS = List.of("processor_usage", "memory_used", "open_files");
 
 	/** The lines {@code search_logs} is asked for: the cap {@code LabTools} applies to the tool. */
 	static final int LOG_LINES = 20;
@@ -119,6 +128,20 @@ public final class DossierGatherer {
 			latency.add(new ServiceLatency(service,
 					calls.read("query_metric", args, result -> latency(result, incident.from()))));
 		}
+		// The resources, after the latency and with its arguments: one call per service and metric (ADR-021).
+		List<ServiceResources> resources = new ArrayList<>();
+		for (String service : this.services) {
+			List<MetricSeries> metrics = new ArrayList<>();
+			for (String metric : RESOURCE_METRICS) {
+				ObjectNode args = JSON.createObjectNode()
+					.put("metric", metric)
+					.put("service", service)
+					.put("sinceMinutes", previous.sinceMinutes());
+				metrics.add(new MetricSeries(metric,
+						calls.read("query_metric", args, result -> resource(result, incident.from()))));
+			}
+			resources.add(new ServiceResources(service, metrics));
+		}
 		List<ServiceLogs> logs = new ArrayList<>();
 		for (String service : this.services) {
 			List<LevelLogs> levels = new ArrayList<>();
@@ -137,7 +160,8 @@ public final class DossierGatherer {
 			events.add(new SourceEvents(source, calls.compared("event_counts", "source", source, previous, incident,
 					DossierGatherer::eventCounts)));
 		}
-		return new Dossier(at, incident, previous, services, states, traffic, latency, logs, events, calls.made);
+		return new Dossier(at, incident, previous, services, states, traffic, latency, resources, logs, events,
+				calls.made);
 	}
 
 	/** {@code sinceMinutes}, and {@code untilMinutesAgo} when the window does not end now. */
@@ -201,15 +225,38 @@ public final class DossierGatherer {
 	private static LatencySeries latency(JsonNode result, Instant incidentFrom) {
 		List<UriLatency> uris = new ArrayList<>();
 		for (JsonNode item : result.path("items")) {
-			List<Double> previous = new ArrayList<>();
-			List<Double> incident = new ArrayList<>();
-			for (JsonNode point : item.path("points")) {
-				Instant time = Instant.ofEpochSecond(number(point, 0));
-				(time.isBefore(incidentFrom) ? previous : incident).add(seconds(point.path(1)));
-			}
-			uris.add(new UriLatency(text(item.path("labels"), "uri"), points(previous), points(incident)));
+			List<LatencyPoints> windows = windows(item, incidentFrom);
+			uris.add(new UriLatency(text(item.path("labels"), "uri"), windows.get(0), windows.get(1)));
 		}
 		return new LatencySeries(result.path("truncated").asBoolean(false), uris);
+	}
+
+	/**
+	 * The one series of a resource metric, split as {@link #latency} splits a series; none gives two windows without
+	 * points, and more than one makes the output unreadable, since a resource series is labelled by its service only.
+	 */
+	private static ResourceSeries resource(JsonNode result, Instant incidentFrom) {
+		JsonNode items = result.path("items");
+		if (items.size() > 1) {
+			throw new IllegalArgumentException(items.size() + " series, not one");
+		}
+		boolean truncated = result.path("truncated").asBoolean(false);
+		if (items.isEmpty()) {
+			return new ResourceSeries(truncated, points(List.of()), points(List.of()));
+		}
+		List<LatencyPoints> windows = windows(items.get(0), incidentFrom);
+		return new ResourceSeries(truncated, windows.get(0), windows.get(1));
+	}
+
+	/** The previous window's and the incident window's points of one series: before {@code incidentFrom}, then not. */
+	private static List<LatencyPoints> windows(JsonNode item, Instant incidentFrom) {
+		List<Double> previous = new ArrayList<>();
+		List<Double> incident = new ArrayList<>();
+		for (JsonNode point : item.path("points")) {
+			Instant time = Instant.ofEpochSecond(number(point, 0));
+			(time.isBefore(incidentFrom) ? previous : incident).add(seconds(point.path(1)));
+		}
+		return List.of(points(previous), points(incident));
 	}
 
 	/** A point's value as Prometheus writes it; {@code null} for {@code NaN} and the infinities, which are no value. */

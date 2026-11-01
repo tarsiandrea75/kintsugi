@@ -322,7 +322,7 @@ class ServiceSheetsTest {
 		events.add(new SourceEvents("inventory",
 				new Compared<>(new Gathered.Ok<>(previousChecks), new Gathered.Ok<>(incidentChecks))));
 		Dossier dossier = new Dossier(f3.gatheredAt(), f3.incidentWindow(), f3.previousWindow(), f3.services(), states,
-				f3.traffic(), f3.latency(), f3.logs(), events, f3.calls());
+				f3.traffic(), f3.latency(), f3.resources(), f3.logs(), events, f3.calls());
 
 		ServiceSheets.Rendered sheets = ServiceSheets.render(dossier, LAB);
 
@@ -338,6 +338,33 @@ class ServiceSheetsTest {
 				+ "- inventory events type=STOCK_CHECKED outcome=OK: incident 1 (previous 4).\n");
 		assertThat(sheets.owners().subList(without.owners().size(), sheets.owners().size()))
 			.containsExactly(ServiceSheets.HEADER, ServiceSheets.HEADER, ServiceSheets.HEADER, ServiceSheets.HEADER);
+	}
+
+	@Test
+	void aServicesResourcesAreLinesOfItsSheetAfterItsLatency() {
+		// resource-facts T4: synthetic outputs for gateway-mock's processor and memory; its open_files call fails.
+		RecordedLab lab = new RecordedLab("f1", "healthy")
+			.answer("query_metric-processor_usage-gateway-mock", DossierGathererTest.resource("gateway-mock",
+					"[1792143600,\"0.1\"],[1792143720,\"0.3\"],[1792144200,\"0.5\"],[1792144320,\"0.9\"]"))
+			.answer("query_metric-memory_used-gateway-mock",
+					"{\"outcome\":\"OK\",\"returned\":0,\"truncated\":true,\"items\":[]}")
+			.answer("query_metric-open_files-gateway-mock",
+					"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\"}");
+
+		ServiceSheets.Rendered sheets = ServiceSheets.render(new DossierGatherer(lab, CLOCK, LAB).gather(10), LAB);
+
+		String text = unnumbered(sheets.text());
+		String gateway = text.substring(text.indexOf("## gateway-mock"), text.indexOf("## inventory-service"));
+		assertThat(gateway).contains("- latency /authorize: incident mean 8.898 s, max 10.015 s (previous mean 0.012 s).\n"
+				+ "- resources open_files: query_metric failed: outcome=UPSTREAM_ERROR "
+				+ "reason=\"Prometheus did not answer\"\n"
+				+ "- resource processor_usage: incident mean 0.7, max 0.9 (previous mean 0.2, max 0.3).\n"
+				+ "- resource memory_used: incident mean -, max - (previous mean -, max -).\n"
+				+ "- resources memory_used: query_metric truncated=true.\n");
+		String payment = text.substring(text.indexOf("## payment-service"), text.indexOf("## order-service"));
+		assertThat(payment).contains("- resources processor_usage, memory_used, open_files: query_metric failed: "
+				+ "outcome=CLIENT_ERROR reason=\"not recorded in this replay: query_metric {\\\"metr\"(cut)\n");
+		assertThat(text).contains("- resources: processor_usage, memory_used and open_files from query_metric");
 	}
 
 	@Test
@@ -406,8 +433,13 @@ class ServiceSheetsTest {
 				List.of(recording));
 		Clock start = Clock.fixed(Instant.parse(recording.path("startedAt").asString()), ZoneOffset.UTC);
 		Dossier dossier = new DossierGatherer(tools, start, LAB).gather(recording.path("sinceMinutes").asInt());
-		// The recording answers every call the dossier makes, so the sheets are what a replay's model reads.
-		assertThat(tools.unrecordedCalls()).as("unrecorded calls").isZero();
+		// The recording answers every call the dossier makes but the resource calls, which it predates (ADR-021), so
+		// the sheets are what a replay's model reads.
+		assertThat(tools.unrecordedCalls()).as("unrecorded calls").isEqualTo(3 * LAB.gatherOrder().size());
+		assertThat(dossier.calls()).filteredOn(call -> call.rawOutput().startsWith(ReplayLabTools.NOT_RECORDED))
+			.hasSize(tools.unrecordedCalls())
+			.allSatisfy(call -> assertThat(DossierGatherer.RESOURCE_METRICS)
+				.contains(JSON.readTree(call.args()).path("metric").asString()));
 		return dossier;
 	}
 

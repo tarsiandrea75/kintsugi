@@ -1,6 +1,7 @@
 package dev.kintsugi.agent.dossier;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,6 +28,9 @@ import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.LogSignature;
+import dev.kintsugi.agent.dossier.Dossier.MetricSeries;
+import dev.kintsugi.agent.dossier.Dossier.ResourceSeries;
+import dev.kintsugi.agent.dossier.Dossier.ServiceResources;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
@@ -77,6 +81,19 @@ public final class DossierRenderer {
 
 	/** The characters of a failure reason kept in its literal. */
 	static final int REASON_CHARS = 200;
+
+	/**
+	 * The characters of a failed resource call's reason kept in its literal: short, since a gathering makes three such
+	 * calls per service and they tend to fail alike, as on a replay that predates them (ADR-021); a service's failures
+	 * written the same are one line.
+	 */
+	static final int RESOURCE_REASON_CHARS = 48;
+
+	/** The significant digits of a resource value, whose unit and size depend on the metric and the source. */
+	static final int RESOURCE_DIGITS = 4;
+
+	/** The magnitude from which a resource value is written in scientific notation, so a cell stays short. */
+	private static final BigDecimal PLAIN_BELOW = BigDecimal.TEN.pow(12);
 
 	/** The characters of a value kept in a table cell. */
 	static final int VALUE_CHARS = 40;
@@ -151,6 +168,7 @@ public final class DossierRenderer {
 		}
 		traffic(out, dossier.traffic(), topology.edges());
 		latency(out, dossier.latency());
+		resources(out, dossier.resources());
 		logs(out, dossier.logs());
 		events(out, dossier.events());
 		return out.text();
@@ -337,8 +355,82 @@ public final class DossierRenderer {
 				: BigDecimal.valueOf(seconds).setScale(LATENCY_DECIMALS, RoundingMode.HALF_UP).toPlainString();
 	}
 
-	private static String points(LatencyPoints points) {
+	static String points(LatencyPoints points) {
 		return points.values() + "/" + points.points();
+	}
+
+	/**
+	 * One table per service, a row per metric whose call was read, in {@link DossierGatherer#RESOURCE_METRICS} order;
+	 * before it, the service's failed calls, one line per outcome and reason as written, and no table when none was
+	 * read.
+	 */
+	private static void resources(Out out, List<ServiceResources> resources) {
+		out.section("## Resources");
+		out.line("Per service, from query_metric " + String.join(", ", DossierGatherer.RESOURCE_METRICS)
+				+ ", in the units of the source: one call per service and metric over both windows, its points split as"
+				+ " the latency's. \"mean\", \"max\" and \"points\" as in the latency table.");
+		for (ServiceResources service : resources) {
+			out.section("### " + cell(service.service()));
+			List<String> failures = failedResources(service);
+			failures.forEach(out::line);
+			List<List<String>> rows = new ArrayList<>();
+			List<String> truncated = new ArrayList<>();
+			for (MetricSeries metric : service.metrics()) {
+				if (metric.series() instanceof Gathered.Ok<ResourceSeries> ok) {
+					ResourceSeries series = ok.value();
+					rows.add(List.of(cell(metric.metric()), value(series.previous().mean()),
+							value(series.incident().mean()), value(series.previous().max()),
+							value(series.incident().max()), points(series.previous()), points(series.incident())));
+					if (series.truncated()) {
+						truncated.add(cell(metric.metric()));
+					}
+				}
+			}
+			if (rows.isEmpty()) {
+				continue;
+			}
+			if (!failures.isEmpty()) {
+				out.blank();
+			}
+			out.table(List.of("metric", "previous mean", "incident mean", "previous max", "incident max",
+					"previous points", "incident points"), rows);
+			if (!truncated.isEmpty()) {
+				out.blank();
+				out.line("query_metric " + String.join(", ", truncated) + ": truncated=true");
+			}
+		}
+	}
+
+	/**
+	 * A service's failed resource calls, one line per outcome and reason as written, with its metrics:
+	 * {@code <metrics>: query_metric failed: outcome=... reason="..."}.
+	 */
+	static List<String> failedResources(ServiceResources service) {
+		Map<String, List<String>> metrics = new LinkedHashMap<>();
+		for (MetricSeries metric : service.metrics()) {
+			if (metric.series() instanceof Gathered.Failed<ResourceSeries> failed) {
+				String fact = failed.tool() + " failed: outcome=" + failed.outcome() + " reason="
+						+ quote(Objects.requireNonNullElse(failed.reason(), ""), RESOURCE_REASON_CHARS);
+				metrics.computeIfAbsent(fact, k -> new ArrayList<>()).add(cell(metric.metric()));
+			}
+		}
+		List<String> lines = new ArrayList<>();
+		metrics.forEach((fact, names) -> lines.add(String.join(", ", names) + ": " + fact));
+		return lines;
+	}
+
+	/**
+	 * A resource value with {@link #RESOURCE_DIGITS} significant digits, half up, without trailing zeros, whatever the
+	 * locale; plain below {@link #PLAIN_BELOW}, scientific above; {@code -} when absent.
+	 */
+	static String value(Double value) {
+		if (value == null) {
+			return NO_VALUE;
+		}
+		BigDecimal rounded = BigDecimal.valueOf(value)
+			.round(new MathContext(RESOURCE_DIGITS, RoundingMode.HALF_UP))
+			.stripTrailingZeros();
+		return rounded.abs().compareTo(PLAIN_BELOW) < 0 ? rounded.toPlainString() : rounded.toString();
 	}
 
 	private static void logs(Out out, List<ServiceLogs> logs) {

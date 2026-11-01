@@ -610,7 +610,7 @@ Each recording and the tool listing are parsed once per run; only the `ReplayLab
 It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as the full view shows it; `<recording>` is the primary recording's file name without `.json`) and one `summary.tsv` line per sample (`fault mode route sample status truth reported verdict recorded unrecorded coverage conflicts promptTokens completionTokens seconds split recording view report model think reportCap reportTimeout candidates`). Then it writes `aggregate.tsv` per fault, mode, route, split, view, report and route settings (`fault mode route split view report recordings samples matches meanCoverage coveredSamples matchesCovered dossierCovered promptTokens completionTokens costUsd model think reportCap reportTimeout`); the view and the report are a decision sample's, so a result is attributable to its variant, and `-` for an explorer or dossier sample. The last four columns **(qwen-dev T3)** are the route settings the sample's report call ran with, overridden or not ("Routes"): the model, `think` (`on` or `off` when the route sends the field, `default` when it does not, `off` on the cloud route, which disables thinking), the report's answer cap and the report's deadline (`600s`); a rules sample has model `rules-v1` and `-` for the other three. They come after every earlier column, so each keeps its position; the evals' scorer reads columns by name. `summary.tsv`'s last column, `candidates` **(hybrid T4)**, holds the rules' candidates ("Rules candidates (Config H)") as `service|category` pairs in order, joined by `;`: on a `rules` line, `RulesDiagnosis.candidates` of the same dossier the rules diagnosed, its `reported` verdict unchanged; on a `hybrid` line, the list the run's report task gave the model, which the loop returns with the run's status (`AgentLoop.runToOutcome`), empty when the list was empty or the gathering gave no dossier; empty on every other line. `aggregate.tsv` has no such column: the candidates are per sample. `replay-agent.sh` MUST refuse `--model`, `--think`, `--report-cap` and `--report-timeout` on any route but `local` with exit 2 before Maven, and MUST clear each `KINTSUGI_AGENT_MODEL_*` variable whose option is not given, so a run never takes a value the shell left. The evals' scorer reads a `summary.tsv` with or without the `report` column; with it, a run's default config name ends with the report (`cloud-decision-sheets-assessed`):
 - the distinct recordings the samples opened on, which are the independent observations, and the samples, which outnumber them with repeats;
 - matches out of samples, and mean coverage;
-- the covered samples, those with coverage at least 0.8 (`COVERED_THRESHOLD`: a fully replayed dossier-mode sample still shows about 0.91, its model-chosen calls being unrecorded), and the matches among them out of them;
+- the covered samples, those with coverage at least 0.8 (`COVERED_THRESHOLD`: a fully replayed dossier-mode sample still shows about 0.91, its model-chosen calls being unrecorded), and the matches among them out of them. A sample's coverage is the share of its calls answered from a recording, the `query_metric` calls of a resource metric (`processor_usage`, `memory_used`, `open_files`) left out of both terms **(resource-facts T4**, the human's choice of 2026-11-01): the lab recordings predate them, and a coverage that counted them would put every lab sample under the threshold. A dossier counts as fully recorded when no call other than those resource calls went unrecorded. The `unrecorded` column and `dossierUnrecorded` still count every unrecorded call, so the gap stays visible;
 - the samples whose `DOSSIER` step made calls and had none unrecorded, out of samples;
 - tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens.
 
@@ -635,7 +635,7 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 #### Scenario: A decision case replays its own recording alone (decision-instrument T3)
 - GIVEN two `dev` recordings of F1, a dossier one and a decision one, holding the dossier's first call with different outputs
 - WHEN each replays as a decision case
-- THEN each is served its own recording's output for that call, with no conflict, and its 33 dossier calls are all recorded (coverage 1.00)
+- THEN each is served its own recording's output for that call, with no conflict, and 33 of its 45 dossier calls are recorded, the 12 resource calls not, which the coverage leaves out (coverage 1.00)
 - AND a decision sample asked for by fault, which would pool the fault's recordings, is refused
 
 #### Scenario: The cases of a split (decision-instrument T3)
@@ -701,6 +701,14 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 - WHEN a sample of F1 is asked for
 - THEN an `IllegalArgumentException` names F1 and the file, and no model is called
 
+#### Scenario: The coverage leaves the resource calls out (resource-facts T4)
+- GIVEN a sample whose calls are one recorded, one unrecorded, a latency `query_metric` recorded, and two resource `query_metric` calls, one recorded and one unrecorded
+- WHEN its coverage is computed
+- THEN it is 2/3: the two resource calls are in neither term
+- AND a lab decision sample, its 12 resource calls unrecorded, shows `unrecorded` 12 and coverage 1.00, counts as covered, and its dossier as fully recorded
+- AND a dossier with one more unrecorded call, not a resource call, is not fully recorded
+- AND the RCAEval recording's rules sample, its resource calls recorded, shows coverage 1.00
+
 #### Scenario: The aggregate counts the covered samples
 - GIVEN four dossier samples of F1 with coverage 0.9, 0.8, 0.5 and 0.8, verdicts MATCH, MISS, MATCH and MATCH, and fully recorded dossiers for the first two only
 - WHEN the aggregate is computed
@@ -710,7 +718,7 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 - GIVEN the recordings of F1 with the truth `gateway-mock|DEPENDENCY_LATENCY`
 - WHEN one dossier-mode sample of F1 runs and its report names `UNKNOWN|UNKNOWN`
 - THEN its `summary.tsv` line holds `COMPLETED`, the truth, `UNKNOWN|UNKNOWN`, `MISS` and its coverage, then the split `-`, the recording it opened on, the view `-` and the report `-`
-- AND its dossier makes 33 calls, all recorded (coverage 1.00): the recording holds the 4 `query_metric` latency calls too ([dossier-latency](../../../odd/tasks/dossier-latency.md) T3)
+- AND its dossier makes 45 calls, 33 recorded, 12 unrecorded and coverage 1.00: the recording holds the 4 `query_metric` latency calls too ([dossier-latency](../../../odd/tasks/dossier-latency.md) T3), and none of the 12 resource calls, which it predates (resource-facts T4)
 
 #### Scenario: The route settings are recorded per sample (qwen-dev T3, AC2)
 - GIVEN a local route with the model `qwen3.5:9b`, `think` true, a report cap of 2048 and a report deadline of 1800 s
@@ -745,7 +753,7 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 #### Scenario: A rules sample diagnoses the recorded dossier with no model (rules-baseline T3)
 - GIVEN the first `dev` decision case of F1, `verify-agent-20261024T162555Z-r1-F1`, whose truth is `gateway-mock|DEPENDENCY_LATENCY`
 - WHEN it replays on the `rules` route
-- THEN no model is called, and its `summary.tsv` line holds `F1 decision rules 1 COMPLETED`, the truth, `gateway-mock|DEPENDENCY_LATENCY` and `MATCH`, 0 prompt and 0 completion tokens, coverage 1.00, then `dev`, the recording, `tables` and `plain`, and last its candidates, `gateway-mock|DEPENDENCY_LATENCY` first (**hybrid T4**)
+- THEN no model is called, and its `summary.tsv` line holds `F1 decision rules 1 COMPLETED`, the truth, `gateway-mock|DEPENDENCY_LATENCY` and `MATCH`, 0 prompt and 0 completion tokens, coverage 1.00 (the 12 unrecorded resource calls left out), then `dev`, the recording, `tables` and `plain`, and last its candidates, `gateway-mock|DEPENDENCY_LATENCY` first (**hybrid T4**)
 - AND its incident file holds route `rules`, model `rules-v1`, the rule `R-DOWN` and at least one fact
 
 #### Scenario: A rules run replays every case of the split (rules-baseline T3)
@@ -830,18 +838,20 @@ It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a d
 2. `status_summary` for `orders`, then `payments`, each for the previous then the incident window;
 3. `traffic_counts` for the previous then the incident window;
 4. per service, in the order `order-service`, `payment-service`, `inventory-service`, `gateway-mock`: `query_metric` with `metric` `latency_avg` and `sinceMinutes` 2N, one call over both windows, since `query_metric` takes no `untilMinutesAgo` ([dossier-latency](../../../odd/tasks/dossier-latency.md)); one call per service, not one for every service, because the tool keeps at most 10 series and 8 KB, which the four services' series (about 1.8 KB each at 60 points) would exceed;
-5. per service, in the same order, and per level, `WARN` then `ERROR`: `count_logs`, then `search_logs` with `limit` 20, over the incident window;
-6. `event_counts` for `order`, `payment`, then `reservation`, each for the previous then the incident window.
+5. per service, in the same order, and per resource metric, `processor_usage`, `memory_used`, then `open_files`: `query_metric` with that `metric` and `sinceMinutes` 2N, one call over both windows, as for the latency **(resource-facts T4**, ADR-021, [feature document](../../../odd/tasks/resource-facts.md)); 12 calls on the lab, 33 on RE2-OB's 11 services;
+6. per service, in the same order, and per level, `WARN` then `ERROR`: `count_logs`, then `search_logs` with `limit` 20, over the incident window;
+7. `event_counts` for `order`, `payment`, then `reservation`, each for the previous then the incident window.
 
 The dossier is an immutable model of facts in ADR-011's five sections, each list in a fixed order so its shape is the same for every incident:
 - service status per lab service: the start times seen, the start times inside the window (the newest `restartsInWindow` of them) and the uptime, the gathering time by the agent's `Clock` minus the newest start time; a service missing from the output keeps its place with no start times and no uptime;
 - order and payment states per window: each status with its count and `sampleOrderIds`, as `status_summary` gives them;
 - traffic per window: the `traffic_counts` rows, every label as the tool gives it;
 - latency per service: whether the tool cut its output (`truncated`), and per series (its `uri` label) the points split at the incident window's start, earlier ones in the previous window and the others in the incident window; per window the number of points, the number with a finite value (`NaN`, no request ended in the point's rate window, and `+Inf`/`-Inf` are no value), and the mean and maximum of those values in seconds (none when no point has a value); a value that is not a number makes the output unreadable;
+- resources per service and metric **(resource-facts T4)**: the one series of the metric, labelled by its service only, split at the incident window's start as latency's are, with the same count, values, mean and maximum per window, in the source's unit; whether the tool cut its output; an output with no series gives two windows without points, and one with more than one series cannot be read;
 - log signatures per service and level: the exact count from `count_logs`, and the lines `search_logs` returned (how many, and whether the tool cut them) grouped by signature, the message after the logger with ids and numbers replaced, as in the `search_logs` summary; each with its count, newest time and newest message, which is kept as untrusted text;
 - event counts per source and window: the total and the count per type and outcome.
 
-It MUST hold no judgment, threshold or marker; the only computed values are the window bounds, the uptime, the grouping and the latency points' split, count, mean and maximum. A call that fails MUST NOT stop the gathering: its section records the tool, the outcome (`INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, or `OK` for an output that cannot be read) and the reason, and every other call still runs. A call that throws is recorded as `CLIENT_ERROR`. The dossier also keeps every call made, in order, with its arguments and full output. The calls are made by code, not by the model: they do not pass the loop's checks, are not offered as tools, and do not count against the tool budget ("Budgets"). How the dossier reaches the model and how its calls are stored belong to "Dossier mode". When it is gathered depends on the mode: dossier mode gathers it after the warm-up, decision mode before it, at the incident's opening, so that the incident window ends when the incident opened ("Decision mode").
+It MUST hold no judgment, threshold or marker; the only computed values are the window bounds, the uptime, the grouping and the latency and resource points' split, count, mean and maximum. A call that fails MUST NOT stop the gathering: its section records the tool, the outcome (`INVALID_PARAMETER`, `UPSTREAM_ERROR`, `CLIENT_ERROR`, or `OK` for an output that cannot be read) and the reason, and every other call still runs. A call that throws is recorded as `CLIENT_ERROR`. The dossier also keeps every call made, in order, with its arguments and full output. The calls are made by code, not by the model: they do not pass the loop's checks, are not offered as tools, and do not count against the tool budget ("Budgets"). How the dossier reaches the model and how its calls are stored belong to "Dossier mode". When it is gathered depends on the mode: dossier mode gathers it after the warm-up, decision mode before it, at the incident's opening, so that the incident window ends when the incident opened ("Decision mode").
 
 #### Scenario: Two windows
 - GIVEN an incident with `sinceMinutes` = 10
@@ -852,7 +862,7 @@ It MUST hold no judgment, threshold or marker; the only computed values are the 
 
 #### Scenario: Same calls for every incident
 - WHEN the dossier is gathered twice over the same outputs
-- THEN the same 33 calls are made in the same order and the two dossiers are equal
+- THEN the same 45 calls are made in the same order and the two dossiers are equal
 
 #### Scenario: Calls through MCP
 - WHEN the dossier is gathered
@@ -867,7 +877,19 @@ It MUST hold no judgment, threshold or marker; the only computed values are the 
 - GIVEN `traffic_counts` answers `UPSTREAM_ERROR` for the incident window
 - WHEN the dossier is gathered
 - THEN its incident traffic records `traffic_counts`, `UPSTREAM_ERROR` and the tool's reason
-- AND the previous window's traffic and every other section are gathered, and all 33 calls are made
+- AND the previous window's traffic and every other section are gathered, and all 45 calls are made
+
+#### Scenario: Resource calls after the latency (resource-facts T4)
+- GIVEN an incident with `sinceMinutes` = 10, gathering at 10:00
+- WHEN the dossier is gathered
+- THEN after the four latency calls, `query_metric` is called for each service with `metric` = `processor_usage`, `memory_used`, then `open_files`, and `sinceMinutes` = 20
+- AND gateway-mock's `processor_usage` points 0.1, `NaN`, 0.3 before 09:50 and 0.5, 0.7, 0.9 after give a previous window of 2 values out of 3 points, mean 0.2 and max 0.3, and an incident window of 3 out of 3, mean 0.7 and max 0.9
+
+#### Scenario: A recording that predates the resource calls (resource-facts T4)
+- GIVEN a lab recording, which holds no resource call
+- WHEN its dossier is replayed
+- THEN each of the 12 resource calls is answered `CLIENT_ERROR` with `not recorded in this replay: query_metric ...` and is a failed fact, every other call is answered from the recording, and the unrecorded count is 12
+- AND an RCAEval recording converted with the resource series replays its 3 + 8 × 11 calls with none unrecorded
 
 #### Scenario: Not counted in the tool budget
 - WHEN the dossier is gathered
@@ -882,8 +904,9 @@ Every section and every fixed row is written for every dossier, in this order, w
 2. **Order states** and **Payment states:** one row per status present in either window, previous and incident counts side by side, and up to 3 sample order ids of the incident window.
 3. **Traffic:** the fixed edges external client → order-service `POST /orders` (server side only), order-service → inventory-service `POST /reservations`, order-service → payment-service `POST /payments`, payment-service → gateway-mock `POST /authorize`. Each edge has its caller-side (`client`) rows by status, outcome and exception, then its server-side rows by status and outcome, previous and incident counts side by side; a row missing from one window counts 0 there. A side with no row in either window is written as one `no rows` row with counts 0, since `traffic_counts` leaves out rows of count 0. Rows that belong to no fixed edge follow under "Other rows", with all their labels.
 4. **Latency (server side):** one table, one row per service and `uri`, in the gatherer's service order, a service's rows sorted by incident mean, then previous mean, largest first (no mean last), then by `uri`, at most 3 per service (the lab's services answer on one or two uris besides `/actuator/prometheus`): mean and max of each window in seconds with 3 decimals (half up), and the points with a value out of all points of each window (`9/11`). A sentence states the source and what mean, max and points are. A service whose call failed keeps one row of `-`, and one with no series one `no rows` row; rows past the cap are stated as `not shown for <service>: rows=<n>`, and a cut output as `query_metric for <service>: truncated=true`. It follows the traffic, where a reader following the call path looks next.
-5. **Log signatures (incident window):** per service and level (`WARN`, `ERROR`), `count_logs`' exact count and `search_logs`' returned lines, truncation and number of signatures; then the signatures, each with its count, newest time and newest message.
-6. **Event counts:** per source, the totals and one row per type and outcome, previous and incident side by side.
+5. **Resources** **(resource-facts T4)**: a sentence states the source, that units are the source's, and that mean, max and points are as in the latency table; then per service, in the gatherer's order, a `### <service>` heading and one table with a row per metric read, in the order `processor_usage`, `memory_used`, `open_files`: mean and max of each window with 4 significant digits (half up, no trailing zeros, scientific from 10^12 on), and the points with a value out of all points of each window. Before the table, the service's failed calls are one line per outcome and reason as written, naming their metrics (`processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="..."`), with the reason cut at 48 characters, since the three calls of a service tend to fail alike; a service with no call read has that line and no table. The truncated metrics of a service are one line, `query_metric <metrics>: truncated=true`.
+6. **Log signatures (incident window):** per service and level (`WARN`, `ERROR`), `count_logs`' exact count and `search_logs`' returned lines, truncation and number of signatures; then the signatures, each with its count, newest time and newest message.
+7. **Event counts:** per source, the totals and one row per type and outcome, previous and incident side by side.
 
 Variable rows are sorted by incident count, then previous count, largest first, then by their labels. Caps keep the size bounded, and what they leave out is stated as a fact (`not shown: rows=<n>, previous=<sum>, incident=<sum>`; `not shown: signatures=<n> lines=<sum>`): at most 5 rows per table and per side of an edge; at most 3 signatures per service and level and 8 in the whole log section, handed out one per level per round in the section's order; table values cut at 40 characters, log messages at 300, failure reasons at 200. A failed call is written as one line in its section, `<tool> failed[ for the <previous|incident> window| for <service>]: outcome=<outcome> reason="<reason>"`, and the section keeps its fixed rows, with `-` for the counts it could not read. Log messages are written as `untrustedText="..."` literals, and reasons as `reason="..."`, with the same JSON escaping as the tool summaries ("Summaries built in code"), so text from the lab can never close its literal or start a line of its own; table values are escaped the same way, without quotes, and with `|` escaped. The rendering is deterministic: the same dossier always gives the same text, whatever the default locale or time zone.
 
@@ -894,13 +917,14 @@ Every line of the rendered dossier that a report may cite MUST start with its nu
 2. its restarts in the incident window, the newest 3 of their start times, and its uptime at gathering;
 3. its inbound requests, its server-side rows, by method, uri, status and outcome;
 4. the latency of its uris but `/actuator/*`, at most 3: the incident mean and max and the previous mean, in seconds;
-5. its outbound calls, its client-side rows: one block per edge it calls on, named by the callee alone (the graph has one edge per caller and callee, and the callee's inbound rows name the uri), by status, outcome and exception; a client row on no edge goes to one more block after them, written only when it has a row, each line naming the callee, method and uri (`outbound to gateway-mock POST /authorize status=200 ...`);
-6. its `WARN` and `ERROR` lines and log signatures, written as the tables write them;
-7. the tables and event sources it owns: each status, and each source's total and its rows by type and outcome.
+5. its resources **(resource-facts T4)**: its failed resource calls as the tables write them, `- resources <metrics>: query_metric failed: ...`, then one line per metric read, `- resource processor_usage: incident mean 0.7, max 0.9 (previous mean 0.2, max 0.3).`, values as in the tables, then `- resources <metrics>: query_metric truncated=true.` for the cut ones;
+6. its outbound calls, its client-side rows: one block per edge it calls on, named by the callee alone (the graph has one edge per caller and callee, and the callee's inbound rows name the uri), by status, outcome and exception; a client row on no edge goes to one more block after them, written only when it has a row, each line naming the callee, method and uri (`outbound to gateway-mock POST /authorize status=200 ...`);
+7. its `WARN` and `ERROR` lines and log signatures, written as the tables write them;
+8. the tables and event sources it owns: each status, and each source's total and its rows by type and outcome.
 
-A count is written `incident N (previous M)`, and a label as `key=value` (`status=201 outcome=SUCCESS exception=none`), escaped as a table value; a label the row does not carry is left out. A count row whose incident count is 0 while its previous count is above 0 MUST be written in the last section instead, under its service (`### payment-service`), in the sheets' order; a source's total stays in its sheet. A block left with no row says so, `inbound: no rows in the incident window.` (`no rows read.` when the incident window failed), and a last section with no row holds `- no rows.`. The tables' caps hold per block (5 rows, 3 latency rows; 8 signatures in all, handed out in the sheets' order), with the same `not shown` facts. A failed call that covers every service (`service_restarts`, `traffic_counts`) is one fact line of the header; any other failed call is one line in its service's sheet, which keeps its fixed lines with `-` for what it could not read. What no lab service owns is kept under a last `## Other rows` **(service-assessment T1r)**, written only when there is one, owned by `header`, with every row in place, those seen only in the previous window included, since the last section is per service: a traffic row of no lab service, with all its labels, then a state table or an event source the topology names no owner for, written as a sheet writes it. `traffic_counts` reads the lab's four services only, and a test checks that every table and event source the gatherer reads has its owner, so a name missing from the lab topology fails the build; in an incident it would move those facts to "Other rows", never fail the rendering. The header states the windows and the gathering time as the tables do, how counts are written, that text from the lab is quoted, the order of the sections, what inbound, outbound and latency are, and that `/actuator/*` uris are left out. The sheets state facts only, as the tables do.
+A count is written `incident N (previous M)`, and a label as `key=value` (`status=201 outcome=SUCCESS exception=none`), escaped as a table value; a label the row does not carry is left out. A count row whose incident count is 0 while its previous count is above 0 MUST be written in the last section instead, under its service (`### payment-service`), in the sheets' order; a source's total stays in its sheet. A block left with no row says so, `inbound: no rows in the incident window.` (`no rows read.` when the incident window failed), and a last section with no row holds `- no rows.`. The tables' caps hold per block (5 rows, 3 latency rows; 8 signatures in all, handed out in the sheets' order), with the same `not shown` facts. A failed call that covers every service (`service_restarts`, `traffic_counts`) is one fact line of the header; any other failed call is one line in its service's sheet, which keeps its fixed lines with `-` for what it could not read. What no lab service owns is kept under a last `## Other rows` **(service-assessment T1r)**, written only when there is one, owned by `header`, with every row in place, those seen only in the previous window included, since the last section is per service: a traffic row of no lab service, with all its labels, then a state table or an event source the topology names no owner for, written as a sheet writes it. `traffic_counts` reads the lab's four services only, and a test checks that every table and event source the gatherer reads has its owner, so a name missing from the lab topology fails the build; in an incident it would move those facts to "Other rows", never fail the rendering. The header states the windows and the gathering time as the tables do, how counts are written, that text from the lab is quoted, the order of the sections, what inbound, outbound, latency and resources are, and that `/actuator/*` uris are left out. The sheets state facts only, as the tables do.
 
-Every citable line of the sheets is numbered `D1`, `D2`, … exactly as in the tables, so a report cites them the same way, and the renderer also returns the **owner** of every numbered line: the service whose sheet, or whose part of the last section, holds it, or `header` for the header's lines, the line of an empty last section and the other rows. Why: one service's facts were spread over six tables of about 55 rows, 8 of the 12 latency rows `/actuator/*`, and a caller's latency contains its callee's (in F1, payment-service's `/payments` mean 1.229 s against gateway-mock's `/authorize` 1.177 s), so magnitudes cannot find the origin while the graph can. Facts grouped per service, leaf first, turn a synthesis over tables into a few local judgments, which code can check against the graph by the owners (the assessed report, T2). The sheets are no larger than the tables: the F3 sheets are about 1,600 tokens by the estimate below, against about 1,820 for its tables, and those of F1's first `dev` decision recording about 1,540, against about 2,040 **(service-assessment T1r)**.
+Every citable line of the sheets is numbered `D1`, `D2`, … exactly as in the tables, so a report cites them the same way, and the renderer also returns the **owner** of every numbered line: the service whose sheet, or whose part of the last section, holds it, or `header` for the header's lines, the line of an empty last section and the other rows. Why: one service's facts were spread over six tables of about 55 rows, 8 of the 12 latency rows `/actuator/*`, and a caller's latency contains its callee's (in F1, payment-service's `/payments` mean 1.229 s against gateway-mock's `/authorize` 1.177 s), so magnitudes cannot find the origin while the graph can. Facts grouped per service, leaf first, turn a synthesis over tables into a few local judgments, which code can check against the graph by the owners (the assessed report, T2). The sheets are no larger than the tables: the F3 sheets are about 1,600 tokens by the estimate below, against about 1,820 for its tables, and those of F1's first `dev` decision recording about 1,540, against about 2,040 **(service-assessment T1r)**; with the resources, failed as on a lab replay, the F3 sheets are about 1,870 against 2,130 **(resource-facts T4)**.
 
 The sheets MUST state facts only, as the tables do: the banned-words test runs on them too. What they add is arrangement, which ADR-014 allows as an amendment of ADR-011's "facts only" rule **(service-assessment T3)**: the order and the "calls; called by" lines come from the topology, the split into "Seen only in the previous window" compares a count with 0, and the `/actuator/*` rows are dropped for every fault alike. No line says which service is slow, failing or the cause.
 
@@ -926,8 +950,8 @@ The sheets MUST state facts only, as the tables do: the banned-words test runs o
 
 #### Scenario: Size ceiling
 - WHEN the F3 and healthy dossiers are rendered
-- THEN each is at most 2,500 tokens by a conservative estimate of one token per 3 characters (about 1.8k for F3 with the latency table, 1.4k before it)
-- AND a stress dossier, every list far above its cap and every value at its length limit, is at most 5,500 by the same estimate (4,500 before the latency table)
+- THEN each is at most 2,500 tokens by a conservative estimate of one token per 3 characters (about 2.1k for F3 with the resources section, its 12 calls failed as on a lab replay; 1.8k before it, 1.4k before the latency table)
+- AND a stress dossier, every list far above its cap and every value at its length limit, is at most 6,500 by the same estimate (5,500 before the resources section, 4,500 before the latency table)
 
 #### Scenario: A slow answer that ends in success shows its latency
 - GIVEN gateway-mock answers `/authorize` with 200 in about 10 s from 09:53, and payment-service's `/payments` waits on it, with points every minute from 09:40 and the gathering at 10:00
@@ -939,6 +963,12 @@ The sheets MUST state facts only, as the tables do: the banned-words test runs o
 - GIVEN `query_metric` answers `INVALID_PARAMETER` for payment-service
 - WHEN the dossier is rendered
 - THEN the latency section holds `query_metric failed for payment-service: outcome=INVALID_PARAMETER reason="..."` and the row `| payment-service | - | - | - | - | - | - | - |`, and every other service keeps its rows
+
+#### Scenario: Resources per service (resource-facts T4)
+- GIVEN order-service's `processor_usage` points as in "Resource calls after the latency", its `memory_used` 351234567 before 09:50 and 702469134 after, an `open_files` output with no series cut by the tool, and every other service's resource calls not recorded
+- WHEN the dossier is rendered
+- THEN the resources section follows the latency and holds, under `### order-service`, the rows `| processor_usage | 0.2 | 0.7 | 0.3 | 0.9 | 2/3 | 3/3 |`, `| memory_used | 351200000 | 702500000 | 351200000 | 702500000 | 1/1 | 1/1 |` and `| open_files | - | - | - | - | 0/0 | 0/0 |`, then `query_metric open_files: truncated=true`
+- AND under `### gateway-mock`, one line `processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="not recorded in this replay: query_metric {\"metr"(cut)` and no table
 
 #### Scenario: Untrusted text marked
 - GIVEN a log message holding a quote, a newline and the text "## Service status"
@@ -962,6 +992,12 @@ The sheets MUST state facts only, as the tables do: the banned-words test runs o
 - WHEN it is rendered as sheets
 - THEN gateway-mock's sheet holds `- latency /authorize: incident mean 8.898 s, max 10.015 s (previous mean 0.012 s).`, payment-service's `- latency /payments: incident mean 8.917 s, max 10.033 s (previous mean 0.045 s).`, and no service's line names `/actuator`
 
+#### Scenario: Resources in the sheets (resource-facts T4)
+- GIVEN gateway-mock's `processor_usage` read, its `memory_used` with no series and cut, and its `open_files` answered `UPSTREAM_ERROR`, over the F1 dossier
+- WHEN it is rendered as sheets
+- THEN gateway-mock's sheet holds, after its latency, `- resources open_files: query_metric failed: outcome=UPSTREAM_ERROR reason="Prometheus did not answer"`, `- resource processor_usage: incident mean 0.7, max 0.9 (previous mean 0.2, max 0.3).`, `- resource memory_used: incident mean -, max - (previous mean -, max -).` and `- resources memory_used: query_metric truncated=true.`
+- AND payment-service's sheet, whose resource calls were not recorded, holds one line `- resources processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="..."`
+
 #### Scenario: A failed call in the sheets (service-assessment T1)
 - GIVEN `service_restarts` cannot reach mcp-tools, `traffic_counts` fails for the previous window and `query_metric` fails for order-service
 - WHEN the dossier is rendered as sheets
@@ -973,7 +1009,7 @@ The sheets MUST state facts only, as the tables do: the banned-words test runs o
 - AND each recorded dossier's sheets are no larger than its tables and at most 2,500 tokens, and the stress dossier's no larger than its tables and at most 5,500
 
 #### Scenario: A clean decision recording as sheets (service-assessment T1r)
-- GIVEN F1's first `dev` decision recording, its 33 outputs served by `ReplayLabTools` to the gatherer as a replay serves them, on a clock at the recording's start; no test reads a `holdout` recording
+- GIVEN F1's first `dev` decision recording, its 33 outputs served by `ReplayLabTools` to the gatherer as a replay serves them, its 12 resource calls answered as not recorded (resource-facts T4), on a clock at the recording's start; no test reads a `holdout` recording
 - WHEN its dossier is rendered as sheets
 - THEN they match their golden file: gateway-mock's sheet comes first with `- latency /authorize: incident mean 1.177 s, max 9.905 s (previous mean 0.002 s).`, and payment-service's holds `- latency /payments: incident mean 1.229 s, max 9.979 s (previous mean 0.015 s).`
 - AND the timeouts are in the sheet of their caller, order-service: `- outbound to payment-service status=CLIENT_ERROR outcome=UNKNOWN exception=HttpTimeoutException: incident 6 (previous 0).`
@@ -1008,9 +1044,9 @@ The loop MUST run in the mode of `kintsugi.agent.mode` **(T5a)**: `explorer` (th
 
 In dossier mode, after the warm-up, code MUST gather the evidence dossier ("Evidence dossier gathering", with N the incident's `sinceMinutes` and the loop's `Clock`) and render it ("Evidence dossier rendering"). The result is the **dossier message**, a user message that every later model call, the report included, carries right after the system message and before the evidence message. It starts with one neutral line: `Evidence dossier, gathered by code before the first phase, in place of TRIAGE: the same tool calls for every incident, over the incident window and the window just before it. It is not a tool call result: cite it with toolCallId "dossier" and tool "dossier", and the number of the line you cite: D7 is line 7.` (**evidence-by-reference**; `and a quote copied exactly from it.` in **T5b**; `It is not a tool call result and has no toolCallId.` in T5a), then a blank line and the rendered dossier. The dossier MUST NOT be part of the system message: the system message is the same in every mode, so Ollama keeps reusing the prefix it has read. `TRIAGE` is skipped, since the dossier covers its tools; the instruction's phase line reads `the phases run in order: INVESTIGATE, KNOWLEDGE, CONCLUDE`. `INVESTIGATE`'s first plan follows the first-plan rule ("The plan"): no tool result has a `toolCallId` yet, so it is asked for hypotheses along the call path, not for a fresh plan; once a dossier is gathered it may also start each hypothesis's `why` with the dossier fact that supports it, `toolCallId=dossier: ...` **(T5b)**. `KNOWLEDGE` asks for a fresh plan as in explorer mode, whose hypotheses may cite `toolCallId=3: ...` or `toolCallId=dossier: ...` **(T5b)**. The model-call budget is unchanged (15; a valid dossier run makes at most 6 + 2 + 2 `ACT` answers and 2 report attempts, 12).
 
-The dossier's 33 calls are code's: they pass no check, count against no tool budget, are never offered to the model and have no `toolCallId`. The dossier is recorded as one step, kind `DOSSIER` in phase `DOSSIER`, before the first `ACT` step: `summary` holds the dossier message the model saw, `tool_output` the 33 calls as a JSON array of `{tool, args, outcome, durationMs, output}` in call order (shown only with `?full=true`), `latency_ms` the gathering's time, and no model, tool name or outcome. A report cites the dossier as a whole, with `toolCallId` and `tool` both `"dossier"` ("Evidence is checked", **T5b**); a citation of the `DOSSIER` step's number is rejected like a citation of any step that is not a tool call.
+The dossier's 45 calls are code's: they pass no check, count against no tool budget, are never offered to the model and have no `toolCallId`. The dossier is recorded as one step, kind `DOSSIER` in phase `DOSSIER`, before the first `ACT` step: `summary` holds the dossier message the model saw, `tool_output` the 33 calls as a JSON array of `{tool, args, outcome, durationMs, output}` in call order (shown only with `?full=true`), `latency_ms` the gathering's time, and no model, tool name or outcome. A report cites the dossier as a whole, with `toolCallId` and `tool` both `"dossier"` ("Evidence is checked", **T5b**); a citation of the `DOSSIER` step's number is rejected like a citation of any step that is not a tool call.
 
-The gathering counts against the incident's time budget and is bounded by the `ACT` call deadline (`kintsugi.agent.model.call-timeout.act`, 600 s), or the incident's time left when that is shorter. A call that fails is a fact in the dossier ("Evidence dossier gathering"). A gathering that throws, or runs past its deadline, gives no dossier: the dossier message is the introduction's first sentence and `The dossier was not gathered: the gathering took longer than <deadline>; there is no dossier to cite.` (or `the gathering failed: <exception>; ...`), recorded the same way with no `tool_output`, and the run goes on; its plans and report task are then explorer mode's, with no mention of the dossier **(T5b)**. Only when the incident's own time runs out does the run end `TIMED_OUT`. Why the ACT deadline: each of the 33 calls is already bounded by the MCP request timeout (20 s), and a live gathering takes seconds; the bound keeps a hung mcp-tools from holding the run longer than one model call would.
+The gathering counts against the incident's time budget and is bounded by the `ACT` call deadline (`kintsugi.agent.model.call-timeout.act`, 600 s), or the incident's time left when that is shorter. A call that fails is a fact in the dossier ("Evidence dossier gathering"). A gathering that throws, or runs past its deadline, gives no dossier: the dossier message is the introduction's first sentence and `The dossier was not gathered: the gathering took longer than <deadline>; there is no dossier to cite.` (or `the gathering failed: <exception>; ...`), recorded the same way with no `tool_output`, and the run goes on; its plans and report task are then explorer mode's, with no mention of the dossier **(T5b)**. Only when the incident's own time runs out does the run end `TIMED_OUT`. Why the ACT deadline: each of the 45 calls is already bounded by the MCP request timeout (20 s), and a live gathering takes seconds; the bound keeps a hung mcp-tools from holding the run longer than one model call would.
 
 Size: the largest call of a dossier run is the report call. With the longest symptom, the F3 dossier with its introduction (about 5,560 characters with the latency table; 4,366 since T5b's citation sentence, 4,298 in T5a), the 6 summaries at their cap of 1,500 characters and the report task with its dossier sentence, it is about 18.8k characters, about 6,770 tokens with its 512-token answer by a conservative estimate of one token per 3 characters, within `num-ctx` 8192 (a test checks it). The stress dossier (about 15.8k characters with the latency table; 13.4k before it) would reach about 10,270 by that estimate and about 7,800 at 4 characters per token: a known edge, recorded for T6's live runs. The line numbers ("Evidence dossier rendering", "Summaries built in code") add about 300 tokens to the prompt, about 150 dossier lines at about 2 tokens each, and the report's answer loses its quotes, about 150-200 tokens (ADR-013).
 
@@ -1043,7 +1079,7 @@ Size: the largest call of a dossier run is the report call. With the longest sym
 
 #### Scenario: The dossier recorded
 - WHEN a dossier run completes
-- THEN its `DOSSIER` step's `summary` is the dossier message the model saw and its `tool_output` lists the 33 calls with their full outputs
+- THEN its `DOSSIER` step's `summary` is the dossier message the model saw and its `tool_output` lists the 45 calls with their full outputs
 - AND the incident and its report record `mode` `dossier`, and the API shows both
 
 #### Scenario: Failed dossier calls
@@ -1080,12 +1116,12 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 - GIVEN `kintsugi.agent.mode` = `decision`
 - WHEN an incident runs and its report is valid
 - THEN its steps are `DOSSIER`, then `REPORT`, and the model gets one call, the report, offered no tool
-- AND only the dossier's 33 calls reach mcp-tools, and the incident and its report record `mode` `decision`
+- AND only the dossier's 45 calls reach mcp-tools, and the incident and its report record `mode` `decision`
 
 #### Scenario: The dossier before the warm-up
 - GIVEN decision mode on the local route
 - WHEN an incident runs
-- THEN the dossier's 33 calls are made before the warm-up request
+- THEN the dossier's 45 calls are made before the warm-up request
 - AND in dossier mode the warm-up still comes before the dossier
 
 #### Scenario: A gathering that gives no dossier
@@ -1120,7 +1156,7 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 #### Scenario: Replayed from a dossier recording
 - GIVEN F1's dossier recording, a case of the `stress` split
 - WHEN it replays as a decision case
-- THEN its 33 dossier calls are all recorded, none is unrecorded, and the model gets only the report call ("Replay of recorded tool outputs")
+- THEN 33 of its 45 dossier calls are recorded, the 12 resource calls, which it predates, are the only unrecorded ones (resource-facts T4), and the model gets only the report call ("Replay of recorded tool outputs")
 
 #### Scenario: The sheets view (service-assessment T1)
 - GIVEN `kintsugi.agent.decision.view` = `sheets`

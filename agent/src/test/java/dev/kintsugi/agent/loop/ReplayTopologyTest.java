@@ -60,7 +60,8 @@ class ReplayTopologyTest {
 
 		assertThat(sample.unrecorded()).isZero();
 		assertThat(sample.dossierUnrecorded()).isZero();
-		assertThat(sample.recorded()).isEqualTo(3 + 5 * 11);
+		assertThat(sample.recorded()).isEqualTo(3 + 8 * 11);
+		assertThat(sample.coverage()).isEqualTo(1.0);
 		assertThat(sample.conflicts()).isZero();
 		assertThat(sample.truth()).isEqualTo("checkoutservice|RESOURCE_EXHAUSTION");
 		assertThat(sample.split()).isEqualTo("dev");

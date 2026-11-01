@@ -28,6 +28,9 @@ import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.LogSignature;
+import dev.kintsugi.agent.dossier.Dossier.MetricSeries;
+import dev.kintsugi.agent.dossier.Dossier.ResourceSeries;
+import dev.kintsugi.agent.dossier.Dossier.ServiceResources;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
@@ -52,11 +55,13 @@ class DossierRendererTest {
 
 	/**
 	 * The ceiling for the stress dossier: every list far above its cap and every value at its length limit, the worst
-	 * case the caps allow (about 15.8k characters with the latency table, near 4k tokens at 4 characters per token;
-	 * 13.4k and 4,500 before it). The ceiling is about two thirds of {@code num-ctx} 8192, no longer half: the stress
-	 * dossier's report call is a known edge (agent spec, dossier size), while the real faults' dossiers stay far below it.
+	 * case the caps allow (about 18.8k characters with the resources section, 6,257 by {@link #tokens}; 16.4k and 5,467
+	 * before it, 13.4k before the latency table). The resources' 12 rows, all truncated and at their widest values, add
+	 * about 2.4k characters, so the ceiling rose from 5,500 to 6,500, about four fifths of {@code num-ctx} 8192
+	 * (resource-facts T4): the stress dossier's report call is a known edge (agent spec, dossier size), while the real
+	 * faults' dossiers stay far below it.
 	 */
-	static final int STRESS_TOKEN_CEILING = 5_500;
+	static final int STRESS_TOKEN_CEILING = 6_500;
 
 	/**
 	 * Words and marks that would interpret a fact (ADR-011, "Facts only"); matched as whole words, ignoring case.
@@ -125,6 +130,7 @@ class DossierRendererTest {
 				"### order-service -> inventory-service POST /reservations",
 				"### order-service -> payment-service POST /payments",
 				"### payment-service -> gateway-mock POST /authorize", "### Other rows", "## Latency (server side)",
+				"## Resources", "### order-service", "### gateway-mock",
 				"| service | uri | previous mean | incident mean | previous max | incident max | previous points "
 						+ "| incident points |",
 				"| order-service |",
@@ -205,6 +211,63 @@ class DossierRendererTest {
 				"| payment-service | - | - | - | - | - | - | - |\n", "| gateway-mock | no rows | - | - | - | - | - | - |\n",
 				"query_metric for gateway-mock: truncated=true\n");
 		assertThat(shape(markdown)).isEqualTo(shape(DossierRenderer.render(gather("f3"), LAB)));
+	}
+
+	@Test
+	void resourceSeriesRenderAsOneTablePerServiceAfterTheLatency() {
+		// resource-facts T4: synthetic outputs for order-service; the other services' calls are not recorded.
+		RecordedLab lab = new RecordedLab("healthy")
+			.answer("query_metric-processor_usage-order-service", DossierGathererTest.resource("order-service",
+					"[1792143600,\"0.1\"],[1792143660,\"NaN\"],[1792143720,\"0.3\"],[1792144200,\"0.5\"],"
+							+ "[1792144260,\"0.7\"],[1792144320,\"0.9\"]"))
+			.answer("query_metric-memory_used-order-service",
+					DossierGathererTest.resource("order-service", "[1792143600,\"351234567\"],[1792144200,\"702469134\"]"))
+			.answer("query_metric-open_files-order-service",
+					"{\"outcome\":\"OK\",\"returned\":0,\"truncated\":true,\"items\":[]}");
+
+		String markdown = DossierRenderer.render(new DossierGatherer(lab, CLOCK, LAB).gather(10), LAB);
+
+		String text = unnumbered(markdown);
+		String resources = text.substring(text.indexOf("## Resources"), text.indexOf("## Log signatures"));
+		assertThat(resources).contains("### order-service\n\n"
+				+ "| metric | previous mean | incident mean | previous max | incident max | previous points "
+				+ "| incident points |\n|---|---|---|---|---|---|---|\n"
+				+ "| processor_usage | 0.2 | 0.7 | 0.3 | 0.9 | 2/3 | 3/3 |\n"
+				+ "| memory_used | 351200000 | 702500000 | 351200000 | 702500000 | 1/1 | 1/1 |\n"
+				+ "| open_files | - | - | - | - | 0/0 | 0/0 |\n\n"
+				+ "query_metric open_files: truncated=true\n");
+		// A service whose three calls failed alike is one fact line, with no table.
+		assertThat(resources).contains("### gateway-mock\n\nprocessor_usage, memory_used, open_files: query_metric "
+				+ "failed: outcome=CLIENT_ERROR reason=\"not recorded in this replay: query_metric {\\\"metr\"(cut)\n");
+		assertThat(resources.lines().filter(line -> line.startsWith("| metric "))).hasSize(1);
+		assertThat(markdown.indexOf("## Resources")).isGreaterThan(markdown.indexOf("## Latency"));
+	}
+
+	@Test
+	void failedResourceCallsOfAServiceAreOneLinePerOutcomeAndReason() {
+		RecordedLab lab = new RecordedLab("healthy")
+			.answer("query_metric-processor_usage-payment-service",
+					"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\"}")
+			.answer("query_metric-open_files-payment-service",
+					"{\"outcome\":\"UPSTREAM_ERROR\",\"reason\":\"Prometheus did not answer\"}")
+			.answer("query_metric-memory_used-payment-service",
+					DossierGathererTest.resource("payment-service", "[1792144200,\"0.00012345678\"]"));
+
+		String text = unnumbered(DossierRenderer.render(new DossierGatherer(lab, CLOCK, LAB).gather(10), LAB));
+
+		assertThat(text).contains("### payment-service\n\nprocessor_usage, open_files: query_metric failed: "
+				+ "outcome=UPSTREAM_ERROR reason=\"Prometheus did not answer\"\n\n| metric |",
+				"| memory_used | - | 0.0001235 | - | 0.0001235 | 0/0 | 1/1 |\n");
+	}
+
+	@Test
+	void resourceValuesKeepFourSignificantDigitsWhateverTheirSize() {
+		assertThat(DossierRenderer.value(null)).isEqualTo("-");
+		assertThat(DossierRenderer.value(0.0)).isEqualTo("0");
+		assertThat(DossierRenderer.value(112.0)).isEqualTo("112");
+		assertThat(DossierRenderer.value(0.0123456)).isEqualTo("0.01235");
+		assertThat(DossierRenderer.value(99_999.999)).isEqualTo("100000");
+		assertThat(DossierRenderer.value(1e300)).isEqualTo("1E+300");
 	}
 
 	@Test
@@ -374,9 +437,16 @@ class DossierRendererTest {
 		List<SourceEvents> events = LAB.eventSources().stream()
 			.map(source -> new SourceEvents(source, both(new EventCounts(1_000, groups))))
 			.toList();
+		LatencyPoints resourcePoints = new LatencyPoints(60, 60, 123_456_789_012.3, 123_456_789_012.3);
+		List<ServiceResources> resources = LAB.gatherOrder().stream()
+			.map(service -> new ServiceResources(service, DossierGatherer.RESOURCE_METRICS.stream()
+				.map(metric -> new MetricSeries(metric,
+						new Gathered.Ok<>(new ResourceSeries(true, resourcePoints, resourcePoints))))
+				.toList()))
+			.toList();
 		Dossier healthy = gather("healthy");
 		return new Dossier(NOW, healthy.incidentWindow(), healthy.previousWindow(), new Gathered.Ok<>(services),
-				states, both(rows), latency, logs, events, List.of());
+				states, both(rows), latency, resources, logs, events, List.of());
 	}
 
 	private static <T> Compared<T> both(T value) {
@@ -418,6 +488,13 @@ class DossierRendererTest {
 						.map(u -> new UriLatency(m.apply(u.uri()), u.previous(), u.incident()))
 						.toList()))))
 			.toList();
+		List<ServiceResources> resources = d.resources()
+			.stream()
+			.map(s -> new ServiceResources(service.apply(s.service()), s.metrics()
+				.stream()
+				.map(metric -> new MetricSeries(metric.metric(), map(metric.series(), series -> series)))
+				.toList()))
+			.toList();
 		List<ServiceLogs> logs = d.logs()
 			.stream()
 			.map(s -> new ServiceLogs(service.apply(s.service()), s.levels()
@@ -438,7 +515,7 @@ class DossierRendererTest {
 						.toList()))))
 			.toList();
 		return new Dossier(d.gatheredAt(), d.incidentWindow(), d.previousWindow(), services, states, traffic, latency,
-				logs, events, d.calls());
+				resources, logs, events, d.calls());
 	}
 
 	private static <T> Compared<T> compared(Compared<T> windows, Function<T, T> f) {

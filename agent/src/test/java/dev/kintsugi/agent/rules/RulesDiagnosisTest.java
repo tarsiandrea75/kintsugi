@@ -476,7 +476,8 @@ class RulesDiagnosisTest {
 						List.of(level(service, "WARN", this.warn), level(service, "ERROR", this.error))))
 				.toList();
 			return new Dossier(NOW, incident, previous, services, List.of(),
-					new Compared<>(new Gathered.Ok<>(List.of()), incidentRows), latencies, logs, List.of(), List.of());
+					new Compared<>(new Gathered.Ok<>(List.of()), incidentRows), latencies, List.of(), logs, List.of(),
+					List.of());
 		}
 
 		private LevelLogs level(String service, String level, Map<String, Long> counts) {

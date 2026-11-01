@@ -35,6 +35,7 @@ import tools.jackson.databind.node.ObjectNode;
 import dev.kintsugi.agent.AgentDatabase;
 import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
+import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.rules.RulesCandidate;
 
@@ -46,6 +47,18 @@ import dev.kintsugi.agent.rules.RulesCandidate;
  * demand only.
  */
 class ReplayDriverTest {
+
+	/**
+	 * The resource calls of a lab dossier, 3 per service (resource-facts T4, ADR-021): the lab recordings predate them,
+	 * so a replay answers each as not recorded (AC2).
+	 */
+	private static final int RESOURCE_CALLS = 12;
+
+	/**
+	 * The coverage of a lab dossier replayed: its 33 recorded calls of 33, since the coverage leaves the resource calls
+	 * out (resource-facts T4, the human's choice), while {@code unrecorded} still counts them.
+	 */
+	private static final double LAB_COVERAGE = 1.0;
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -132,12 +145,14 @@ class ReplayDriverTest {
 		assertThat(sample.truth()).isEqualTo("gateway-mock|DEPENDENCY_LATENCY");
 		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
 		assertThat(sample.verdict()).isEqualTo("MISS");
-		// The recording holds the dossier's 33 calls, the 4 latency calls included (dossier-latency T3).
-		assertThat(sample.dossierCalls()).isEqualTo(33);
-		assertThat(sample.dossierUnrecorded()).isZero();
+		// The recording holds 33 of the dossier's calls, the 4 latency calls included (dossier-latency T3), and none of
+		// its 12 resource calls, which it predates (resource-facts T4).
+		assertThat(sample.dossierCalls()).isEqualTo(33 + RESOURCE_CALLS);
+		assertThat(sample.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(sample.dossierResourceUnrecorded()).isEqualTo(RESOURCE_CALLS);
 		assertThat(sample.recorded()).isEqualTo(33);
-		assertThat(sample.unrecorded()).isZero();
-		assertThat(sample.coverage()).isEqualTo(1.0);
+		assertThat(sample.unrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(sample.coverage()).isEqualTo(LAB_COVERAGE);
 
 		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
 		assertThat(summary).hasSize(2);
@@ -145,7 +160,7 @@ class ReplayDriverTest {
 		String[] line = summary.get(1).split("\t", -1);
 		assertThat(line).hasSize(24);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
-				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "0", "1.00");
+				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "12", "1.00");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
 		assertThat(line[12]).isEqualTo(String.valueOf(sample.promptTokens()));
 		assertThat(line[14]).matches("\\d+\\.\\d");
@@ -245,7 +260,7 @@ class ReplayDriverTest {
 		assertThat(sample.recording()).isEqualTo("stress");
 		assertThat(servedOutput(sample, sharedCall)).isEqualTo(first.path("output").asString());
 		assertThat(sample.conflicts()).isZero();
-		assertThat(sample.coverage()).isEqualTo(1.0);
+		assertThat(sample.coverage()).isEqualTo(LAB_COVERAGE);
 		assertThat(sample.split()).isEqualTo("-");
 		// A fault with no stress recording has no explorer or dossier sample: it fails before any model call.
 		int calls = this.model.calls();
@@ -272,11 +287,12 @@ class ReplayDriverTest {
 		Instant startedAt = Instant.parse(sample.incident().path("startedAt").asString());
 		assertThat(Duration.between(F1_DOSSIER_START, startedAt).abs()).isLessThan(Duration.ofMinutes(1));
 		assertThat(sample.incident().path("mode").asString()).isEqualTo("decision");
-		assertThat(sample.dossierCalls()).isEqualTo(33);
-		assertThat(sample.dossierUnrecorded()).isZero();
+		assertThat(sample.dossierCalls()).isEqualTo(33 + RESOURCE_CALLS);
+		assertThat(sample.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(sample.dossierResourceUnrecorded()).isEqualTo(RESOURCE_CALLS);
 		assertThat(sample.recorded()).isEqualTo(33);
-		assertThat(sample.unrecorded()).isZero();
-		assertThat(sample.coverage()).isEqualTo(1.0);
+		assertThat(sample.unrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(sample.coverage()).isEqualTo(LAB_COVERAGE);
 		// The report is the sample's only model call.
 		assertThat(this.model.calls()).isEqualTo(1);
 		// The view of the run, the tables by default, is recorded with the sample.
@@ -311,7 +327,7 @@ class ReplayDriverTest {
 		for (ReplayDriver.Sample sample : List.of(first, second)) {
 			assertThat(sample.conflicts()).as("conflicts").isZero();
 			assertThat(sample.recorded()).as("recorded calls").isEqualTo(33);
-			assertThat(sample.coverage()).as("coverage").isEqualTo(1.0);
+			assertThat(sample.coverage()).as("coverage").isEqualTo(LAB_COVERAGE);
 		}
 		assertThat(List.of(first.recording(), second.recording())).containsExactly("dossier", "decision");
 		assertThat(List.of(first.split(), second.split())).containsExactly("dev", "dev");
@@ -460,7 +476,7 @@ class ReplayDriverTest {
 		assertThat(decision.view()).hasValue(DossierView.SHEETS);
 		assertThat(dossierMessage(decision)).contains("# Evidence dossier, by service\n")
 			.doesNotContain("## Service status (incident window)");
-		assertThat(decision.dossierUnrecorded()).isZero();
+		assertThat(decision.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
 		assertThat(decision.summaryLine()).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tplain" + LOCAL_LINE_END);
 		// Dossier mode reads no view: it shows the tables, and its sample records none.
 		assertThat(dossier.view()).isEmpty();
@@ -606,7 +622,8 @@ class ReplayDriverTest {
 		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
 		assertThat(summary).hasSize(5);
 		assertThat(summary.get(4)).startsWith("F1\tdecision\tlocal\t2\t").endsWith("\tdev\tb\ttables\tplain" + LOCAL_LINE_END);
-		// The aggregate tells the 2 distinct recordings from the 4 samples.
+		// The aggregate tells the 2 distinct recordings from the 4 samples. The coverage and the fully recorded dossiers
+		// leave the resource calls out, so all 4 are covered and fully recorded (resource-facts T4).
 		List<String> aggregate = ReplayDriver.aggregate(samples);
 		assertThat(aggregate).hasSize(2);
 		assertThat(aggregate.get(1)).startsWith("F1\tdecision\tlocal\tdev\ttables\tplain\t2\t4\t0/4\t1.00\t4\t0/4\t4/4\t");
@@ -661,6 +678,42 @@ class ReplayDriverTest {
 	 * database. F1 r1 is the first dev case of F1.
 	 */
 	@Test
+	void theCoverageLeavesTheResourceCallsOutAndTheUnrecordedCountKeepsThem() {
+		// resource-facts T4: one recorded call, one unrecorded call, and two resource calls, one of them unrecorded.
+		ReplayDriver.CoverageCounter counter = new ReplayDriver.CoverageCounter(new ReplayLabToolsStub());
+
+		counter.call("service_restarts", "{\"sinceMinutes\":10}");
+		counter.call("search_logs", "{\"service\":\"order-service\",\"sinceMinutes\":10}");
+		counter.call("query_metric", "{\"metric\":\"processor_usage\",\"service\":\"order-service\",\"sinceMinutes\":20}");
+		counter.call("query_metric", "{\"metric\":\"open_files\",\"service\":\"order-service\",\"sinceMinutes\":20}");
+		counter.call("query_metric", "{\"metric\":\"latency_avg\",\"service\":\"order-service\",\"sinceMinutes\":20}");
+
+		assertThat(counter.coverage(3, 2)).isEqualTo(2.0 / 3);
+		assertThat(ReplayDriver.CoverageCounter.coverage(0, 0, 0, 0)).isEqualTo(1.0);
+		assertThat(ReplayDriver.CoverageCounter.coverage(0, 2, 2, 2)).isEqualTo(1.0);
+	}
+
+	/**
+	 * Answers {@code search_logs} and {@code open_files} as not recorded, every other call from a recording.
+	 */
+	private static final class ReplayLabToolsStub implements dev.kintsugi.agent.lab.LabTools {
+
+		@Override
+		public dev.kintsugi.agent.lab.ToolResult call(String tool, String jsonArgs) {
+			boolean unrecorded = tool.equals("search_logs") || jsonArgs.contains("open_files");
+			return new dev.kintsugi.agent.lab.ToolResult(tool, jsonArgs,
+					unrecorded ? ReplayLabTools.NOT_RECORDED + tool : "{\"outcome\":\"OK\"}",
+					unrecorded ? dev.kintsugi.agent.lab.ToolOutcome.CLIENT_ERROR : dev.kintsugi.agent.lab.ToolOutcome.OK, 0);
+		}
+
+		@Override
+		public List<org.springframework.ai.tool.ToolCallback> toolsFor(dev.kintsugi.agent.lab.Phase phase) {
+			return List.of();
+		}
+
+	}
+
+	@Test
 	void aRulesSampleDiagnosesTheRecordedDossierWithNoModel() throws IOException {
 		ReplayDriver driver = ReplayDriver.rulesOnly(ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST,
 				DossierView.TABLES, DecisionReport.PLAIN);
@@ -679,11 +732,14 @@ class ReplayDriverTest {
 		assertThat(sample.verdict()).isEqualTo("MATCH");
 		assertThat(sample.promptTokens()).isZero();
 		assertThat(sample.completionTokens()).isZero();
-		// The gatherer's calls are the only calls, so they are the dossier's, and the recording holds every one.
-		assertThat(sample.unrecorded()).isZero();
-		assertThat(sample.coverage()).isEqualTo(1.0);
-		assertThat(sample.dossierCalls()).isEqualTo(sample.recorded()).isPositive();
-		assertThat(sample.dossierUnrecorded()).isZero();
+		// The gatherer's calls are the only calls, so they are the dossier's, and the recording holds every one but the
+		// resource calls, which it predates (resource-facts T4, AC2).
+		assertThat(sample.unrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(sample.coverage()).isEqualTo(LAB_COVERAGE);
+		assertThat(sample.dossierCalls()).isEqualTo(sample.recorded() + RESOURCE_CALLS);
+		assertThat(sample.recorded()).isPositive();
+		assertThat(sample.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(sample.dossierResourceUnrecorded()).isEqualTo(RESOURCE_CALLS);
 
 		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
 		assertThat(line).hasSize(24);
@@ -822,6 +878,18 @@ class ReplayDriverTest {
 		assertThat(ReplayDriver.COVERED_THRESHOLD).isEqualTo(0.8);
 		assertThat(ReplayDriver.aggregate(samples)).containsExactly(ReplayDriver.AGGREGATE_HEADER,
 				"F1\tdossier\tlocal\t-\t-\t-\t1\t4\t3/4\t0.75\t3\t2/3\t2/4\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
+	}
+
+	@Test
+	void aDossierWhoseOnlyUnrecordedCallsAreResourceCallsIsFullyRecorded() {
+		// resource-facts T4: 12 unrecorded calls, all resource calls, then 13, one of them another call.
+		ReplayDriver.Sample resourcesOnly = dossierSample("MATCH", 1.0, RESOURCE_CALLS).withResourceUnrecorded(RESOURCE_CALLS);
+		ReplayDriver.Sample oneMore = dossierSample("MATCH", 1.0, RESOURCE_CALLS + 1)
+			.withResourceUnrecorded(RESOURCE_CALLS);
+
+		assertThat(resourcesOnly.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
+		assertThat(ReplayDriver.aggregate(List.of(resourcesOnly, oneMore))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
+				"F1\tdossier\tlocal\t-\t-\t-\t1\t2\t2/2\t1.00\t2\t2/2\t1/2\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
 	}
 
 	@Test

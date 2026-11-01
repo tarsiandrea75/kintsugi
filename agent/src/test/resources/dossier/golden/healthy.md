@@ -79,52 +79,72 @@ D27 | inventory-service | /actuator/prometheus | 0.003 | 0.003 | 0.004 | 0.004 |
 D28 | gateway-mock | /authorize | 0.011 | 0.012 | 0.012 | 0.013 | 10/10 | 11/11 |
 D29 | gateway-mock | /actuator/prometheus | 0.002 | 0.002 | 0.002 | 0.002 | 10/10 | 11/11 |
 
+## Resources
+
+D30 Per service, from query_metric processor_usage, memory_used, open_files, in the units of the source: one call per service and metric over both windows, its points split as the latency's. "mean", "max" and "points" as in the latency table.
+
+### order-service
+
+D31 processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="not recorded in this replay: query_metric {\"metr"(cut)
+
+### payment-service
+
+D32 processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="not recorded in this replay: query_metric {\"metr"(cut)
+
+### inventory-service
+
+D33 processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="not recorded in this replay: query_metric {\"metr"(cut)
+
+### gateway-mock
+
+D34 processor_usage, memory_used, open_files: query_metric failed: outcome=CLIENT_ERROR reason="not recorded in this replay: query_metric {\"metr"(cut)
+
 ## Log signatures (incident window)
 
 ### order-service
 
-D30 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
-D31 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D35 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D36 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
 
 ### payment-service
 
-D32 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
-D33 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D37 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D38 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
 
 ### inventory-service
 
-D34 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
-D35 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D39 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D40 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
 
 ### gateway-mock
 
-D36 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
-D37 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D41 - WARN: count_logs=0; search_logs returned=0 truncated=false signatures=0
+D42 - ERROR: count_logs=0; search_logs returned=0 truncated=false signatures=0
 
 ## Event counts
 
 ### order events
 
-D38 Total: previous 12, incident 15.
+D43 Total: previous 12, incident 15.
 
 | type | outcome | previous | incident |
 |---|---|---|---|
-D39 | INVENTORY_RESERVED | CREATED | 4 | 5 |
-D40 | ORDER_RECEIVED | CREATED | 4 | 5 |
-D41 | PAYMENT_AUTHORIZED | PAID | 4 | 5 |
+D44 | INVENTORY_RESERVED | CREATED | 4 | 5 |
+D45 | ORDER_RECEIVED | CREATED | 4 | 5 |
+D46 | PAYMENT_AUTHORIZED | PAID | 4 | 5 |
 
 ### payment events
 
-D42 Total: previous 4, incident 5.
+D47 Total: previous 4, incident 5.
 
 | type | outcome | previous | incident |
 |---|---|---|---|
-D43 | PAYMENT_ATTEMPT | AUTHORIZED | 4 | 5 |
+D48 | PAYMENT_ATTEMPT | AUTHORIZED | 4 | 5 |
 
 ### reservation events
 
-D44 Total: previous 4, incident 5.
+D49 Total: previous 4, incident 5.
 
 | type | outcome | previous | incident |
 |---|---|---|---|
-D45 | RESERVATION_ATTEMPT | RESERVED | 4 | 5 |
+D50 | RESERVATION_ATTEMPT | RESERVED | 4 | 5 |

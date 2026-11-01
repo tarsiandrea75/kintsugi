@@ -15,6 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.lab.LabTools;
 import dev.kintsugi.agent.lab.Phase;
+import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.lab.ToolOutcome;
 import dev.kintsugi.agent.lab.ToolResult;
 
@@ -23,7 +24,9 @@ import dev.kintsugi.agent.lab.ToolResult;
  * ({@code src/test/resources/dossier/<set>/<key>.json}, from the first set that holds the key), keyed by the tool,
  * its subject (metric, table, source, or service and level) and its window ({@code previous} when the call carries
  * {@code untilMinutesAgo}; none for {@code service_restarts} and {@code query_metric}, whose one call covers what it
- * covers). A log call without a fixture answers an empty window. Every call is kept, in order.
+ * covers). A log call without a fixture answers an empty window; a resource call without one is answered as a replay
+ * answers a call it did not record, since the lab fixtures, like the lab's recorded replays, predate the resource
+ * metrics (resource-facts T4, ADR-021). Every call is kept, in order.
  */
 public final class RecordedLab implements LabTools {
 
@@ -65,7 +68,7 @@ public final class RecordedLab implements LabTools {
 			throw failure;
 		}
 		String output = this.outputs.computeIfAbsent(key, k -> fixture(tool, args, k));
-		if (output.startsWith("mcp-tools call failed:")) {
+		if (output.startsWith("mcp-tools call failed:") || output.startsWith(ReplayLabTools.NOT_RECORDED)) {
 			return new ToolResult(tool, jsonArgs, output, ToolOutcome.CLIENT_ERROR, 7);
 		}
 		String outcome = JSON.readTree(output).path("outcome").asString();
@@ -108,6 +111,12 @@ public final class RecordedLab implements LabTools {
 		}
 		return switch (tool) {
 			case "search_logs" -> "{\"outcome\":\"OK\",\"returned\":0,\"truncated\":false,\"items\":[]}";
+			case "query_metric" -> {
+				if (!DossierGatherer.RESOURCE_METRICS.contains(args.path("metric").asString())) {
+					throw new IllegalArgumentException("no fixture " + this.sets + " " + key);
+				}
+				yield ReplayLabTools.NOT_RECORDED + tool + " " + JSON.writeValueAsString(args);
+			}
 			case "count_logs" -> "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"service\":\""
 					+ args.get("service").asString() + "\",\"count\":0}]}";
 			default -> throw new IllegalArgumentException("no fixture " + this.sets + " " + key);

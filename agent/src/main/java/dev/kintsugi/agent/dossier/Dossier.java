@@ -8,9 +8,10 @@ import dev.kintsugi.agent.lab.ToolResult;
 
 /**
  * The evidence dossier of one incident: facts read through the mcp-tools tools for the incident window and the
- * previous one, in ADR-011's five sections and the latency added by the dossier-latency feature. It holds no
- * judgment, threshold or marker; the only values computed here are arithmetic facts (window bounds, uptime, the mean
- * and maximum of latency points) and the grouping of log lines by signature. Lists keep a fixed order, so the dossier
+ * previous one, in ADR-011's five sections, the latency added by the dossier-latency feature and the resources added
+ * by the resource-facts feature (ADR-021). It holds no judgment, threshold or marker; the only values computed here are
+ * arithmetic facts (window bounds, uptime, the mean and maximum of latency and resource points) and the grouping of log
+ * lines by signature. Lists keep a fixed order, so the dossier
  * has the same shape for every incident.
  *
  * @param gatheredAt the time the gathering started, by the gatherer's clock
@@ -20,6 +21,7 @@ import dev.kintsugi.agent.lab.ToolResult;
  * @param states order and payment states, in {@link Topology#statusTables()} order
  * @param traffic the request counts per edge and side
  * @param latency the server-side latency per service, in {@link Topology#gatherOrder()} order
+ * @param resources the resource series per service, in {@link Topology#gatherOrder()} order
  * @param logs WARN and ERROR log signatures per service, incident window only
  * @param events event counts per source, in {@link Topology#eventSources()} order
  * @param calls every tool call made, in order, with its full output; how they are recorded as steps is the loop's
@@ -27,11 +29,13 @@ import dev.kintsugi.agent.lab.ToolResult;
  */
 public record Dossier(Instant gatheredAt, Window incidentWindow, Window previousWindow,
 		Gathered<List<ServiceStatus>> services, List<TableStates> states, Compared<List<TrafficRow>> traffic,
-		List<ServiceLatency> latency, List<ServiceLogs> logs, List<SourceEvents> events, List<ToolResult> calls) {
+		List<ServiceLatency> latency, List<ServiceResources> resources, List<ServiceLogs> logs,
+		List<SourceEvents> events, List<ToolResult> calls) {
 
 	public Dossier {
 		states = List.copyOf(states);
 		latency = List.copyOf(latency);
+		resources = List.copyOf(resources);
 		logs = List.copyOf(logs);
 		events = List.copyOf(events);
 		calls = List.copyOf(calls);
@@ -114,8 +118,9 @@ public record Dossier(Instant gatheredAt, Window incidentWindow, Window previous
 	}
 
 	/**
-	 * The points of one series in one window. Each point is the average server-side answer time, in seconds, of the
-	 * requests that ended in its rate window; a point has no value ({@code NaN}) when none ended.
+	 * The points of one series in one window. In the latency section each point is the average server-side answer time,
+	 * in seconds, of the requests that ended in its rate window, and has no value ({@code NaN}) when none ended; in the
+	 * resources section it is a resource reading in its source's unit.
 	 *
 	 * @param points the points in the window
 	 * @param values the points with a finite value
@@ -123,6 +128,31 @@ public record Dossier(Instant gatheredAt, Window incidentWindow, Window previous
 	 * @param max the largest of those values; {@code null} when there is none
 	 */
 	public record LatencyPoints(int points, int values, Double mean, Double max) {
+	}
+
+	/**
+	 * One service's resources, a {@link MetricSeries} per metric in {@link DossierGatherer#RESOURCE_METRICS} order
+	 * (ADR-021, "The dossier").
+	 */
+	public record ServiceResources(String service, List<MetricSeries> metrics) {
+
+		public ServiceResources {
+			metrics = List.copyOf(metrics);
+		}
+
+	}
+
+	/** One resource metric's {@code query_metric} output for one service: one call over both windows. */
+	public record MetricSeries(String metric, Gathered<ResourceSeries> series) {
+	}
+
+	/**
+	 * The one series of a resource metric, labelled by its service only, its points split at the start of the incident
+	 * window as latency's are. An output with no series gives two windows without points.
+	 *
+	 * @param truncated whether the tool left out series or points to fit its output cap
+	 */
+	public record ResourceSeries(boolean truncated, LatencyPoints previous, LatencyPoints incident) {
 	}
 
 	/** One service's logs, a {@link LevelLogs} per level in {@link DossierGatherer#LOG_LEVELS} order. */

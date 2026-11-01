@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.boot.io.ApplicationResourceLoader;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.ai.tool.ToolCallback;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -40,7 +41,10 @@ import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
+import dev.kintsugi.agent.lab.LabTools;
+import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ReplayLabTools;
+import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
@@ -328,9 +332,10 @@ final class ReplayDriver {
 		checkReport(AgentMode.DECISION);
 		Parsed parsed = parsed(recording);
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), List.of(parsed.incident()));
+		CoverageCounter counter = new CoverageCounter(tools);
 		Clock clock = clockAt(parsed.startedAt());
 		long start = System.nanoTime();
-		Dossier dossier = new DossierGatherer(tools, clock, this.topology).gather(parsed.sinceMinutes());
+		Dossier dossier = new DossierGatherer(counter, clock, this.topology).gather(parsed.sinceMinutes());
 		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, this.topology);
 		double seconds = (System.nanoTime() - start) / 1e9;
 		// The candidates a hybrid run would list on the same dossier (hybrid T4); the verdict above is unchanged.
@@ -361,9 +366,10 @@ final class ReplayDriver {
 		return new Sample(recording.fault(), mode, RULES_ROUTE, recording.split(), recording.stem(),
 				mode.viewFrom(this.decisionView), mode.reportFrom(this.decisionReport), n, IncidentStatus.COMPLETED,
 				truth, reported, verdict(IncidentStatus.COMPLETED, reported, truth), tools.recordedCalls(),
-				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), 0, 0, seconds,
+				tools.unrecordedCalls(), counter.coverage(tools.recordedCalls(), tools.unrecordedCalls()),
+				tools.conflicts(), 0, 0, seconds,
 				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident, Settings.RULES,
-				candidates);
+				candidates, counter.resourceUnrecorded);
 	}
 
 	/** A clock whose "now" is {@code startedAt}, then running: the recording's start, as the sample sees it. */
@@ -406,12 +412,13 @@ final class ReplayDriver {
 		}
 		String fault = primary.recording().fault();
 		ReplayLabTools tools = new ReplayLabTools(toolsList(), served);
+		CoverageCounter counter = new CoverageCounter(tools);
 		Clock clock = clockAt(primary.startedAt());
 
 		UUID id = open(primary.symptom(), primary.sinceMinutes(), clock.instant());
 		AgentLoop.Outcome outcome;
 		long start = System.nanoTime();
-		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, tools, this.settings, clock, this.topology, mode,
+		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, counter, this.settings, clock, this.topology, mode,
 				this.decisionView, this.decisionReport)) {
 			outcome = loop.runToOutcome(id);
 		}
@@ -428,9 +435,13 @@ final class ReplayDriver {
 				: "none";
 		ArrayNode dossier = dossierCalls(incident);
 		int dossierUnrecorded = 0;
+		int dossierResourceUnrecorded = 0;
 		for (JsonNode call : dossier) {
 			if (call.path("output").asString("").startsWith(ReplayLabTools.NOT_RECORDED)) {
 				dossierUnrecorded++;
+				if (CoverageCounter.resource(call.path("tool").asString(""), call.path("args"))) {
+					dossierResourceUnrecorded++;
+				}
 			}
 		}
 		String route = this.router.route(ModelTask.ACT).route().value();
@@ -438,9 +449,10 @@ final class ReplayDriver {
 		return new Sample(fault, mode, route, split, primary.recording().stem(), mode.viewFrom(this.decisionView),
 				mode.reportFrom(this.decisionReport), n,
 				status, truth, reported, verdict(status, reported, truth), tools.recordedCalls(),
-				tools.unrecordedCalls(), tools.coverage(), tools.conflicts(), total(incident, "promptTokens"),
+				tools.unrecordedCalls(), counter.coverage(tools.recordedCalls(), tools.unrecordedCalls()),
+				tools.conflicts(), total(incident, "promptTokens"),
 				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident,
-				Settings.of(this.router.route(ModelTask.REPORT)), outcome.candidates());
+				Settings.of(this.router.route(ModelTask.REPORT)), outcome.candidates(), dossierResourceUnrecorded);
 	}
 
 	/** The fault's first recording made in {@code mode}, if any. */
@@ -481,7 +493,7 @@ final class ReplayDriver {
 	 * the settings written last, after the columns of every run before them: the distinct recordings the samples
 	 * opened on, the samples, matches out of samples, mean coverage, the covered samples (coverage at least
 	 * {@link #COVERED_THRESHOLD}) and the matches among them, the samples whose {@code DOSSIER} step made calls and had
-	 * none unrecorded out of samples, tokens and, on the cloud route, the estimated cost at
+	 * none unrecorded but resource calls out of samples, tokens and, on the cloud route, the estimated cost at
 	 * {@link #PROMPT_USD_PER_MILLION} and {@link #COMPLETION_USD_PER_MILLION}; on the {@code rules} route, 0. With repeats, the samples outnumber the
 	 * recordings, which are the independent observations.
 	 */
@@ -502,7 +514,8 @@ final class ReplayDriver {
 			List<Sample> covered = group.stream().filter(sample -> sample.coverage() >= COVERED_THRESHOLD).toList();
 			long matchesCovered = covered.stream().filter(sample -> sample.verdict().equals("MATCH")).count();
 			long dossierCovered = group.stream()
-				.filter(sample -> sample.dossierCalls() > 0 && sample.dossierUnrecorded() == 0)
+				.filter(sample -> sample.dossierCalls() > 0
+						&& sample.dossierUnrecorded() == sample.dossierResourceUnrecorded())
 				.count();
 			Long prompt = sum(group.stream().map(Sample::promptTokens).toList());
 			Long completion = sum(group.stream().map(Sample::completionTokens).toList());
@@ -701,15 +714,36 @@ final class ReplayDriver {
 	 * The four come in the order of their {@code summary.tsv} columns. {@code settings} are the route settings the sample
 	 * ran with ({@link Settings}), and {@code candidates} the rules' candidates of a rules sample or the list a hybrid
 	 * run's report task gave the model, empty for every other sample (hybrid T4), its last column.
-	 * {@code recorded}, {@code unrecorded}, {@code coverage} and {@code conflicts} are the sample's
-	 * {@link ReplayLabTools} counters; {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
-	 * step's calls and those no recording held; a token count is null when no step counted it.
+	 * {@code recorded}, {@code unrecorded} and {@code conflicts} are the sample's {@link ReplayLabTools} counters, and
+	 * {@code coverage} their share of recorded calls without the resource calls ({@link CoverageCounter}); {@code dossierCalls} and {@code dossierUnrecorded} count the {@code DOSSIER}
+	 * step's calls and those no recording held, and {@code dossierResourceUnrecorded} those among them that are resource
+	 * calls, which a fully recorded dossier may leave unrecorded (resource-facts T4); a token count is null when no
+	 * step counted it.
 	 */
 	record Sample(String fault, AgentMode mode, String route, String split, String recording,
 			Optional<DossierView> view, Optional<DecisionReport> report, int n, IncidentStatus status, String truth,
 			String reported, String verdict, int recorded, int unrecorded, double coverage, int conflicts,
 			Integer promptTokens, Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded,
-			ObjectNode incident, Settings settings, List<RulesCandidate> candidates) {
+			ObjectNode incident, Settings settings, List<RulesCandidate> candidates, int dossierResourceUnrecorded) {
+
+		/** A sample whose dossier left no resource call unrecorded. */
+		Sample(String fault, AgentMode mode, String route, String split, String recording, Optional<DossierView> view,
+				Optional<DecisionReport> report, int n, IncidentStatus status, String truth, String reported,
+				String verdict, int recorded, int unrecorded, double coverage, int conflicts, Integer promptTokens,
+				Integer completionTokens, double seconds, int dossierCalls, int dossierUnrecorded, ObjectNode incident,
+				Settings settings, List<RulesCandidate> candidates) {
+			this(fault, mode, route, split, recording, view, report, n, status, truth, reported, verdict, recorded,
+					unrecorded, coverage, conflicts, promptTokens, completionTokens, seconds, dossierCalls,
+					dossierUnrecorded, incident, settings, candidates, 0);
+		}
+
+		/** This sample with {@code count} of its dossier's unrecorded calls being resource calls. */
+		Sample withResourceUnrecorded(int count) {
+			return new Sample(this.fault, this.mode, this.route, this.split, this.recording, this.view, this.report,
+					this.n, this.status, this.truth, this.reported, this.verdict, this.recorded, this.unrecorded,
+					this.coverage, this.conflicts, this.promptTokens, this.completionTokens, this.seconds,
+					this.dossierCalls, this.dossierUnrecorded, this.incident, this.settings, this.candidates, count);
+		}
 
 		/** The sample's line of {@code summary.tsv}, in {@link #SUMMARY_HEADER}'s columns. */
 		String summaryLine() {
@@ -761,6 +795,73 @@ final class ReplayDriver {
 		/** The four columns, tab-separated. */
 		String columns() {
 			return String.join("\t", this.model, this.think, this.reportCap, this.reportTimeout);
+		}
+
+	}
+
+	/**
+	 * The calls a sample makes through its {@link ReplayLabTools}, passed on unchanged, with the resource calls
+	 * counted apart (resource-facts T4, the human's choice of 2026-11-01): the lab recordings predate the dossier's
+	 * {@code query_metric} calls of {@link DossierGatherer#RESOURCE_METRICS}, so the coverage leaves them out of both
+	 * its terms, while {@code unrecorded} still counts every unrecorded call, so the gap stays visible.
+	 */
+	static final class CoverageCounter implements LabTools {
+
+		private final LabTools tools;
+
+		private int resourceCalls;
+
+		/** The resource calls no recording held. */
+		int resourceUnrecorded;
+
+		CoverageCounter(LabTools tools) {
+			this.tools = tools;
+		}
+
+		@Override
+		public ToolResult call(String tool, String jsonArgs) {
+			ToolResult result = this.tools.call(tool, jsonArgs);
+			if (resource(tool, jsonArgs)) {
+				this.resourceCalls++;
+				if (result.rawOutput().startsWith(ReplayLabTools.NOT_RECORDED)) {
+					this.resourceUnrecorded++;
+				}
+			}
+			return result;
+		}
+
+		@Override
+		public List<ToolCallback> toolsFor(Phase phase) {
+			return this.tools.toolsFor(phase);
+		}
+
+		/** The coverage of {@code recorded} and {@code unrecorded} calls, the resource calls left out. */
+		double coverage(int recorded, int unrecorded) {
+			return coverage(recorded, unrecorded, this.resourceCalls, this.resourceUnrecorded);
+		}
+
+		/** The share of the calls but the resource calls answered from a recording; 1 when there is none. */
+		static double coverage(int recorded, int unrecorded, int resourceCalls, int resourceUnrecorded) {
+			int calls = recorded + unrecorded - resourceCalls;
+			return calls <= 0 ? 1.0 : (double) (recorded - (resourceCalls - resourceUnrecorded)) / calls;
+		}
+
+		private static boolean resource(String tool, String jsonArgs) {
+			if (!"query_metric".equals(tool)) {
+				return false;
+			}
+			try {
+				return resource(tool, JSON.readTree(jsonArgs));
+			}
+			catch (RuntimeException unreadable) {
+				return false;
+			}
+		}
+
+		/** Whether a call is a {@code query_metric} call of a resource metric. */
+		static boolean resource(String tool, JsonNode args) {
+			return "query_metric".equals(tool)
+					&& DossierGatherer.RESOURCE_METRICS.contains(args.path("metric").asString(""));
 		}
 
 	}

@@ -141,8 +141,8 @@ class AgentLoopDecisionModeTest {
 		assertThat(this.model.prompts()).hasSize(1);
 		assertThat(toolNames(this.model.prompts().get(0))).isEmpty();
 		assertThat(this.model.warmUps()).hasSize(1);
-		// Only the dossier's 33 calls reach the lab: no drill-down call.
-		assertThat(this.lab.calls()).hasSize(33).doesNotContain("recent_events", "get_order_trace", "search_runbooks");
+		// Only the dossier's 45 calls reach the lab: no drill-down call.
+		assertThat(this.lab.calls()).hasSize(45).doesNotContain("recent_events", "get_order_trace", "search_runbooks");
 		assertThat(mode()).isEqualTo("decision");
 		JsonNode stored = storedReport();
 		assertThat(stored.get("mode").asString()).isEqualTo("decision");
@@ -182,8 +182,8 @@ class AgentLoopDecisionModeTest {
 
 		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
 
-		// The 33 calls were all made when the warm-up came, so the windows end at the incident's opening.
-		assertThat(callsAtWarmUp.get()).isEqualTo(33);
+		// The 45 calls were all made when the warm-up came, so the windows end at the incident's opening.
+		assertThat(callsAtWarmUp.get()).isEqualTo(45);
 		assertThat(this.model.warmUps()).hasSize(1);
 	}
 
@@ -195,7 +195,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(run(AgentMode.DOSSIER)).isEqualTo(IncidentStatus.COMPLETED);
 
 		assertThat(callsAtWarmUp.get()).isZero();
-		assertThat(this.lab.calls()).hasSize(33);
+		assertThat(this.lab.calls()).hasSize(45);
 	}
 
 	@Test
@@ -329,7 +329,7 @@ class AgentLoopDecisionModeTest {
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 
 		assertThat((String) step(1).get("summary")).startsWith(Prompts.DOSSIER_INTRO);
-		assertThat(this.lab.calls()).hasSize(33);
+		assertThat(this.lab.calls()).hasSize(45);
 	}
 
 	@Test
@@ -755,7 +755,7 @@ class AgentLoopDecisionModeTest {
 		// No warm-up and no report call: the model is never asked.
 		assertThat(this.model.calls()).isZero();
 		assertThat(this.model.warmUps()).isEmpty();
-		assertThat(quiet.calls()).hasSize(33);
+		assertThat(quiet.calls()).hasSize(45);
 		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
 		assertThat(step(2).get("summary")).isEqualTo(AgentLoop.NO_CANDIDATE);
 		JsonNode stored = storedReport();

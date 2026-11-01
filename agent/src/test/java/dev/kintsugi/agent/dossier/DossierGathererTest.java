@@ -23,11 +23,15 @@ import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
 import dev.kintsugi.agent.dossier.Dossier.LogLines;
 import dev.kintsugi.agent.dossier.Dossier.LogSignature;
+import dev.kintsugi.agent.dossier.Dossier.MetricSeries;
+import dev.kintsugi.agent.dossier.Dossier.ResourceSeries;
+import dev.kintsugi.agent.dossier.Dossier.ServiceResources;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 import dev.kintsugi.agent.dossier.Dossier.StatusCount;
 import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
 import dev.kintsugi.agent.dossier.Dossier.UriLatency;
+import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.lab.ToolOutcome;
 
 /**
@@ -61,6 +65,13 @@ class DossierGathererTest {
 		for (String service : SERVICES) {
 			expected.add("query_metric {\"metric\":\"latency_avg\",\"service\":\"" + service + "\",\"sinceMinutes\":20}");
 		}
+		// resource-facts T4 (ADR-021): after the latency, one call per service and resource metric, the same shape.
+		for (String service : SERVICES) {
+			for (String metric : List.of("processor_usage", "memory_used", "open_files")) {
+				expected.add("query_metric {\"metric\":\"" + metric + "\",\"service\":\"" + service
+						+ "\",\"sinceMinutes\":20}");
+			}
+		}
 		for (String service : SERVICES) {
 			for (String level : List.of("WARN", "ERROR")) {
 				String subject = "\"service\":\"" + service + "\",\"level\":\"" + level + "\",\"sinceMinutes\":10";
@@ -85,7 +96,7 @@ class DossierGathererTest {
 
 		assertThat(second.calls()).isEqualTo(first.calls());
 		assertThat(two).isEqualTo(one);
-		assertThat(one.calls()).hasSize(33);
+		assertThat(one.calls()).hasSize(45);
 	}
 
 	@Test
@@ -235,7 +246,74 @@ class DossierGathererTest {
 		assertThat(dossier.latency().get(1).latency()).isEqualTo(
 				new Gathered.Failed<>("query_metric", ToolOutcome.INVALID_PARAMETER, "sinceMinutes must be 1 to 360"));
 		assertThat(ok(dossier.latency().get(3).latency()).uris()).hasSize(2);
-		assertThat(dossier.calls()).hasSize(33);
+		assertThat(dossier.calls()).hasSize(45);
+	}
+
+	@Test
+	void resourcesPerServiceAndMetricWithTheirPointsSplitAtTheIncidentWindowsStart() {
+		// Synthetic points: two in the previous window, one without a value, and three in the incident window.
+		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-processor_usage-gateway-mock",
+				resource("gateway-mock", "[1792143600,\"0.1\"],[1792143660,\"NaN\"],[1792143720,\"0.3\"],"
+						+ "[1792144200,\"0.5\"],[1792144260,\"0.7\"],[1792144320,\"0.9\"]"));
+
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB).gather(10);
+
+		assertThat(dossier.resources()).extracting(ServiceResources::service).containsExactlyElementsOf(SERVICES);
+		ServiceResources gateway = dossier.resources().get(3);
+		assertThat(gateway.metrics()).extracting(MetricSeries::metric)
+			.containsExactly("processor_usage", "memory_used", "open_files");
+		ResourceSeries processor = ok(gateway.metrics().get(0).series());
+		assertThat(processor.truncated()).isFalse();
+		assertThat(processor.previous().points()).isEqualTo(3);
+		assertThat(processor.previous().values()).isEqualTo(2);
+		assertThat(processor.previous().mean()).isCloseTo(0.2, within(1e-9));
+		assertThat(processor.previous().max()).isEqualTo(0.3);
+		assertThat(processor.incident().points()).isEqualTo(3);
+		assertThat(processor.incident().values()).isEqualTo(3);
+		assertThat(processor.incident().mean()).isCloseTo(0.7, within(1e-9));
+		assertThat(processor.incident().max()).isEqualTo(0.9);
+	}
+
+	@Test
+	void aResourceCallTheReplayDidNotRecordIsAFailedFact() {
+		// The lab fixtures, like the lab's recorded replays, hold no resource call (ADR-021, "The dossier").
+		Dossier dossier = new DossierGatherer(new RecordedLab("f3"), CLOCK, LAB).gather(10);
+
+		for (ServiceResources service : dossier.resources()) {
+			assertThat(service.metrics()).hasSize(3).allSatisfy(metric -> assertThat(metric.series())
+				.isInstanceOfSatisfying(Gathered.Failed.class, failed -> {
+					assertThat(failed.tool()).isEqualTo("query_metric");
+					assertThat(failed.outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
+					assertThat(failed.reason()).startsWith(ReplayLabTools.NOT_RECORDED);
+				}));
+		}
+		assertThat(ok(dossier.latency().get(3).latency()).uris()).hasSize(2);
+	}
+
+	@Test
+	void aResourceOutputWithNoSeriesHasTwoWindowsWithoutPoints() {
+		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-open_files-order-service",
+				"{\"outcome\":\"OK\",\"returned\":0,\"truncated\":true,\"items\":[]}");
+
+		ResourceSeries files = ok(new DossierGatherer(lab, CLOCK, LAB).gather(10).resources().get(0).metrics().get(2)
+			.series());
+
+		assertThat(files).isEqualTo(new ResourceSeries(true, new LatencyPoints(0, 0, null, null),
+				new LatencyPoints(0, 0, null, null)));
+	}
+
+	@Test
+	void aResourceOutputWithMoreThanOneSeriesCannotBeRead() {
+		String series = resource("order-service", "[1792143600,\"1\"]");
+		String two = series.replace("}]}", "},{\"labels\":{\"service\":\"order-service\"},\"points\":[]}]}");
+		RecordedLab lab = new RecordedLab("healthy").answer("query_metric-memory_used-order-service", two);
+
+		Gathered<ResourceSeries> memory = new DossierGatherer(lab, CLOCK, LAB).gather(10).resources().get(0).metrics()
+			.get(1)
+			.series();
+
+		assertThat(memory).isInstanceOfSatisfying(Gathered.Failed.class,
+				failed -> assertThat(failed.reason()).startsWith("the output could not be read"));
 	}
 
 	@Test
@@ -308,7 +386,7 @@ class DossierGathererTest {
 				new Gathered.Failed<>("traffic_counts", ToolOutcome.UPSTREAM_ERROR, "Prometheus did not answer"));
 		assertThat(ok(dossier.traffic().previous())).hasSize(7);
 		assertThat(ok(dossier.events().get(0).windows().incident()).total()).isEqualTo(18);
-		assertThat(dossier.calls()).hasSize(33);
+		assertThat(dossier.calls()).hasSize(45);
 		assertThat(dossier.calls().get(6).outcome()).isEqualTo(ToolOutcome.UPSTREAM_ERROR);
 	}
 
@@ -326,7 +404,7 @@ class DossierGathererTest {
 				ToolOutcome.CLIENT_ERROR, "the call failed: IllegalStateException: no MCP session"));
 		assertThat(dossier.calls().get(2).outcome()).isEqualTo(ToolOutcome.CLIENT_ERROR);
 		assertThat(ok(dossier.states().get(0).windows().previous())).hasSize(1);
-		assertThat(dossier.calls()).hasSize(33);
+		assertThat(dossier.calls()).hasSize(45);
 	}
 
 	@Test
@@ -353,6 +431,12 @@ class DossierGathererTest {
 		return "{\"timestamp\":\"" + timestamp + "\",\"service\":\"payment-service\",\"level\":\"WARN\","
 				+ "\"untrustedText\":\"" + timestamp + "  WARN 1 --- [payment-service] [exec-1] d.k.Gateway : "
 				+ message + "\"}";
+	}
+
+	/** A {@code query_metric} output of one resource series of {@code service}, labelled by its service only. */
+	static String resource(String service, String points) {
+		return "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"labels\":{\"service\":\""
+				+ service + "\"},\"points\":[" + points + "]}]}";
 	}
 
 	private static <T> T ok(Gathered<T> gathered) {

@@ -94,7 +94,7 @@ class AgentLoopDossierApiTest {
 		assertThat(incident.get("steps").get(1).get("phase").asString()).isEqualTo("INVESTIGATE");
 
 		JsonNode full = JSON.readTree(send(HttpRequest.newBuilder(uri("/incidents/" + id + "?full=true")).build()).body());
-		assertThat(JSON.readTree(full.get("steps").get(0).get("toolOutput").asString())).hasSize(33);
+		assertThat(JSON.readTree(full.get("steps").get(0).get("toolOutput").asString())).hasSize(45);
 	}
 
 	private JsonNode pollUntilEnded(String id, Duration within) throws Exception {

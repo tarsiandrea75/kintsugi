@@ -17,6 +17,9 @@ import dev.kintsugi.agent.dossier.Dossier.Compared;
 import dev.kintsugi.agent.dossier.Dossier.EventCounts;
 import dev.kintsugi.agent.dossier.Dossier.LatencySeries;
 import dev.kintsugi.agent.dossier.Dossier.LevelLogs;
+import dev.kintsugi.agent.dossier.Dossier.MetricSeries;
+import dev.kintsugi.agent.dossier.Dossier.ResourceSeries;
+import dev.kintsugi.agent.dossier.Dossier.ServiceResources;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLatency;
 import dev.kintsugi.agent.dossier.Dossier.ServiceLogs;
 import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
@@ -40,7 +43,7 @@ import dev.kintsugi.agent.dossier.DossierRenderer.Row;
  * side belongs to its caller ({@code service}), with the callee in {@code clientName}, and one on the server side to
  * the callee; a state table or an event source belongs to the service the {@link Topology} names for it. A sheet holds,
  * in order: the service's place in the graph, its restarts, its inbound requests, the latency of its uris but
- * {@code /actuator/*}, its outbound calls per edge, its log signatures, and the tables and events it owns. A count row
+ * {@code /actuator/*}, its resources, its outbound calls per edge, its log signatures, and the tables and events it owns. A count row
  * whose incident count is 0 while its previous count is above 0 is written in the last section, "Seen only in the
  * previous window", under its service, which still owns it. The tables' caps hold per block. A failed call that covers
  * every service ({@code service_restarts}, {@code traffic_counts}) is one fact line of the header; any other is one line
@@ -102,6 +105,7 @@ public final class ServiceSheets {
 			restarts(sheet, dossier.services());
 			inbound(sheet, dossier.traffic());
 			latency(sheet, dossier.latency());
+			resources(sheet, dossier.resources());
 			outbound(sheet, dossier.traffic(), topology.edges());
 			logs(sheet, logs, shown);
 			for (TableStates table : dossier.states()) {
@@ -135,6 +139,11 @@ public final class ServiceSheets {
 		out.line(HEADER, "- latency: seconds per request on the server side, from query_metric "
 				+ DossierGatherer.LATENCY_METRIC + "; the mean and max of the points with a value in each window. "
 				+ ACTUATOR + "/* uris are left out.");
+		out.line(HEADER, "- resources: " + String.join(", ", DossierGatherer.RESOURCE_METRICS.subList(0,
+				DossierGatherer.RESOURCE_METRICS.size() - 1)) + " and "
+				+ DossierGatherer.RESOURCE_METRICS.get(DossierGatherer.RESOURCE_METRICS.size() - 1)
+				+ " from query_metric, in the units of the source; the mean and max of the points with a value in each"
+				+ " window.");
 		if (dossier.services() instanceof Gathered.Failed<?> failed) {
 			out.line(HEADER, "- " + DossierRenderer.failed(failed, null));
 		}
@@ -229,6 +238,36 @@ public final class ServiceSheets {
 					sheet.line("- latency: query_metric truncated=true.");
 				}
 			}
+		}
+	}
+
+	/**
+	 * The service's resources as the tables write them: its failed calls first, one line per outcome and reason, then
+	 * a line per metric read, incident mean and max, and the previous ones, then one line naming the truncated ones.
+	 */
+	private static void resources(Sheet sheet, List<ServiceResources> resources) {
+		Optional<ServiceResources> found = find(resources, ServiceResources::service, sheet.service);
+		if (found.isEmpty()) {
+			sheet.line("- resources: not gathered.");
+			return;
+		}
+		DossierRenderer.failedResources(found.get()).forEach(line -> sheet.line("- resources " + line));
+		List<String> truncated = new ArrayList<>();
+		for (MetricSeries metric : found.get().metrics()) {
+			if (metric.series() instanceof Gathered.Ok<ResourceSeries> ok) {
+				ResourceSeries series = ok.value();
+				sheet.line("- resource " + cell(metric.metric()) + ": incident mean "
+						+ DossierRenderer.value(series.incident().mean()) + ", max "
+						+ DossierRenderer.value(series.incident().max()) + " (previous mean "
+						+ DossierRenderer.value(series.previous().mean()) + ", max "
+						+ DossierRenderer.value(series.previous().max()) + ").");
+				if (series.truncated()) {
+					truncated.add(cell(metric.metric()));
+				}
+			}
+		}
+		if (!truncated.isEmpty()) {
+			sheet.line("- resources " + String.join(", ", truncated) + ": query_metric truncated=true.");
 		}
 	}
 
