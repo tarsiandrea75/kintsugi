@@ -286,7 +286,7 @@ Without the converter, every number is on a lab one person built and tuned again
     - R3-publish-step-is-not-all-or-nothing (`convert.py:324-326`): the move into `--out` is per file, not one rename.
     - R3-replay-edge-assertion-proves-one-row (`RcaevalRecordingTest.java:60-61`): the Java test proves only one traffic row.
 
-- 2026-11-01, T5 (route: delegated writer; trigger: Java, a shell script, the Python scorer, tests and three docs). The replay plumbing and the scorer; T5 stays open for the parent's check and review.
+- 2026-11-01, T5 (route: delegated writer; trigger: Java, a shell script, the Python scorer, tests and three docs). The replay plumbing and the scorer.
   - **Files:**
     - `ReplayDriver.java` (the topology), the new `ReplayTopologyTest.java` (6 tests);
     - `infra/scripts/replay-agent.sh` (`--dataset`), `infra/scripts/test-lib.sh` (9 cases);
@@ -311,6 +311,13 @@ Without the converter, every number is on a lab one person built and tuned again
     - **AC5:** `infra/scripts/replay-agent.sh --route rules --mode decision --split holdout` (the holdout Config 0 run behind `replay-20261031T212629Z-rules`) wrote `replay-20261101T003319Z-rules`: `summary.tsv` identical to the baseline in every column but `seconds` (verdicts and candidates included), `aggregate.tsv` byte-identical, and the 15 incident files identical apart from `id` and `startedAt`. F1 5/5, F2 0/5, F3 5/5, as before.
     - **re2-ob dry path:** `REPLAY_DIR=agent/src/test/resources/rcaeval infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision --faults cpu`: exit 0, `replay-20261101T003339Z-rules`, one sample, 58 calls recorded, 0 unrecorded, coverage 1.00, reported `UNKNOWN|UNKNOWN` (the synthetic fixture fires no rule). `score --service-only --label 0` on it: `0  pooled   0/1   AC@1   0%  [0%, 79%]  coverage 0%  selective -  recall 0%`.
   - **Data reads:** none; only the committed fixtures.
+  - The parent re-ran the full evals suite (132 passed) and accepted the writer's choices: `REPLAY_DIR` rather than a new flag, decision mode only for `re2-ob`, the explicit lab topology property, no `scores.tsv` column. The 661 Java tests are 650 + 4 (`TopologyTest`, T2) + 1 (`RcaevalRecordingTest`, T3) + 6.
+  - Commit `61de927`. Review of `e5d29f3..61de927`: high (`replay-agent.sh` starts processes), four lenses, approved and acknowledged. No blocker; ten non-blocking findings, all follow-ups:
+    - WARNING R2/R3/R4 service-only-scope-absent (`cli.py:199`): `scores.tsv` does not say the AC@1 was service-only; only `report.txt` does. Before T6's results are committed, the scope must be visible in what is committed (the plan states it, `report.txt` is committed).
+    - WARNING R3-dataset-topology-forwarding-unproved (`test-lib.sh:651-657`): no test proves the JVM receives the dataset's topology property. T6's dev run proves it end to end (unrecorded calls would show).
+    - WARNING R2-task-log-contradicts-t5-status (this document): the T5 entry said "stays open" while the box was ticked; fixed here.
+    - SUGGESTION R2/R3 `ReplayDriver.java:205-207`: the driver reads only the system property, not `KINTSUGI_AGENT_TOPOLOGY`, and its comment overstates parity with the agent.
+    - SUGGESTION R2 `scoring.py:196` (recall docstring stale under `--service-only`), `scoring.py:57` (an unexplained, effectively dead `UNKNOWN` guard), `ReplayTopologyTest.java:63` (the 58 calls are unexplained).
 
 ## Next step
 
