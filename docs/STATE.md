@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-01 (session 01)
+2026-11-01 (session 02)
 
 ## Milestone
 
@@ -28,7 +28,8 @@ This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, n
 3. Done 2026-10-31: topology as data (`odd/tasks/topology-data.md`, chain `feat/topology-data` → `-01-call-sites` → `-02-derived`). The agent loads its topology from `kintsugi.agent.topology` (default `classpath:topology/lab.json`); `CallGraph` and the hard-coded lists are gone; the lab's goldens, prompt and schemas are byte-identical, and Config 0's verdicts and candidates are unchanged on dev and holdout. The RCAEval converter followed (item 5).
 4. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
 5. Done 2026-11-01: the RCAEval converter (above).
-6. Done 2026-11-01: H − 0 on RE2-OB dev (`odd/tasks/hybrid.md` T9–T10, plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, branch `feat/hybrid-rcaeval`). H 5/30, 17% [7%, 34%] against 0 4/30, 13% [5%, 30%]; H − 0 +3 points, McNemar p = 1. **The stop rule is not met**, as the plan fixed before the run: 19 of 30 candidate lists are empty, so H's ceiling was 5/30, and it reached it (Qon's one real choice went right). **Next: decide the next feature with the human.** The limit on RCAEval is the rules' recall, i.e. the dossier's missing resource facts (vision M3).
+6. Done 2026-11-01: H − 0 on RE2-OB dev (`odd/tasks/hybrid.md` T9–T10, plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, branch `feat/hybrid-rcaeval`). H 5/30, 17% [7%, 34%] against 0 4/30, 13% [5%, 30%]; H − 0 +3 points, McNemar p = 1. **The stop rule is not met**, as the plan fixed before the run: 19 of 30 candidate lists are empty, so H's ceiling was 5/30, and it reached it (Qon's one real choice went right). The limit on RCAEval is the rules' recall, i.e. the dossier's missing resource facts (vision M3).
+7. **Now: `resource-facts`** (`odd/tasks/resource-facts.md`, branch `feat/resource-facts` from `e4b0259`, 7 tasks, none started). The human chose a new Config 0R (rule R-RES, `RESOURCE_EXHAUSTION`, after R-REACH and R-DOWN) over candidates-only, to keep the leakage principle; Config 0 stays frozen. Metrics `cpu_usage`, `memory_used`, `open_files` (lab metrics checked live in Prometheus). **Next: the human confirms the design in the feature document, then T1 (ADR-021, R-RES's threshold fixed before any converted resource series is read).**
 
 ## Local branch chains (not pushed)
 
@@ -49,7 +50,7 @@ This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, n
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
