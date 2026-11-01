@@ -66,6 +66,8 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T6 Calibration on `stress`: one H run with Qon to fix the report cap and deadline. Route: inline commands.
 - [x] T7 The lab dev plan, committed before the run. Route: inline.
 - [x] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
+- [x] T9 (added 2026-11-01, after the RCAEval converter) The RE2-OB dev plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, committed before the run. It fixes the stop-rule outcome in advance: the rules' candidates cap H at 5/30 against Config 0's 4/30. Route: inline.
+- [ ] T10 The H run on RE2-OB dev, the score with 0, and the reading in STATE. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -165,4 +167,4 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
 
 ## Next step
 
-The feature is complete on `feat/hybrid`. The stop-rule measurement H − 0 on RCAEval dev waits for the converter and topology-as-data.
+T10 on `feat/hybrid-rcaeval`: the H run on RE2-OB dev under `evals/plans/2026-11-01-hybrid-re2ob-dev.md`.
