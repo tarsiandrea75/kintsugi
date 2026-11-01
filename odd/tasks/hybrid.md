@@ -67,7 +67,7 @@ If the model chooses well among the rules' candidates, the local route gets a nu
 - [x] T7 The lab dev plan, committed before the run. Route: inline.
 - [x] T8 The H dev run, the score with 0 and Qon, and the reading in STATE. Route: inline commands.
 - [x] T9 (added 2026-11-01, after the RCAEval converter) The RE2-OB dev plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, committed before the run. It fixes the stop-rule outcome in advance: the rules' candidates cap H at 5/30 against Config 0's 4/30. Route: inline.
-- [ ] T10 The H run on RE2-OB dev, the score with 0, and the reading in STATE. Route: inline commands.
+- [x] T10 The H run on RE2-OB dev, the score with 0, and the reading in STATE. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -165,6 +165,14 @@ Forecast about 750 authored lines (docs 150, candidates with tests 200, hybrid r
   - Reading. On F2 and F3 every list had one candidate, the truth, so H's gain there comes from the rules' proposals, not from the model's choice. F1 is the only fault with a real choice, and there the model lost 2 of 5 that the rules' first candidate had right. On these 15 cases, "take the first candidate" (the fallback ADR-019 rejected for measurement) would score 15/15. Dev has been read many times, so this is no claim; it says where to look on RCAEval: whether the model adds anything when the list has more than one entry.
   - Commit `5fc7224`. Review of `4715600..5fc7224` (T5-T8): medium, `slice_budget_reached`; one lens (reliability), approved with no findings and acknowledged (`review-ee0ba94db473e384`).
 
+- 2026-11-01, T9–T10 (route: inline; no trigger: one plan and three commands). H on RE2-OB dev.
+  - Plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, committed before the run (`77e39d2`) on `feat/hybrid-rcaeval`. It fixed the stop-rule outcome in advance: the rules' candidate lists cap H at 5/30 against Config 0's 4/30, so H cannot win the paired comparison on RE2-OB dev.
+  - Run `infra/scripts/out/replay-20261101T040745Z-local`: 30 COMPLETED, no FAILED, 0 unrecorded calls; the 19 empty lists ended `UNKNOWN|UNKNOWN` with 0 tokens (no model call). Mechanics pass.
+  - Score (`score --service-only`, `evals/results/2026-11-01-hybrid-re2ob-dev/`): H 5/30, AC@1 17% [7%, 34%], coverage 37%, selective 45%; 0 4/30, 13% [5%, 30%]. H − 0: H only 1, 0 only 0, exact McNemar p = 1, +3 points, cluster bootstrap 95% [+0, +10].
+  - Choices on the 11 non-empty lists: Qon answered from the list every time (no UNKNOWN, no `INVALID_REPORT`, no timeout). It kept the first candidate 10 times and took the second once: `recommendationservice` on the `recommendationservice` loss case, where the rules' first candidate was `checkoutservice|DEPENDENCY_REJECTING`; that is the one gain over 0. Of the other 4 lists with more than one entry, 1 had the truth first (kept) and 3 lacked it, so keeping the first candidate cost nothing.
+  - Report time per sample 795–1,918 s (median 910 s), under the 2100 s deadline. The slowest (`productcatalogservice` loss) used 12,311 prompt and 791 completion tokens, about twice the others, consistent with a second report attempt; the sample file does not record attempts, so this is not confirmed.
+  - Reading: H reached its ceiling. The model's one real choice went right, but RE2-OB dev cannot show more until the rules propose the truth more often: 19 of 30 lists are empty, mostly on cpu, disk and socket faults, for want of resource facts (vision M3). Stop rule for H on RE2-OB dev: not met.
+
 ## Next step
 
-T10 on `feat/hybrid-rcaeval`: the H run on RE2-OB dev under `evals/plans/2026-11-01-hybrid-re2ob-dev.md`.
+The feature is complete. H does not meet the stop rule on RE2-OB dev; the limit is the rules' recall (resource facts, vision M3), not the model.

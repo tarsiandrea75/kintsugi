@@ -19,6 +19,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, nothing pushed: the RCAEval converter, T1–T6, chain `feat/rcaeval-converter` → `-01-core` → `-02-replay` (ADR-020).
 - RE2 downloaded (Zenodo 14590730, md5-checked) to `~/data/rcaeval`; topology files `re2-ob.json` and `re2-ss.json`; the converter writes replay recordings with traffic from the OB traces; `replay-agent.sh --dataset re2-ob`; `score --service-only`.
 - Mechanics check on RE2-OB dev (repetition 1, 30 cases, plan `evals/plans/2026-11-01-config0-re2ob-dev.md`): no FAILED sample, no unrecorded call, no leak. Config 0: 4/30, AC@1 13% [5%, 30%] on the service, coverage 37% (`evals/results/2026-11-01-config0-re2ob-dev/`).
+- H on RE2-OB dev (`evals/results/2026-11-01-hybrid-re2ob-dev/`): 5/30, its ceiling; stop rule not met (Next action 6).
 
 ## Next action
 
@@ -26,7 +27,8 @@ This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, n
 2. In M3: Config H, the hybrid (ADR-019, vision amended): `odd/tasks/hybrid.md` on `feat/hybrid`, T1–T8 done; the feature is complete (journal `docs/journal/2026-10-31-02.md`). Lab dev mechanics check passed: H 13/15, 87% [62%, 96%], against 0 10/15 and Qon 8/15 (`evals/results/2026-10-31-hybrid-dev/`). F2 and F3 lists held only the truth; on F1, the only real choice, the model kept the rules' first candidate 3/5 and picked the caller twice. Next: the stop-rule measurement H − 0 on RCAEval dev, which waits for the converter. Follow-ups in the feature document: a partial dossier gives empty candidates; a `rulesOnly` HYBRID guard; a script-level test for the cloud route.
 3. Done 2026-10-31: topology as data (`odd/tasks/topology-data.md`, chain `feat/topology-data` → `-01-call-sites` → `-02-derived`). The agent loads its topology from `kintsugi.agent.topology` (default `classpath:topology/lab.json`); `CallGraph` and the hard-coded lists are gone; the lab's goldens, prompt and schemas are byte-identical, and Config 0's verdicts and candidates are unchanged on dev and holdout. The RCAEval converter followed (item 5).
 4. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
-5. Done 2026-11-01: the RCAEval converter (above). **Next: the H − 0 stop-rule measurement on RE2-OB dev** (`odd/tasks/hybrid.md`), under its own plan: the first RCAEval run with a model (Qon, local). Config 0 is weak there (13%), mostly abstentions on resource faults, since the dossier has no resource facts (vision M3).
+5. Done 2026-11-01: the RCAEval converter (above).
+6. Done 2026-11-01: H − 0 on RE2-OB dev (`odd/tasks/hybrid.md` T9–T10, plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, branch `feat/hybrid-rcaeval`). H 5/30, 17% [7%, 34%] against 0 4/30, 13% [5%, 30%]; H − 0 +3 points, McNemar p = 1. **The stop rule is not met**, as the plan fixed before the run: 19 of 30 candidate lists are empty, so H's ceiling was 5/30, and it reached it (Qon's one real choice went right). **Next: decide the next feature with the human.** The limit on RCAEval is the rules' recall, i.e. the dossier's missing resource facts (vision M3).
 
 ## Local branch chains (not pushed)
 
@@ -47,7 +49,7 @@ This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, n
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
