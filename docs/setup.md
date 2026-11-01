@@ -592,6 +592,29 @@ python3 -m kintsugi_evals score --service-only --label 0 ../infra/scripts/out/re
 - Decision mode only: the converter writes one decision case per RCAEval case, in `dev` (repetition 1), or in `holdout` only under a committed holdout plan.
 - `score --service-only` counts a report correct when its service is the truth's, whatever its category, still with Wilson 95% CIs; the report's first line per config ends with `; AC@1 on the service only`. Without the flag the scorer compares the whole `service|category`.
 
+### Choose the rules version
+
+`kintsugi.agent.rules` (`KINTSUGI_AGENT_RULES`) selects the rules configuration ([ADR-021](adr/ADR-021-resource-rules-config.md), `odd/tasks/resource-facts.md`):
+
+- `v1`, the default, is Config 0 (ADR-016), frozen.
+- `v2` is Config 0R: Config 0's rules unchanged, plus R-RES, which names a service `RESOURCE_EXHAUSTION` from its resource facts only where Config 0 abstains. Its candidates are Config 0's, then the resource-abnormal services.
+- Any other value stops the agent's start. The agent reads it only for the hybrid report's candidates.
+
+On replay, `replay-agent.sh --rules v1|v2` (default `v1`) passes it as `-Dkintsugi.agent.rules`, next to the topology and the view, so a value left in the shell never applies:
+
+```bash
+# Config 0R on the RE2-OB dev cases; summary.tsv's model column reads rules-v2.
+REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision \
+  --rules v2
+# HR: the hybrid over Config 0R's candidates; each incident names the version under "rules".
+REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route local --mode decision \
+  --report hybrid --rules v2
+```
+
+- `--rules` applies to decision mode on the `rules` route or with `--report hybrid`. Any other run exits 2 before Maven, since the version would change nothing there.
+- The lab recordings predate the resource calls, so their resource facts are failed and `v2` equals `v1` on them.
+- The output directory is named by the route only, so keep a `v1` and a `v2` run apart by their directories, and label them when scoring.
+
 ### Reset a volume
 
 Init scripts (`infra/postgres/init/`, `infra/knowledge-db/init/`) run only when their volume is empty. When one changes after the volume was created (for example when the `agent` database was added to `knowledge-db`), or when a volume's state is broken, delete that one volume and start the lab again:

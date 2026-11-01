@@ -59,7 +59,7 @@ import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.AgentMode.DossierGathering;
 import dev.kintsugi.agent.rules.RulesCandidate;
-import dev.kintsugi.agent.rules.RulesDiagnosis;
+import dev.kintsugi.agent.rules.RulesVersion;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -150,6 +150,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/** Which report decision mode asks for; the other modes ask for the plain one ({@link AgentMode#reportFrom}). */
 	private final DecisionReport decisionReport;
 
+	/** The rules whose candidates the hybrid report lists (ADR-021, "Selection"). */
+	private final RulesVersion rules;
+
 	/** Runs each model call, so that the loop can stop waiting for it at its time budget. */
 	private final ExecutorService modelCalls;
 
@@ -183,6 +186,19 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, Topology topology, AgentMode mode, DossierView decisionView, DecisionReport decisionReport) {
+		this(incidents, router, labTools, settings, clock, topology, mode, decisionView, decisionReport,
+				RulesVersion.V1);
+	}
+
+	/**
+	 * A loop as above whose hybrid report, in decision mode only, lists the candidates of {@code rules}
+	 * (resource-facts T5; ADR-021, "Selection"): Config 0's for {@code v1}, Config 0R's for {@code v2}.
+	 * @throws NullPointerException when {@code rules} is null, in every mode
+	 */
+	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
+			Clock clock, Topology topology, AgentMode mode, DossierView decisionView, DecisionReport decisionReport,
+			RulesVersion rules) {
+		this.rules = Objects.requireNonNull(rules, "rules");
 		this.topology = Objects.requireNonNull(topology, "topology");
 		this.assessedSchema = Schemas.assessedReport(topology);
 		this.decisionView = Objects.requireNonNull(decisionView, NULL_VIEW);
@@ -383,7 +399,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			run.sheets = view == DossierView.SHEETS ? ServiceSheets.render(dossier, this.topology) : null;
 			run.dossierText = run.sheets == null ? view.render(dossier, this.topology) : run.sheets.text();
 			// The hybrid report's candidates, from the typed record, never the text, so either view gives the same.
-			run.candidates = report(run) == DecisionReport.HYBRID ? RulesDiagnosis.candidates(dossier, this.topology)
+			run.candidates = report(run) == DecisionReport.HYBRID ? this.rules.candidates(dossier, this.topology)
 					: null;
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);

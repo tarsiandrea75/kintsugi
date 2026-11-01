@@ -38,6 +38,7 @@ import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.rules.RulesCandidate;
+import dev.kintsugi.agent.rules.RulesVersion;
 
 /**
  * The replay driver's per-sample pipeline (agent spec, "Replay of recorded tool outputs"; odd/tasks/replay-harness.md
@@ -463,6 +464,44 @@ class ReplayDriverTest {
 			.hasMessage("kintsugi.agent.decision.report does not apply to this mode: only decision mode reads it; "
 					+ "explorer and dossier mode always ask for the plain report");
 		ReplayDriver.refuseIgnoredProperties(true, report::get);
+		// Nor the rules version (resource-facts T5): the rules route and the hybrid report are decision mode's.
+		Map<String, String> rules = Map.of(RulesVersion.PROPERTY, "v2");
+		assertThatThrownBy(() -> ReplayDriver.refuseIgnoredProperties(false, rules::get))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessage("kintsugi.agent.rules does not apply to this mode: only decision mode reads it, on the rules "
+					+ "route and in the hybrid report");
+		ReplayDriver.refuseIgnoredProperties(true, rules::get);
+	}
+
+	@Test
+	void theRulesVersionIsReadFromItsPropertyV1ByDefaultAndAnyOtherValueFails() {
+		assertThat(ReplayDriver.rules(Map.<String, String>of()::get)).isEqualTo(RulesVersion.V1);
+		assertThat(ReplayDriver.rules(Map.of(RulesVersion.PROPERTY, "v2")::get)).isEqualTo(RulesVersion.V2);
+		assertThatThrownBy(() -> ReplayDriver.rules(Map.of(RulesVersion.PROPERTY, "v9")::get))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessage("kintsugi.agent.rules must be v1 or v2, got \"v9\"");
+	}
+
+	@Test
+	void aRulesSampleRecordsItsRulesVersionAsItsModel() throws IOException {
+		// The lab recordings predate the resource calls, so Config 0R gives Config 0's verdict and candidates there.
+		ReplayDriver v1 = ReplayDriver.rulesOnly(ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST,
+				DossierView.TABLES, DecisionReport.PLAIN, LAB, RulesVersion.V1);
+		ReplayDriver v2 = ReplayDriver.rulesOnly(ReplayDriver.DEFAULT_RECORDINGS, ReplayDriver.DEFAULT_TOOLS_LIST,
+				DossierView.TABLES, DecisionReport.PLAIN, LAB, RulesVersion.V2);
+		ReplayCases.Recording r1 = v2.decisionCases("dev", List.of("F1")).get(0);
+
+		ReplayDriver.Sample config0 = v1.rulesSample(r1, 1);
+		ReplayDriver.Sample config0r = v2.rulesSample(r1, 1);
+		ReplayDriver.write(this.out, config0r);
+
+		assertThat(config0r.reported()).isEqualTo(config0.reported()).isEqualTo(F1_TRUTH);
+		assertThat(config0r.candidates()).isEqualTo(config0.candidates());
+		assertThat(config0.settings()).isEqualTo(ReplayDriver.Settings.RULES);
+		assertThat(config0r.settings()).isEqualTo(new ReplayDriver.Settings("rules-v2", "-", "-", "-"));
+		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
+		assertThat(List.of(line).subList(19, 23)).containsExactly("rules-v2", "-", "-", "-");
+		assertThat(config0r.incident().path("model").asString()).isEqualTo("rules-v2");
 	}
 
 	@Test
@@ -533,6 +572,8 @@ class ReplayDriverTest {
 		assertThat(hybrid.report()).hasValue(DecisionReport.HYBRID);
 		assertThat(hybrid.reported()).isEqualTo("UNKNOWN|UNKNOWN");
 		assertThat(hybrid.candidates()).isNotEmpty().isEqualTo(rules.candidates());
+		// Its candidates are those of the run's rules version, v1 by default, which its incident names.
+		assertThat(hybrid.incident().path("rules").asString()).isEqualTo("v1");
 		assertThat(hybrid.summaryLine())
 			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\thybrid" + LOCAL_COLUMNS + "\t"
 					+ rules.candidatesColumn());

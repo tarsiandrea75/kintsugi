@@ -48,6 +48,7 @@ import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
+import dev.kintsugi.agent.rules.RulesVersion;
 import dev.kintsugi.agent.rules.RulesVerdict;
 
 /**
@@ -82,6 +83,11 @@ import dev.kintsugi.agent.rules.RulesVerdict;
  * The gatherer, the rules and the loop read the topology of {@code kintsugi.agent.topology}, as the agent does, the
  * lab's by default ({@link #topology}; odd/tasks/rcaeval-converter.md T5): an RCAEval recording replays on its
  * system's file, since the dossier's calls follow the topology's services.
+ *
+ * <p>
+ * The rules version is {@code kintsugi.agent.rules}, {@code v1} by default ({@link #rules}; resource-facts T5,
+ * ADR-021): a rules sample diagnoses with it and records {@code rules-v1} or {@code rules-v2} as its model, and a
+ * hybrid sample's report lists its candidates, its incident naming the version under {@code rules}.
  */
 final class ReplayDriver {
 
@@ -115,7 +121,7 @@ final class ReplayDriver {
 	/** Config 0's route in {@code summary.tsv}: replay-only, so no {@link AgentRoute} (ADR-016). */
 	static final String RULES_ROUTE = "rules";
 
-	/** Config 0's model in a rules sample's incident: the rules of ADR-016, version 1. */
+	/** Config 0's model in a rules sample's incident: the rules of ADR-016, version 1 ({@link RulesVersion#model}). */
 	static final String RULES_MODEL = "rules-v1";
 
 	private static final String RULES_ONLY = "a rules-only driver runs no model sample: use rulesSamples";
@@ -147,6 +153,9 @@ final class ReplayDriver {
 	/** The system's topology, which the gatherer, the rules and the loop read. */
 	private final Topology topology;
 
+	/** The rules a rules sample diagnoses with and a hybrid sample's report takes its candidates from. */
+	private final RulesVersion rules;
+
 	/** Each recording, parsed and checked once. */
 	private final Map<Recording, Parsed> parsed = new HashMap<>();
 
@@ -176,17 +185,19 @@ final class ReplayDriver {
 	 * @param decisionReport which report a decision sample asks for
 	 * @throws NullPointerException when {@code decisionView} or {@code decisionReport} is null, before any sample, as
 	 * the loop refuses them
-	 * @throws IllegalArgumentException when {@code kintsugi.agent.topology} names a missing or invalid file
+	 * @throws IllegalArgumentException when {@code kintsugi.agent.topology} names a missing or invalid file, or
+	 * {@code kintsugi.agent.rules} a version other than {@code v1} or {@code v2}
 	 */
 	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
 			Path recordings, Path toolsList, DossierView decisionView, DecisionReport decisionReport) {
 		this(router, settings, incidents, admin, recordings, toolsList, decisionView, decisionReport,
-				topology(System::getProperty));
+				topology(System::getProperty), rules(System::getProperty));
 	}
 
-	private ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
+	/** A driver as above, over {@code topology} and with the rules version {@code rules}. */
+	ReplayDriver(ModelRouter router, LoopSettings settings, IncidentRepository incidents, JdbcClient admin,
 			Path recordings, Path toolsList, DossierView decisionView, DecisionReport decisionReport,
-			Topology topology) {
+			Topology topology, RulesVersion rules) {
 		this.decisionView = Objects.requireNonNull(decisionView, AgentLoop.NULL_VIEW);
 		this.decisionReport = Objects.requireNonNull(decisionReport, AgentLoop.NULL_REPORT);
 		this.router = router;
@@ -196,6 +207,7 @@ final class ReplayDriver {
 		this.recordings = recordings;
 		this.toolsList = toolsList;
 		this.topology = Objects.requireNonNull(topology);
+		this.rules = Objects.requireNonNull(rules, "rules");
 		this.cases = ReplayCases.read(recordings);
 	}
 
@@ -212,9 +224,20 @@ final class ReplayDriver {
 	}
 
 	/**
+	 * The rules version a replay run reads: the one {@code property} names under {@link RulesVersion#PROPERTY}, else
+	 * {@link RulesVersion#DEFAULT}, Config 0.
+	 * @param property a property's value, null when it is not set: the driver passes {@code System::getProperty}
+	 * @throws IllegalArgumentException naming the property for any version but {@code v1} or {@code v2}
+	 */
+	static RulesVersion rules(Function<String, String> property) {
+		return RulesVersion.of(Objects.requireNonNullElse(property.apply(RulesVersion.PROPERTY), RulesVersion.DEFAULT));
+	}
+
+	/**
 	 * A driver for the {@code rules} route only: no router, no loop settings and no database, since a rules sample
 	 * calls no model and opens no incident. Its model samples refuse to run ({@link #sample}, {@link #decisionSample}).
-	 * It reads the topology of {@code kintsugi.agent.topology} ({@link #topology}).
+	 * It reads the topology of {@code kintsugi.agent.topology} ({@link #topology}) and the rules version of
+	 * {@code kintsugi.agent.rules} ({@link #rules}).
 	 */
 	static ReplayDriver rulesOnly(Path recordings, Path toolsList, DossierView decisionView,
 			DecisionReport decisionReport) {
@@ -224,7 +247,14 @@ final class ReplayDriver {
 	/** A driver for the {@code rules} route only, as {@link #rulesOnly} above, over {@code topology}. */
 	static ReplayDriver rulesOnly(Path recordings, Path toolsList, DossierView decisionView,
 			DecisionReport decisionReport, Topology topology) {
-		return new ReplayDriver(null, null, null, null, recordings, toolsList, decisionView, decisionReport, topology);
+		return rulesOnly(recordings, toolsList, decisionView, decisionReport, topology, rules(System::getProperty));
+	}
+
+	/** A driver for the {@code rules} route only, over {@code topology}, diagnosing with {@code rules}. */
+	static ReplayDriver rulesOnly(Path recordings, Path toolsList, DossierView decisionView,
+			DecisionReport decisionReport, Topology topology, RulesVersion rules) {
+		return new ReplayDriver(null, null, null, null, recordings, toolsList, decisionView, decisionReport, topology,
+				rules);
 	}
 
 	/**
@@ -251,6 +281,8 @@ final class ReplayDriver {
 					"only decision mode reads it; explorer has no dossier, and dossier mode writes the tables");
 			refuseIfSet(property, DecisionReport.PROPERTY,
 					"only decision mode reads it; explorer and dossier mode always ask for the plain report");
+			refuseIfSet(property, RulesVersion.PROPERTY,
+					"only decision mode reads it, on the rules route and in the hybrid report");
 		}
 	}
 
@@ -324,7 +356,7 @@ final class ReplayDriver {
 	/**
 	 * Runs repeat {@code n} of decision case {@code recording} on the {@code rules} route: the dossier a decision sample's
 	 * loop gathers, over the same {@link ReplayLabTools} and clock and with the recording's window, diagnosed by
-	 * {@link RulesDiagnosis}. It always completes, with 0 tokens, and its counters are the gatherer's calls, which are
+	 * the run's rules version ({@link RulesDiagnosis} for {@code v1}). It always completes, with 0 tokens, and its counters are the gatherer's calls, which are
 	 * the dossier's. Its incident holds the verdict, its rule and its facts; no database row is written.
 	 * @throws IllegalArgumentException when the recording lacks its start, symptom or window
 	 */
@@ -336,10 +368,10 @@ final class ReplayDriver {
 		Clock clock = clockAt(parsed.startedAt());
 		long start = System.nanoTime();
 		Dossier dossier = new DossierGatherer(counter, clock, this.topology).gather(parsed.sinceMinutes());
-		RulesVerdict verdict = RulesDiagnosis.diagnose(dossier, this.topology);
+		RulesVerdict verdict = this.rules.diagnose(dossier, this.topology);
 		double seconds = (System.nanoTime() - start) / 1e9;
 		// The candidates a hybrid run would list on the same dossier (hybrid T4); the verdict above is unchanged.
-		List<RulesCandidate> candidates = RulesDiagnosis.candidates(dossier, this.topology);
+		List<RulesCandidate> candidates = this.rules.candidates(dossier, this.topology);
 
 		AgentMode mode = AgentMode.DECISION;
 		String reported = verdict.service() + "|" + verdict.category();
@@ -349,7 +381,7 @@ final class ReplayDriver {
 		incident.put("sinceMinutes", parsed.sinceMinutes());
 		incident.put("mode", mode.value());
 		incident.put("route", RULES_ROUTE);
-		incident.put("model", RULES_MODEL);
+		incident.put("model", this.rules.model());
 		incident.put("status", IncidentStatus.COMPLETED.name());
 		incident.put("startedAt", clock.instant().toString());
 		incident.putObject("report")
@@ -368,7 +400,8 @@ final class ReplayDriver {
 				truth, reported, verdict(IncidentStatus.COMPLETED, reported, truth), tools.recordedCalls(),
 				tools.unrecordedCalls(), counter.coverage(tools.recordedCalls(), tools.unrecordedCalls()),
 				tools.conflicts(), 0, 0, seconds,
-				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident, Settings.RULES,
+				tools.recordedCalls() + tools.unrecordedCalls(), tools.unrecordedCalls(), incident,
+				Settings.rules(this.rules),
 				candidates, counter.resourceUnrecorded);
 	}
 
@@ -419,7 +452,7 @@ final class ReplayDriver {
 		AgentLoop.Outcome outcome;
 		long start = System.nanoTime();
 		try (AgentLoop loop = new AgentLoop(this.incidents, this.router, counter, this.settings, clock, this.topology, mode,
-				this.decisionView, this.decisionReport)) {
+				this.decisionView, this.decisionReport, this.rules)) {
 			outcome = loop.runToOutcome(id);
 		}
 		double seconds = (System.nanoTime() - start) / 1e9;
@@ -429,6 +462,10 @@ final class ReplayDriver {
 		IncidentStatus status = outcome.status();
 
 		ObjectNode incident = incident(id);
+		// A hybrid sample's candidates came from the run's rules version, which its model column does not name.
+		if (mode.reportFrom(this.decisionReport).orElse(null) == DecisionReport.HYBRID) {
+			incident.put("rules", this.rules.value());
+		}
 		JsonNode report = incident.path("report");
 		String reported = report.isObject()
 				? report.path("rootCauseService").asString("") + "|" + report.path("rootCauseCategory").asString("")
@@ -778,12 +815,18 @@ final class ReplayDriver {
 	 * {@code summary.tsv}'s candidates (agent spec, "Replay of recorded tool outputs"; odd/tasks/qwen-dev.md T3): the model, its thinking setting
 	 * ({@code on}, {@code off} or {@code default}, see {@link ModelRoute#thinking}), the report's answer cap and the
 	 * report's deadline, written in seconds with an {@code s}. They are the route's effective values, overridden or
-	 * not, so a line is attributable to the model and the settings that wrote it. Config 0 calls no model: its model is
-	 * {@link #RULES_MODEL} and the other three are {@code -}.
+	 * not, so a line is attributable to the model and the settings that wrote it. The rules call no model: their model
+	 * is their version's ({@link RulesVersion#model}: {@link #RULES_MODEL} for Config 0, {@code rules-v2} for Config 0R)
+	 * and the other three are {@code -}.
 	 */
 	record Settings(String model, String think, String reportCap, String reportTimeout) {
 
-		static final Settings RULES = new Settings(RULES_MODEL, NONE, NONE, NONE);
+		static final Settings RULES = rules(RulesVersion.V1);
+
+		/** The settings of a rules sample diagnosed by {@code rules}. */
+		static Settings rules(RulesVersion rules) {
+			return new Settings(rules.model(), NONE, NONE, NONE);
+		}
 
 		/** The settings of {@code route}'s report call. */
 		static Settings of(ModelRoute route) {

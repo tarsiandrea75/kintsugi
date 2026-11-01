@@ -26,7 +26,8 @@ import dev.kintsugi.agent.dossier.DossierView;
  * store ({@link ReplayDriver#rulesOnly}), so nothing here selects a route, and production's routes stay closed to
  * {@code rules}. The view and the report are read from {@link DossierView#PROPERTY} and {@link DecisionReport#PROPERTY}
  * with the application's defaults and recorded with each sample; the rules read the typed dossier, so neither changes
- * a verdict.
+ * a verdict. The rules version is read from {@code kintsugi.agent.rules}, {@code v1} (Config 0) by default or
+ * {@code v2} (Config 0R; resource-facts T5), and recorded as each sample's model.
  *
  * <p>
  * System properties: {@code replay.mode} ({@code decision}, the only mode it replays; any other is refused),

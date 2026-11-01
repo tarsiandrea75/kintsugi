@@ -21,8 +21,10 @@ import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
+import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
 import dev.kintsugi.agent.rules.RulesVerdict;
+import dev.kintsugi.agent.rules.RulesVersion;
 
 /**
  * AC1 of odd/tasks/rcaeval-converter.md: a recording the RCAEval converter wrote replays through the unchanged
@@ -87,6 +89,40 @@ class RcaevalRecordingTest {
 					.hasSize(1);
 			}
 		}
+	}
+
+	@Test
+	void config0rKeepsConfig0sAnswerAndCandidatesOnTheConvertedDossier() throws Exception {
+		// resource-facts T5, AC4: the converted dossier's resource facts are gathered, not failed, so this is the one
+		// committed dossier where R-RES can read series. Config 0R answers as Config 0 wherever Config 0 answers, and
+		// its candidates start with Config 0's list.
+		List<Recording> rows = ReplayCases.read(RECORDINGS).decisionCases("dev", List.of("cpu"));
+		JsonNode incident = JSON.readTree(RECORDINGS.resolve(rows.get(0).file()).toFile());
+		Topology topology = Topology.load(new ClassPathResource("topology/re2-ob.json"));
+		ReplayLabTools tools = new ReplayLabTools(JSON.createObjectNode(), List.of(incident));
+		Clock clock = Clock.fixed(Instant.parse(incident.path("startedAt").asString()), ZoneOffset.UTC);
+		Dossier dossier = new DossierGatherer(tools, clock, topology).gather(incident.path("sinceMinutes").asInt());
+		assertThat(dossier.resources()).isNotEmpty()
+			.allSatisfy(service -> assertThat(service.metrics())
+				.allSatisfy(metric -> assertThat(metric.series()).isInstanceOf(Gathered.Ok.class)));
+
+		RulesVerdict config0 = RulesVersion.V1.diagnose(dossier, topology);
+		RulesVerdict config0r = RulesVersion.V2.diagnose(dossier, topology);
+		List<RulesCandidate> v1 = RulesVersion.V1.candidates(dossier, topology);
+		List<RulesCandidate> v2 = RulesVersion.V2.candidates(dossier, topology);
+
+		assertThat(config0).isEqualTo(RulesDiagnosis.diagnose(dossier, topology));
+		assertThat(v1).isEqualTo(RulesDiagnosis.candidates(dossier, topology));
+		if (!config0.service().equals("UNKNOWN")) {
+			assertThat(config0r).isEqualTo(config0);
+		}
+		else {
+			assertThat(config0r.rule()).isIn("R-NONE", "R-RES");
+		}
+		assertThat(v2.subList(0, Math.min(v1.size(), v2.size()))).isEqualTo(v1.subList(0, Math.min(v1.size(), 5)));
+		assertThat(v2).hasSizeLessThanOrEqualTo(5).extracting(RulesCandidate::service).doesNotHaveDuplicates();
+		assertThat(v2.subList(v1.size(), v2.size())).allSatisfy(candidate -> assertThat(candidate.rule())
+			.isEqualTo("R-RES"));
 	}
 
 }

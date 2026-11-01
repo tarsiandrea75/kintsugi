@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Replays the recorded faults through the real agent loop and scores every sample (odd/tasks/replay-harness.md T4,
-# odd/tasks/decision-instrument.md T3, odd/tasks/service-assessment.md T1 and T2r, odd/tasks/rcaeval-converter.md T5).
+# odd/tasks/decision-instrument.md T3, odd/tasks/service-assessment.md T1 and T2r, odd/tasks/rcaeval-converter.md T5,
+# odd/tasks/resource-facts.md T5).
 # Run with --help.
 set -euo pipefail
 
@@ -18,6 +19,8 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --mode decision --view sheets --report assessed   # each service's role first
   infra/scripts/replay-agent.sh --route local --mode decision --report hybrid   # Config H: the model picks a candidate
   infra/scripts/replay-agent.sh --route rules --mode decision   # Config 0: the rules alone, no model (ADR-016)
+  infra/scripts/replay-agent.sh --route rules --mode decision --rules v2   # Config 0R: Config 0 plus R-RES (ADR-021)
+  infra/scripts/replay-agent.sh --route local --mode decision --report hybrid --rules v2   # HR: H over 0R's candidates
   infra/scripts/replay-agent.sh --route local --mode decision --model qwen3.5:9b --think on \
     --report-cap 2048 --report-timeout 1800   # another local model, thinking, with its own report cap and deadline
   REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules \
@@ -32,6 +35,8 @@ recorded tool outputs").
   --view tables|sheets           decision: how the dossier is written for the model (default tables)
   --report plain|assessed|hybrid decision: which report the model writes (default plain); assessed needs --view
                                  sheets; hybrid (Config H) picks among the rules' candidates, local or cloud only
+  --rules v1|v2                  decision, --route rules or --report hybrid: the rules version (default v1), v1
+                                 Config 0 (ADR-016), v2 Config 0R (ADR-021)
   --faults F1,F2,F3              the recorded faults to replay (default: the dataset's, F1,F2,F3 for lab and
                                  cpu,mem,disk,delay,loss,socket for re2-ob)
   --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
@@ -72,7 +77,14 @@ the call graph. assessed with the tables stops the run here, before Maven, since
 owners. hybrid, Config H (ADR-019; odd/tasks/hybrid.md), lists the rules' candidates (RulesDiagnosis.candidates) and
 asks the model to pick one or UNKNOWN; it takes either view and is refused on the rules route, which calls no model.
 Every line of summary.tsv and aggregate.tsv names the view and the report, so a result is attributable to its
-variant. The last column of summary.tsv, candidates, holds the rules' candidates as service|category pairs in order,
+variant.
+
+--rules sets kintsugi.agent.rules (ADR-021, "Selection"; odd/tasks/resource-facts.md): v1, the default, is Config 0;
+v2 is Config 0R, Config 0's rules unchanged plus R-RES, which names a service RESOURCE_EXHAUSTION from its resource
+facts only where Config 0 abstains, and whose candidates are Config 0's followed by the resource-abnormal services. It
+applies to the rules route, whose model column then reads rules-v1 or rules-v2, and to the hybrid report, which lists
+that version's candidates (HR is --report hybrid --rules v2; its incidents name the version under rules). Any other
+run refuses it, since it would change nothing. The last column of summary.tsv, candidates, holds the rules' candidates as service|category pairs in order,
 joined by ';': on rules lines those of the dossier the rules diagnosed, on hybrid lines the list the report task gave
 the model (empty when it had none); it is empty on every other line.
 
@@ -129,12 +141,12 @@ mode=dossier
 # Unset until given: decision mode refuses --samples, and the other modes refuse --split, --repeats, --view and
 # --report; every route but local refuses --model, --think, --report-cap and --report-timeout.
 # --faults defaults to the dataset's faults.
-unset samples split repeats view report model think report_cap report_timeout faults
+unset samples split repeats view report rules model think report_cap report_timeout faults
 while (( $# )); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --dataset|--route|--mode|--samples|--split|--repeats|--view|--report|--faults|--model|--think|--report-cap\
-    |--report-timeout)
+    --dataset|--route|--mode|--samples|--split|--repeats|--view|--report|--rules|--faults|--model|--think\
+    |--report-cap|--report-timeout)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
       set -- "$1=$2" "${@:3}" ;;
     --dataset=*) dataset=${1#*=}; shift ;;
@@ -145,6 +157,7 @@ while (( $# )); do
     --repeats=*) repeats=${1#*=}; shift ;;
     --view=*) view=${1#*=}; shift ;;
     --report=*) report=${1#*=}; shift ;;
+    --rules=*) rules=${1#*=}; shift ;;
     --faults=*) faults=${1#*=}; shift ;;
     --model=*) model=${1#*=}; shift ;;
     --think=*) think=${1#*=}; shift ;;
@@ -203,6 +216,13 @@ if [[ "$mode" == decision ]]; then
   # Config H (ADR-019): the model picks among the rules' candidates, so the rules route, with no model, has no use for it.
   [[ "$report" != hybrid || "$route" != rules ]] || { echo "--report hybrid applies to --route local or cloud only," \
     "not rules: Config H has a model choose among the rules' candidates, and Config 0 calls no model" >&2; exit 2; }
+  # The agent's own default, RulesVersion.DEFAULT (test-lib.sh checks that they agree). It is read by the rules route
+  # and the hybrid report only (ADR-021), so any other run refuses it rather than ignore it.
+  [[ -z "${rules+given}" || "$route" == rules || "$report" == hybrid ]] || { echo "--rules applies to --route rules" \
+    "or --report hybrid only: the other reports list no candidate, and the rules choose none" >&2; exit 2; }
+  rules=${rules-v1}
+  [[ "$rules" == v1 || "$rules" == v2 ]] || { echo "Unknown rules '$rules'; choose v1 or v2" >&2; exit 2; }
+  rules_note=$([[ "$route" == rules || "$report" == hybrid ]] && echo ", rules $rules" || true)
   # The agent's own rule (DecisionReport.checkView), checked here so the run stops before Maven and docker.
   [[ "$report" != assessed || "$view" == sheets ]] || { echo "--report assessed needs --view sheets, got $view: the" \
     "assessed report's checks read the service that owns each line of the sheets" >&2; exit 2; }
@@ -215,6 +235,8 @@ else
     "writes the tables" >&2; exit 2; }
   [[ -z "${report+given}" ]] || { echo "--report applies to decision mode only: explorer and dossier mode always ask" \
     "for the plain report" >&2; exit 2; }
+  [[ -z "${rules+given}" ]] || { echo "--rules applies to decision mode only: the rules route and the hybrid report" \
+    "are decision mode's" >&2; exit 2; }
   samples=${samples-1}
   [[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] \
     || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
@@ -256,7 +278,8 @@ if [[ "$mode" == decision ]]; then
   [[ -z "$listing" ]] || mapfile -t cases <<<"$listing"
   recordings=${#cases[@]}
   total=$((recordings * repeats))
-  info "decision mode, split $split, view $view, report $report: $recordings recording(s) of ${selected[*]}," \
+  info "decision mode, split $split, view $view, report $report$rules_note: $recordings recording(s) of" \
+    "${selected[*]}," \
     "each replayed $repeats time(s): $total samples"
 else
   modes=$([[ "$mode" == both ]] && echo 2 || echo 1)
@@ -307,11 +330,11 @@ fi
 OUT_DIR="$REPO_DIR/infra/scripts/out/replay-$(date -u +%Y%m%dT%H%M%SZ)-$route"
 if [[ "$mode" == decision ]]; then
   info "replaying ${selected[*]}; mode: decision; split: $split; repeats: $repeats; view: $view; report: $report;" \
-    "route: $route; out: $OUT_DIR"
-  # Always passed, so the run's view and report are the ones asked for, never ones KINTSUGI_AGENT_DECISION_VIEW or
-  # KINTSUGI_AGENT_DECISION_REPORT leave in the shell.
+    "rules: $rules; route: $route; out: $OUT_DIR"
+  # Always passed, so the run's view, report and rules are the ones asked for, never ones
+  # KINTSUGI_AGENT_DECISION_VIEW, KINTSUGI_AGENT_DECISION_REPORT or KINTSUGI_AGENT_RULES leave in the shell.
   options=("-Dreplay.split=$split" "-Dreplay.repeats=$repeats" "-Dkintsugi.agent.decision.view=$view"
-    "-Dkintsugi.agent.decision.report=$report")
+    "-Dkintsugi.agent.decision.report=$report" "-Dkintsugi.agent.rules=$rules")
 else
   info "replaying ${selected[*]}; mode: $mode; route: $route; samples: $samples; out: $OUT_DIR"
   options=("-Dreplay.samples=$samples")

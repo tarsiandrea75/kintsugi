@@ -52,6 +52,7 @@ import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
+import dev.kintsugi.agent.rules.RulesVersion;
 
 /**
  * Decision mode (agent spec, "Decision mode"; odd/tasks/decision-instrument.md T1): code gathers the evidence dossier
@@ -532,13 +533,13 @@ class AgentLoopDecisionModeTest {
 		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
 		LoopSettings settings = new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5));
 		assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(),
-				LAB, "decision", "tables", "assessed"))
+				LAB, "decision", "tables", "assessed", RulesVersion.DEFAULT))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessage(needsSheets);
 		// Explorer and dossier mode apply neither setting, so the pair does not stop them.
 		for (AgentMode mode : List.of(AgentMode.EXPLORER, AgentMode.DOSSIER)) {
 			new LoopConfig().agentLoop(this.incidents, router, this.lab, settings, fixedClock(), LAB, mode.value(),
-					"tables", "assessed")
+					"tables", "assessed", RulesVersion.DEFAULT)
 				.close();
 		}
 	}
@@ -578,7 +579,7 @@ class AgentLoopDecisionModeTest {
 		for (AgentMode mode : AgentMode.values()) {
 			for (String report : List.of("", "rich")) {
 				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
-						fixedClock(), LAB, mode.value(), "sheets", report))
+						fixedClock(), LAB, mode.value(), "sheets", report, RulesVersion.DEFAULT))
 					.as("%s, \"%s\"", mode.value(), report)
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessage(
@@ -641,7 +642,7 @@ class AgentLoopDecisionModeTest {
 		for (AgentMode mode : AgentMode.values()) {
 			for (String view : List.of("", "charts")) {
 				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
-						fixedClock(), LAB, mode.value(), view, DecisionReport.DEFAULT))
+						fixedClock(), LAB, mode.value(), view, DecisionReport.DEFAULT, RulesVersion.DEFAULT))
 					.as("%s, \"%s\"", mode.value(), view)
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessage("kintsugi.agent.decision.view must be tables or sheets, got \"" + view + "\"");
@@ -797,6 +798,105 @@ class AgentLoopDecisionModeTest {
 		for (DossierView view : DossierView.values()) {
 			loop(AgentMode.DECISION, view, DecisionReport.HYBRID, clock).close();
 		}
+	}
+
+	/**
+	 * The hybrid report lists the candidates of the rules version (resource-facts T5; ADR-021, "Selection"): on a lab
+	 * where Config 0 proposes nothing and payment-service's processor usage quintuples, v1 lists no candidate and calls
+	 * no model, while v2 lists R-RES's {@code payment-service|RESOURCE_EXHAUSTION}.
+	 */
+	@Test
+	void aHybridRunListsTheCandidatesOfItsRulesVersion() {
+		Clock clock = fixedClock();
+		this.loop = hybridLoop(resourceLab(clock), RulesVersion.V1, clock);
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(this.model.calls()).isZero();
+		assertThat(step(2).get("summary")).isEqualTo(AgentLoop.NO_CANDIDATE);
+		this.loop.close();
+
+		this.id = open();
+		this.model.text(report("payment-service", "RESOURCE_EXHAUSTION", dossierEvidence(1)));
+		this.loop = hybridLoop(resourceLab(clock), RulesVersion.V2, clock);
+		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.model.calls()).isEqualTo(1);
+		assertThat(last(this.model.prompts().getFirst()))
+			.contains("\n1. payment-service|RESOURCE_EXHAUSTION, by R-RES: payment-service processor_usage: incident"
+					+ " mean 0.5000, 5.00x the previous mean 0.1000, above the previous max 0.1000")
+			.doesNotContain("\n2. ");
+		assertThat(storedReport().get("rootCauseCategory").asString()).isEqualTo("RESOURCE_EXHAUSTION");
+	}
+
+	@Test
+	void anUnknownRulesVersionStopsTheStartInEveryMode() {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		LoopSettings settings = new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5));
+		for (AgentMode mode : AgentMode.values()) {
+			for (String rules : List.of("", "v3")) {
+				assertThatThrownBy(() -> new LoopConfig().agentLoop(this.incidents, router, this.lab, settings,
+						fixedClock(), LAB, mode.value(), "tables", "hybrid", rules))
+					.as("%s, \"%s\"", mode.value(), rules)
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessage("kintsugi.agent.rules must be v1 or v2, got \"" + rules + "\"");
+			}
+		}
+		assertThatThrownBy(() -> new AgentLoop(this.incidents, router, this.lab, settings, fixedClock(), LAB,
+				AgentMode.DECISION, DossierView.TABLES, DecisionReport.HYBRID, null))
+			.isInstanceOf(NullPointerException.class)
+			.hasMessage("rules");
+	}
+
+	/** A decision loop over {@code lab} that asks for the hybrid report with the candidates of {@code rules}. */
+	private AgentLoop hybridLoop(dev.kintsugi.agent.lab.LabTools lab, RulesVersion rules, Clock clock) {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		return new AgentLoop(this.incidents,
+				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), lab,
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), clock, LAB, AgentMode.DECISION,
+				DossierView.TABLES, DecisionReport.HYBRID, rules);
+	}
+
+	/**
+	 * {@link #noCandidateLab}, whose resource calls answer one series per service: flat at 0.1 in the previous window,
+	 * and for payment-service's processor_usage 0.5 in the incident window, one point a minute over the 30 minutes
+	 * before {@code clock}'s now.
+	 */
+	private static dev.kintsugi.agent.lab.LabTools resourceLab(Clock clock) {
+		FakeLabTools quiet = noCandidateLab();
+		JsonMapper json = JsonMapper.shared();
+		return new dev.kintsugi.agent.lab.LabTools() {
+
+			@Override
+			public dev.kintsugi.agent.lab.ToolResult call(String tool, String jsonArgs) {
+				JsonNode args = json.readTree(jsonArgs);
+				String metric = args.path("metric").asString();
+				if (!"query_metric".equals(tool) || !DossierGatherer.RESOURCE_METRICS.contains(metric)) {
+					return quiet.call(tool, jsonArgs);
+				}
+				boolean rising = "processor_usage".equals(metric) && "payment-service".equals(args.path("service")
+					.asString());
+				long now = clock.instant().getEpochSecond();
+				StringBuilder points = new StringBuilder();
+				for (int minutes = 29; minutes >= 1; minutes--) {
+					if (minutes == 15) {
+						continue;
+					}
+					String value = minutes > 15 || !rising ? "0.1" : "0.5";
+					points.append(points.isEmpty() ? "" : ",").append("[").append(now - 60L * minutes).append(",\"")
+						.append(value).append("\"]");
+				}
+				String output = "{\"outcome\":\"OK\",\"returned\":1,\"truncated\":false,\"items\":[{\"labels\":"
+						+ "{\"service\":\"" + args.path("service").asString() + "\"},\"points\":[" + points + "]}]}";
+				return new dev.kintsugi.agent.lab.ToolResult(tool, jsonArgs, output,
+						dev.kintsugi.agent.lab.ToolOutcome.OK, 3);
+			}
+
+			@Override
+			public List<org.springframework.ai.tool.ToolCallback> toolsFor(Phase phase) {
+				return quiet.toolsFor(phase);
+			}
+
+		};
 	}
 
 	private IncidentStatus run(AgentMode mode) {

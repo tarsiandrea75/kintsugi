@@ -9,8 +9,10 @@ import java.util.Objects;
  * candidate can be checked by hand.
  *
  * @param service a lab service, never {@code UNKNOWN}
- * @param category a category of the report's taxonomy, never {@code UNKNOWN} or {@code RESOURCE_EXHAUSTION}
- * @param rule the step that proposed it: {@link RulesDiagnosis#REACH} or {@link RulesDiagnosis#DOWN}
+ * @param category a category of the report's taxonomy, never {@code UNKNOWN}; {@code RESOURCE_EXHAUSTION} only from
+ * Config 0R's R-RES (ADR-021)
+ * @param rule the step that proposed it: {@link RulesDiagnosis#REACH}, {@link RulesDiagnosis#DOWN}, or {@code R-RES}
+ * under {@link RulesVersion#V2}
  * @param facts short statements of the facts behind the proposal, at least one
  */
 public record RulesCandidate(String service, String category, String rule, List<String> facts) {

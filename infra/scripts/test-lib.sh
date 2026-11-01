@@ -605,9 +605,34 @@ expect "the run names its report" "$(grep -F '....  ' <<<"$assessed_run")" \
  samples"
 hybrid_run=$(replay_agent --mode decision --report hybrid --faults F1)
 expect "the local route takes --report hybrid in either view, and the run stops at the Ollama check" "$?" 2
-expect "the hybrid run names its report" "$(grep -F '....  ' <<<"$hybrid_run")" \
-  "....  decision mode, split dev, view tables, report hybrid: 2 recording(s) of F1, each replayed 1 time(s): 2\
- samples"
+expect "the hybrid run names its report and its rules version" "$(grep -F '....  ' <<<"$hybrid_run")" \
+  "....  decision mode, split dev, view tables, report hybrid, rules v1: 2 recording(s) of F1, each replayed 1\
+ time(s): 2 samples"
+# The default rules version is written twice, as RulesVersion.DEFAULT and as replay-agent.sh's literal: they must
+# agree.
+[[ "$(<"$REPO_DIR/agent/src/main/java/dev/kintsugi/agent/rules/RulesVersion.java")" \
+  =~ String\ DEFAULT\ =\ \"([a-z0-9]*)\" ]]
+expect "replay-agent.sh's default rules version is the agent's own, RulesVersion.DEFAULT" \
+  "$(grep -o 'rules [a-z0-9]*:' <<<"$hybrid_run")" "rules ${BASH_REMATCH[1]-missing}:"
+# --rules (resource-facts T5; ADR-021): v1 is Config 0, v2 Config 0R. Only the rules route and the hybrid report read
+# it, so every other run refuses it before Maven.
+hr_run=$(replay_agent --mode decision --report hybrid --rules v2 --faults F1)
+expect "the hybrid report takes --rules v2 (HR), and the run stops at the Ollama check" "$?" 2
+expect "the HR run names its rules version" "$(grep -F '....  ' <<<"$hr_run")" \
+  "....  decision mode, split dev, view tables, report hybrid, rules v2: 2 recording(s) of F1, each replayed 1\
+ time(s): 2 samples"
+expect "an unknown rules version exits 2 on the option itself" \
+  "$(replay_agent --mode decision --report hybrid --rules v3; echo "exit $?")" \
+  "Unknown rules 'v3'; choose v1 or v2"$'\n'"exit 2"
+expect "the plain report refuses --rules, which only the rules route and the hybrid report read" \
+  "$(replay_agent --mode decision --rules v2; echo "exit $?")" \
+  "--rules applies to --route rules or --report hybrid only: the other reports list no candidate, and the rules\
+ choose none"$'\n'"exit 2"
+expect "dossier mode refuses --rules, which only decision mode reads" \
+  "$(replay_agent --mode dossier --rules v2; echo "exit $?")" \
+  "--rules applies to decision mode only: the rules route and the hybrid report are decision mode's"$'\n'"exit 2"
+expect "--rules needs a value" "$(replay_agent --mode decision --rules; echo "exit $?")" \
+  "--rules needs a value; see --help"$'\n'"exit 2"
 expect "a chosen fault with no recording in the split stops the run before Maven" \
   "$(replay_agent --mode decision --split holdout --faults F1,F3; echo "exit $?")" \
   "no decision or dossier recording of F3 in split holdout of $manifest_dir/recordings.tsv"$'\n'"exit 2"

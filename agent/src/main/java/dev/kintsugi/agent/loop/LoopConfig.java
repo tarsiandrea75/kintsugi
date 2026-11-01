@@ -18,6 +18,7 @@ import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.lab.LabTools;
+import dev.kintsugi.agent.rules.RulesVersion;
 
 /** The loop is the web profile's {@code IncidentRunner}; the {@code demo} profile has neither. */
 @Configuration(proxyBeanMethods = false)
@@ -55,15 +56,19 @@ class LoopConfig {
 	 * The view and the report are checked in every mode, although only decision mode applies them, so any other value,
 	 * an empty one included ({@code KINTSUGI_AGENT_DECISION_VIEW=}, which the default does not replace), stops an
 	 * explorer or dossier start too: a typo fails at once, not in a later decision run. The assessed report with the
-	 * tables stops a decision start only. The loop reads the one {@link Topology} the agent loaded at startup.
+	 * tables stops a decision start only. The loop reads the one {@link Topology} the agent loaded at startup. The
+	 * hybrid report lists the candidates of the rules version {@code kintsugi.agent.rules} (resource-facts T5;
+	 * ADR-021): {@code v1}, Config 0 and the default ({@link RulesVersion#DEFAULT}), or {@code v2}, Config 0R; any
+	 * other value stops the start in every mode, as the view and the report do.
 	 */
 	@Bean
 	AgentLoop agentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, Topology topology, @Value("${kintsugi.agent.mode:explorer}") String mode,
 			@Value("${" + DossierView.PROPERTY + ":" + DossierView.DEFAULT + "}") String decisionView,
-			@Value("${" + DecisionReport.PROPERTY + ":" + DecisionReport.DEFAULT + "}") String decisionReport) {
+			@Value("${" + DecisionReport.PROPERTY + ":" + DecisionReport.DEFAULT + "}") String decisionReport,
+			@Value("${" + RulesVersion.PROPERTY + ":" + RulesVersion.DEFAULT + "}") String rules) {
 		return new AgentLoop(incidents, router, labTools, settings, clock, topology, AgentMode.of(mode),
-				DossierView.of(decisionView), DecisionReport.of(decisionReport));
+				DossierView.of(decisionView), DecisionReport.of(decisionReport), RulesVersion.of(rules));
 	}
 
 	/**

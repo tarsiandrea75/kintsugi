@@ -67,6 +67,11 @@ kintsugi:
     # an unknown name, a cycle or a foreign owner stops the start. The default is the lab's file,
     # Topology.DEFAULT_LOCATION, written here.
     topology: ${KINTSUGI_AGENT_TOPOLOGY:classpath:topology/lab.json}
+    # Which rules configuration gives the hybrid report its candidates (ADR-021, "Selection"; ADR-019): v1, Config 0
+    # (ADR-016), the default; or v2, Config 0R, Config 0's rules plus R-RES on the dossier's resource facts. The
+    # replay's rules route reads the same setting. Any other value stops the start. The default is
+    # RulesVersion.DEFAULT, written here.
+    rules: ${KINTSUGI_AGENT_RULES:v1}
     # How the loop gathers its evidence (agent spec, "Dossier mode", "Decision mode"; ADR-010, "Amended in T5a"):
     # explorer, the ADR-010 loop where the model picks every call from TRIAGE on; dossier, where code first gathers the
     # evidence dossier (ADR-011), the model reads it before INVESTIGATE and KNOWLEDGE, and TRIAGE is skipped; or

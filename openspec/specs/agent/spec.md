@@ -614,7 +614,7 @@ It writes the incident with its steps (`<fault>-<mode>-<recording>-<n>.json`, as
 - the samples whose `DOSSIER` step made calls and had none unrecorded, out of samples;
 - tokens and, on the cloud route, the estimated cost at $0.10 and $0.50 per million prompt and completion tokens.
 
-A decision run MAY instead run on the `rules` route, Config 0 ("Rules-only diagnosis (Config 0)"; **rules-baseline T3**, ADR-016): `RulesReplayTest`, run by `replay-agent.sh --route rules`, replays the same decision cases with the same properties, and a case's sample gathers its dossier with `DossierGatherer` over the same fresh `ReplayLabTools`, the same offset clock and the recording's `sinceMinutes` as a decision sample's loop, then diagnoses it with `RulesDiagnosis`. It has no Spring context, no `ModelRouter`, no `AgentLoop` and no database row, so nothing selects a production route; a driver built for it refuses model samples with an `IllegalStateException`. Its sample is always `COMPLETED`, its `reported` is the verdict's `service|category`, scored by the same rule, with 0 prompt and 0 completion tokens and the gatherer's counters, which are the dossier's calls. Its `summary.tsv` line has the same columns, with route `rules`; its `aggregate.tsv` cost is `0.0000`, never `-`; its incident file holds `id`, `symptom`, `sinceMinutes`, mode `decision`, route `rules`, model `rules-v1`, status `COMPLETED`, `startedAt`, the `report`'s `rootCauseService` and `rootCauseCategory`, the verdict's `rule` and `facts`, the run's `view` and `decisionReport`, and no steps. The rules read the typed dossier, so the view and the report only label the sample. Any mode but decision MUST be refused: `RulesReplayTest` with an `IllegalArgumentException`, `replay-agent.sh` with exit 2 before Maven. The script needs no key, no Ollama and no docker for it, prints no cost warning, and keeps `ANTHROPIC_API_KEY` out of the test JVM.
+A decision run MAY instead run on the `rules` route, Config 0 ("Rules-only diagnosis (Config 0)"; **rules-baseline T3**, ADR-016): `RulesReplayTest`, run by `replay-agent.sh --route rules`, replays the same decision cases with the same properties, and a case's sample gathers its dossier with `DossierGatherer` over the same fresh `ReplayLabTools`, the same offset clock and the recording's `sinceMinutes` as a decision sample's loop, then diagnoses it with `RulesDiagnosis`. It has no Spring context, no `ModelRouter`, no `AgentLoop` and no database row, so nothing selects a production route; a driver built for it refuses model samples with an `IllegalStateException`. Its sample is always `COMPLETED`, its `reported` is the verdict's `service|category`, scored by the same rule, with 0 prompt and 0 completion tokens and the gatherer's counters, which are the dossier's calls. Its `summary.tsv` line has the same columns, with route `rules`; its `aggregate.tsv` cost is `0.0000`, never `-`; its incident file holds `id`, `symptom`, `sinceMinutes`, mode `decision`, route `rules`, model `rules-v1` (or `rules-v2` under `kintsugi.agent.rules=v2`, Config 0R; **resource-facts T5**), status `COMPLETED`, `startedAt`, the `report`'s `rootCauseService` and `rootCauseCategory`, the verdict's `rule` and `facts`, the run's `view` and `decisionReport`, and no steps. The rules read the typed dossier, so the view and the report only label the sample. The sample diagnoses with the rules version of the system property `kintsugi.agent.rules` (`v1` when unset; "Config 0R and the rules version"), and its `summary.tsv` model column is that version's, `rules-v1` or `rules-v2`; a hybrid decision sample's report lists that version's candidates, and its incident file names the version under `rules`. `kintsugi.agent.rules` MUST be refused outside decision mode as the view and the report are, and `replay-agent.sh --rules v1|v2` (default `v1`) MUST reach the test JVM as `-Dkintsugi.agent.rules`, be accepted only on the `rules` route or with `--report hybrid`, and otherwise exit 2 before Maven. Any mode but decision MUST be refused: `RulesReplayTest` with an `IllegalArgumentException`, `replay-agent.sh` with exit 2 before Maven. The script needs no key, no Ollama and no docker for it, prints no cost warning, and keeps `ANTHROPIC_API_KEY` out of the test JVM.
 
 **The replay's topology (rcaeval-converter T5).** The driver MUST read the topology the agent reads: the file named by the system property `kintsugi.agent.topology` (a Spring resource location: `classpath:topology/re2-ob.json`, or a `file:` URL), loaded and checked by `Topology.load` as at the agent's start, and the lab's file, `classpath:topology/lab.json`, when it is not set. The gatherer, the rules and the loop of every sample read it, so a recording of another system (the RCAEval converter's, `odd/tasks/rcaeval-converter.md`, ADR-020) replays on that system's file. A missing or invalid file MUST fail the run before any sample, naming the file. `replay-agent.sh --dataset lab|re2-ob` (default `lab`) chooses the recorded system: `lab` replays the lab's faults `F1`-`F3` from the committed replay directory with `-Dkintsugi.agent.topology=classpath:topology/lab.json`, the agent's default, so a lab run is unchanged whatever `KINTSUGI_AGENT_TOPOLOGY` holds; `re2-ob` takes RCAEval's fault types (`cpu`, `mem`, `disk`, `delay`, `loss`, `socket`, all six by default), passes `-Dkintsugi.agent.topology=classpath:topology/re2-ob.json`, needs `REPLAY_DIR` to name the converter's output directory (the recordings stay outside the repository, so there is no default), and takes decision mode only, since the converter writes one decision case per RCAEval case and no `stress` recording. Each refusal exits 2 before Maven. The converter's `recordings.tsv` (route `none`, mode `decision`, truth `<service>|<category>`) is read by `ReplayCases` unchanged.
 
@@ -829,6 +829,47 @@ It MUST never return `RESOURCE_EXHAUSTION`, which the prompt defines without a d
 - GIVEN a dossier where only `gateway-mock` is slow, so the walk never reaches it and `diagnose` gives `UNKNOWN|UNKNOWN`
 - WHEN its candidates are computed
 - THEN the list is `gateway-mock|DEPENDENCY_LATENCY` by `R-DOWN`
+
+### Requirement: Config 0R and the rules version
+
+`kintsugi.agent.rules` (`KINTSUGI_AGENT_RULES`) MUST select the rules configuration, `RulesVersion` **(resource-facts T5)** ([ADR-021](../../../docs/adr/ADR-021-resource-rules-config.md); [feature document](../../../odd/tasks/resource-facts.md)): `v1`, the default (`RulesVersion.DEFAULT`, which `application.yaml` writes), is Config 0, `RulesDiagnosis` unchanged; `v2` is Config 0R. Any other value, an empty one included, MUST stop the agent's start in every mode with `kintsugi.agent.rules must be v1 or v2, got "<value>"`. The hybrid report lists the selected version's candidates ("The hybrid report (Config H)"), and replay's `rules` route diagnoses with it ("Replay of recorded tool outputs"). Config 0R stays a baseline like Config 0: no production route runs its verdict.
+
+Config 0R runs Config 0's rules unchanged and adds **R-RES** after R-REACH and R-DOWN and before R-NONE, so its verdict is Config 0's when that is not `UNKNOWN`, else R-RES's when it fires, else Config 0's `UNKNOWN|UNKNOWN`. R-RES reads only the dossier's resource series ("Evidence dossier gathering"), with the thresholds ADR-021 fixed before any converted resource series was read:
+- **Usable window:** at least 2 points with a value, and at least half as many points with a value as the fuller of the series' two windows holds points.
+- **Resource ratio of a series:** its incident mean over its previous mean, when both windows are usable and the previous mean is above 0; otherwise none.
+- **Resource-abnormal series:** its ratio is at least 2 and its incident mean is above its previous max.
+- **Resource ratio of a service:** the largest ratio over its resource-abnormal series; a service with none is not resource-abnormal.
+- **Verdict:** the service with the largest resource ratio, `<service>|RESOURCE_EXHAUSTION` by `R-RES`, ties in the topology's services order as in R-REACH and R-DOWN. Its facts name each abnormal series of that service with both means, the previous max and the ratio.
+
+A failed resource fact (`Gathered.Failed`) is no evidence. Under `v2`, `candidates` MUST return Config 0's list unchanged, then each resource-abnormal service it does not already hold, by resource ratio, ties as above, as `<service>|RESOURCE_EXHAUSTION` by `R-RES` with the verdict's facts; a service already listed keeps its entry, and the list stays capped at 5. Under `v1`, `diagnose` and `candidates` MUST be exactly Config 0's.
+
+#### Scenario: Config 0R answers only where Config 0 abstains (resource-facts T5)
+- GIVEN a dossier on which Config 0 gives a verdict, and resource series of other services at 9 times their previous mean
+- WHEN it is diagnosed under `v2`
+- THEN the verdict is Config 0's, with its rule and facts
+- AND on the healthy golden dossier with `payment-service`'s `processor_usage` at 9 times its previous mean and above its previous max, the verdict is `payment-service|RESOURCE_EXHAUSTION` by `R-RES`
+
+#### Scenario: The edges of R-RES (resource-facts T5)
+- GIVEN a series whose ratio is exactly 2 and whose incident mean is above its previous max
+- WHEN it is diagnosed under `v2`
+- THEN R-RES fires; at a ratio just under 2, or an incident mean equal to the previous max, or a previous mean of 0, or a window with fewer than 2 values or fewer than half the fuller window's points, it does not
+- AND a failed resource fact is skipped, so the service's other series still count
+
+#### Scenario: The lab goldens are unchanged (resource-facts T5, AC4)
+- GIVEN the F1, F3 and healthy golden dossiers, whose resource facts are failed because their recordings predate the resource calls
+- WHEN each is diagnosed and its candidates computed under `v1` and under `v2`
+- THEN `v1` gives exactly `RulesDiagnosis`'s verdict and candidates, and `v2` gives the same
+
+#### Scenario: Config 0R's candidates follow Config 0's (resource-facts T5)
+- GIVEN a dossier where only `gateway-mock` is slow, unreached by the walk, and `inventory-service`'s `processor_usage` is at 4 times its previous mean
+- WHEN its candidates are computed under `v2`
+- THEN they are `gateway-mock|DEPENDENCY_LATENCY` by `R-DOWN`, then `inventory-service|RESOURCE_EXHAUSTION` by `R-RES`, while `v2`'s verdict is `inventory-service|RESOURCE_EXHAUSTION`
+- AND a resource-abnormal service already listed is not added again, and seven resource-abnormal services give the 5 with the largest ratios, largest first
+
+#### Scenario: An unknown version stops the start (resource-facts T5)
+- GIVEN `kintsugi.agent.rules` set to `v3`, or to an empty value
+- WHEN the agent starts, in any mode
+- THEN the start fails with `kintsugi.agent.rules must be v1 or v2, got "v3"` (or `got ""`)
 
 ### Requirement: Evidence dossier gathering
 
@@ -1208,7 +1249,7 @@ Why the dossier first: its windows end when it is gathered ("Evidence dossier ga
 
 ### Requirement: The hybrid report (Config H)
 
-With `kintsugi.agent.decision.report` = `hybrid` (`KINTSUGI_AGENT_DECISION_REPORT=hybrid`), decision mode MUST ask the model to choose among the rules' candidates **(hybrid T3)** ([ADR-019](../../../docs/adr/ADR-019-hybrid-config.md); [feature document](../../../odd/tasks/hybrid.md)). Once the dossier is gathered, code computes `RulesDiagnosis.candidates` from the typed `Dossier` ("Rules candidates (Config H)"), never from the rendered text, so either view gives the same list.
+With `kintsugi.agent.decision.report` = `hybrid` (`KINTSUGI_AGENT_DECISION_REPORT=hybrid`), decision mode MUST ask the model to choose among the rules' candidates **(hybrid T3)** ([ADR-019](../../../docs/adr/ADR-019-hybrid-config.md); [feature document](../../../odd/tasks/hybrid.md)). Once the dossier is gathered, code computes the candidates of the rules version `kintsugi.agent.rules` from the typed `Dossier` (`RulesDiagnosis.candidates` under `v1`, "Rules candidates (Config H)"; Config 0R's under `v2`, "Config 0R and the rules version"), never from the rendered text, so either view gives the same list. The hybrid over `v2`'s candidates is HR (ADR-021).
 
 - **No candidate.** The run ends `COMPLETED` before the warm-up, with no model call. Its one `REPORT` step has no model and no answer, and its summary is `valid; no candidate: the rules proposed none, so both causes are UNKNOWN and no model was called`. The stored report is that of "The report", with both causes `UNKNOWN`, no evidence and a confidence of 0.
 - **Candidates.** The report call is the plain report's ("The report"), with the same system message, dossier message and schema. Its instruction is the plain one, `Citable toolCallIds: dossier.` included, followed by the block `Candidates the rules propose from the dossier's facts, in their order:`, one numbered line per candidate (`<n>. <service>|<category>, by <rule>: <facts joined by "; ">`), and the choice: `Pick exactly one candidate: write its rootCauseService and rootCauseCategory as listed, or both UNKNOWN when the evidence supports none of them. Say in the summary why you picked it, and cite the dossier lines that support it.` A retry's errors follow the block.
@@ -1238,6 +1279,11 @@ Only decision mode applies it: explorer and dossier mode ask for the plain repor
 - GIVEN the hybrid report, and a dossier with no connection failure and no slow or refusing service
 - WHEN an incident runs
 - THEN it ends `COMPLETED` with steps `DOSSIER` and `REPORT`, no warm-up and no model call, and its stored report has both causes `UNKNOWN` and no evidence
+
+#### Scenario: The rules version gives the candidates (resource-facts T5)
+- GIVEN the hybrid report, and a lab where Config 0 proposes nothing while `payment-service`'s `processor_usage` quintuples
+- WHEN an incident runs under `kintsugi.agent.rules=v1`, then under `v2`
+- THEN the `v1` run ends with no candidate and no model call, and the `v2` run lists `1. payment-service|RESOURCE_EXHAUSTION, by R-RES: ...` as its only candidate
 
 #### Scenario: Decision mode only, either view (hybrid T3)
 - GIVEN the hybrid report

@@ -63,7 +63,11 @@ R-RES runs after R-REACH and R-DOWN, so 0R answers exactly where 0 answers and c
 
 ### Candidates
 
-Under 0R, `candidates()` returns Config 0's list unchanged, then the resource-abnormal services in order of their resource ratio (ties as above), each as `service|RESOURCE_EXHAUSTION` with rule `R-RES`. A service already in the list is not added again. The list stays capped at 5. Under 0 it is unchanged.
+Under 0R, `candidates()` returns Config 0's list unchanged, then the resource-abnormal services, largest resource ratio first (ties as above), each as `service|RESOURCE_EXHAUSTION` with rule `R-RES`. Under 0 it is unchanged.
+
+- **No service twice.** A service already in Config 0's list is not added again, whatever its category there: it keeps Config 0's entry and place.
+- **Cap.** The whole list stays capped at 5, Config 0's entries first, so no resource candidate is added when Config 0 already lists 5.
+- **The first candidate.** ADR-019's "the first candidate is the verdict" holds under 0R whenever Config 0 answers. When only R-RES answers, Config 0's list may still hold abnormal services that no rule chose, and 0R's verdict then follows them.
 
 ### Selection
 
