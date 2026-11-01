@@ -1,0 +1,2 @@
+first	second	cases	only_first	only_second	mcnemar_p	holm_p	diff	boot_low	boot_high
+0	0R	30	0	16	3.0517578125e-05	3.0517578125e-05	0.5333	0.3333	0.7000
