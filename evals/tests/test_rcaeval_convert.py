@@ -67,7 +67,10 @@ def test_the_symptom_is_the_one_fixed_sentence_of_the_system(converted):
     assert "frontend" in convert.SYMPTOMS["re2-ob"] and "front-end" in convert.SYMPTOMS["re2-ss"]
 
 
-# The calls, exactly as DossierGatherer makes them for a topology without owners
+# The calls, exactly as DossierGatherer makes them for a topology without owners, plus the resource calls it makes
+# from resource-facts T4 on (ADR-021)
+
+RESOURCE_METRICS = ("processor_usage", "memory_used", "open_files")
 
 
 def gatherer_calls(services):
@@ -75,6 +78,8 @@ def gatherer_calls(services):
                 ("traffic_counts", {"sinceMinutes": 20, "untilMinutesAgo": 10}),
                 ("traffic_counts", {"sinceMinutes": 10})]
     expected += [("query_metric", {"metric": "latency_avg", "service": s, "sinceMinutes": 20}) for s in services]
+    expected += [("query_metric", {"metric": metric, "service": s, "sinceMinutes": 20})
+                 for s in services for metric in RESOURCE_METRICS]
     for service in services:
         for level in ("WARN", "ERROR"):
             expected.append(("count_logs", {"service": service, "level": level, "sinceMinutes": 10}))
@@ -87,7 +92,7 @@ def test_the_dossier_holds_exactly_the_gatherers_calls_with_its_arguments(conver
     _, incident = recording(out, "checkoutservice_cpu")
     made = [(c["tool"], c["args"]) for c in calls(incident)]
     assert sorted(map(json.dumps, made)) == sorted(map(json.dumps, gatherer_calls(OB_SERVICES)))
-    assert len(made) == 3 + 5 * len(OB_SERVICES)
+    assert len(made) == 3 + 8 * len(OB_SERVICES)
     for call in calls(incident):
         assert list(call) == ["tool", "args", "outcome", "output"]
         assert list(json.loads(call["output"])) == ["outcome", "returned", "truncated", "items"]
@@ -297,6 +302,86 @@ def test_metric_prefixes_outside_the_topology_are_reported_except_the_known_extr
     report = (out / "converter-report.tsv").read_text()
     assert "unknown_metric_prefix\tmysteryservice" in report
     assert "frontend-external" not in report.replace("unknown_log_container\tfrontend-external", "")
+
+
+# Resources (ADR-021)
+
+
+def resource(incident, metric, service):
+    return output(incident, "query_metric", metric=metric, service=service, sinceMinutes=20)
+
+
+def test_resource_series_are_resampled_like_latency_and_labelled_with_the_service_only(converted):
+    out, _ = converted
+    _, incident = recording(out, "checkoutservice_cpu")
+    result = resource(incident, "processor_usage", "checkoutservice")
+    assert result["returned"] == 1 and result["truncated"] is False
+    (series,) = result["items"]
+    assert list(series) == ["labels", "points"]
+    assert series["labels"] == {"service": "checkoutservice"}  # mcp-tools' `sum by (service)`: no uri
+    times = [t for t, _ in series["points"]]
+    end = INJECT + 600
+    assert times == list(range(end - 1200, end + 1, 21)) and len(times) == 58
+    values = dict(series["points"])
+    assert all(isinstance(v, str) for v in values.values())
+    assert float(values[INJECT - 12]) == pytest.approx(0.2)
+    assert float(values[INJECT + 9]) == pytest.approx((0.2 + 0.9 + 0.9) / 3)
+    assert float(values[INJECT + 597]) == pytest.approx(0.9)
+
+
+def test_memory_comes_from_mem_and_open_files_from_socket_in_the_exporters_unit(converted):
+    out, _ = converted
+    _, incident = recording(out, "checkoutservice_cpu")
+    memory = dict(resource(incident, "memory_used", "checkoutservice")["items"][0]["points"])
+    assert float(memory[INJECT - 12]) == pytest.approx(100000000.0)
+    assert float(memory[INJECT + 597]) == pytest.approx(300000000.0)
+    files = dict(resource(incident, "open_files", "checkoutservice")["items"][0]["points"])
+    assert float(files[INJECT - 12]) == pytest.approx(40.0)
+    assert float(files[INJECT + 597]) == pytest.approx(120.0)
+    frontend = dict(resource(incident, "processor_usage", "frontend")["items"][0]["points"])
+    assert {float(v) for v in frontend.values()} == {0.5}
+
+
+def test_a_service_without_a_resource_column_returns_nothing(converted):
+    out, _ = converted
+    empty = {"outcome": "OK", "returned": 0, "truncated": False, "items": []}
+    _, incident = recording(out, "checkoutservice_cpu")
+    for metric in RESOURCE_METRICS:
+        assert resource(incident, metric, "redis") == empty
+    assert resource(incident, "memory_used", "frontend") == empty
+    assert resource(incident, "open_files", "frontend") == empty
+    _, delay = recording(out, "currencyservice_delay")
+    for metric in RESOURCE_METRICS:
+        assert resource(delay, metric, "currencyservice") == empty
+
+
+def test_diskio_is_not_mapped(converted):
+    out, _ = converted
+    _, incident = recording(out, "checkoutservice_cpu")
+    metrics = {c["args"]["metric"] for c in calls(incident) if c["tool"] == "query_metric"}
+    assert metrics == {"latency_avg", *RESOURCE_METRICS}
+    assert convert.RESOURCE_COLUMNS == {"processor_usage": "{service}_cpu", "memory_used": "{service}_mem",
+                                        "open_files": "{service}_socket"}
+
+
+def test_the_resource_metric_names_pass_the_guard_unchanged():
+    for metric in RESOURCE_METRICS:
+        assert leakage.scan(json.dumps({"metric": metric}), []).strict == [], metric
+    assert leakage.scan(json.dumps({"metric": "cpu_usage"}), []).strict == ["fault word 'cpu'"]
+
+
+def test_a_recording_with_resource_answers_passes_the_guard_and_names_no_column(converted):
+    out, _ = converted
+    case_names = [name for name, _ in convert.discover(FIXTURE / "RE2-OB", 1)]
+    for row in manifest(out):
+        text = (out / row["file"]).read_text()
+        assert leakage.scan(text, case_names).strict == [], row["file"]
+        for service in OB_SERVICES:
+            for suffix in ("cpu", "mem", "socket", "diskio"):
+                assert f"{service}_{suffix}" not in text, (row["file"], service, suffix)
+    _, incident = recording(out, "checkoutservice_cpu")
+    for metric in RESOURCE_METRICS:
+        assert resource(incident, metric, "checkoutservice")["returned"] == 1
 
 
 # Logs

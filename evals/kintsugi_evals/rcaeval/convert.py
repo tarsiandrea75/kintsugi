@@ -3,13 +3,16 @@
 One case directory, `<root>/RE2-<SYS>/<service>_<fault>/<rep>/` with `simple_metrics.csv`, `logs.csv` and
 `inject_time.txt`, becomes one incident JSON in the replay format `ReplayLabTools` reads: a fixed symptom, `startedAt`
 = inject time + 10 min, `sinceMinutes` = 10, and one `DOSSIER` step holding exactly the calls `DossierGatherer` makes
-for a topology without table or source owners, each with the output mcp-tools would have answered. The truth goes only
-to the `recordings.tsv` row; the file name is a blinded hash.
+for a topology without table or source owners, plus its resource calls (ADR-021), each with the output mcp-tools
+would have answered. The truth goes only to the `recordings.tsv` row; the file name is a blinded hash.
 
 Choices, with their evidence in the feature document's T3 entry:
 
 - Latency is `<svc>_latency-50`, already in seconds (`LATENCY_TO_SECONDS`), resampled to the lab's step for a 20-minute
   window (21 s): each point is the mean of the 1 s rows in (t - 21 s, t]; a bucket with no finite value is "NaN".
+- The resource metrics of ADR-021 (`RESOURCE_COLUMNS`: `_cpu`, `_mem`, `_socket`) are resampled the same way, in the
+  exporter's unit, one series per service labelled with the service only. `_diskio` is not mapped. The dossier also
+  holds their calls, one per service and metric, which the gatherer makes from resource-facts T4 on.
 - A log line's level is its `level` column when that names one, else read from the message (`level_of`).
 - Restarts are an empty answer. Traffic comes from Online Boutique's traces (`traffic.py`, T4); Sock Shop has no
   traces, so its traffic is an empty answer and no `traces.csv` is read for it.
@@ -71,6 +74,14 @@ LATENCY_COLUMN = "{service}_latency-50"
 # 200 ms while its latency-50 (Istio, sidecar-measured) grows from 0.0075 to 0.175. Read as milliseconds, the sidecar's
 # latency would be shorter than the spans it contains, so the values are seconds already.
 LATENCY_TO_SECONDS = 1.0
+# ADR-021: metric -> RE2-OB column. The names carry no fault word, so they pass the leakage guard unchanged; the
+# column names never reach a recording. `_diskio` exists for 4 of 11 services and the lab has no disk exporter: out.
+RESOURCE_COLUMNS = {"processor_usage": "{service}_cpu", "memory_used": "{service}_mem",
+                    "open_files": "{service}_socket"}
+# Every `query_metric` series the converter answers: its column, its labels after `service` (mcp-tools groups the
+# resource metrics `by (service)` alone) and the factor to the lab's unit.
+SERIES = {LATENCY_METRIC: (LATENCY_COLUMN, {"uri": "/"}, LATENCY_TO_SECONDS),
+          **{metric: (column, {}, 1.0) for metric, column in RESOURCE_COLUMNS.items()}}
 
 
 def step_seconds(since_minutes):
@@ -78,7 +89,7 @@ def step_seconds(since_minutes):
     return max(5, (since_minutes * 60 + 58) // 59)
 
 
-LATENCY_WINDOW_SECONDS = 2 * SINCE_MINUTES * 60  # query_metric is asked for both windows at once
+LATENCY_WINDOW_SECONDS = 2 * SINCE_MINUTES * 60  # query_metric is asked for both windows at once, every metric
 LATENCY_STEP_SECONDS = step_seconds(2 * SINCE_MINUTES)
 
 _LEVEL_COLUMN = {"warn": "WARN", "warning": "WARN", "error": "ERROR", "err": "ERROR", "fatal": "ERROR",
@@ -182,8 +193,8 @@ def _finite(text):
     return value if math.isfinite(value) else None
 
 
-def _latency(case_dir, services, end, report):
-    """The `query_metric latency_avg` items per service: one series, uri `/`, or none without a column."""
+def _metrics(case_dir, services, end, report):
+    """The `query_metric` items per metric of `SERIES` and per service: one series, or none without its column."""
     start = end - LATENCY_WINDOW_SECONDS
     count = LATENCY_WINDOW_SECONDS // LATENCY_STEP_SECONDS + 1
     with (case_dir / "simple_metrics.csv").open(newline="", encoding="utf-8") as handle:
@@ -192,9 +203,10 @@ def _latency(case_dir, services, end, report):
         prefixes = {normalize(name) for name in header if name != "time"}
         for prefix in sorted(prefixes - set(services) - EXTRA_PREFIXES):
             report.append(("unknown_metric_prefix", prefix, 1))
-        columns = {s: header.index(LATENCY_COLUMN.format(service=s)) for s in services
-                   if LATENCY_COLUMN.format(service=s) in header}
-        buckets = {s: defaultdict(list) for s in columns}
+        columns = {(metric, s): header.index(column.format(service=s))
+                   for metric, (column, _, _) in SERIES.items() for s in services
+                   if column.format(service=s) in header}
+        buckets = {key: defaultdict(list) for key in columns}
         time_column = header.index("time")
         for row in reader:
             time = int(float(row[time_column]))
@@ -202,20 +214,22 @@ def _latency(case_dir, services, end, report):
             k = -(-(time - start) // LATENCY_STEP_SECONDS)
             if not 0 <= k < count:
                 continue
-            for service, column in columns.items():
+            for (metric, service), column in columns.items():
                 value = _finite(row[column]) if column < len(row) else None
                 if value is not None:
-                    buckets[service][k].append(value * LATENCY_TO_SECONDS)
-    items = {}
-    for service in services:
-        if service not in columns:
-            items[service] = []
-            continue
-        points = []
-        for k in range(count):
-            values = buckets[service].get(k)
-            points.append([start + k * LATENCY_STEP_SECONDS, repr(sum(values) / len(values)) if values else "NaN"])
-        items[service] = [{"labels": {"service": service, "uri": "/"}, "points": points}]
+                    buckets[(metric, service)][k].append(value * SERIES[metric][2])
+    items = {metric: {} for metric in SERIES}
+    for metric, (_, labels, _) in SERIES.items():
+        for service in services:
+            if (metric, service) not in columns:
+                items[metric][service] = []
+                continue
+            points = []
+            for k in range(count):
+                values = buckets[(metric, service)].get(k)
+                points.append([start + k * LATENCY_STEP_SECONDS,
+                               repr(sum(values) / len(values)) if values else "NaN"])
+            items[metric][service] = [{"labels": {"service": service, **labels}, "points": points}]
     return items
 
 
@@ -267,7 +281,7 @@ def convert_case(case_dir, system, case, rep, services):
     inject = int((case_dir / "inject_time.txt").read_text(encoding="utf-8").strip())
     end = inject + SINCE_MINUTES * 60
     report = []
-    latency = _latency(case_dir, services, end, report)
+    metrics = _metrics(case_dir, services, end, report)
     logs = _logs(case_dir, services, inject, report)
     previous, current = [], []
     if system in TRACED_SYSTEMS:
@@ -281,7 +295,11 @@ def convert_case(case_dir, system, case, rep, services):
              _call("traffic_counts", dict(incident_args), traffic.check_size(_result(current)))]
     for s in services:
         calls.append(_call("query_metric", {"metric": LATENCY_METRIC, "service": s,
-                                            "sinceMinutes": 2 * SINCE_MINUTES}, _result(latency[s])))
+                                            "sinceMinutes": 2 * SINCE_MINUTES}, _result(metrics[LATENCY_METRIC][s])))
+    for s in services:
+        for metric in RESOURCE_COLUMNS:
+            calls.append(_call("query_metric", {"metric": metric, "service": s, "sinceMinutes": 2 * SINCE_MINUTES},
+                               _result(metrics[metric][s])))
     for s in services:
         for level in LOG_LEVELS:
             found = logs.get((s, level), [])

@@ -67,4 +67,26 @@ class RcaevalRecordingTest {
 			.toList());
 	}
 
+	@Test
+	void theRecordingAnswersTheResourceMetricsForEveryService() throws Exception {
+		// resource-facts T3 (ADR-021): the converter records the calls the gatherer makes from T4 on, one per service
+		// and metric, with the latency call's arguments.
+		List<Recording> rows = ReplayCases.read(RECORDINGS).decisionCases("dev", List.of("cpu"));
+		JsonNode incident = JSON.readTree(RECORDINGS.resolve(rows.get(0).file()).toFile());
+		JsonNode calls = JSON.readTree(incident.path("steps").get(0).path("toolOutput").asString());
+		Topology topology = Topology.load(new ClassPathResource("topology/re2-ob.json"));
+		for (String metric : List.of("processor_usage", "memory_used", "open_files")) {
+			for (String service : topology.services()) {
+				assertThat(calls.valueStream()
+					.filter(call -> call.path("tool").asString().equals("query_metric"))
+					.map(call -> call.path("args"))
+					.filter(args -> args.path("metric").asString().equals(metric)
+							&& args.path("service").asString().equals(service)
+							&& args.path("sinceMinutes").asInt() == 2 * incident.path("sinceMinutes").asInt()))
+					.as("%s %s", metric, service)
+					.hasSize(1);
+			}
+		}
+	}
+
 }
