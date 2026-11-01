@@ -98,7 +98,7 @@ Without the converter, every number is on a lab one person built and tuned again
   - the agent and evals specs, and `docs/setup.md`.
 
   Route: delegated writer.
-- [ ] T6 Convert RE2-OB repetition 1 and run Config 0 on it as a mechanics check, under a plan committed first. Then STATE, the journal and the backup. Route: inline commands.
+- [x] T6 Convert RE2-OB repetition 1 and run Config 0 on it as a mechanics check, under a plan committed first. Then STATE, the journal and the backup. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -319,6 +319,15 @@ Without the converter, every number is on a lab one person built and tuned again
     - SUGGESTION R2/R3 `ReplayDriver.java:205-207`: the driver reads only the system property, not `KINTSUGI_AGENT_TOPOLOGY`, and its comment overstates parity with the agent.
     - SUGGESTION R2 `scoring.py:196` (recall docstring stale under `--service-only`), `scoring.py:57` (an unexplained, effectively dead `UNKNOWN` guard), `ReplayTopologyTest.java:63` (the 58 calls are unexplained).
 
+- 2026-11-01, T6 (route: inline commands; no trigger: one plan file and three commands). The RE2-OB dev mechanics check.
+  - Plan `evals/plans/2026-11-01-config0-re2ob-dev.md`, committed first (`225f153`).
+  - **Convert:** `convert-rcaeval --system re2-ob --rep 1` under `python3 -I`: 30 cases, fault words in `untrustedText` 0, 1 min 48 s, output `evals/out/rcaeval/re2-ob-rep1/` (git-ignored). `recordings.tsv` and `converter-report.tsv` are copied to the results' `inputs/`.
+  - **AC2:** over the 30 recordings, 0 files hold a case directory name (`<service>_<fault>`), 0 hold a category name, and 0 strings outside `untrustedText` hold a fault word (cpu, mem, memory, disk, delay, loss, socket; JSON-in-string outputs parsed and walked).
+  - **AC4:** `REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision` wrote `infra/scripts/out/replay-20261101T025036Z-rules`: 30 COMPLETED, no FAILED, 58 calls recorded and 0 unrecorded in every sample (coverage 1.00), so the JVM read the re2-ob topology (the T5 review's WARNING R3-dataset-topology-forwarding-unproved is answered end to end).
+  - **Score** (`score --service-only`, `evals/results/2026-11-01-config0-re2ob-dev/`): pooled 4/30, AC@1 13% [5%, 30%], coverage 37% (11 answers), selective 36%, recall 17%. Per fault: cpu 0/5, mem 1/5, disk 0/5, delay 1/5, loss 2/5, socket 0/5. On the whole `service|category`, 3/30 (the mem hit names `DEPENDENCY_LATENCY`).
+  - **Reading** (exploratory, no claim): the 4 hits are checkoutservice (delay, loss, mem) and currencyservice (loss). 6 of the 7 misses name a caller of the faulty service (`checkoutservice`, `frontend` or `recommendationservice`), as the lab's F1 pattern would; the seventh names `checkoutservice` for a `recommendationservice` loss case, which it does not call. 19 abstentions: all 5 cpu, 4 disk, 4 socket, 3 mem, 2 delay, 1 loss. With no resource facts in the dossier (ADR-020, Consequences), the resource faults leave the rules little to fire on.
+  - **Checks:** evals 132 passed (T5, unchanged since); the agent suite and `test-lib.sh` as at T5 (no code changed in T6).
+
 ## Next step
 
-T6: convert RE2-OB repetition 1 and run Config 0 on the 30 dev cases under a committed plan (branch `feat/rcaeval-converter-02-replay`).
+The feature is complete. Next, outside it: the H − 0 stop-rule measurement on RE2-OB dev (`odd/tasks/hybrid.md`), under its own plan; it is the first RCAEval run with a model.
