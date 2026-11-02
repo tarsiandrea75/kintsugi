@@ -1,14 +1,16 @@
-"""BARO on RCAEval RE2 cases, a standard-library port of `RCAEval.e2e.baro.baro` 1.11.0 (ADR-024, T7 of
-odd/tasks/rcaeval-dev-baselines.md).
+"""BARO on RCAEval RE2 cases, a standard-library port of the published pipeline, `main.py` of RCAEval 1.11.0 up to its
+call of `RCAEval.e2e.baro.baro`, and of that function (ADR-024, T7 and T9 of odd/tasks/rcaeval-dev-baselines.md).
 
 `tests/fixtures/baro/` holds the original's answers on synthetic series, which the port's tests compare against. Each
 step below is the original's unless it says otherwise:
 
-- The 600 s window is ours (vision §2), inclusive on both sides. The original gets the window from its caller.
+- Infinities become NaN and every column, `time` included, is filled forward over the whole file and then with 0, before
+  the rows are split. After that the kept rows are counted, 600 on each side, so a window is 600 s only without gaps.
 - The scale is the original's `RobustScaler`, whose `_handle_zeros_in_scale` makes 1 of any scale under 10 machine
   epsilons, not only of a scale of 0. Percentiles follow numpy's linear interpolation arithmetic.
-- An infinite value in a scored column, a segment with no sample and a non-numeric cell raise, as they do in the
-  original. So does a repeated metric header, which pandas would silently rename: only a repeated `time` is known.
+- A segment with no sample raises, as it does in the original. So does a non-numeric cell, anywhere in the file: the
+  original raises only for one that reaches a scored column. So do a row longer than the header, and a metric header
+  repeated or made so by the rename, which pandas would silently rename or score as one: only one repeated `time` is known.
 - `rank_case` takes a directory and reads two files in it. The truth comes from the directory's name, which only
   `run` looks at, and goes to the `truth` and `fault` columns, never to the ranking.
 """
@@ -23,7 +25,7 @@ from pathlib import Path
 from . import convert
 from .trace_edges import normalize
 
-WINDOW_SECONDS = 600
+SEGMENT_ROWS = 600  # main.py's `--length 20`, in minutes, at `length * 60 // 2`
 MEM_DIVISOR = 1e6
 NEAR_ZERO_SCALE = 10 * sys.float_info.epsilon
 TOP_SERVICES = 5
@@ -32,6 +34,8 @@ ROUTE = "baro"
 UNKNOWN_CATEGORY = "UNKNOWN"
 MODEL = "RCAEval-1.11.0"
 TIME_COLUMNS = ("time", "time.1")  # "time.1" is how pandas reads a repeated "time" header
+DROPPED_SUFFIX = "_latency-50"
+RENAMED_SUFFIX = "_latency-90"
 
 # What pandas' read_csv reads as NaN by default. Anything else that float() refuses makes a column the original refuses.
 NA_TEXTS = {"", "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan", "1.#IND", "1.#QNAN", "<NA>", "N/A",
@@ -93,8 +97,6 @@ def _median(ordered):
 def column_score(normal, anomalous):
     """`RobustScaler` fitted on the normal segment, ignoring NaN. The score is Python's `max` over the scaled anomalous
     values in order: a NaN in first place stays the maximum, a NaN later is passed over."""
-    if any(math.isinf(value) for value in normal + anomalous):
-        raise ValueError("an infinite value in a scored column")
     ordered = sorted(value for value in normal if not math.isnan(value))
     center = _median(ordered)
     scale = _percentile(ordered, 0.75) - _percentile(ordered, 0.25)
@@ -108,15 +110,18 @@ def _number(text):
 
 
 def _metric_columns(header):
-    """The `(position, name)` of each metric column; refuses a header pandas would have to rename."""
+    """The `(position, name)` of each metric column: `_latency-50` dropped, `_latency-90` renamed. Refuses a header that
+    pandas would have to rename, or that the rename would repeat."""
     if "time" not in header:
         raise ValueError("no time column")
-    metrics = [(i, name) for i, name in enumerate(header) if name not in TIME_COLUMNS]
-    names = Counter(name for _, name in metrics)
+    named = [(i, name) for i, name in enumerate(header) if name not in TIME_COLUMNS]
+    metrics = [(i, name.replace(RENAMED_SUFFIX, "_latency") if name.endswith(RENAMED_SUFFIX) else name)
+               for i, name in named if not name.endswith(DROPPED_SUFFIX)]
+    names = Counter(name for _, name in named) | Counter(name for _, name in metrics)
     names["time"] = header.count("time") - 1
     bad = sorted(name for name, count in names.items() if count > 1 or not name)
     if bad:
-        raise ValueError(f"column names pandas would rename: {', '.join(repr(name) for name in bad)}")
+        raise ValueError(f"repeated or empty column names: {', '.join(repr(name) for name in bad)}")
     return metrics
 
 
@@ -135,6 +140,16 @@ def _read_metrics(path):
     return header, rows
 
 
+def _filled(rows, width):
+    """Infinities and NaN take the last finite value above them in the file, or 0 when there is none."""
+    last = [0.0] * width
+    filled = []
+    for row in rows:
+        last = [value if math.isfinite(value) else held for value, held in zip(row, last)]
+        filled.append(last)
+    return filled
+
+
 def _segment(rows, metrics):
     """One segment as `{column: values}`: each column constant in it dropped, then memory divided into megabytes."""
     if not rows:
@@ -145,12 +160,12 @@ def _segment(rows, metrics):
 
 
 def rank(header, rows, inject_time):
-    """The columns, scores and services, best first: ADR-024 steps 1 to 7. A sample with a NaN time is in no segment."""
+    """The columns, scores and services, best first: ADR-024 steps 1 to 7."""
     metrics = _metric_columns(header)
     time = header.index("time")
-    window = [row for row in rows if abs(row[time] - inject_time) <= WINDOW_SECONDS]
-    normal = _segment([row for row in window if row[time] < inject_time], metrics)
-    anomalous = _segment([row for row in window if row[time] >= inject_time], metrics)
+    filled = _filled(rows, len(header))
+    normal = _segment([row for row in filled if row[time] < inject_time][-SEGMENT_ROWS:], metrics)
+    anomalous = _segment([row for row in filled if row[time] >= inject_time][:SEGMENT_ROWS], metrics)
     scored = [(name, column_score(values, anomalous[name])) for name, values in normal.items() if name in anomalous]
     scored = sorted(scored, key=lambda item: item[1], reverse=True)
     columns = [name for name, _ in scored]
@@ -160,7 +175,7 @@ def rank(header, rows, inject_time):
 def rank_case(case_dir):
     """The ranking of one case directory, from `simple_metrics.csv` and `inject_time.txt` alone."""
     case_dir = Path(case_dir)
-    inject = int((case_dir / "inject_time.txt").read_text(encoding="utf-8").strip())
+    inject = int((case_dir / "inject_time.txt").read_text(encoding="utf-8").split("\n")[0].strip())
     header, rows = _read_metrics(case_dir / "simple_metrics.csv")
     return rank(header, rows, inject)
 

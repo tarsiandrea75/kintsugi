@@ -3,9 +3,11 @@ on `tests/fixtures/baro/`, and `baro-rcaeval` on synthetic trees named as the co
 is read."""
 
 import csv
+import importlib.util
 import json
 import math
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -58,7 +60,9 @@ def test_a_case_the_original_refuses_is_refused(name):
 
 def test_the_goldens_cover_the_branches_the_adr_names():
     assert {"ordinary", "mem_column", "constant_normal_only", "constant_anomalous_only", "zero_iqr", "nan_values", "ties",
-            "service_names", "window", "sample_at_injection"} <= set(GOLDENS)
+            "service_names", "sample_at_injection", "more_than_600_rows", "more_than_600_rows_unsorted", "few_normal_rows",
+            "few_anomalous_rows", "gaps_across_injection", "gap_at_the_kept_edge", "leading_nan", "infinities",
+            "latency_columns", "redis_column", "time_cells", "word_in_a_column"} <= set(GOLDENS)
     assert all((CASES / name / "simple_metrics.csv").is_file() for name in GOLDENS)
 
 
@@ -90,6 +94,110 @@ def test_a_service_is_the_text_before_the_first_underscore_without_db():
     assert baro.service_of("frontend-external_latency-50") == "frontend-external"
     assert baro.service_of("redis_cpu") == "redis"
     assert baro.service_of("plain") == "plain"
+
+
+def scores_of(directory):
+    ranking = baro.rank_case(directory)
+    return dict(zip(ranking.columns, ranking.scores))
+
+
+NORMAL_ROWS = [[INJECT - 5 + k, value] for k, value in enumerate([1, 2, 3, 4, 5])]  # median 3, quartiles 2 and 4
+
+
+def test_a_gap_is_filled_forward_across_the_injection(tmp_path):
+    directory = case_dir(tmp_path, ["time", "a_cpu"], NORMAL_ROWS + [[INJECT, ""], [INJECT + 1, 3]])
+    assert scores_of(directory) == {"a_cpu": 1.0}  # the first anomalous value is the normal segment's last, 5
+
+
+def test_what_is_empty_before_a_first_value_becomes_zero(tmp_path):
+    directory = case_dir(tmp_path, ["time", "a_cpu"], [[INJECT - 5, ""]] + NORMAL_ROWS[1:] + [[INJECT, 3], [INJECT + 1, 11]])
+    assert scores_of(directory) == {"a_cpu": 4.0}  # 0, 2, 3, 4, 5: the median and the quartiles are as with a 1
+
+
+def test_an_infinity_is_filled_as_an_empty_cell_is(tmp_path):
+    directory = case_dir(tmp_path, ["time", "a_cpu"], NORMAL_ROWS + [[INJECT, "inf"], [INJECT + 1, 3]])
+    assert scores_of(directory) == {"a_cpu": 1.0}
+    other = tmp_path / "other"
+    other.mkdir()
+    directory = case_dir(other, ["time", "a_cpu"], NORMAL_ROWS + [[INJECT, "-inf"], [INJECT + 1, 3]])
+    assert scores_of(directory) == {"a_cpu": 1.0}
+
+
+def test_an_empty_time_is_filled_too(tmp_path):
+    # The cell after the last normal time takes that time, so its row is normal and 90 is not an anomalous value.
+    directory = case_dir(tmp_path, ["time", "a_cpu"], NORMAL_ROWS + [["", 90], [INJECT + 1, 3], [INJECT + 2, 11]])
+    assert scores_of(directory) == {"a_cpu": 3.0}  # 1, 2, 3, 4, 5, 90: median 3.5, quartiles 2.25 and 4.75; then 3, 11
+
+
+def test_a_latency_50_column_is_dropped_and_a_latency_90_is_renamed(tmp_path):
+    rows = [[INJECT - 3, 1, 1, 1], [INJECT - 2, 2, 2, 2], [INJECT - 1, 3, 3, 3], [INJECT, 9, 9, 9], [INJECT + 1, 2, 2, 2]]
+    directory = case_dir(tmp_path, ["time", "a_latency-50", "b_latency-90", "c_latency"], rows)
+    assert baro.rank_case(directory).columns == ["b_latency", "c_latency"]
+
+
+def many_rows(normal, anomalous):
+    return [[INJECT - normal + k, k] for k in range(normal)] + [[INJECT + k, k] for k in range(anomalous)]
+
+
+def test_only_the_last_600_normal_rows_and_the_first_600_anomalous_rows_count(tmp_path):
+    directory = case_dir(tmp_path, ["time", "a_cpu"], many_rows(700, 700))
+    # Normal 100..699: median 399.5, quartiles at 249.75 and 549.25. Anomalous 0..599: the largest is 599.
+    assert scores_of(directory)["a_cpu"] == pytest.approx((599 - 399.5) / 299.5)
+
+
+def test_a_side_with_fewer_rows_keeps_them_all(tmp_path):
+    directory = case_dir(tmp_path, ["time", "a_cpu"], many_rows(5, 700))
+    # Normal 0..4: median 2, quartiles 1 and 3. Anomalous 0..599.
+    assert scores_of(directory)["a_cpu"] == pytest.approx((599 - 2) / 2)
+
+
+def test_the_kept_rows_are_counted_in_file_order_not_by_time(tmp_path):
+    rows = many_rows(700, 2)
+    rows[:700] = list(reversed(rows[:700]))  # the file's last 600 normal rows now hold the earliest times, values 0..599
+    directory = case_dir(tmp_path, ["time", "a_cpu"], rows)
+    assert scores_of(directory)["a_cpu"] == pytest.approx((1 - 299.5) / 299.5)
+
+
+def test_a_gap_at_the_edge_is_filled_from_a_row_that_is_not_kept(tmp_path):
+    rows = many_rows(601, 2)
+    rows[0][1] = 5000
+    rows[1][1] = ""  # the first kept row, which takes the 5000 of the row before it
+    directory = case_dir(tmp_path, ["time", "a_cpu"], rows)
+    values = sorted([5000] + list(range(2, 601)))
+    median = (values[299] + values[300]) / 2
+    first_quartile = values[149] + 0.75 * (values[150] - values[149])
+    third_quartile = values[449] + 0.25 * (values[450] - values[449])
+    assert scores_of(directory)["a_cpu"] == pytest.approx((1 - median) / (third_quartile - first_quartile))
+
+
+def test_only_the_first_line_of_the_injection_file_counts(tmp_path):
+    directory = case_dir(tmp_path, ["time", "a_cpu"], NORMAL_ROWS + [[INJECT, 3], [INJECT + 1, 11]])
+    (directory / "inject_time.txt").write_text(f"{INJECT}\nsomething else\n", encoding="utf-8")
+    assert scores_of(directory) == {"a_cpu": 4.0}
+
+
+def test_a_row_longer_than_the_header_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="a row of 3 cells"):
+        baro.rank_case(case_dir(tmp_path, ["time", "a_cpu"], [[INJECT - 1, 1, 9], [INJECT, 3]]))
+
+
+def test_a_rename_onto_an_existing_column_is_refused(tmp_path):
+    rows = [[INJECT - 1, 1, 2], [INJECT, 3, 4]]
+    with pytest.raises(ValueError, match="a_latency"):
+        baro.rank_case(case_dir(tmp_path, ["time", "a_latency", "a_latency-90"], rows))
+
+
+def test_a_repeated_dropped_header_is_refused(tmp_path):
+    # pandas would read the second as `a_latency-50.1`, which the published pipeline then keeps as a metric.
+    rows = [[INJECT - 1, 1, 2], [INJECT, 3, 4]]
+    with pytest.raises(ValueError, match="a_latency-50"):
+        baro.rank_case(case_dir(tmp_path, ["time", "a_latency-50", "a_latency-50"], rows))
+
+
+def test_a_third_time_column_is_refused(tmp_path):
+    rows = [[INJECT - 1, 1, INJECT - 1, INJECT - 1], [INJECT, 3, INJECT, INJECT]]
+    with pytest.raises(ValueError, match="time"):
+        baro.rank_case(case_dir(tmp_path, ["time", "a_cpu", "time", "time"], rows))
 
 
 def test_a_repeated_metric_header_is_refused(tmp_path):
@@ -218,3 +326,139 @@ def test_a_case_with_no_ranking_fails_the_run_and_writes_nothing(tmp_path):
     with pytest.raises(SystemExit, match="checkoutservice_cpu"):
         main(["baro-rcaeval", "--root", str(root), "--system", "re2-ob", "--rep", "1", "--out", str(out)])
     assert not out.exists()
+
+
+@pytest.fixture
+def compare_dev(monkeypatch):
+    """`compare_dev.py`, whose decisions need no pandas: the original's answers are handed to it."""
+    monkeypatch.setattr(sys, "path", list(sys.path))  # the script prepends its own directories
+    spec = importlib.util.spec_from_file_location("compare_dev", FIXTURES / "baro" / "compare_dev.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def dev_tree(root, size=30):
+    for k in range(size):
+        shutil.copytree(CASES / "ordinary", root / f"service{k}_cpu" / "1")
+    return root
+
+
+def the_ports_answer(directory):
+    ranking = baro.rank_case(directory)
+    return {"ranks": ranking.columns, "scores": ranking.scores, "services": ranking.services}
+
+
+def changing(case, change):
+    """The port's own answer everywhere, and `change(answer)` for repetition 1 of the case named."""
+    def original(directory):
+        answer = the_ports_answer(directory)
+        return change(answer) if directory.parent.name == case else answer
+    return original
+
+
+@pytest.fixture
+def compared(compare_dev, tmp_path):
+    def run(original, size=30):
+        root = tmp_path / "RE2-OB"
+        root.mkdir()
+        out = tmp_path / "compare.tsv"
+        code = compare_dev.compare_cases(dev_tree(root, size), out, original)
+        with out.open(newline="", encoding="utf-8") as handle:
+            return code, list(csv.DictReader(handle, delimiter="\t"))
+    return run
+
+
+def test_thirty_equal_cases_exit_0(compared):
+    code, rows = compared(the_ports_answer)
+    assert code == 0
+    assert len(rows) == 30
+    assert {row["outcome"] for row in rows} == {"compared"}
+
+
+@pytest.mark.parametrize("size", [0, 29, 31])
+def test_any_other_number_of_cases_exits_1(compared, size):
+    assert compared(the_ports_answer, size)[0] == 1
+
+
+def test_a_case_refused_only_by_the_original_exits_1(compared):
+    code, rows = compared(changing("service3_cpu", lambda _: {"error": "ValueError"}))
+    assert code == 1
+    assert [row["outcome"] for row in rows].count("refused_by_original") == 1
+
+
+def dev_tree_with_a_case_the_port_refuses(root):
+    dev_tree(root)
+    (root / "service3_cpu" / "1" / "simple_metrics.csv").write_text(f"time,a_cpu\n{INJECT - 1},high\n{INJECT},1\n",
+                                                                    encoding="utf-8")
+    return root
+
+
+def test_a_case_refused_only_by_the_port_exits_1(compare_dev, tmp_path):
+    root = dev_tree_with_a_case_the_port_refuses(tmp_path / "RE2-OB")
+    out = tmp_path / "compare.tsv"
+
+    def original(directory):
+        if directory.parent.name == "service3_cpu":
+            return {"ranks": ["a_cpu"], "scores": [1.0], "services": ["a"]}
+        return the_ports_answer(directory)
+
+    assert compare_dev.compare_cases(root, out, original) == 1
+    assert "refused_by_port" in out.read_text(encoding="utf-8")
+
+
+def test_a_case_refused_by_both_is_reported_and_is_not_a_difference(compare_dev, tmp_path, capsys):
+    root = dev_tree_with_a_case_the_port_refuses(tmp_path / "RE2-OB")
+    out = tmp_path / "compare.tsv"
+
+    def original(directory):
+        return {"error": "ValueError"} if directory.parent.name == "service3_cpu" else the_ports_answer(directory)
+
+    assert compare_dev.compare_cases(root, out, original) == 0
+    assert "refused_by_both" in out.read_text(encoding="utf-8")
+    assert "1 refused by both" in capsys.readouterr().out
+
+
+def test_no_case_compared_exits_1_even_with_thirty_refused_by_both(compare_dev, tmp_path):
+    root = tmp_path / "RE2-OB"
+    for k in range(30):
+        directory = root / f"service{k}_cpu" / "1"
+        directory.mkdir(parents=True)
+        (directory / "simple_metrics.csv").write_text("a_cpu\n1\n", encoding="utf-8")
+        (directory / "inject_time.txt").write_text(f"{INJECT}\n", encoding="utf-8")
+    assert compare_dev.compare_cases(root, tmp_path / "compare.tsv", lambda _: {"error": "KeyError"}) == 1
+
+
+def with_scores(answer, score):
+    return {**answer, "scores": [score] * len(answer["scores"])}
+
+
+@pytest.mark.parametrize("score", [math.nan, 1e6])
+def test_a_score_beyond_the_tolerance_exits_1(compared, score):
+    code, rows = compared(changing("service3_cpu", lambda answer: with_scores(answer, score)))
+    assert code == 1
+    assert float(next(row for row in rows if row["max_score_difference"] != "0.000e+00")["max_score_difference"]) > 1e-9
+
+
+def test_a_column_only_one_side_ranks_exits_1(compared):
+    def without_last(answer):
+        return {"ranks": answer["ranks"][:-1], "scores": answer["scores"][:-1], "services": answer["services"]}
+
+    assert compared(changing("service3_cpu", without_last))[0] == 1
+
+
+def test_a_different_service_ranking_exits_1(compared):
+    code, rows = compared(changing("service3_cpu", lambda answer: {**answer, "services": answer["services"][::-1]}))
+    assert code == 1
+    assert [row["same_services"] for row in rows].count("False") == 1
+
+
+@pytest.mark.parametrize("ours, theirs, expected", [
+    (math.nan, math.nan, 0.0),
+    (math.nan, 1.0, math.inf),
+    (1.0, math.nan, math.inf),
+    (1.5, 1.0, 0.5),
+    (1.0, 1.5, 0.5),
+])
+def test_a_score_difference_never_depends_on_max_over_nan(compare_dev, ours, theirs, expected):
+    assert compare_dev.score_difference(ours, theirs) == expected

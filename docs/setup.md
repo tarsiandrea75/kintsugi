@@ -575,7 +575,7 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
 
 ### Rank RCAEval cases with BARO
 
-BARO is the published baseline, ported with the standard library ([ADR-024](adr/ADR-024-baro-port.md)). It reads the case files directly, so a run needs a committed plan first. From `evals/`, again with `python3 -I`:
+BARO is the published baseline, ported with the standard library together with the published pipeline's preprocessing ([ADR-024](adr/ADR-024-baro-port.md)). It reads the case files directly, so a run needs a committed plan first. From `evals/`, again with `python3 -I`:
 
 ```bash
 python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli import main; sys.exit(main(sys.argv[1:]))' \
@@ -584,7 +584,9 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
 
 - It writes one `summary.tsv` to `evals/out/rcaeval/baro-re2-ob-rep1/` (git-ignored; `--out` sets another directory), which `score --service-only` reads next to the replayed configs on the same recording ids.
 - Only RE2-OB repetition 1 is accepted. Every other repetition or system is refused before any case file is read.
-- The port's goldens are in `evals/tests/fixtures/baro/`, written by `generate_goldens.py` in a throwaway virtual environment; its header holds the versions and the steps.
+- Before ranking it drops `time.1` and `_latency-50`, turns infinities into empty cells, fills every column forward over the whole file and then with 0, keeps the last 600 rows before `inject_time` and the first 600 from it, and renames `_latency-90` to `_latency`. These are row counts, so a side is 600 s only on a case without gaps. BARO has no window of its own, and a case with a non-numeric cell anywhere is refused.
+- The port's goldens are in `evals/tests/fixtures/baro/`, written by `generate_goldens.py` in a throwaway virtual environment; its header holds the versions and the steps, and it holds a copy of the pipeline's lines from `main.py`, which cannot be imported.
+- `compare_dev.py` in the same directory compares the port with that pipeline on the 30 dev cases, in the same environment, and exits 1 on any difference or any other number of cases. It reads case files, so it needs the same committed plan.
 
 ### Replay RCAEval cases
 

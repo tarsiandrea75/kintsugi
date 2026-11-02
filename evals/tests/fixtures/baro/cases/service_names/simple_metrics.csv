@@ -1,4 +1,4 @@
-time,frontend-external_cpu,frontend_latency-50,redis_cpu,carts-db_mem,carts_cpu,catalogue-db_latency-50,a-dbx_cpu,plain,two_under_scores
+time,frontend-external_cpu,frontend_latency-90,redis_cpu,carts-db_mem,carts_cpu,catalogue-db_latency-90,a-dbx_cpu,plain,two_under_scores
 1699999400,1.05,1.069,1.072,100713674.7083,0.9828,0.9912,1.1134,1.1417,0.9352
 1699999410,0.8211,1.0633,1.1202,119188561.7898,1.1415,0.8573,1.0494,0.8691,1.1494
 1699999420,0.9225,0.7738,0.9734,99326093.218,1.113,1.1672,0.9847,1.2427,1.0282

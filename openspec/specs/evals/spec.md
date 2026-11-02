@@ -221,19 +221,32 @@ The converter MUST write into a staging directory beside `--out` and move the fi
 - Then no call is answered `not recorded in this replay`, the incident traffic is not empty and its client rows match the topology's edges, and `RulesDiagnosis.diagnose` returns a verdict
 
 ### REQ-12 BARO baseline
-`python -m kintsugi_evals baro-rcaeval --system re2-ob --rep 1` MUST rank each case directory `<root>/RE2-OB/<service>_<fault>/1/` with a standard-library port of `RCAEval.e2e.baro.baro` 1.11.0 and write one `summary.tsv` the scorer reads unchanged, under `--out` (default `evals/out/rcaeval/baro-<system>-rep<N>/`, git-ignored) ([ADR-024](../../../docs/adr/ADR-024-baro-port.md)). The root MUST default as in REQ-11. The ranking MUST follow these steps:
-- keep the samples within 600 s of `inject_time`, both ends included; those with `time < inject_time` are normal, the rest anomalous;
+`python -m kintsugi_evals baro-rcaeval --system re2-ob --rep 1` MUST rank each case directory `<root>/RE2-OB/<service>_<fault>/1/` with a standard-library port of the published pipeline of `RCAEval` 1.11.0, `main.py` up to its call of `RCAEval.e2e.baro.baro`, and of that function, and write one `summary.tsv` the scorer reads unchanged, under `--out` (default `evals/out/rcaeval/baro-<system>-rep<N>/`, git-ignored) ([ADR-024](../../../docs/adr/ADR-024-baro-port.md)). The root MUST default as in REQ-11. The ranking MUST follow these steps:
+- drop `time.1` and every column ending in `_latency-50`;
+- turn infinities into `NaN`, forward-fill every column, `time` included, over the whole file in file order, and then fill what remains with 0;
+- samples with `time < inject_time` are normal and the rest anomalous; keep the last 600 rows of the normal ones and the first 600 of the anomalous ones, by row count in file order;
+- rename `_latency-90` to `_latency`;
 - in each segment separately, drop `time` and every column constant in that segment, a `NaN` differing from everything, itself included; then divide columns ending in `_mem` by 1e6;
 - keep the columns in both segments, in the normal segment's order, each centred at its normal median and divided by the difference of its normal 75th and 25th percentiles with linear interpolation, ignoring `NaN`; a scale under 10 machine epsilons MUST become 1, as in the original's `RobustScaler`;
 - a column's score is Python's `max` over its scaled anomalous values in file order, and the columns MUST be sorted by it with Python's descending stable `sorted`;
 - a column's service is the text before its first `_` with `-db` removed, and the service ranking keeps each service's first occurrence.
 
-Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev`, `reported` `<first service>|UNKNOWN`, `candidates` the top 5 services as `<service>|UNKNOWN` joined by `;`, and the converter's `recording` id, so that it pairs with the replayed configs. Columns with no meaning for BARO hold `-`. The truth and the fault MUST come from the directory's name and MUST NOT reach the ranking. A case with no column left, with an empty segment, with an infinite value in a scored column or a non-numeric cell MUST fail the run and write nothing, and so MUST a repeated metric header. Every repetition or system but RE2-OB repetition 1 MUST be refused before any case file is read, until a committed plan names another.
+Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev`, `reported` `<first service>|UNKNOWN`, `candidates` the top 5 services as `<service>|UNKNOWN` joined by `;`, and the converter's `recording` id, so that it pairs with the replayed configs. Columns with no meaning for BARO hold `-`. The truth and the fault MUST come from the directory's name and MUST NOT reach the ranking. A case with no column left, with an empty segment, with a non-numeric cell anywhere in the file or with a row longer than the header MUST fail the run and write nothing, and so MUST a metric header that is repeated, before or after the rename. Every repetition or system but RE2-OB repetition 1 MUST be refused before any case file is read, until a committed plan names another.
 
 #### Scenario: Equal to the pinned original
-- Given the synthetic cases of `evals/tests/fixtures/baro/`, covering `_mem`, columns constant in one segment, a zero and a near-zero scale, `NaN` in both segments including as the first anomalous value, ties, `frontend-external` and `-db` names, samples outside the window and a sample at `inject_time`
+- Given the synthetic cases of `evals/tests/fixtures/baro/`, covering `_mem`, columns constant in one segment, a zero and a near-zero scale, gaps across the injection, a leading `NaN`, an infinity, empty `time` cells, `_latency-50` and `_latency-90`, ties, `frontend-external`, `redis` and `-db` names, more and fewer than 600 rows on a side and a sample at `inject_time`
 - When the port ranks each
-- Then its column and service rankings equal those `generate_goldens.py` recorded from `RCAEval` 1.11.0, its scores are within 1e-9, and it refuses the cases the original refuses
+- Then its column and service rankings equal those `generate_goldens.py` recorded from `RCAEval` 1.11.0 and a copy of the pipeline's lines, its scores are within 1e-9, and it refuses the cases the original refuses
+
+#### Scenario: A gap is filled before the rows are split
+- Given a column whose normal values are 1, 2, 3, 4, 5, and whose anomalous cells are empty, then 3
+- When the port ranks it
+- Then its score is 1: the empty cell took the normal segment's last value, 5, which scales to 1
+
+#### Scenario: The rows are counted, not the seconds
+- Given 700 rows on each side of `inject_time`, one with each value from 0 to 699 on each side, in file order
+- When the port ranks them
+- Then the normal segment holds the values 100 to 699, the anomalous one holds 0 to 599, and the score is (599 - 399.5) / 299.5
 
 #### Scenario: A first NaN wins, a later one is passed over
 - Given a column whose normal segment scales by 2 around 3
@@ -242,7 +255,7 @@ Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev
 - And when they are `11, NaN`, its score is 4
 
 #### Scenario: The scorer reads the summary
-- Given a case `checkoutservice_cpu` whose largest jump is in `checkoutservice_cpu` and a case `currencyservice_delay` whose largest is in `frontend_latency-50`
+- Given a case `checkoutservice_cpu` whose largest jump is in `checkoutservice_cpu` and a case `currencyservice_delay` whose largest is in `frontend_latency-90`
 - When `baro-rcaeval` runs and `score --service-only` reads its `summary.tsv`
 - Then the first is correct, reported as `checkoutservice|UNKNOWN`, and the second a miss, with the `recording` of each equal to its converted recording's
 

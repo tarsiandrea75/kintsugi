@@ -1,9 +1,9 @@
 {
  "ordinary": {
   "ranks": [
-   "frontend_latency-50",
+   "frontend_latency",
    "checkoutservice_cpu",
-   "cartservice_latency-90",
+   "cartservice_latency",
    "checkoutservice_socket",
    "frontend_cpu",
    "cartservice_cpu",
@@ -108,40 +108,30 @@
  },
  "nan_values": {
   "ranks": [
-   "later_nan_cpu",
    "first_nan_cpu",
+   "later_nan_cpu",
    "normal_nan_cpu",
-   "normal_first_nan_cpu",
-   "constant_then_nan_cpu",
-   "all_nan_normal_cpu",
-   "all_nan_anomalous_cpu",
-   "all_nan_cpu",
    "fine_cpu",
-   "second_first_nan_cpu",
-   "small_cpu"
+   "normal_first_nan_cpu",
+   "small_cpu",
+   "second_first_nan_cpu"
   ],
   "scores": [
+   784.6643156270663,
    432.00837557857614,
-   NaN,
-   257.3504880212954,
-   5.0,
-   2.476,
-   NaN,
-   NaN,
-   NaN,
+   254.11215772179645,
    34.23585099814773,
-   NaN,
-   3.2421929215822285
+   5.0,
+   3.2421929215822285,
+   2.077584306810669
   ],
   "services": [
-   "later",
    "first",
+   "later",
    "normal",
-   "constant",
-   "all",
    "fine",
-   "second",
-   "small"
+   "small",
+   "second"
   ]
  },
  "na_tokens": {
@@ -151,7 +141,7 @@
   ],
   "scores": [
    2.3333333333333335,
-   2.0
+   2.1666666666666665
   ],
   "services": [
    "b",
@@ -164,7 +154,7 @@
    "z_cpu",
    "m_cpu",
    "a_cpu",
-   "y_latency-50",
+   "y_latency",
    "c_cpu"
   ],
   "scores": [
@@ -187,10 +177,10 @@
  "service_names": {
   "ranks": [
    "frontend-external_cpu",
-   "frontend_latency-50",
+   "frontend_latency",
    "redis_cpu",
    "carts_cpu",
-   "catalogue-db_latency-50",
+   "catalogue-db_latency",
    "a-dbx_cpu",
    "plain",
    "two_under_scores",
@@ -218,23 +208,6 @@
    "two"
   ]
  },
- "window": {
-  "ranks": [
-   "edge_cpu",
-   "start_edge_cpu",
-   "plain_cpu"
-  ],
-  "scores": [
-   344.2211432354888,
-   2.383981154299174,
-   1.6412761410471668
-  ],
-  "services": [
-   "edge",
-   "start",
-   "plain"
-  ]
- },
  "sample_at_injection": {
   "ranks": [
    "spike_cpu",
@@ -256,7 +229,7 @@
   ],
   "scores": [
    33.89379627265764,
-   13.004127966976279
+   11.22901785714287
   ],
   "services": [
    "a",
@@ -284,7 +257,7 @@
   ],
   "scores": [
    18.352484154569595,
-   NaN
+   8.465715280194923
   ],
   "services": [
    "a",
@@ -306,7 +279,15 @@
   ]
  },
  "infinity_scored": {
-  "error": "ValueError"
+  "ranks": [
+   "a_cpu"
+  ],
+  "scores": [
+   10.471979833236363
+  ],
+  "services": [
+   "a"
+  ]
  },
  "infinity_constant": {
   "ranks": [
@@ -325,20 +306,201 @@
   "services": []
  },
  "one_anomalous_sample": {
-  "ranks": [
-   "b_cpu"
-  ],
-  "scores": [
-   NaN
-  ],
-  "services": [
-   "b"
-  ]
+  "ranks": [],
+  "scores": [],
+  "services": []
  },
  "no_anomalous_sample": {
   "error": "IndexError"
  },
  "no_normal_sample": {
   "error": "IndexError"
+ },
+ "more_than_600_rows": {
+  "ranks": [
+   "edge_cpu",
+   "plain_cpu",
+   "outside_cpu"
+  ],
+  "scores": [
+   287.6784067859119,
+   2.0801311236568925,
+   1.892408423287916
+  ],
+  "services": [
+   "edge",
+   "plain",
+   "outside"
+  ]
+ },
+ "more_than_600_rows_unsorted": {
+  "ranks": [
+   "b_cpu",
+   "a_cpu"
+  ],
+  "scores": [
+   23.864697665136674,
+   18.119461253171995
+  ],
+  "services": [
+   "b",
+   "a"
+  ]
+ },
+ "few_normal_rows": {
+  "ranks": [
+   "b_cpu",
+   "a_cpu"
+  ],
+  "scores": [
+   19.69120360877588,
+   10.656760772659714
+  ],
+  "services": [
+   "b",
+   "a"
+  ]
+ },
+ "few_anomalous_rows": {
+  "ranks": [
+   "b_cpu",
+   "a_cpu"
+  ],
+  "scores": [
+   16.104118381173137,
+   9.097574523236435
+  ],
+  "services": [
+   "b",
+   "a"
+  ]
+ },
+ "gaps_across_injection": {
+  "ranks": [
+   "opening_cpu",
+   "carried_cpu",
+   "plain_cpu"
+  ],
+  "scores": [
+   178.20675575352644,
+   172.88438012830085,
+   18.511111111111113
+  ],
+  "services": [
+   "opening",
+   "carried",
+   "plain"
+  ]
+ },
+ "gap_at_the_kept_edge": {
+  "ranks": [
+   "plain_cpu",
+   "edge_cpu"
+  ],
+  "scores": [
+   9.268665266373864,
+   0.0016417775513055473
+  ],
+  "services": [
+   "plain",
+   "edge"
+  ]
+ },
+ "leading_nan": {
+  "ranks": [
+   "plain_cpu",
+   "late_cpu"
+  ],
+  "scores": [
+   8.738910926794091,
+   1.331287305768348
+  ],
+  "services": [
+   "plain",
+   "late"
+  ]
+ },
+ "infinities": {
+  "ranks": [
+   "positive_cpu",
+   "negative_cpu",
+   "spelled_cpu",
+   "leading_cpu"
+  ],
+  "scores": [
+   9.331297709923671,
+   9.084240687679078,
+   8.437402597402603,
+   8.08833246391932
+  ],
+  "services": [
+   "positive",
+   "negative",
+   "spelled",
+   "leading"
+  ]
+ },
+ "latency_columns": {
+  "ranks": [
+   "ad_latency-90_extra",
+   "plain-latency-50",
+   "cart_latency",
+   "catalogue-db_latency",
+   "email_latency"
+  ],
+  "scores": [
+   70.10708215297454,
+   40.891406249999996,
+   35.86388286334063,
+   31.3187820983125,
+   14.955989804587919
+  ],
+  "services": [
+   "ad",
+   "plain-latency-50",
+   "cart",
+   "catalogue",
+   "email"
+  ]
+ },
+ "redis_column": {
+  "ranks": [
+   "redis_cpu",
+   "main_cpu",
+   "frontend-external_cpu",
+   "rabbitmq_cpu",
+   "frontend_cpu"
+  ],
+  "scores": [
+   65.25473535138956,
+   53.76096922069416,
+   48.381539486837674,
+   44.37776193870279,
+   8.432678252395643
+  ],
+  "services": [
+   "redis",
+   "main",
+   "frontend-external",
+   "rabbitmq",
+   "frontend"
+  ]
+ },
+ "time_cells": {
+  "ranks": [
+   "plain_cpu",
+   "jump_cpu"
+  ],
+  "scores": [
+   18.895939086294423,
+   10.53148614609572
+  ],
+  "services": [
+   "plain",
+   "jump"
+  ]
+ },
+ "word_in_a_column": {
+  "error": "ValueError"
  }
 }

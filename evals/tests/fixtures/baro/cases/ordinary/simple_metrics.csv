@@ -1,4 +1,4 @@
-time,frontend_cpu,frontend_latency-50,cartservice_cpu,cartservice_latency-90,checkoutservice_cpu,checkoutservice_socket,emailservice_diskio
+time,frontend_cpu,frontend_latency-90,cartservice_cpu,cartservice_latency-90,checkoutservice_cpu,checkoutservice_socket,emailservice_diskio
 1699999400,0.5644,0.1192,0.1851,0.0307,0.3031,38.7861,5.2172
 1699999410,0.5725,0.0981,0.2233,0.0335,0.2742,36.9198,4.4809
 1699999420,0.5033,0.0963,0.2039,0.0292,0.2879,41.4079,4.0088

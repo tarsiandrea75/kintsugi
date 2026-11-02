@@ -1,4 +1,4 @@
-time,z_cpu,m_cpu,a_cpu,y_latency-50,b_cpu,c_cpu
+time,z_cpu,m_cpu,a_cpu,y_latency-90,b_cpu,c_cpu
 1699999400,0.0,0.0,0.0,0.0,0.0,0.0
 1699999410,1.0,1.0,1.0,10.0,1.0,1.0
 1699999420,2.0,2.0,2.0,20.0,2.0,2.0
