@@ -96,6 +96,8 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
   - Exploratory, outside the plan: without `redis` BARO would score 26/30, and its Avg@5 by a quick calculation with all services is 0.76, not the published evaluator's. No `redis` filter is adopted: it would be fitted on dev. AC@3 and Avg@5 are not in the scorer yet, and vision §6 asks for them to compare with the published baselines.
   - Vision §7's pre-close check was not run: this branch changes nothing under `agent/`, and T3 ran the rules on RE2-OB.
 
+- 2026-11-02: native review of `bc3d80e..92553fa`, and then of `d3df17f` alone in a temporary worktree, both **refused** with `lens_context_budget_exceeded`: the regenerated fixtures exceed the reviewer's context, and no review authority was created. So T9 and T10 have no native review. Under the off path, medium risk: the writer's verification (86 tests, 25 mutants), the parent's spot check (224 passed) and T10's conformance on 30 cases stand in for it. The scope cannot shrink further without rewriting the commit.
+
 ## Next step
 
 The feature is complete. The human chooses the next one.
