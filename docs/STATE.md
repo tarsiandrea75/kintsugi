@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-01 (session 02)
+2026-11-02 (session 01)
 
 ## Milestone
 
@@ -16,10 +16,10 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, nothing pushed: the RCAEval converter, T1–T6, chain `feat/rcaeval-converter` → `-01-core` → `-02-replay` (ADR-020).
-- RE2 downloaded (Zenodo 14590730, md5-checked) to `~/data/rcaeval`; topology files `re2-ob.json` and `re2-ss.json`; the converter writes replay recordings with traffic from the OB traces; `replay-agent.sh --dataset re2-ob`; `score --service-only`.
-- Mechanics check on RE2-OB dev (repetition 1, 30 cases, plan `evals/plans/2026-11-01-config0-re2ob-dev.md`): no FAILED sample, no unrecorded call, no leak. Config 0: 4/30, AC@1 13% [5%, 30%] on the service, coverage 37% (`evals/results/2026-11-01-config0-re2ob-dev/`).
-- H on RE2-OB dev (`evals/results/2026-11-01-hybrid-re2ob-dev/`): 5/30, its ceiling; stop rule not met (Next action 6).
+This session (journal `docs/journal/2026-11-02-01.md`), all on local branches, nothing pushed: `resource-facts`, T1–T7 (`odd/tasks/resource-facts.md`, ADR-021), chain `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules`.
+- Three resource metrics on both tracks: `processor_usage`, `memory_used`, `open_files` (not `cpu_usage`: the converter's guard rejects the `cpu` token). They are in the dossier's `## Resources` section.
+- Config 0R (`--rules v2`): Config 0's rules unchanged, then R-RES (incident mean at least twice the previous mean and above the previous max). Config 0 (`v1`) is unchanged, with verdicts identical on lab dev, lab holdout and RE2-OB dev.
+- RE2-OB dev, service-only (`evals/results/2026-11-01-config0r-re2ob-dev/`, `evals/results/2026-11-01-hybrid-rules-v2-re2ob-dev/`): 0 4/30, 13% [5%, 30%]; **0R 20/30, 67% [49%, 81%]**; **HR 23/30, 77% [59%, 88%]**. 0R − 0 +53 points, exact McNemar p = 3.1e-05; HR − 0R +10 points, 3 discordant cases all for HR, p = 0.25 (the plan fixed before the run that HR could not win: ceiling 24/30). HR kept all 20 of 0R's right answers and gained 3 of the 4 lists where the truth was second or third.
 
 ## Next action
 
@@ -29,7 +29,8 @@ This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, n
 4. Local timeouts: per-run overrides exist now (`--report-timeout`, `qwen-dev` T3); granite's default stays 600 s.
 5. Done 2026-11-01: the RCAEval converter (above).
 6. Done 2026-11-01: H − 0 on RE2-OB dev (`odd/tasks/hybrid.md` T9–T10, plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, branch `feat/hybrid-rcaeval`). H 5/30, 17% [7%, 34%] against 0 4/30, 13% [5%, 30%]; H − 0 +3 points, McNemar p = 1. **The stop rule is not met**, as the plan fixed before the run: 19 of 30 candidate lists are empty, so H's ceiling was 5/30, and it reached it (Qon's one real choice went right). The limit on RCAEval is the rules' recall, i.e. the dossier's missing resource facts (vision M3).
-7. **Now: `resource-facts`** (`odd/tasks/resource-facts.md`, branch `feat/resource-facts` from `e4b0259`, 7 tasks, none started). The human chose a new Config 0R (rule R-RES, `RESOURCE_EXHAUSTION`, after R-REACH and R-DOWN) over candidates-only, to keep the leakage principle; Config 0 stays frozen. Metrics `cpu_usage`, `memory_used`, `open_files` (lab metrics checked live in Prometheus). **Next: the human confirms the design in the feature document, then T1 (ADR-021, R-RES's threshold fixed before any converted resource series is read).**
+7. Done 2026-11-02: `resource-facts` (Last action). The stop rule's reading is the human's: the paired win on RE2-OB dev is 0R − 0 (rules only, p = 3.1e-05); HR − 0R is not a win (p = 0.25).
+8. **Next: the human reads the stop rule (vision §7) and chooses the next feature.** Candidates from the results: the holdout (RE2-OB repetitions 2–3, holdout A) for 0R and HR under a plan committed first; the 2 `INVALID_REPORT` on loss; delay (1/5 for every config).
 
 ## Local branch chains (not pushed)
 
@@ -50,7 +51,7 @@ This session (journal `docs/journal/2026-11-01-01.md`), all on local branches, n
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -71,6 +72,11 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 ## Follow-ups
 
+Session of 2026-11-01/02, resource-facts (details in `odd/tasks/resource-facts.md`):
+- `summary.tsv`'s `model` column cannot tell HR from H; `tools-list.json` holds the old `query_metric` description; second report attempts are not recorded in the incident JSON.
+- Review advisories: the raised dossier stress ceiling (6,500 tokens); `RESOURCE_REASON_CHARS` = 48; `ReplayDriver` and `replay-agent.sh` readability and test suggestions (T5 review).
+- HR's reports take about 16 min each on RE2-OB (median 958 s), so a 30-case run takes about 8 h.
+
 benchmark-v0 review (details in `odd/tasks/benchmark-v0.md`): the renderer does not fail on a zero-byte TSV or a missing seed line; the byte-identity test normalizes newlines.
 
 Session of 2026-11-01 (details in `odd/tasks/rcaeval-converter.md` and `odd/tasks/topology-data.md`):
@@ -80,7 +86,7 @@ Session of 2026-11-01 (details in `odd/tasks/rcaeval-converter.md` and `odd/task
 
 Session of 2026-10-30 (details in each feature document):
 - service-assessment: WARNING R2-config-name-asymmetry (the scorer's default config name gains `-<report>` only when the TSV has the column; T4 is not affected, since it labels every input); SUGGESTION R3-quote-null-fallback; `docs/setup.md` names `--view` but not `--report`.
-- Untracked files in the repository root (`export_bundle.sh`, `project_bundle.*`, `scan_deep_project.sh`, `project_deep_overview.txt`) are not part of any feature; the human decides whether to keep them.
+- Untracked files in the repository root (`export_bundle.sh`, `project_bundle.*`, `scan_deep_project.sh`, `project_deep_overview.txt`) are not part of any feature; since 2026-11-01 they are listed in `.git/info/exclude` (the human's choice).
 
 Session of 2026-10-24:
 - evidence-by-reference: ReportCheck checks that a cited line exists, not that it supports the item's `why` (local F3 cited D17, a success row, for a `ConnectException`); the T2 SUGGESTION R3-runbook-budget-untested.
