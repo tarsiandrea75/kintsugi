@@ -89,7 +89,7 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
 | BARO (5 services) | 4, 26, 26, 29, 29 | 87% [70%, 95%] | 97% [83%, 99%] | 76% |
 
   - **BARO and 0R tie on Avg@5 at 76%, by different routes:** 0R puts the truth first in 20 cases and has it nowhere in 6, while BARO puts it first in 4 and has it in the top 5 in 29. So BARO's AC@1 understated its ranking, and Avg@5 alone hides the difference.
-  - Below chance is impossible to read here: 0's Avg@5 of 16% is under the 27% floor because 19 of its lists are empty, an abstention counting as a miss. D's and A's numbers measure one answer, not a ranking.
+  - 0's Avg@5 of 16% is under the 27% chance level because 19 of its lists are empty and an abstention counts as a miss, so it does not mean its answers are worse than random. D's and A's numbers measure one answer, not a ranking.
   - Not tested: no paired test on AC@3 or Avg@5. The tie is a description on 30 cases, not a result.
 
 ## Next step
