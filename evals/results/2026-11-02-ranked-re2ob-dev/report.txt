@@ -1,0 +1,86 @@
+0: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0  cpu      0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  disk     0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  loss     2/5   AC@1  40%  [12%, 77%]  recall 60%
+0  mem      1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  socket   0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 37%  selective 36%  recall 17%
+0  ranked cpu      5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.00
+0  ranked delay    5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+0  ranked disk     5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.40
+0  ranked loss     5  AC@1 2/5 40% [12%, 77%]  AC@3 3/5 60% [23%, 88%]  AC@5 3/5 60% [23%, 88%]  Avg@5 56%  mean list 2.00
+0  ranked mem      5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+0  ranked socket   5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.20
+0  ranked pooled  30  AC@1 4/30 13% [5%, 30%]  AC@3 5/30 17% [7%, 34%]  AC@5 5/30 17% [7%, 34%]  Avg@5 16%  mean list 0.63
+0R: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0R  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+0R  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0R  disk     4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+0R  mem      4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  socket   4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%  recall 80%
+0R  ranked cpu      5  AC@1 4/5 80% [38%, 96%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 80%  mean list 0.80
+0R  ranked delay    5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+0R  ranked disk     5  AC@1 4/5 80% [38%, 96%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 92%  mean list 1.40
+0R  ranked loss     5  AC@1 3/5 60% [23%, 88%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 76%  mean list 2.20
+0R  ranked mem      5  AC@1 4/5 80% [38%, 96%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 92%  mean list 1.40
+0R  ranked socket   5  AC@1 4/5 80% [38%, 96%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 96%  mean list 1.20
+0R  ranked pooled  30  AC@1 20/30 67% [49%, 81%]  AC@3 24/30 80% [63%, 90%]  AC@5 24/30 80% [63%, 90%]  Avg@5 76%  mean list 1.27
+D: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+D  cpu      1/5   AC@1  20%  [4%, 62%]
+D  delay    0/5   AC@1   0%  [0%, 43%]
+D  disk     2/5   AC@1  40%  [12%, 77%]
+D  loss     4/5   AC@1  80%  [38%, 96%]
+D  mem      2/5   AC@1  40%  [12%, 77%]
+D  socket   2/5   AC@1  40%  [12%, 77%]
+D  pooled  11/30  AC@1  37%  [22%, 54%]  coverage 43%  selective 85%
+D  ranked cpu      5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.20
+D  ranked delay    5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.00
+D  ranked disk     5  AC@1 2/5 40% [12%, 77%]  AC@3 2/5 40% [12%, 77%]  AC@5 2/5 40% [12%, 77%]  Avg@5 40%  mean list 0.60
+D  ranked loss     5  AC@1 4/5 80% [38%, 96%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 80%  mean list 0.80
+D  ranked mem      5  AC@1 2/5 40% [12%, 77%]  AC@3 2/5 40% [12%, 77%]  AC@5 2/5 40% [12%, 77%]  Avg@5 40%  mean list 0.60
+D  ranked socket   5  AC@1 2/5 40% [12%, 77%]  AC@3 2/5 40% [12%, 77%]  AC@5 2/5 40% [12%, 77%]  Avg@5 40%  mean list 0.40
+D  ranked pooled  30  AC@1 11/30 37% [22%, 54%]  AC@3 11/30 37% [22%, 54%]  AC@5 11/30 37% [22%, 54%]  Avg@5 37%  mean list 0.43
+A2100: route local, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+A2100  cpu      3/5   AC@1  60%  [23%, 88%]
+A2100  delay    2/5   AC@1  40%  [12%, 77%]
+A2100  disk     2/5   AC@1  40%  [12%, 77%]
+A2100  loss     5/5   AC@1 100%  [57%, 100%]
+A2100  mem      4/5   AC@1  80%  [38%, 96%]
+A2100  socket   3/5   AC@1  60%  [23%, 88%]
+A2100  pooled  19/30  AC@1  63%  [46%, 78%]  coverage 100%  selective 63%
+A2100  ranked cpu      5  AC@1 3/5 60% [23%, 88%]  AC@3 3/5 60% [23%, 88%]  AC@5 3/5 60% [23%, 88%]  Avg@5 60%  mean list 1.00
+A2100  ranked delay    5  AC@1 2/5 40% [12%, 77%]  AC@3 2/5 40% [12%, 77%]  AC@5 2/5 40% [12%, 77%]  Avg@5 40%  mean list 1.00
+A2100  ranked disk     5  AC@1 2/5 40% [12%, 77%]  AC@3 2/5 40% [12%, 77%]  AC@5 2/5 40% [12%, 77%]  Avg@5 40%  mean list 1.00
+A2100  ranked loss     5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.00
+A2100  ranked mem      5  AC@1 4/5 80% [38%, 96%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 80%  mean list 1.00
+A2100  ranked socket   5  AC@1 3/5 60% [23%, 88%]  AC@3 3/5 60% [23%, 88%]  AC@5 3/5 60% [23%, 88%]  Avg@5 60%  mean list 1.00
+A2100  ranked pooled  30  AC@1 19/30 63% [46%, 78%]  AC@3 19/30 63% [46%, 78%]  AC@5 19/30 63% [46%, 78%]  Avg@5 63%  mean list 1.00
+BARO: route baro, mode decision, view -; 30 fault cases, 0 healthy; AC@1 on the service only
+BARO  cpu      0/5   AC@1   0%  [0%, 43%]
+BARO  delay    0/5   AC@1   0%  [0%, 43%]
+BARO  disk     0/5   AC@1   0%  [0%, 43%]
+BARO  loss     2/5   AC@1  40%  [12%, 77%]
+BARO  mem      2/5   AC@1  40%  [12%, 77%]
+BARO  socket   0/5   AC@1   0%  [0%, 43%]
+BARO  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 100%  selective 13%
+BARO  ranked cpu      5  AC@1 0/5 0% [0%, 43%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 64%  mean list 5.00
+BARO  ranked delay    5  AC@1 0/5 0% [0%, 43%]  AC@3 3/5 60% [23%, 88%]  AC@5 5/5 100% [57%, 100%]  Avg@5 64%  mean list 5.00
+BARO  ranked disk     5  AC@1 0/5 0% [0%, 43%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 80%  mean list 5.00
+BARO  ranked loss     5  AC@1 2/5 40% [12%, 77%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 88%  mean list 5.00
+BARO  ranked mem      5  AC@1 2/5 40% [12%, 77%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 88%  mean list 5.00
+BARO  ranked socket   5  AC@1 0/5 0% [0%, 43%]  AC@3 4/5 80% [38%, 96%]  AC@5 5/5 100% [57%, 100%]  Avg@5 72%  mean list 5.00
+BARO  ranked pooled  30  AC@1 4/30 13% [5%, 30%]  AC@3 26/30 87% [70%, 95%]  AC@5 29/30 97% [83%, 99%]  Avg@5 76%  mean list 5.00
+chance with 11 services (../agent/src/main/resources/topology/re2-ob.json): AC@1 9.09%  AC@3 27.27%  AC@5 45.45%  Avg@5 27.27%
+0R - 0: 30 cases, 0R only 16, 0 only 0, exact McNemar p = 3.1e-05 (Holm 0.00031); difference +53 points, cluster bootstrap 95% [+33, +70] (seed 1, 10000 resamples)
+D - 0: 30 cases, D only 8, 0 only 1, exact McNemar p = 0.039 (Holm 0.23); difference +23 points, cluster bootstrap 95% [+7, +40] (seed 1, 10000 resamples)
+A2100 - 0: 30 cases, A2100 only 15, 0 only 0, exact McNemar p = 6.1e-05 (Holm 0.00055); difference +50 points, cluster bootstrap 95% [+33, +67] (seed 1, 10000 resamples)
+BARO - 0: 30 cases, BARO only 4, 0 only 4, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [-17, +20] (seed 1, 10000 resamples)
+D - 0R: 30 cases, D only 4, 0R only 13, exact McNemar p = 0.049 (Holm 0.23); difference -30 points, cluster bootstrap 95% [-53, -3] (seed 1, 10000 resamples)
+A2100 - 0R: 30 cases, A2100 only 6, 0R only 7, exact McNemar p = 1 (Holm 1); difference -3 points, cluster bootstrap 95% [-27, +20] (seed 1, 10000 resamples)
+BARO - 0R: 30 cases, BARO only 3, 0R only 19, exact McNemar p = 0.00086 (Holm 0.006); difference -53 points, cluster bootstrap 95% [-77, -27] (seed 1, 10000 resamples)
+A2100 - D: 30 cases, A2100 only 10, D only 2, exact McNemar p = 0.039 (Holm 0.23); difference +27 points, cluster bootstrap 95% [+7, +47] (seed 1, 10000 resamples)
+BARO - D: 30 cases, BARO only 3, D only 10, exact McNemar p = 0.092 (Holm 0.28); difference -23 points, cluster bootstrap 95% [-47, +0] (seed 1, 10000 resamples)
+BARO - A2100: 30 cases, BARO only 0, A2100 only 15, exact McNemar p = 6.1e-05 (Holm 0.00055); difference -50 points, cluster bootstrap 95% [-67, -33] (seed 1, 10000 resamples)
