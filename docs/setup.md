@@ -573,6 +573,19 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
   It takes the pairs from client spans (an `operationName` of `hipstershop.<Name>Service/<Method>`) and from parent links, with the same names as the converter (`frontendservice` is `frontend`), marks each pair `edge` or `NOT AN EDGE`, and exits 1 when a pair is not an edge or no pair is found.
 - The agent's test copy in `agent/src/test/resources/rcaeval/` is the converter's output on the synthetic fixture. To regenerate it, run from `evals/` `.venv/bin/python -m kintsugi_evals convert-rcaeval --root tests/fixtures/rcaeval --system re2-ob --rep 1 --case checkoutservice_cpu --out ../agent/src/test/resources/rcaeval`, then delete the `converter-report.tsv` it leaves in that directory: it is not part of the fixture.
 
+### Rank RCAEval cases with BARO
+
+BARO is the published baseline, ported with the standard library ([ADR-024](adr/ADR-024-baro-port.md)). It reads the case files directly, so a run needs a committed plan first. From `evals/`, again with `python3 -I`:
+
+```bash
+python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli import main; sys.exit(main(sys.argv[1:]))' \
+  baro-rcaeval --system re2-ob --rep 1
+```
+
+- It writes one `summary.tsv` to `evals/out/rcaeval/baro-re2-ob-rep1/` (git-ignored; `--out` sets another directory), which `score --service-only` reads next to the replayed configs on the same recording ids.
+- Only RE2-OB repetition 1 is accepted. Every other repetition or system is refused before any case file is read.
+- The port's goldens are in `evals/tests/fixtures/baro/`, written by `generate_goldens.py` in a throwaway virtual environment; its header holds the versions and the steps.
+
 ### Replay RCAEval cases
 
 Replay the converted cases with `--dataset re2-ob` ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md), `odd/tasks/rcaeval-converter.md`), then score them on the service only:

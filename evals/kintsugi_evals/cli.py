@@ -4,6 +4,8 @@ Prints the report and, with --out, writes report.txt, scores.tsv, paired.tsv, in
 copy of every input summary.tsv, so the result regenerates from committed files alone.
 
 `python -m kintsugi_evals convert-rcaeval` turns RCAEval RE2 cases into replay recordings (ADR-020).
+
+`python -m kintsugi_evals baro-rcaeval` ranks RCAEval RE2 dev cases with BARO into a summary.tsv (ADR-024).
 """
 
 import argparse
@@ -71,6 +73,12 @@ def _parser():
     rca.add_argument("--case", action="append", dest="cases", metavar="NAME",
                      help="convert only this case directory, e.g. checkoutservice_cpu; repeatable")
     rca.add_argument("--topology", help="the topology file (default: the agent's topology/<system>.json)")
+    bar = commands.add_parser("baro-rcaeval", help="rank RCAEval RE2 cases with BARO into a summary.tsv")
+    bar.add_argument("--root", help="the extracted dataset, holding RE2-OB/ and RE2-SS/ "
+                                    "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
+    bar.add_argument("--system", required=True, choices=["re2-ob", "re2-ss"])
+    bar.add_argument("--rep", required=True, type=int, help="the repetition; only RE2-OB repetition 1 is accepted")
+    bar.add_argument("--out", help="the output directory (default: evals/out/rcaeval/baro-<system>-rep<rep>/)")
     return parser
 
 
@@ -237,7 +245,21 @@ def convert_rcaeval(args):
     return 0
 
 
+def baro_rcaeval(args):
+    from .rcaeval import baro, convert
+
+    root = args.root or os.environ.get("KINTSUGI_RCAEVAL_DIR") or "~/data/rcaeval"
+    out = args.out or convert.REPO / "evals" / "out" / "rcaeval" / f"baro-{args.system}-rep{args.rep}"
+    try:
+        summary = baro.run(root, args.system, args.rep, out)
+    except (convert.HoldoutRefused, ValueError, OSError) as error:
+        raise SystemExit(f"baro-rcaeval: {error}") from None
+    print(f"ranked {summary.cases} cases of {convert.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
+          f"(split {summary.split}) to {summary.out / 'summary.tsv'}")
+    return 0
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
-    commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval}
+    commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval, "baro-rcaeval": baro_rcaeval}
     return commands.get(args.command, score)(args)

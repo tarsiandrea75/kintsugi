@@ -1,6 +1,6 @@
 # Spec: evals (the scorer)
 
-The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`, and `convert-rcaeval`, which writes the agent's replay input from RCAEval, REQ-11) from `evals/`.
+The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`, `convert-rcaeval`, which writes the agent's replay input from RCAEval, REQ-11, and `baro-rcaeval`, which ranks RCAEval cases with the published baseline, REQ-12) from `evals/`.
 
 ## Requirements
 
@@ -219,3 +219,39 @@ The converter MUST write into a staging directory beside `--out` and move the fi
 - Given the recording `agent/src/test/resources/rcaeval/` holds, converted from the synthetic fixture and checked byte for byte against a fresh conversion
 - When `DossierGatherer` gathers with the RE2-OB topology at its `startedAt`
 - Then no call is answered `not recorded in this replay`, the incident traffic is not empty and its client rows match the topology's edges, and `RulesDiagnosis.diagnose` returns a verdict
+
+### REQ-12 BARO baseline
+`python -m kintsugi_evals baro-rcaeval --system re2-ob --rep 1` MUST rank each case directory `<root>/RE2-OB/<service>_<fault>/1/` with a standard-library port of `RCAEval.e2e.baro.baro` 1.11.0 and write one `summary.tsv` the scorer reads unchanged, under `--out` (default `evals/out/rcaeval/baro-<system>-rep<N>/`, git-ignored) ([ADR-024](../../../docs/adr/ADR-024-baro-port.md)). The root MUST default as in REQ-11. The ranking MUST follow these steps:
+- keep the samples within 600 s of `inject_time`, both ends included; those with `time < inject_time` are normal, the rest anomalous;
+- in each segment separately, drop `time` and every column constant in that segment, a `NaN` differing from everything, itself included; then divide columns ending in `_mem` by 1e6;
+- keep the columns in both segments, in the normal segment's order, each centred at its normal median and divided by the difference of its normal 75th and 25th percentiles with linear interpolation, ignoring `NaN`; a scale under 10 machine epsilons MUST become 1, as in the original's `RobustScaler`;
+- a column's score is Python's `max` over its scaled anomalous values in file order, and the columns MUST be sorted by it with Python's descending stable `sorted`;
+- a column's service is the text before its first `_` with `-db` removed, and the service ranking keeps each service's first occurrence.
+
+Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev`, `reported` `<first service>|UNKNOWN`, `candidates` the top 5 services as `<service>|UNKNOWN` joined by `;`, and the converter's `recording` id, so that it pairs with the replayed configs. Columns with no meaning for BARO hold `-`. The truth and the fault MUST come from the directory's name and MUST NOT reach the ranking. A case with no column left, with an empty segment, with an infinite value in a scored column or a non-numeric cell MUST fail the run and write nothing, and so MUST a repeated metric header. Every repetition or system but RE2-OB repetition 1 MUST be refused before any case file is read, until a committed plan names another.
+
+#### Scenario: Equal to the pinned original
+- Given the synthetic cases of `evals/tests/fixtures/baro/`, covering `_mem`, columns constant in one segment, a zero and a near-zero scale, `NaN` in both segments including as the first anomalous value, ties, `frontend-external` and `-db` names, samples outside the window and a sample at `inject_time`
+- When the port ranks each
+- Then its column and service rankings equal those `generate_goldens.py` recorded from `RCAEval` 1.11.0, its scores are within 1e-9, and it refuses the cases the original refuses
+
+#### Scenario: A first NaN wins, a later one is passed over
+- Given a column whose normal segment scales by 2 around 3
+- When its anomalous values are `NaN, 11`
+- Then its score is `NaN`
+- And when they are `11, NaN`, its score is 4
+
+#### Scenario: The scorer reads the summary
+- Given a case `checkoutservice_cpu` whose largest jump is in `checkoutservice_cpu` and a case `currencyservice_delay` whose largest is in `frontend_latency-50`
+- When `baro-rcaeval` runs and `score --service-only` reads its `summary.tsv`
+- Then the first is correct, reported as `checkoutservice|UNKNOWN`, and the second a miss, with the `recording` of each equal to its converted recording's
+
+#### Scenario: The name of a directory does not reach the ranking
+- Given the same two cases under the names `emailservice_mem` and `paymentservice_loss`
+- When `baro-rcaeval` runs
+- Then `reported` and `candidates` are unchanged and only `truth`, `fault` and `recording` differ
+
+#### Scenario: A holdout is refused
+- Given `--system re2-ob --rep 2` or `--system re2-ss --rep 1`
+- When `baro-rcaeval` runs
+- Then it exits naming the holdout, reads no case file and creates no output directory

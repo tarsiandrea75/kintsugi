@@ -1,0 +1,344 @@
+{
+ "ordinary": {
+  "ranks": [
+   "frontend_latency-50",
+   "checkoutservice_cpu",
+   "cartservice_latency-90",
+   "checkoutservice_socket",
+   "frontend_cpu",
+   "cartservice_cpu",
+   "emailservice_diskio"
+  ],
+  "scores": [
+   37.06976744186046,
+   32.182432432432414,
+   6.135922330097093,
+   3.614610171245275,
+   1.973370064279156,
+   1.393170731707317,
+   0.4471492632927604
+  ],
+  "services": [
+   "frontend",
+   "checkoutservice",
+   "cartservice",
+   "emailservice"
+  ]
+ },
+ "mem_column": {
+  "ranks": [
+   "d_mem_used",
+   "b_mem",
+   "a_mem",
+   "c_cpu",
+   "e_mem"
+  ],
+  "scores": [
+   30000000.0,
+   30.0,
+   5.707789056021062,
+   3.104327666151466,
+   2.9999999999999984e-05
+  ],
+  "services": [
+   "d",
+   "b",
+   "a",
+   "c",
+   "e"
+  ]
+ },
+ "constant_normal_only": {
+  "ranks": [
+   "b_cpu"
+  ],
+  "scores": [
+   5.4419595314164
+  ],
+  "services": [
+   "b"
+  ]
+ },
+ "constant_anomalous_only": {
+  "ranks": [
+   "b_cpu"
+  ],
+  "scores": [
+   6.7626728110598995
+  ],
+  "services": [
+   "b"
+  ]
+ },
+ "zero_iqr": {
+  "ranks": [
+   "a_cpu",
+   "b_cpu",
+   "c_cpu"
+  ],
+  "scores": [
+   3.0,
+   2.5,
+   1.25
+  ],
+  "services": [
+   "a",
+   "b",
+   "c"
+  ]
+ },
+ "near_zero_iqr": {
+  "ranks": [
+   "above_cpu",
+   "plain_cpu",
+   "tiny_cpu",
+   "tiny_mem"
+  ],
+  "scores": [
+   199.0,
+   2.5,
+   0.5,
+   4.999999997999999e-07
+  ],
+  "services": [
+   "above",
+   "plain",
+   "tiny"
+  ]
+ },
+ "nan_values": {
+  "ranks": [
+   "later_nan_cpu",
+   "first_nan_cpu",
+   "normal_nan_cpu",
+   "normal_first_nan_cpu",
+   "constant_then_nan_cpu",
+   "all_nan_normal_cpu",
+   "all_nan_anomalous_cpu",
+   "all_nan_cpu",
+   "fine_cpu",
+   "second_first_nan_cpu",
+   "small_cpu"
+  ],
+  "scores": [
+   432.00837557857614,
+   NaN,
+   257.3504880212954,
+   5.0,
+   2.476,
+   NaN,
+   NaN,
+   NaN,
+   34.23585099814773,
+   NaN,
+   3.2421929215822285
+  ],
+  "services": [
+   "later",
+   "first",
+   "normal",
+   "constant",
+   "all",
+   "fine",
+   "second",
+   "small"
+  ]
+ },
+ "na_tokens": {
+  "ranks": [
+   "b_cpu",
+   "a_cpu"
+  ],
+  "scores": [
+   2.3333333333333335,
+   2.0
+  ],
+  "services": [
+   "b",
+   "a"
+  ]
+ },
+ "ties": {
+  "ranks": [
+   "b_cpu",
+   "z_cpu",
+   "m_cpu",
+   "a_cpu",
+   "y_latency-50",
+   "c_cpu"
+  ],
+  "scores": [
+   4.5,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0
+  ],
+  "services": [
+   "b",
+   "z",
+   "m",
+   "a",
+   "y",
+   "c"
+  ]
+ },
+ "service_names": {
+  "ranks": [
+   "frontend-external_cpu",
+   "frontend_latency-50",
+   "redis_cpu",
+   "carts_cpu",
+   "catalogue-db_latency-50",
+   "a-dbx_cpu",
+   "plain",
+   "two_under_scores",
+   "carts-db_mem"
+  ],
+  "scores": [
+   58.17143750977631,
+   57.88491501416431,
+   49.107676630434824,
+   48.6066262249184,
+   31.270675300647564,
+   26.222222222222207,
+   12.820257611241214,
+   9.371936758893286,
+   5.475248758710287
+  ],
+  "services": [
+   "frontend-external",
+   "frontend",
+   "redis",
+   "carts",
+   "catalogue",
+   "ax",
+   "plain",
+   "two"
+  ]
+ },
+ "window": {
+  "ranks": [
+   "edge_cpu",
+   "start_edge_cpu",
+   "plain_cpu"
+  ],
+  "scores": [
+   344.2211432354888,
+   2.383981154299174,
+   1.6412761410471668
+  ],
+  "services": [
+   "edge",
+   "start",
+   "plain"
+  ]
+ },
+ "sample_at_injection": {
+  "ranks": [
+   "spike_cpu",
+   "before_cpu"
+  ],
+  "scores": [
+   412.4476674641154,
+   1.512254901960783
+  ],
+  "services": [
+   "spike",
+   "before"
+  ]
+ },
+ "unsorted_rows": {
+  "ranks": [
+   "a_cpu",
+   "b_cpu"
+  ],
+  "scores": [
+   33.89379627265764,
+   13.004127966976279
+  ],
+  "services": [
+   "a",
+   "b"
+  ]
+ },
+ "repeated_time": {
+  "ranks": [
+   "a_cpu",
+   "b_cpu"
+  ],
+  "scores": [
+   21.577701036013803,
+   7.567381436844582
+  ],
+  "services": [
+   "a",
+   "b"
+  ]
+ },
+ "short_rows": {
+  "ranks": [
+   "a_cpu",
+   "b_cpu"
+  ],
+  "scores": [
+   18.352484154569595,
+   NaN
+  ],
+  "services": [
+   "a",
+   "b"
+  ]
+ },
+ "integers": {
+  "ranks": [
+   "a_socket",
+   "b_mem"
+  ],
+  "scores": [
+   6.0,
+   3.0000000000071054
+  ],
+  "services": [
+   "a",
+   "b"
+  ]
+ },
+ "infinity_scored": {
+  "error": "ValueError"
+ },
+ "infinity_constant": {
+  "ranks": [
+   "b_cpu"
+  ],
+  "scores": [
+   7.856338960609075
+  ],
+  "services": [
+   "b"
+  ]
+ },
+ "no_common_column": {
+  "ranks": [],
+  "scores": [],
+  "services": []
+ },
+ "one_anomalous_sample": {
+  "ranks": [
+   "b_cpu"
+  ],
+  "scores": [
+   NaN
+  ],
+  "services": [
+   "b"
+  ]
+ },
+ "no_anomalous_sample": {
+  "error": "IndexError"
+ },
+ "no_normal_sample": {
+  "error": "IndexError"
+ }
+}
