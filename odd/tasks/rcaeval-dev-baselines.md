@@ -41,7 +41,7 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 - [x] T3 Fresh 0 and 0R runs; verdicts equal to the earlier ones. Route: inline commands.
 - [x] T4 D's run, after the human's go-ahead. Route: inline commands.
 - [x] T5 A's overnight run; the scored result committed. Route: inline commands.
-- [ ] T5b A at a 2100 s deadline, under `evals/plans/2026-11-02-a-deadline-re2ob-dev.md` (the human's choice, 2026-11-02). Route: inline commands.
+- [x] T5b A at a 2100 s deadline, under `evals/plans/2026-11-02-a-deadline-re2ob-dev.md` (the human's choice, 2026-11-02). Route: inline commands.
 - [ ] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
 - [ ] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
 - [ ] T8 BARO's plan, run and result. Route: inline commands.
@@ -75,7 +75,11 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
 - 2026-11-02: T5 done on `3d8fb7a`. Run `replay-20261102T024308Z-local`: 30 samples, all `TIMED_OUT` at the 600 s deadline, about 5 h. A 0/30, 0% [0%, 11%], coverage 0%. Not rerun, as the plan fixes. Results in `evals/results/2026-11-02-baselines-re2ob-dev/` (AC4 holds): 0 4/30, 0R 20/30, D 11/30, A 0/30; D − 0R −30 points, p = 0.049, Holm 0.12; A − 0R −67 points, Holm 1.1e-05.
   - The 0/30 measures the deadline, not A's diagnosis: no sample produced an answer. The likely cause, not proved: on the lab, A's median was 560 s on a median prompt of 3,240 tokens, and here the prompt is about 2.5 times that size (D's median is 8,383 tokens). Ollama was up and the model loaded after the run.
   - The plan's cut-prompt check could not be made: timed-out samples record no `promptTokens`.
+- 2026-11-02: T5b done on `f38c92a`, exploratory. Run `replay-20261102T114407Z-local`: 30 samples, all `COMPLETED`, `unrecorded` 0, coverage 1.00, 7.3 h, no timeout. Results in `evals/results/2026-11-02-a-deadline-re2ob-dev/`. A2100 19/30, 63% [46%, 78%], coverage 100%, selective 63%; A2100 − 0R −3 points (6 for A, 7 for 0R, p = 1); A2100 − D +27 points (10 for A, 2 for D, p = 0.039, Holm 0.19).
+  - The plan's rule: 30 of 30 finished, at least 15, so 2100 s is the proposal for M4. Report time: median 877 s (14.6 minutes), maximum 1,051 s. At that median, 200 holdout cases take about 49 h of CPU.
+  - Prompt check: 29 samples at most 5,828 tokens; one at 10,877, the only one at 8,000 or more, read as two attempts because it is about twice the others (not separately proved). No sign of a cut.
+  - A never abstains: its 11 misses are wrong answers, 10 of them `frontend` or `checkoutservice`. 0R and A together are right on 26 of 30, and each has cases the other misses.
 
 ## Next step
 
-T5b's plan is committed. Its run takes about 12 to 17.5 h of CPU and waits for the human's go-ahead. BARO (T6–T8) does not depend on it.
+The human accepts or rejects 2100 s as A's deadline on RCAEval, against M4's budget; if accepted, an ADR records it before any holdout is read. Then BARO (T6–T8).
