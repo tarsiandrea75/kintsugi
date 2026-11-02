@@ -21,7 +21,7 @@ Pitch (CV / LinkedIn):
 
 These claims are written before any holdout is read, so the numbers cannot be chosen after seeing them. Every outcome is reported in `docs/benchmark.md`, and rules beating the model is a finding.
 
-- **H1, the LLM beats rules.** On the RCAEval holdouts, the paired 95% CI of service-level AC@1, D minus Config 0, lies above 0. This is the primary test; A minus Config 0 is secondary. If the upper bound is below +5 points, the result reads "rules are enough".
+- **H1, the LLM beats rules.** On the RCAEval holdouts, the paired 95% CI of service-level AC@1, D minus Config 0R, lies above 0. This is the primary test; A minus Config 0R is secondary, and D minus Config 0 and A minus Config 0 are reported as secondary too. If the upper bound is below +5 points, the result reads "rules are enough". The baseline moved from Config 0 to 0R before any RCAEval holdout was read and before D or A ran on RCAEval ([ADR-022](adr/ADR-022-h1-baseline-0r.md)).
 - **H2, local is enough.** All three must hold, otherwise local is not enough on this hardware:
   - the paired 95% CI of AC@1(A) − AC@1(D), pooled over lab holdout-2 and the RCAEval holdouts, has its lower bound above −10 points;
   - A's false-alarm rate is at most D's plus 10 points;
@@ -168,12 +168,14 @@ The agent never calls a model directly: it goes through a `ModelRouter` interfac
 
 | Config | What it is | Question it answers |
 |---|---|---|
-| 0 | Rules only, Java, over the same dossier | what do the rules alone get from the same facts? |
+| 0 | Rules only, Java, over the same dossier | what do the lab's rules alone get from the same facts, on any system? |
+| 0R | Config 0's rules plus R-RES, the resource rule (ADR-021) | what do the rules alone get from the same facts, resources included? H1's baseline (ADR-022) |
 | A | Local 8B | is laptop hardware enough? |
 | B | Local 14B, on a paired subset of about 60 cases | how much does a bigger local model buy? |
 | C | Local first, escalating to D on abstention, an L2/L3 failure or low confidence (threshold set on dev). Computed from the paired A and D outputs, with no extra runs | near-D quality at a fraction of the cost? |
 | D | `claude-haiku-5-5`, the cheapest API model (ADR-012) | the API reference, and its price |
 | H | Hybrid (ADR-019): Config 0's rules propose up to 5 candidates, local qwen3.5:9b with thinking (ADR-018) picks one or UNKNOWN and explains, with no fallback | does the LLM add anything over the rules once it sees them? (H − 0 on RCAEval dev) |
+| HR | H over 0R's candidates (ADR-021) | the same question, resources included (HR − 0R on RCAEval dev) |
 | D+ | An optional frontier spot-check, about 60 cases, only with the human's go-ahead and a price check | does a frontier model change the picture? |
 
 The hypotheses are pre-registered in §1 (H1–H3) and verified, not assumed. Any result is reported; "small models fail here, and here is why" is valuable to an SME too.
@@ -254,7 +256,7 @@ Four 3-week milestones, Oct 5 – Dec 27, 2026. Each ends with something working
 - The ranked report (1–5 candidates)
 - Config H, the hybrid (ADR-019)
 - The case dossier with resource facts
-- RCAEval dev for 0, A, D and BARO
+- RCAEval dev for 0, 0R, A, D and BARO
 - Lab realism
 - Policy and approval
 - The freeze on Dec 1; holdout-2 recorded Dec 1–5 (75 cases)
@@ -284,7 +286,7 @@ M4 is never cut.
 6. approved write actions (the policy then refuses every write);
 7. holdout B.
 
-Never cut the protocol, Config 0, the freeze, holdout-2, `benchmark.md` or the M4 run.
+Never cut the protocol, Config 0, Config 0R, the freeze, holdout-2, `benchmark.md` or the M4 run.
 
 Out of scope unless a benchmark justifies it: multi-agent architectures (supervisor + specialist agents). If attempted, only as a final measured experiment.
 
@@ -350,7 +352,7 @@ Rule: if time runs short, apply the cut order of §7, never cut the evals. A sim
 | Spring AI API changes | upgrades breaking the build | own interfaces isolate the framework; pinned version |
 | Motivation drop | a week without commits | milestone checks and the session journal keep the thread; restart from the smallest task |
 | The lab becomes the product | a feature closes with no number in `benchmark.md` | write the measurement plan first |
-| Rules beat the LLM | Config 0 matches or beats the LLM | report it in `benchmark.md`; the lab then measures the live loop |
+| Rules beat the LLM | Config 0 or 0R matches or beats the LLM | report it in `benchmark.md`; the lab then measures the live loop |
 | The RCAEval converter overruns | more than 2 sessions on it | metrics-only RE2-OB |
 | Forking paths | a holdout is read twice | label the result exploratory; record a fresh holdout |
 | Budget | over $2.5 spent, or nights lost | apply the cut order |
