@@ -32,8 +32,10 @@ ADR-001 keeps Python to evaluation code. A converter that writes the agent's inp
    |---|---|
    | `RE2-OB.zip` | `b9e23f8842c404b396ffd2becff15de4` |
    | `RE2-SS.zip` | `bd747a8fc7c5be00c613e13fbf9dd74b` |
+   | `RE2-TT.zip` | `a7fbcd1ada406067dcc50771ae398408` |
 
    - The data lives outside the repository (`KINTSUGI_RCAEVAL_DIR`, default `~/data/rcaeval`), checked against these md5s.
+   - RE2-TT was added on 2026-11-02 for BARO's reproduction alone (ADR-024). The converter refuses it.
    - The evaluator's semantics are those of RCAEval tag `1.11.0`.
    - The dataset is cited under both licenses as stated by its publishers.
 2. **Boundary.** The converter is Python under `evals/`. It only writes files in the agent's existing replay format: one incident JSON per case and a `recordings.tsv` manifest. It never runs inside the agent and adds no Python to the system. ADR-001 is amended to allow this one producer of agent input.

@@ -13,9 +13,13 @@ step below is the original's unless it says otherwise:
   repeated or made so by the rename, which pandas would silently rename or score as one: only one repeated `time` is known.
 - `rank_case` takes a directory and reads two files in it. The truth comes from the directory's name, which only
   `run` looks at, and goes to the `truth` and `fault` columns, never to the ranking.
+- RE2-TT takes the same steps as RE2-OB (ADR-024's revision). `main.py`'s `ts-` filter, at line 246, keys on `mm-tt` and
+  `torai-TT` in the path, and RE2-TT's is `data/RE2/RE2-TT`. Its SLI, at lines 297-300, is passed to `baro`, which never
+  reads it. `preprocess` branches only on `causalrca-sock-shop` and on `dk_select_useful`, which main.py passes as false.
 """
 
 import csv
+import json
 import math
 import sys
 from collections import Counter
@@ -29,6 +33,13 @@ SEGMENT_ROWS = 600  # main.py's `--length 20`, in minutes, at `length * 60 // 2`
 MEM_DIVISOR = 1e6
 NEAR_ZERO_SCALE = 10 * sys.float_info.epsilon
 TOP_SERVICES = 5
+
+# Upstream pools every repetition of RE2-TT and the published table is over all of them. RE2-TT is in no split of vision
+# §2, so reading it spends nothing, and it is no dev either. convert.SYSTEM_DIRS stays without it: the converter refuses it.
+SYSTEM_DIRS = {**convert.SYSTEM_DIRS, "re2-tt": "RE2-TT"}
+REFERENCE_SYSTEM = "re2-tt"
+REFERENCE_SPLIT = "reference"
+ALL_REPETITIONS = "all"
 
 ROUTE = "baro"
 UNKNOWN_CATEGORY = "UNKNOWN"
@@ -57,7 +68,7 @@ class Ranking:
 @dataclass(frozen=True)
 class Summary:
     system: str
-    rep: int
+    rep: object  # a repetition's number, or ALL_REPETITIONS
     split: str
     out: Path
     cases: int
@@ -181,26 +192,46 @@ def rank_case(case_dir):
 
 
 def split_of(system, rep):
-    """`dev`, or a refusal: BARO reads only RE2-OB repetition 1 until a committed plan names another (ADR-024)."""
+    """`dev`, `reference`, or a refusal. BARO reads RE2-OB repetition 1 and the whole of RE2-TT, and nothing else until a
+    committed plan names it (ADR-024)."""
+    if system == REFERENCE_SYSTEM:
+        if rep != ALL_REPETITIONS:
+            raise ValueError(f"{SYSTEM_DIRS[system]} is read whole, as upstream pools it: pass --rep {ALL_REPETITIONS}")
+        return REFERENCE_SPLIT
+    if rep == ALL_REPETITIONS:
+        raise convert.HoldoutRefused(f"--rep {ALL_REPETITIONS} on {system} would read a holdout: only "
+                                     f"{REFERENCE_SYSTEM} takes it")
     try:
         return convert.split_of(system, rep, None)
     except convert.HoldoutRefused:
-        raise convert.HoldoutRefused(f"{convert.SYSTEM_DIRS[system]} repetition {rep} is a holdout: baro-rcaeval reads "
+        raise convert.HoldoutRefused(f"{SYSTEM_DIRS[system]} repetition {rep} is a holdout: baro-rcaeval reads "
                                      f"only RE2-OB repetition 1 until a committed plan names another") from None
 
 
 def recording_of(system, case, rep):
-    """The converter's recording id of a case, so that BARO pairs with the replayed configs."""
-    return convert.blinded(convert.SYSTEM_DIRS[system], case, rep)[0]
+    """The converter's recording id of a case, so that BARO pairs with the replayed configs. It hashes the repetition, so
+    it stays unique across repetitions."""
+    return convert.blinded(SYSTEM_DIRS[system], case, rep)[0]
 
 
-def _summary_row(case, case_dir, system, rep, split):
+def every_repetition(system_dir):
+    """Every `(case, rep, directory)` of a system, whatever repetitions it holds, sorted by case and then repetition."""
+    cases = [path for path in Path(system_dir).iterdir() if path.is_dir() and convert.CASE_NAME.match(path.name)]
+    return sorted((case.name, int(path.name), path) for case in cases for path in case.iterdir()
+                  if path.is_dir() and path.name.isdecimal())
+
+
+def _ranked_services(case, rep, case_dir):
     try:
         services = rank_case(case_dir).services
         if not services:
             raise ValueError("no column is left to rank")
     except ValueError as error:
-        raise ValueError(f"{case}: {error}") from None
+        raise ValueError(f"{case} repetition {rep}: {error}") from None
+    return services
+
+
+def _summary_row(case, rep, services, system, split):
     service, fault = convert.CASE_NAME.match(case).group("service", "fault")
     candidates = [f"{name}|{UNKNOWN_CATEGORY}" for name in services[:TOP_SERVICES]]
     values = {"fault": fault, "mode": "decision", "route": ROUTE, "sample": 1, "status": "COMPLETED",
@@ -211,15 +242,22 @@ def _summary_row(case, case_dir, system, rep, split):
 
 
 def run(root, system, rep, out):
-    """Ranks repetition `rep` of `system` under `root` into `out/summary.tsv`. Refuses a holdout before reading anything;
-    a case that cannot be ranked fails the run and nothing is written."""
+    """Ranks repetition `rep` of `system` under `root`, or every repetition with ALL_REPETITIONS, into `out/summary.tsv`,
+    and writes the services ranked over the run to `out/services.json`, the topology `score --topology` asks for. Refuses
+    a holdout before reading anything; a case that cannot be ranked fails the run and nothing is written."""
     split = split_of(system, rep)
-    system_dir = Path(root).expanduser() / convert.SYSTEM_DIRS[system]
-    chosen = convert.discover(system_dir, rep)
+    system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
+    if rep == ALL_REPETITIONS:
+        chosen = every_repetition(system_dir)
+    else:
+        chosen = [(case, rep, case_dir) for case, case_dir in convert.discover(system_dir, rep)]
     if not chosen:
         raise ValueError(f"no case with repetition {rep} in {system_dir}")
-    rows = [_summary_row(case, case_dir, system, rep, split) for case, case_dir in chosen]
+    ranked = [(case, number, _ranked_services(case, number, case_dir)) for case, number, case_dir in chosen]
+    rows = [_summary_row(case, number, services, system, split) for case, number, services in ranked]
+    union = sorted({name for _, _, services in ranked for name in services})
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     convert._write_tsv(out / "summary.tsv", SUMMARY_COLUMNS, rows)
+    (out / "services.json").write_text(json.dumps({"services": union}, indent=2) + "\n", encoding="utf-8", newline="\n")
     return Summary(system, rep, split, out, len(rows))

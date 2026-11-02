@@ -502,5 +502,31 @@
  },
  "word_in_a_column": {
   "error": "ValueError"
+ },
+ "train_ticket_columns": {
+  "ranks": [
+   "ts-auth-service_cpu",
+   "rabbitmq_cpu",
+   "ts-ui-dashboard_latency",
+   "ts-order-db_socket",
+   "ts-auth-mongo_mem",
+   "kube-proxy_cpu"
+  ],
+  "scores": [
+   86.57271780631724,
+   63.99470712773463,
+   11.2998474059003,
+   5.693073052623618,
+   2.4771420903535777,
+   1.4477935857246236
+  ],
+  "services": [
+   "ts-auth-service",
+   "rabbitmq",
+   "ts-ui-dashboard",
+   "ts-order",
+   "ts-auth-mongo",
+   "kube-proxy"
+  ]
  }
 }

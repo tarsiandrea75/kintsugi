@@ -63,6 +63,10 @@ def _copy_name(label):
     return re.sub(r"[^A-Za-z0-9._-]", "_", label) + "-summary.tsv"
 
 
+def _repetition(text):
+    return text if text == "all" else int(text)
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="python -m kintsugi_evals")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -93,10 +97,11 @@ def _parser():
                      help="convert only this case directory, e.g. checkoutservice_cpu; repeatable")
     rca.add_argument("--topology", help="the topology file (default: the agent's topology/<system>.json)")
     bar = commands.add_parser("baro-rcaeval", help="rank RCAEval RE2 cases with BARO into a summary.tsv")
-    bar.add_argument("--root", help="the extracted dataset, holding RE2-OB/ and RE2-SS/ "
+    bar.add_argument("--root", help="the extracted dataset, holding RE2-OB/, RE2-SS/ and RE2-TT/ "
                                     "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
-    bar.add_argument("--system", required=True, choices=["re2-ob", "re2-ss"])
-    bar.add_argument("--rep", required=True, type=int, help="the repetition; only RE2-OB repetition 1 is accepted")
+    bar.add_argument("--system", required=True, choices=["re2-ob", "re2-ss", "re2-tt"])
+    bar.add_argument("--rep", required=True, type=_repetition, metavar="N|all",
+                     help="the repetition; only RE2-OB repetition 1, and 'all' on RE2-TT, are accepted")
     bar.add_argument("--out", help="the output directory (default: evals/out/rcaeval/baro-<system>-rep<rep>/)")
     return parser
 
@@ -312,7 +317,7 @@ def baro_rcaeval(args):
         summary = baro.run(root, args.system, args.rep, out)
     except (convert.HoldoutRefused, ValueError, OSError) as error:
         raise SystemExit(f"baro-rcaeval: {error}") from None
-    print(f"ranked {summary.cases} cases of {convert.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
+    print(f"ranked {summary.cases} cases of {baro.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
           f"(split {summary.split}) to {summary.out / 'summary.tsv'}")
     return 0
 

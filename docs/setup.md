@@ -539,16 +539,18 @@ python3 -m kintsugi_evals score \
 
 ### Convert RCAEval cases
 
-The offline track reads the RCAEval RE2 dataset ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md)). The data stays outside the repository, about 11 GB extracted. Download Zenodo record [14590730](https://doi.org/10.5281/zenodo.14590730) and check the md5s before unzipping:
+The offline track reads the RCAEval RE2 dataset ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md)). The data stays outside the repository, about 11 GB extracted for RE2-OB and RE2-SS; `RE2-TT.zip`, 2.8 GB more, is read only by BARO's reproduction. Download Zenodo record [14590730](https://doi.org/10.5281/zenodo.14590730) and check the md5s before unzipping:
 
 ```bash
 mkdir -p ~/data/rcaeval && cd ~/data/rcaeval
 curl -LO https://zenodo.org/records/14590730/files/RE2-OB.zip
 curl -LO https://zenodo.org/records/14590730/files/RE2-SS.zip
-md5sum RE2-OB.zip RE2-SS.zip
+curl -LO https://zenodo.org/records/14590730/files/RE2-TT.zip
+md5sum RE2-OB.zip RE2-SS.zip RE2-TT.zip
 # b9e23f8842c404b396ffd2becff15de4  RE2-OB.zip
 # bd747a8fc7c5be00c613e13fbf9dd74b  RE2-SS.zip
-unzip -q RE2-OB.zip && unzip -q RE2-SS.zip
+# a7fbcd1ada406067dcc50771ae398408  RE2-TT.zip
+unzip -q RE2-OB.zip && unzip -q RE2-SS.zip && unzip -q RE2-TT.zip
 export KINTSUGI_RCAEVAL_DIR=~/data/rcaeval     # the converter's default root
 ```
 
@@ -582,11 +584,12 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
   baro-rcaeval --system re2-ob --rep 1
 ```
 
-- It writes one `summary.tsv` to `evals/out/rcaeval/baro-re2-ob-rep1/` (git-ignored; `--out` sets another directory), which `score --service-only` reads next to the replayed configs on the same recording ids.
-- Only RE2-OB repetition 1 is accepted. Every other repetition or system is refused before any case file is read.
+- It writes one `summary.tsv` to `evals/out/rcaeval/baro-re2-ob-rep1/` (git-ignored; `--out` sets another directory), which `score --service-only` reads next to the replayed configs on the same recording ids, and `services.json`, the services ranked over the run, which `score --topology` accepts.
+- Only RE2-OB repetition 1 and `--system re2-tt --rep all` are accepted. Every other repetition or system is refused before any case file is read.
+- `--system re2-tt --rep all` writes every repetition of RE2-TT into one `summary.tsv` of split `reference`, to `evals/out/rcaeval/baro-re2-tt-repall/`. RE2-TT is in no split of the vision, so this spends no holdout, and the converter refuses it.
 - Before ranking it drops `time.1` and `_latency-50`, turns infinities into empty cells, fills every column forward over the whole file and then with 0, keeps the last 600 rows before `inject_time` and the first 600 from it, and renames `_latency-90` to `_latency`. These are row counts, so a side is 600 s only on a case without gaps. BARO has no window of its own, and a case with a non-numeric cell anywhere is refused.
 - The port's goldens are in `evals/tests/fixtures/baro/`, written by `generate_goldens.py` in a throwaway virtual environment; its header holds the versions and the steps, and it holds a copy of the pipeline's lines from `main.py`, which cannot be imported.
-- `compare_dev.py` in the same directory compares the port with that pipeline on the 30 dev cases, in the same environment, and exits 1 on any difference or any other number of cases. It reads case files, so it needs the same committed plan.
+- `compare_dev.py` in the same directory compares the port with that pipeline on the 30 dev cases, in the same environment, and exits 1 on any difference or any other number of cases. `--system re2-tt` does so on the 90 cases of RE2-TT, and refuses a directory of another name. It reads case files, so it needs the same committed plan.
 
 ### Replay RCAEval cases
 

@@ -231,7 +231,9 @@ The converter MUST write into a staging directory beside `--out` and move the fi
 - a column's score is Python's `max` over its scaled anomalous values in file order, and the columns MUST be sorted by it with Python's descending stable `sorted`;
 - a column's service is the text before its first `_` with `-db` removed, and the service ranking keeps each service's first occurrence.
 
-Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev`, `reported` `<first service>|UNKNOWN`, `candidates` the top 5 services as `<service>|UNKNOWN` joined by `;`, and the converter's `recording` id, so that it pairs with the replayed configs. Columns with no meaning for BARO hold `-`. The truth and the fault MUST come from the directory's name and MUST NOT reach the ranking. A case with no column left, with an empty segment, with a non-numeric cell anywhere in the file or with a row longer than the header MUST fail the run and write nothing, and so MUST a metric header that is repeated, before or after the rename. Every repetition or system but RE2-OB repetition 1 MUST be refused before any case file is read, until a committed plan names another.
+Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev` (`reference` on RE2-TT), `reported` `<first service>|UNKNOWN`, `candidates` the top 5 services as `<service>|UNKNOWN` joined by `;`, and the converter's `recording` id, so that it pairs with the replayed configs. Columns with no meaning for BARO hold `-`. The truth and the fault MUST come from the directory's name and MUST NOT reach the ranking. A case with no column left, with an empty segment, with a non-numeric cell anywhere in the file or with a row longer than the header MUST fail the run and write nothing, and so MUST a metric header that is repeated, before or after the rename. Every repetition or system but RE2-OB repetition 1 and the whole of RE2-TT MUST be refused before any case file is read, until a committed plan names another.
+
+`--system re2-tt --rep all` MUST rank every repetition of `<root>/RE2-TT/<service>_<fault>/<rep>/` with the same steps, as upstream pools them, into one `summary.tsv` of split `reference` (default `--out`: `baro-re2-tt-repall/`), whose `recording` stays unique across repetitions. `--rep all` off `re2-tt`, and `re2-tt` with one repetition, MUST be refused. RE2-TT is in no split of vision §2, so it is neither `dev` nor a holdout, and `convert-rcaeval` MUST keep refusing it. Every run MUST also write `services.json` next to `summary.tsv`, `{"services": [...]}`, the sorted union of the services ranked over the run, which `score --topology` accepts; since upstream's n is per case, this n is an upper bound and the chance it gives a lower floor.
 
 #### Scenario: Equal to the pinned original
 - Given the synthetic cases of `evals/tests/fixtures/baro/`, covering `_mem`, columns constant in one segment, a zero and a near-zero scale, gaps across the injection, a leading `NaN`, an infinity, empty `time` cells, `_latency-50` and `_latency-90`, ties, `frontend-external`, `redis` and `-db` names, more and fewer than 600 rows on a side and a sample at `inject_time`
@@ -268,6 +270,23 @@ Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev
 - Given `--system re2-ob --rep 2` or `--system re2-ss --rep 1`
 - When `baro-rcaeval` runs
 - Then it exits naming the holdout, reads no case file and creates no output directory
+
+#### Scenario: RE2-TT is ranked whole
+- Given two cases of `<root>/RE2-TT/` with three repetitions each, one of which ranks a service no other repetition does
+- When `baro-rcaeval --system re2-tt --rep all` runs
+- Then `summary.tsv` has six rows of split `reference` with six distinct `recording`s
+- And `services.json` lists the sorted union of the services ranked, and `score --service-only --topology` accepts it
+
+#### Scenario: RE2-TT keeps the columns outside `ts-`
+- Given a synthetic case with `ts-` columns and others, `rabbitmq_cpu` and `kube-proxy_cpu`, `generate_goldens.py` called with the dataset `re2-tt`
+- When the port ranks it
+- Then its rankings equal the original's, with the others ranked: `main.py` filters on `ts-` only on an `mm-tt` or `torai-TT` path
+
+#### Scenario: `--rep all` and RE2-TT refused elsewhere
+- Given `--system re2-ob --rep all`, `--system re2-ss --rep all` or `--system re2-tt --rep 1`
+- When `baro-rcaeval` runs
+- Then it exits with a message, reads no case file and creates no output directory
+- And given `convert-rcaeval --system re2-tt`, it refuses as well
 
 ### REQ-13 Ranked metrics (rcaeval-ranked-metrics T1)
 `score --service-only --topology PATH` MUST add AC@1, AC@3, AC@5, Avg@5 and their chance levels to the output, with the semantics of RCAEval's evaluator at tag `1.11.0`, because the published baselines report Avg@5 and AC@1 alone cannot see a truth ranked second (vision §6). `--topology` without `--service-only` MUST exit with a one-line message and write nothing. Without `--topology`, the report and every output file MUST be byte-identical to what REQ-9 writes.

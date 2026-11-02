@@ -422,12 +422,32 @@ def word_in_a_column():
     return table({"a_cpu": values, "b_cpu": steady_then(rng, 1, 0.1, 1)})
 
 
+def train_ticket_columns():
+    """RE2-TT's names, called with its dataset. `main.py` keeps only `ts-` columns on an `mm-tt` or `torai-TT` path, and
+    this case's path, as RE2-TT's, holds neither, so the others stay and can rank first. Short, to keep the fixture small."""
+    rng = random.Random(30)
+
+    def moved(level, spread, jump):
+        return noisy(rng, level, spread, range(12)) + noisy(rng, level + jump, spread, range(12))
+
+    return table({"ts-ui-dashboard_latency-50": moved(1, 0.1, 90),
+                  "ts-ui-dashboard_latency-90": moved(1, 0.1, 2),
+                  "rabbitmq_cpu": moved(1, 0.1, 9),
+                  "ts-auth-service_cpu": moved(1, 0.1, 6),
+                  "ts-auth-mongo_mem": moved(1e8, 1e6, 3e6),
+                  "ts-order-db_socket": moved(40, 2, 5),
+                  "kube-proxy_cpu": moved(1, 0.1, 0)}, rows_around(12, 12))
+
+
 CASES = (ordinary, mem_column, constant_normal_only, constant_anomalous_only, zero_iqr, near_zero_iqr, nan_values,
          na_tokens, ties, service_names, sample_at_injection, unsorted_rows, repeated_time, short_rows,
          integers, infinity_scored, infinity_constant, no_common_column, one_anomalous_sample, no_anomalous_sample,
          no_normal_sample, more_than_600_rows, more_than_600_rows_unsorted, few_normal_rows, few_anomalous_rows,
          gaps_across_injection, gap_at_the_kept_edge, leading_nan, infinities, latency_columns, redis_column, time_cells,
-         word_in_a_column)
+         word_in_a_column, train_ticket_columns)
+
+# The dataset `main.py` would pass, for a case that stands for another than RE2-OB. `preprocess` reads only that it is set.
+DATASETS = {"train_ticket_columns": "re2-tt"}
 
 
 def write_case(directory, header, rows):
@@ -439,11 +459,11 @@ def write_case(directory, header, rows):
     (directory / "inject_time.txt").write_text(f"{INJECT}\n", encoding="utf-8", newline="\n")
 
 
-def answer(baro, service_ranks, directory):
+def answer(baro, service_ranks, directory, dataset="re2-ob"):
     """The published answer on a case directory, called as `main.py` does at line 356, or the exception it raises."""
     try:
         data, inject_time = published_pipeline(str(directory / "simple_metrics.csv"), PUBLISHED_ARGS)
-        result = baro(data, inject_time, dataset="re2-ob", anomalies=None, dk_select_useful=False)
+        result = baro(data, inject_time, dataset=dataset, anomalies=None, dk_select_useful=False)
     except REFUSALS as error:
         return {"error": type(error).__name__}
     return {"ranks": result["ranks"], "scores": [result["scores"][name] for name in result["ranks"]],
@@ -458,7 +478,7 @@ def main():
     for case in CASES:
         directory = cases / case.__name__
         write_case(directory, *case())
-        goldens[case.__name__] = answer(baro, service_ranks, directory)
+        goldens[case.__name__] = answer(baro, service_ranks, directory, DATASETS.get(case.__name__, "re2-ob"))
     (HERE / "goldens.json").write_text(json.dumps(goldens, indent=1) + "\n", encoding="utf-8", newline="\n")
 
 

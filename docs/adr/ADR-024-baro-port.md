@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted by the agent on 2026-11-02, as a reversible implementation choice inside the human's approved scope (`odd/tasks/rcaeval-dev-baselines.md`, T6). The package version was checked on PyPI that day. Revised the same day, with the human's approval, after T8: the port now covers the published pipeline's preprocessing (step 1).
+Accepted by the agent on 2026-11-02, as a reversible implementation choice inside the human's approved scope (`odd/tasks/rcaeval-dev-baselines.md`, T6). The package version was checked on PyPI that day. Revised the same day, with the human's approval, after T8: the port now covers the published pipeline's preprocessing (step 1). Revised again the same day, inside the feature the human chose (`odd/tasks/rcaeval-baro-reproduction.md`, T1): the port also reads RE2-TT, with its steps unchanged.
 
 ## Date
 
@@ -31,6 +31,15 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 
 **Proof of equality.** A generator run once, in a throwaway virtual environment with `RCAEval==1.11.0` installed without dependencies plus numpy, pandas and scikit-learn, writes goldens of the original's ranking and scores on synthetic series. They are committed as a fixture with the generator and its versions, and the port's test compares against them. The published pipeline's lines cannot be imported, because `main.py` imports every method's dependencies, so the generator holds a verbatim copy of them with the tag, the commit and the line numbers. The goldens never touch RCAEval case data.
 
+**RE2-TT takes the same steps**, from reading `main.py` at the pinned commit with `--method baro --dataset re2-tt` and the wheel's `RCAEval/e2e/baro.py` and `RCAEval/io/time_series.py`, both byte-equal to that commit:
+
+- `main.py`:246 keeps only `ts-` columns when the path holds `mm-tt` or `torai-TT`. RE2-TT's is `data/RE2/RE2-TT` (`RCAEval/benchmark/datasets.py`:17), so it is not reached and the other columns stay.
+- `main.py`:297–300 picks an SLI for an `RE2-TT` path and line 362 passes it, but `baro` takes `sli` and never reads it.
+- `main.py`:359 passes `dataset`. `preprocess` (`time_series.py`:102–111) branches on `causalrca-sock-shop`, on any other non-null name, and on `dk_select_useful`, false at `main.py`:360. RE2-OB and RE2-TT take the same branch, and nothing in that file names `ts-`.
+- `main.py`:153–155 reads `data.csv` if any exists under the dataset, else `simple_metrics.csv`. RE2-OB holds no `data.csv`; RE2-TT must be checked once extracted, since the port reads only `simple_metrics.csv`.
+
+`--rep all`, on `re2-tt` alone, ranks every repetition into one `summary.tsv` of split `reference`, because upstream pools them. `re2-tt` with one repetition is refused: upstream gives no reason to read part of it. `baro.SYSTEM_DIRS` adds RE2-TT over `convert.SYSTEM_DIRS`, which stays as it was, so the converter keeps refusing it. Every run also writes `services.json`, the union of the services it ranked, for `score --topology`.
+
 **Output.** One `summary.tsv` the scorer reads as is: route `baro`, `reported` as `<service>|UNKNOWN` for the top service, `candidates` holding the top 5. BARO has no abstention. A case with no column left to rank, or with input the port refuses, fails the whole run and writes nothing, so no `UNKNOWN` is invented. The truth, taken from the case directory for the `truth` column, never reaches the ranking.
 
 ## Alternatives considered
@@ -45,5 +54,5 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 - **The first port equalled the function only.** The wheel holds no benchmark entry point, so T8 ran without the pipeline's preprocessing: BARO 7/30, with 22 of 23 misses naming `redis`, in `evals/results/2026-11-02-baro-re2ob-dev/`. That result is kept and is not the published baseline. `main.py` was read after it.
 - The pipeline's window counts rows and is half-open at the injection, as the converter's windows are. On a case with gaps in its samples it is not exactly 600 s; that is the published behaviour, kept.
 - A new `RCAEval` release does not move this baseline. The pinned version is the one reported.
-- BARO reads raw case files, so it gets the guard the converter has: only repetitions a committed plan names, and no holdout before M4.
+- BARO reads raw case files, so it gets the guard the converter has: only repetitions a committed plan names, and no holdout before M4. RE2-TT is in no split of vision §2, so reading it spends no holdout. `compare_dev.py --system re2-tt` reads every repetition under its root, so it refuses a directory not named `RE2-TT`.
 - AC@3 and Avg@5 for comparison with the published numbers are outside this ADR.

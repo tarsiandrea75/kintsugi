@@ -14,7 +14,7 @@ import pytest
 
 from kintsugi_evals.cli import main
 from kintsugi_evals.rcaeval import baro, convert
-from kintsugi_evals.scoring import CORRECT, MISS, read_summary
+from kintsugi_evals.scoring import CORRECT, MISS, read_service_count, read_summary
 
 FIXTURES = Path(__file__).parent / "fixtures"
 RCAEVAL = FIXTURES / "rcaeval"
@@ -24,9 +24,9 @@ TOLERANCE = 1e-9
 INJECT = 1700000000
 
 
-def case_dir(tmp_path, header, rows, inject=INJECT):
-    directory = tmp_path / "case"
-    directory.mkdir()
+def case_dir(tmp_path, header, rows, inject=INJECT, name="case"):
+    directory = tmp_path / name
+    directory.mkdir(parents=True)
     with (directory / "simple_metrics.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(header)
@@ -62,7 +62,7 @@ def test_the_goldens_cover_the_branches_the_adr_names():
     assert {"ordinary", "mem_column", "constant_normal_only", "constant_anomalous_only", "zero_iqr", "nan_values", "ties",
             "service_names", "sample_at_injection", "more_than_600_rows", "more_than_600_rows_unsorted", "few_normal_rows",
             "few_anomalous_rows", "gaps_across_injection", "gap_at_the_kept_edge", "leading_nan", "infinities",
-            "latency_columns", "redis_column", "time_cells", "word_in_a_column"} <= set(GOLDENS)
+            "latency_columns", "redis_column", "time_cells", "word_in_a_column", "train_ticket_columns"} <= set(GOLDENS)
     assert all((CASES / name / "simple_metrics.csv").is_file() for name in GOLDENS)
 
 
@@ -94,6 +94,15 @@ def test_a_service_is_the_text_before_the_first_underscore_without_db():
     assert baro.service_of("frontend-external_latency-50") == "frontend-external"
     assert baro.service_of("redis_cpu") == "redis"
     assert baro.service_of("plain") == "plain"
+    assert baro.service_of("ts-ui-dashboard_latency") == "ts-ui-dashboard"
+    assert baro.service_of("ts-order-db_mem") == "ts-order"
+
+
+def test_re2_tt_keeps_the_columns_outside_ts_as_the_original_does():
+    # main.py:246 keeps only `ts-` columns on an `mm-tt` or `torai-TT` path; RE2-TT's is data/RE2/RE2-TT.
+    golden = GOLDENS["train_ticket_columns"]
+    assert "rabbitmq" in golden["services"] and "ts-ui-dashboard" in golden["services"]
+    assert baro.rank_case(CASES / "train_ticket_columns").services == golden["services"]
 
 
 def scores_of(directory):
@@ -328,6 +337,128 @@ def test_a_case_with_no_ranking_fails_the_run_and_writes_nothing(tmp_path):
     assert not out.exists()
 
 
+TT_COLUMNS = ("ts-auth-service_cpu", "ts-order-service_cpu", "ts-route-service_cpu")
+
+
+def tt_case(root, case, rep, jumps, columns=TT_COLUMNS):
+    """`<root>/RE2-TT/<case>/<rep>/`, where the column `jumps` moves at the injection and the others do not."""
+    times = [INJECT - 40, INJECT - 30, INJECT - 20, INJECT - 10, INJECT, INJECT + 10]
+    rows = [[t] + [1 + i % 3 + (90 if t >= INJECT and name == jumps else 0) for name in columns]
+            for i, t in enumerate(times)]
+    return case_dir(root, ["time", *columns], rows, name=f"RE2-TT/{case}/{rep}")
+
+
+def run_tt(root, out):
+    assert main(["baro-rcaeval", "--root", str(root), "--system", "re2-tt", "--rep", "all", "--out", str(out)]) == 0
+    return out
+
+
+@pytest.fixture
+def tt_tree(tmp_path):
+    """Two cases of three repetitions. In repetition 3 of the first its own service is passed over, and a fourth service
+    appears that no other repetition has."""
+    root = tmp_path / "root"
+    for rep in (1, 2):
+        tt_case(root, "ts-auth-service_cpu", rep, "ts-auth-service_cpu")
+    tt_case(root, "ts-auth-service_cpu", 3, "ts-train-service_mem", TT_COLUMNS + ("ts-train-service_mem",))
+    for rep in (1, 2, 3):
+        tt_case(root, "ts-order-service_delay", rep, "ts-order-service_cpu")
+    return root
+
+
+def test_rep_all_writes_every_repetitions_rows_into_one_summary(tt_tree, tmp_path):
+    rows = summary_rows(run_tt(tt_tree, tmp_path / "out"))
+    assert len(rows) == 6
+    assert {row["split"] for row in rows} == {"reference"}
+    assert [row["reported"] for row in rows if row["fault"] == "cpu"] == [
+        "ts-auth-service|UNKNOWN", "ts-auth-service|UNKNOWN", "ts-train-service|UNKNOWN"]
+    assert {row["truth"] for row in rows} == {"ts-auth-service|RESOURCE_EXHAUSTION", "ts-order-service|DEPENDENCY_LATENCY"}
+
+
+def test_rep_all_keeps_the_case_ids_unique_across_repetitions(tt_tree, tmp_path):
+    rows = summary_rows(run_tt(tt_tree, tmp_path / "out"))
+    assert len({row["recording"] for row in rows}) == 6
+    for rep in (1, 2, 3):
+        assert baro.recording_of("re2-tt", "ts-order-service_delay", rep) in {row["recording"] for row in rows}
+
+
+def test_rep_all_reads_a_repetition_beyond_the_third(tt_tree, tmp_path):
+    tt_case(tt_tree, "ts-auth-service_cpu", 4, "ts-route-service_cpu")
+    assert len(summary_rows(run_tt(tt_tree, tmp_path / "out"))) == 7
+
+
+def test_the_scorer_reads_rep_all_on_the_topology_the_run_wrote(tt_tree, tmp_path, capsys):
+    out = run_tt(tt_tree, tmp_path / "out")
+    assert len(read_summary(out, label="BARO", service_only=True)) == 6
+    capsys.readouterr()
+    assert main(["score", "--service-only", "--topology", str(out / "services.json"), "--label", "BARO", str(out)]) == 0
+    report = capsys.readouterr().out
+    assert "BARO  pooled   5/6 " in report
+    assert "AC@1 25.00%" in report  # chance on the four services of the run
+
+
+def test_services_json_is_the_sorted_union_over_the_run(tt_tree, tmp_path):
+    out = run_tt(tt_tree, tmp_path / "out")
+    written = json.loads((out / "services.json").read_text(encoding="utf-8"))
+    assert written == {"services": ["ts-auth-service", "ts-order-service", "ts-route-service", "ts-train-service"]}
+    assert read_service_count(out / "services.json") == 4
+
+
+def test_services_json_holds_every_service_ranked_not_only_the_top_five(tmp_path):
+    columns = tuple(f"ts-s{k}-service_cpu" for k in range(7))
+    tt_case(tmp_path, "ts-s0-service_cpu", 1, columns[0], columns)
+    out = run_tt(tmp_path, tmp_path / "out")
+    assert len(summary_rows(out)[0]["candidates"].split(";")) == 5
+    assert read_service_count(out / "services.json") == 7
+
+
+def test_rep_1_of_re2_ob_writes_services_json_too(ran):
+    assert set(json.loads((ran / "services.json").read_text(encoding="utf-8"))["services"]) >= {"checkoutservice", "frontend"}
+
+
+def test_a_case_that_fails_in_any_repetition_writes_nothing(tt_tree, tmp_path):
+    (tt_tree / "RE2-TT" / "ts-order-service_delay" / "3" / "inject_time.txt").unlink()
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit, match="inject_time"):
+        main(["baro-rcaeval", "--root", str(tt_tree), "--system", "re2-tt", "--rep", "all", "--out", str(out)])
+    assert not out.exists()
+
+
+def test_two_rep_all_runs_write_the_same_bytes(tt_tree, tmp_path):
+    first, second = run_tt(tt_tree, tmp_path / "one"), run_tt(tt_tree, tmp_path / "two")
+    for name in ("summary.tsv", "services.json"):
+        assert (first / name).read_bytes() == (second / name).read_bytes()
+
+
+@pytest.mark.parametrize("system, rep, message", [("re2-ob", "all", "holdout"), ("re2-ss", "all", "holdout"),
+                                                  ("re2-tt", "1", "--rep all"), ("re2-tt", "3", "--rep all")])
+def test_rep_all_only_on_re2_tt_and_re2_tt_only_whole(system, rep, message, tmp_path, monkeypatch):
+    opened = []
+    real_open = Path.open
+    monkeypatch.setattr(Path, "open", lambda self, *a, **k: opened.append(self) or real_open(self, *a, **k))
+    out = tmp_path / "refused"
+    with pytest.raises(SystemExit, match=message):
+        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", system, "--rep", rep, "--out", str(out)])
+    assert not out.exists()
+    assert not [path for path in opened if "RE2" in str(path)]
+
+
+def test_a_rep_that_is_neither_a_number_nor_all_is_refused(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", "re2-tt", "--rep", "some", "--out", str(tmp_path / "out")])
+    assert "--rep" in capsys.readouterr().err
+
+
+def test_the_converter_still_refuses_re2_tt(tmp_path, capsys):
+    assert "re2-tt" not in convert.SYSTEM_DIRS
+    with pytest.raises(ValueError, match="re2-tt"):
+        convert.convert(tmp_path, "re2-tt", 1, tmp_path / "out")
+    with pytest.raises(SystemExit):
+        main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1", "--out", str(tmp_path / "out")])
+    assert "re2-tt" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
 @pytest.fixture
 def compare_dev(monkeypatch):
     """`compare_dev.py`, whose decisions need no pandas: the original's answers are handed to it."""
@@ -451,6 +582,76 @@ def test_a_different_service_ranking_exits_1(compared):
     code, rows = compared(changing("service3_cpu", lambda answer: {**answer, "services": answer["services"][::-1]}))
     assert code == 1
     assert [row["same_services"] for row in rows].count("False") == 1
+
+
+def tt_compare_tree(root, cases=30, reps=(1, 2, 3)):
+    for k in range(cases):
+        for rep in reps:
+            shutil.copytree(CASES / "ordinary", root / f"ts-s{k}-service_cpu" / str(rep))
+    return root
+
+
+def compare_tt(compare_dev, tmp_path, original, cases=30, reps=(1, 2, 3)):
+    root = tt_compare_tree(tmp_path / "RE2-TT", cases, reps)
+    out = tmp_path / "compare.tsv"
+    code = compare_dev.compare_cases(root, out, original, system="re2-tt")
+    with out.open(newline="", encoding="utf-8") as handle:
+        return code, list(csv.DictReader(handle, delimiter="\t"))
+
+
+def test_ninety_equal_re2_tt_cases_exit_0_one_row_per_repetition(compare_dev, tmp_path):
+    code, rows = compare_tt(compare_dev, tmp_path, the_ports_answer)
+    assert code == 0
+    assert len(rows) == 90
+    assert len({row["recording"] for row in rows}) == 90
+    assert baro.recording_of("re2-tt", "ts-s0-service_cpu", 3) in {row["recording"] for row in rows}
+
+
+@pytest.mark.parametrize("cases, reps", [(30, (1, 2)), (29, (1, 2, 3)), (31, (1, 2, 3)), (30, (1, 2, 3, 4))])
+def test_any_other_number_of_re2_tt_cases_exits_1(compare_dev, tmp_path, cases, reps):
+    assert compare_tt(compare_dev, tmp_path, the_ports_answer, cases, reps)[0] == 1
+
+
+def test_a_difference_in_the_third_repetition_of_re2_tt_exits_1(compare_dev, tmp_path):
+    def original(directory):
+        answer = the_ports_answer(directory)
+        if directory.parent.name == "ts-s3-service_cpu" and directory.name == "3":
+            return {**answer, "services": answer["services"][::-1]}
+        return answer
+
+    code, rows = compare_tt(compare_dev, tmp_path, original)
+    assert code == 1
+    assert [row["same_services"] for row in rows].count("False") == 1
+
+
+@pytest.mark.parametrize("name", ["RE2-OB", "RE2-SS", "anything"])
+def test_re2_tt_mode_refuses_any_other_directory_before_reading_it(compare_dev, tmp_path, name):
+    # Every repetition of RE2-OB or RE2-SS under this mode would be a holdout read.
+    root = tt_compare_tree(tmp_path / name)
+    read = []
+    with pytest.raises(ValueError, match="RE2-TT"):
+        compare_dev.compare_cases(root, tmp_path / "compare.tsv", lambda directory: read.append(directory), system="re2-tt")
+    assert not read
+
+
+def test_re2_ob_mode_reads_only_repetition_1_even_with_the_others_present(compare_dev, tmp_path):
+    root = dev_tree(tmp_path / "RE2-OB")
+    shutil.copytree(CASES / "ordinary", root / "service3_cpu" / "2")
+    read = []
+
+    def original(directory):
+        read.append(directory.name)
+        return the_ports_answer(directory)
+
+    assert compare_dev.compare_cases(root, tmp_path / "compare.tsv", original) == 0
+    assert set(read) == {"1"}
+
+
+@pytest.mark.parametrize("argv", [["--system", "re2-ss", "x", "y"], ["--system", "re2-tt", "x"], ["--system"], ["x"]])
+def test_compare_dev_refuses_other_arguments_before_loading_the_original(compare_dev, argv, monkeypatch):
+    monkeypatch.setattr(compare_dev.generate_goldens, "load_original", lambda: pytest.fail("the original was loaded"))
+    with pytest.raises(SystemExit):
+        compare_dev.main(argv)
 
 
 @pytest.mark.parametrize("ours, theirs, expected", [
