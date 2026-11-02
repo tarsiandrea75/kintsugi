@@ -46,8 +46,9 @@ Choices here:
 ## Tasks
 
 - [x] T1 The scorer's ranked metrics, tests first, and the living spec. Route: delegated writer (three non-trivial files).
-- [ ] T2 The plan, with the published BARO numbers if a primary source gives them. Route: inline (docs).
-- [ ] T3 The rescoring and its result. Route: inline commands.
+- [x] T1b The review's two advisories, tests first. Route: inline (small, understood).
+- [x] T2 The plan, with the published BARO numbers if a primary source gives them. Route: inline (docs).
+- [x] T3 The rescoring and its result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -73,8 +74,24 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
 - 2026-11-02: the human chose this feature. Semantics read from the pinned source, not from a summary.
 - 2026-11-02: T1 done by a delegated writer (`1674293`): REQ-13, `--topology`, `ranked.tsv`. RED 32 failed against stubs; GREEN 257 passed; parent spot check `pytest -q` 257 passed. 537 authored lines, over the forecast, mostly hand-computed test cases. Without the flag, the committed `baro-pipeline` result regenerates byte for byte. AC1–AC4 hold.
   - The writer's choices: `none` and empty services are dropped from a ranking, like `UNKNOWN`; the topology is not in `inputs.tsv`, because `benchmark.py` renders every row there as an input, so its path sits in the report's chance line; a topology with duplicate services is refused.
-  - Open gap: a `COMPLETED` row reporting `UNKNOWN` with a non-empty candidate list abstains under REQ-7, but its first candidate would count as rank 1, so ranked AC@1 could differ from AC@1. No inspected input has such a row. A hybrid abstention with candidates would need a decision.
+  - Gap found: a `COMPLETED` row reporting `UNKNOWN` with a non-empty candidate list abstains under REQ-7, but its first candidate counted as rank 1. Closed in T1b.
+- 2026-11-02: native review of `3f25788..b468288`: one reliability lens, **approved** and acknowledged (lineage `review-204160b5b1ea3b3a`), with two WARNINGs: R3-abstention-ranked-ac1-divergence and R3-empty-topology-bypass.
+- 2026-11-02: T1b done (`937a0de`): an abstaining row has an empty ranking, even with candidates; an empty `--topology` value is refused instead of silently dropping the metrics. RED 2 failed; GREEN 259 passed.
+- 2026-11-02: T2 done (`0ff028c`). No published RE2-OB number found: the RCAEval paper's Table 6 and the upstream README give BARO's Avg@5 on Train Ticket only. The ASE and FSE papers were not read. The dev cases' headers hold 16 to 20 names, so the table's chance at n = 11 is the stricter floor for BARO.
+- 2026-11-02: T3 done on `0ff028c`. Results in `evals/results/2026-11-02-ranked-re2ob-dev/`. The plan's stop rule did not fire: all five input checksums match, and ranked AC@1 equals the committed AC@1 on all 35 rows. AC5 and AC6 hold. Pooled, service-only, 30 cases, hits at k = 1 to 5, chance at n = 11 (AC@1 9%, AC@3 27%, AC@5 45%, Avg@5 27%):
+
+| Config | Hits at k = 1..5 | AC@3 | AC@5 | Avg@5 |
+|---|---|---|---|---|
+| 0 | 4, 5, 5, 5, 5 | 17% [7%, 34%] | 17% [7%, 34%] | 16% |
+| 0R | 20, 22, 24, 24, 24 | 80% [63%, 90%] | 80% [63%, 90%] | 76% |
+| D (one answer) | 11, 11, 11, 11, 11 | 37% [22%, 54%] | 37% [22%, 54%] | 37% |
+| A2100 (one answer) | 19, 19, 19, 19, 19 | 63% [46%, 78%] | 63% [46%, 78%] | 63% |
+| BARO (5 services) | 4, 26, 26, 29, 29 | 87% [70%, 95%] | 97% [83%, 99%] | 76% |
+
+  - **BARO and 0R tie on Avg@5 at 76%, by different routes:** 0R puts the truth first in 20 cases and has it nowhere in 6, while BARO puts it first in 4 and has it in the top 5 in 29. So BARO's AC@1 understated its ranking, and Avg@5 alone hides the difference.
+  - Below chance is impossible to read here: 0's Avg@5 of 16% is under the 27% floor because 19 of its lists are empty, an abstention counting as a miss. D's and A's numbers measure one answer, not a ranking.
+  - Not tested: no paired test on AC@3 or Avg@5. The tie is a description on 30 cases, not a result.
 
 ## Next step
 
-T2.
+The feature is complete. The human chooses the next one. Reproducing BARO's published Avg@5 on RE2-TT (`odd/tasks/vision-revision.md`) is the only way found to check the port against a published number.
