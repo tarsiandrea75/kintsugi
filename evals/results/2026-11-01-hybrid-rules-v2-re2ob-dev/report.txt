@@ -1,0 +1,27 @@
+0: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0  cpu      0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  disk     0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  loss     2/5   AC@1  40%  [12%, 77%]  recall 60%
+0  mem      1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  socket   0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 37%  selective 36%  recall 17%
+0R: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0R  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+0R  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0R  disk     4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+0R  mem      4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  socket   4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%  recall 80%
+HR: route local, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+HR  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+HR  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+HR  disk     5/5   AC@1 100%  [57%, 100%]  recall 100%
+HR  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+HR  mem      5/5   AC@1 100%  [57%, 100%]  recall 100%
+HR  socket   5/5   AC@1 100%  [57%, 100%]  recall 100%
+HR  pooled  23/30  AC@1  77%  [59%, 88%]  coverage 83%  selective 92%  recall 80%
+0R - 0: 30 cases, 0R only 16, 0 only 0, exact McNemar p = 3.1e-05 (Holm 6.1e-05); difference +53 points, cluster bootstrap 95% [+33, +70] (seed 1, 10000 resamples)
+HR - 0: 30 cases, HR only 19, 0 only 0, exact McNemar p = 3.8e-06 (Holm 1.1e-05); difference +63 points, cluster bootstrap 95% [+47, +80] (seed 1, 10000 resamples)
+HR - 0R: 30 cases, HR only 3, 0R only 0, exact McNemar p = 0.25 (Holm 0.25); difference +10 points, cluster bootstrap 95% [+0, +23] (seed 1, 10000 resamples)
