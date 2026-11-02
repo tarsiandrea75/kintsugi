@@ -40,7 +40,7 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 - [x] T2 The plan for 0, 0R, D and A (`evals/plans/2026-11-02-baselines-re2ob-dev.md`). Route: inline (docs). Passive docs, structural readback.
 - [x] T3 Fresh 0 and 0R runs; verdicts equal to the earlier ones. Route: inline commands.
 - [x] T4 D's run, after the human's go-ahead. Route: inline commands.
-- [ ] T5 A's overnight run; the scored result committed. Route: inline commands.
+- [x] T5 A's overnight run; the scored result committed. Route: inline commands.
 - [ ] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
 - [ ] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
 - [ ] T8 BARO's plan, run and result. Route: inline commands.
@@ -71,6 +71,10 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
 
 - 2026-11-02: T4 done on `a1fc1b0`. Run `replay-20261102T024016Z-cloud`: 30 samples, all `COMPLETED`, `unrecorded` 0, coverage 1.00; cost $0.0325; median 2.9 s per sample. An interim score, not committed until T5 adds A: D 11/30, 37% [22%, 54%], coverage 43%, selective 85%. D − 0R −30 points, 4 cases for D and 13 for 0R, exact McNemar p = 0.049. D's median prompt is 8,383 tokens on the cloud's count, above A's `num-ctx` of 8192, so T5 must check for cut prompts.
 
+- 2026-11-02: T5 done on `3d8fb7a`. Run `replay-20261102T024308Z-local`: 30 samples, all `TIMED_OUT` at the 600 s deadline, about 5 h. A 0/30, 0% [0%, 11%], coverage 0%. Not rerun, as the plan fixes. Results in `evals/results/2026-11-02-baselines-re2ob-dev/` (AC4 holds): 0 4/30, 0R 20/30, D 11/30, A 0/30; D − 0R −30 points, p = 0.049, Holm 0.12; A − 0R −67 points, Holm 1.1e-05.
+  - The 0/30 measures the deadline, not A's diagnosis: no sample produced an answer. The likely cause, not proved: on the lab, A's median was 560 s on a median prompt of 3,240 tokens, and here the prompt is about 2.5 times that size (D's median is 8,383 tokens). Ollama was up and the model loaded after the run.
+  - The plan's cut-prompt check could not be made: timed-out samples record no `promptTokens`.
+
 ## Next step
 
-T5, A's overnight run, on the human's go-ahead for the CPU.
+The human decides how A is measured on RCAEval. Any change of deadline needs a new plan. BARO (T6–T8) does not depend on it.

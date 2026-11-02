@@ -1,0 +1,38 @@
+0: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0  cpu      0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  disk     0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  loss     2/5   AC@1  40%  [12%, 77%]  recall 60%
+0  mem      1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  socket   0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 37%  selective 36%  recall 17%
+0R: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0R  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+0R  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0R  disk     4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+0R  mem      4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  socket   4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%  recall 80%
+D: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+D  cpu      1/5   AC@1  20%  [4%, 62%]
+D  delay    0/5   AC@1   0%  [0%, 43%]
+D  disk     2/5   AC@1  40%  [12%, 77%]
+D  loss     4/5   AC@1  80%  [38%, 96%]
+D  mem      2/5   AC@1  40%  [12%, 77%]
+D  socket   2/5   AC@1  40%  [12%, 77%]
+D  pooled  11/30  AC@1  37%  [22%, 54%]  coverage 43%  selective 85%
+A: route local, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+A  cpu      0/5   AC@1   0%  [0%, 43%]
+A  delay    0/5   AC@1   0%  [0%, 43%]
+A  disk     0/5   AC@1   0%  [0%, 43%]
+A  loss     0/5   AC@1   0%  [0%, 43%]
+A  mem      0/5   AC@1   0%  [0%, 43%]
+A  socket   0/5   AC@1   0%  [0%, 43%]
+A  pooled   0/30  AC@1   0%  [0%, 11%]  coverage 0%  selective -
+0R - 0: 30 cases, 0R only 16, 0 only 0, exact McNemar p = 3.1e-05 (Holm 0.00015); difference +53 points, cluster bootstrap 95% [+33, +70] (seed 1, 10000 resamples)
+D - 0: 30 cases, D only 8, 0 only 1, exact McNemar p = 0.039 (Holm 0.12); difference +23 points, cluster bootstrap 95% [+7, +40] (seed 1, 10000 resamples)
+A - 0: 30 cases, A only 0, 0 only 4, exact McNemar p = 0.12 (Holm 0.12); difference -13 points, cluster bootstrap 95% [-27, -3] (seed 1, 10000 resamples)
+D - 0R: 30 cases, D only 4, 0R only 13, exact McNemar p = 0.049 (Holm 0.12); difference -30 points, cluster bootstrap 95% [-53, -3] (seed 1, 10000 resamples)
+A - 0R: 30 cases, A only 0, 0R only 20, exact McNemar p = 1.9e-06 (Holm 1.1e-05); difference -67 points, cluster bootstrap 95% [-83, -50] (seed 1, 10000 resamples)
+A - D: 30 cases, A only 0, D only 11, exact McNemar p = 0.00098 (Holm 0.0039); difference -37 points, cluster bootstrap 95% [-53, -20] (seed 1, 10000 resamples)
