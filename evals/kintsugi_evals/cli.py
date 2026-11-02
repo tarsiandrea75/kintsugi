@@ -1,7 +1,8 @@
 """`python -m kintsugi_evals score`: AC@1 with Wilson CIs and paired differences (ADR-015).
 
 Prints the report and, with --out, writes report.txt, scores.tsv, paired.tsv, inputs.tsv and a
-copy of every input summary.tsv, so the result regenerates from committed files alone.
+copy of every input summary.tsv, so the result regenerates from committed files alone. With --topology it adds
+AC@3, AC@5, Avg@5 and their chance levels to the report, and writes ranked.tsv.
 
 `python -m kintsugi_evals convert-rcaeval` turns RCAEval RE2 cases into replay recordings (ADR-020).
 
@@ -17,15 +18,30 @@ import shutil
 import sys
 from pathlib import Path
 
-from .scoring import paired, read_summary, summarize, summary_path
+from .scoring import (
+    chance_ac,
+    chance_avg5,
+    paired,
+    read_service_count,
+    read_summary,
+    summarize,
+    summarize_ranked,
+    summary_path,
+)
 from .stats import holm
 
 DEFAULT_SEED = 1
 DEFAULT_ITERATIONS = 10000
+# The cuts that get a Wilson interval, in the report and ranked.tsv.
+RANKED_CUTS = (1, 3, 5)
 
 
 def _pct(x):
     return f"{round(100 * x)}%"
+
+
+def _pct2(x):
+    return f"{100 * x:.2f}%"
 
 
 def _points(x):
@@ -59,6 +75,9 @@ def _parser():
     score.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
     score.add_argument("--service-only", action="store_true",
                        help="score AC@1 on the service part of the truth only (RCAEval's AC@1, ADR-020)")
+    score.add_argument("--topology", metavar="PATH",
+                       help="with --service-only: add AC@3, AC@5, Avg@5 and their chance levels over this topology's "
+                            "services, and write ranked.tsv")
     bench = commands.add_parser("benchmark", help="render docs/benchmark.md from committed result dirs")
     bench.add_argument("--out", required=True, help="the Markdown file to write")
     bench.add_argument("dirs", nargs="+", help="result dirs written by score --out, in document order")
@@ -82,9 +101,22 @@ def _parser():
     return parser
 
 
-def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False):
+def _ranked_line(config, score):
+    cuts = "  ".join(f"AC@{k} {score.hits[k - 1]}/{score.n} {_pct(score.ac(k))} "
+                     f"[{_pct(score.ci(k)[0])}, {_pct(score.ci(k)[1])}]" for k in RANKED_CUTS)
+    return (f"{config}  ranked {score.fault:<7} {score.n:>2}  {cuts}  Avg@5 {_pct(score.avg5)}  "
+            f"mean list {score.mean_length:.2f}")
+
+
+def _chance_line(topology, services):
+    cuts = "  ".join(f"AC@{k} {_pct2(chance_ac(k, services))}" for k in RANKED_CUTS)
+    return f"chance with {services} services ({topology}): {cuts}  Avg@5 {_pct2(chance_avg5(services))}"
+
+
+def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False, ranked=None, topology=None,
+            services=None):
     lines = []
-    for (label, source, rows), score in zip(inputs, scores):
+    for i, ((label, source, rows), score) in enumerate(zip(inputs, scores)):
         first = rows[0]
         faulty = score.pooled.n if score.pooled else 0
         healthy = score.healthy.n if score.healthy else 0
@@ -106,6 +138,11 @@ def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False)
             low, high = h.ci
             lines.append(f"{score.config}  healthy {h.false_alarms:>2}/{h.n:<2}  false alarms {_pct(h.false_alarm_rate)}"
                          f"  [{_pct(low)}, {_pct(high)}]")
+        if ranked:
+            mine = ranked[i]
+            lines += [_ranked_line(mine.config, r) for r in mine.faults + ([mine.pooled] if mine.pooled else [])]
+    if ranked:
+        lines.append(_chance_line(topology, services))
     for pair, adjusted in zip(pairs, holm_p):
         if pair.mcnemar_p is None:
             test = "exact McNemar n/a (repeated cases)"
@@ -164,6 +201,20 @@ def _write(out, inputs, scores, pairs, holm_p, report):
     _write_tsv(out / "inputs.tsv", ["label", "source", "sha256", "rows"], provenance)
 
 
+def _write_ranked(out, ranked, services):
+    """ranked.tsv: every count behind the report's ranked lines, and chance on each row so the file reads alone."""
+    chance = [services, *(f"{chance_ac(k, services):.4f}" for k in RANKED_CUTS), f"{chance_avg5(services):.4f}"]
+    rows = []
+    for config in ranked:
+        for r in config.faults + ([config.pooled] if config.pooled else []):
+            cuts = [f"{value:.4f}" for k in RANKED_CUTS for value in (r.ac(k), *r.ci(k))]
+            rows.append([config.config, r.fault, r.n, *r.hits, *cuts, f"{r.avg5:.4f}", f"{r.mean_length:.4f}", *chance])
+    _write_tsv(out / "ranked.tsv",
+               ["config", "fault", "n", "hits1", "hits2", "hits3", "hits4", "hits5",
+                *(f"ac{k}{part}" for k in RANKED_CUTS for part in ("", "_low", "_high")), "avg5", "mean_length",
+                "services", *(f"chance_ac{k}" for k in RANKED_CUTS), "chance_avg5"], rows)
+
+
 def _check_names(inputs):
     """Two inputs with one label, or one copy name, would merge or overwrite each other."""
     labels, copies = {}, {}
@@ -185,6 +236,9 @@ def score(args):
 
 
 def _score(args):
+    if args.topology and not args.service_only:
+        raise SystemExit("score: --topology needs --service-only: the ranked metrics name the service alone")
+    services = read_service_count(args.topology) if args.topology else None
     sources = [(name, path) for name, path in args.label] + [(None, path) for path in args.dirs]
     if not sources:
         raise SystemExit("score needs at least one replay dir")
@@ -204,10 +258,14 @@ def _score(args):
     holm_p = [None] * len(pairs)
     for i, adjusted in zip(tested, holm([pairs[i].mcnemar_p for i in tested])):
         holm_p[i] = adjusted
-    report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations, args.service_only)
+    ranked = [summarize_ranked(rows)[0] for _, _, rows in inputs] if args.topology else None
+    report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations, args.service_only, ranked,
+                     args.topology, services)
     sys.stdout.write(report)
     if args.out:
         _write(Path(args.out), inputs, scores, pairs, holm_p, report)
+        if ranked:
+            _write_ranked(Path(args.out), ranked, services)
     return 0
 
 

@@ -127,7 +127,7 @@ The scorer MUST read the replay driver's `summary.tsv`, given as the file or its
 - Then its config is `<route>-<mode>--`
 
 ### REQ-9 Output
-The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`.
+The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`. `--topology` adds to this output as REQ-13 states; without it the output MUST be unchanged.
 
 The CLI MUST exit with a one-line message, not a traceback, when an input is missing or malformed, when two configs share no fault case, when two inputs resolve to the same label or the same copy name, and, at parse time, when `--iterations` is below 1.
 
@@ -268,3 +268,69 @@ Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev
 - Given `--system re2-ob --rep 2` or `--system re2-ss --rep 1`
 - When `baro-rcaeval` runs
 - Then it exits naming the holdout, reads no case file and creates no output directory
+
+### REQ-13 Ranked metrics (rcaeval-ranked-metrics T1)
+`score --service-only --topology PATH` MUST add AC@1, AC@3, AC@5, Avg@5 and their chance levels to the output, with the semantics of RCAEval's evaluator at tag `1.11.0`, because the published baselines report Avg@5 and AC@1 alone cannot see a truth ranked second (vision §6). `--topology` without `--service-only` MUST exit with a one-line message and write nothing. Without `--topology`, the report and every output file MUST be byte-identical to what REQ-9 writes.
+
+A row's ranking MUST be its `reported` service followed by the services of its raw `candidates` column, whatever the route, each service's first occurrence kept before any cut, with `UNKNOWN`, `none` and empty services dropped. A row whose status is not `COMPLETED` MUST have an empty ranking. The ranking is separate from candidate recall: REQ-7a still governs which rows recall applies to, and how it counts.
+
+Per config, per fault and pooled, on fault rows only: AC@k MUST be the share of rows whose truth's service is in the ranking's first k, an empty ranking counting in the denominator with no hit; Avg@5 MUST be the mean of AC@1 to AC@5; the mean list length MUST be reported, so that a route with one answer per row, whose AC@3, AC@5 and Avg@5 equal its AC@1, is not read as a ranking's result. AC@1, AC@3 and AC@5 MUST carry their Wilson 95% interval; Avg@5 MUST be a point value, being a mean of nested proportions on the same cases.
+
+With n the number of entries in the topology's `services` list, chance MUST be `min(k, n) / n` for AC@k, and the mean of chance AC@1 to AC@5 for Avg@5. A topology that is missing, not JSON, or without a non-empty list of distinct names MUST exit with a one-line message naming the file, and write nothing.
+
+The report MUST gain, after each config's lines, one `ranked` line per fault and pooled, and, before the paired lines, one line stating n, the topology path and the chance levels. `--out` MUST also write `ranked.tsv` next to `scores.tsv`: config, fault, n, the hits at k = 1 to 5, each cut's AC and Wilson bounds, `avg5`, `mean_length`, `services` and the chance levels. `scores.tsv`, `paired.tsv` and `inputs.tsv` MUST NOT change, so the topology path is recorded in the report line alone.
+
+#### Scenario: The truth ranked second of five
+- GIVEN a COMPLETED fault row reporting `frontend` with candidates `frontend`, the truth's service, and three others
+- WHEN `score --service-only --topology PATH` runs
+- THEN its AC@1 is 0, its AC@3 and AC@5 are 1, its Avg@5 is 0.8 and its mean list length is 5
+
+#### Scenario: An empty ranking
+- GIVEN one fault row reporting `UNKNOWN|UNKNOWN` with no candidates, and one reporting the truth
+- WHEN the ranked metrics are computed
+- THEN n is 2 and AC@1, AC@3, AC@5 and Avg@5 are all 0.5
+
+#### Scenario: A repeated service
+- GIVEN a row with candidates `frontend|A;frontend|B;frontend|C;checkoutservice|A` and truth service `checkoutservice`
+- WHEN the ranked metrics are computed
+- THEN the ranking is `frontend`, `checkoutservice`, and the row is a hit at k = 2 and k = 3
+
+#### Scenario: A row that did not complete
+- GIVEN a `TIMED_OUT` fault row whose candidates hold the truth's service
+- WHEN the ranked metrics are computed
+- THEN its ranking is empty and it is a miss at every k
+
+#### Scenario: A single answer
+- GIVEN fault rows with a `reported` answer and no candidates
+- WHEN the ranked metrics are computed
+- THEN AC@3, AC@5 and Avg@5 equal AC@1, and the mean list length is 1
+
+#### Scenario: Healthy rows
+- GIVEN a fault row and a healthy row with candidates
+- WHEN the ranked metrics are computed
+- THEN n is 1, and no line names the healthy row's fault
+
+#### Scenario: The ranking on a route without candidate recall
+- GIVEN a `local` row with report `plain` and a `candidates` column
+- WHEN it is read
+- THEN its ranking holds the candidates' services, and candidate recall still does not apply to it
+
+#### Scenario: Chance with 11 services
+- GIVEN a topology of 11 services
+- WHEN `score --service-only --topology PATH` runs
+- THEN the report states `chance with 11 services (PATH): AC@1 9.09%  AC@3 27.27%  AC@5 45.45%  Avg@5 27.27%`
+
+#### Scenario: Chance with 3 services
+- GIVEN a topology of 3 services
+- WHEN `score --service-only --topology PATH` runs
+- THEN chance AC@3 and AC@5 cap at 100.00% and chance Avg@5 is 80.00%
+
+#### Scenario: The flag without service-only
+- GIVEN `score --topology PATH` without `--service-only`
+- WHEN it runs
+- THEN it exits naming both flags, and writes nothing
+
+#### Scenario: Without the flag
+- GIVEN the committed inputs of `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`
+- WHEN `score --service-only` runs on them with the same labels and seed
+- THEN `report.txt`, `scores.tsv` and `paired.tsv` are byte-identical to the committed files, and no `ranked.tsv` is written

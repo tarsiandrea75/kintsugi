@@ -5,6 +5,7 @@ so abstentions and healthy cases follow the protocol's rule rather than MATCH/MI
 """
 
 import csv
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,11 @@ NO_REPORT = "none"
 # Rows whose candidates column is meaningful (hybrid T4): the rules' list, and the list a hybrid report chose from.
 CANDIDATE_ROUTE = "rules"
 CANDIDATE_REPORT = "hybrid"
+
+# The service parts that are not an answer, so never enter a ranking.
+NO_SERVICE = ("", NO_REPORT, "UNKNOWN")
+# The longest list the ranked metrics read: AC@1 to AC@5, and their mean Avg@5.
+RANK_DEPTH = 5
 
 REQUIRED = ("fault", "mode", "route", "status", "truth", "reported", "split", "recording")
 
@@ -79,6 +85,8 @@ class Row:
     candidates: tuple = None
     # Scored on the service part of the truth only (--service-only).
     service_only: bool = False
+    # The services this row names, best first (ranking_of); whichever route wrote it.
+    ranking: tuple = ()
 
     @property
     def case(self):
@@ -99,6 +107,20 @@ def parse_candidates(raw, route, report):
     if raw is None or (route != CANDIDATE_ROUTE and report != CANDIDATE_REPORT):
         return None
     return tuple(raw.split(";")) if raw else ()
+
+
+def ranking_of(status, reported, raw_candidates):
+    """The services a row names, best first: reported, then candidates, each once, and none unless COMPLETED.
+
+    Why not Row.candidates: that one governs candidate recall and is None off the rules and hybrid rows, while a
+    ranking has one rule for every route, so a single-answer route ranks its one answer. The dedupe comes before any
+    cut at k, as in RCAEval's evaluator: a service repeated with another category does not push the truth down.
+    """
+    if status != "COMPLETED":
+        return ()
+    answers = [reported] + (raw_candidates.split(";") if raw_candidates else [])
+    services = (service_of(answer) for answer in answers)
+    return tuple(dict.fromkeys(service for service in services if service not in NO_SERVICE))
 
 
 def read_summary(path, label=None, service_only=False):
@@ -126,7 +148,8 @@ def read_summary(path, label=None, service_only=False):
             rows.append(Row(config, raw["fault"], raw["mode"], raw["route"], view, raw["split"], raw["recording"],
                             raw["status"], raw["truth"], raw["reported"],
                             outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
-                            parse_candidates(raw.get("candidates"), raw["route"], report), service_only))
+                            parse_candidates(raw.get("candidates"), raw["route"], report), service_only,
+                            ranking_of(raw["status"], raw["reported"], raw.get("candidates"))))
     return rows
 
 
@@ -219,6 +242,84 @@ def summarize(rows):
                               sum(r.outcome == FALSE_ALARM for r in healthy)) if healthy else None
         scores.append(ConfigScore(config, faults, pooled, health))
     return scores
+
+
+@dataclass(frozen=True)
+class RankedScore:
+    """AC@k on the service over fault rows; hits[k - 1] is the rows whose truth is in the ranking's first k."""
+
+    fault: str
+    n: int
+    hits: tuple
+    # The services named over all the rows: mean_length shows a one-answer route for what it is.
+    listed: int
+
+    def ac(self, k):
+        return self.hits[k - 1] / self.n
+
+    def ci(self, k):
+        return wilson(self.hits[k - 1], self.n)
+
+    @property
+    def avg5(self):
+        """A point value: a mean of nested proportions on the same cases, so a Wilson interval does not apply."""
+        return sum(self.hits) / (RANK_DEPTH * self.n)
+
+    @property
+    def mean_length(self):
+        return self.listed / self.n
+
+
+@dataclass(frozen=True)
+class RankedConfig:
+    config: str
+    faults: list
+    pooled: RankedScore
+
+
+def _ranked_score(name, rows):
+    def hit(row, k):
+        return service_of(row.truth) in row.ranking[:k]
+
+    return RankedScore(name, len(rows), tuple(sum(hit(r, k) for r in rows) for k in range(1, RANK_DEPTH + 1)),
+                       sum(len(r.ranking) for r in rows))
+
+
+def summarize_ranked(rows):
+    """Per config, in first-seen order: AC@1 to AC@5 per fault and pooled, on fault rows as in summarize."""
+    scores = []
+    for config in dict.fromkeys(r.config for r in rows):
+        faulty = [r for r in rows if r.config == config and not r.healthy]
+        faults = [_ranked_score(f, [r for r in faulty if r.fault == f])
+                  for f in sorted(dict.fromkeys(r.fault for r in faulty))]
+        scores.append(RankedConfig(config, faults, _ranked_score("pooled", faulty) if faulty else None))
+    return scores
+
+
+def chance_ac(k, n):
+    """AC@k of a uniformly random list of the n services: the list holds min(k, n) of them."""
+    return min(k, n) / n
+
+
+def chance_avg5(n):
+    return sum(chance_ac(k, n) for k in range(1, RANK_DEPTH + 1)) / RANK_DEPTH
+
+
+def read_service_count(path):
+    """The number of services of a topology file: chance's n."""
+    try:
+        with Path(path).open(encoding="utf-8") as handle:
+            services = json.load(handle)
+    except OSError as error:
+        raise ValueError(f"cannot read the topology {path}: {error.strerror}") from None
+    except ValueError as error:
+        raise ValueError(f"the topology {path} is not JSON: {error}") from None
+    services = services.get("services") if isinstance(services, dict) else None
+    if not isinstance(services, list) or not services or not all(isinstance(s, str) and s for s in services):
+        raise ValueError(f"the topology {path} needs a non-empty services list of names")
+    if len(set(services)) != len(services):
+        raise ValueError(f"the topology {path} lists a service twice")
+    return len(services)
 
 
 @dataclass(frozen=True)

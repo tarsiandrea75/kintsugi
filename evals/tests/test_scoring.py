@@ -7,11 +7,17 @@ from kintsugi_evals.scoring import (
     CORRECT,
     FALSE_ALARM,
     MISS,
+    chance_ac,
+    chance_avg5,
     outcome,
     paired,
+    ranking_of,
+    read_service_count,
     read_summary,
     summarize,
+    summarize_ranked,
 )
+from kintsugi_evals.stats import wilson
 
 HEADER = [
     "fault", "mode", "route", "sample", "status", "truth", "reported", "verdict", "recorded", "unrecorded",
@@ -282,3 +288,165 @@ def test_service_only_candidate_recall_matches_the_service(tmp_path):
     [service] = summarize(read_summary(path, service_only=True))
     assert default.pooled.recalled == 0
     assert service.pooled.recalled == 1
+
+
+RANK_TRUTH = "checkoutservice|RESOURCE_EXHAUSTION"
+
+
+def write_ranked_tsv(path, rows, route="baro", report="-"):
+    """A summary.tsv whose rows are (fault, status, truth, reported, recording, candidates)."""
+    lines = ["\t".join(HEADER + ["view", "report", "candidates"])]
+    for fault, status, truth, reported, recording, candidates in rows:
+        lines.append("\t".join([fault, "decision", route, "1", status, truth, reported, "-", "-", "-", "-", "-", "0",
+                                "0", "-", "dev", recording, "-", report, candidates]))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def ranked(tmp_path, rows, **kwargs):
+    [score] = summarize_ranked(read_summary(write_ranked_tsv(tmp_path / "summary.tsv", rows, **kwargs),
+                                            service_only=True))
+    return score
+
+
+def pairs(*services):
+    return ";".join(f"{service}|UNKNOWN" for service in services)
+
+
+def test_ranking_is_reported_then_candidates_with_first_occurrences_and_no_unknown():
+    assert ranking_of("COMPLETED", "a|X", "b|Y;a|Z;UNKNOWN|UNKNOWN;c|Y;b|Z") == ("a", "b", "c")
+
+
+def test_ranking_of_a_row_that_did_not_complete_is_empty():
+    assert ranking_of("TIMED_OUT", "a|X", "a|X;b|Y") == ()
+    assert ranking_of("FAILED", "none", "") == ()
+
+
+def test_ranking_without_an_answer_is_empty():
+    assert ranking_of("COMPLETED", "UNKNOWN|UNKNOWN", "") == ()
+    assert ranking_of("COMPLETED", "none", "") == ()
+    assert ranking_of("COMPLETED", "", None) == ()
+
+
+def test_ranking_of_a_file_without_the_column_is_the_reported_service():
+    assert ranking_of("COMPLETED", "a|X", None) == ("a",)
+
+
+def test_truth_at_rank_two_of_five(tmp_path):
+    score = ranked(tmp_path, [("cpu", "COMPLETED", RANK_TRUTH, "frontend|UNKNOWN", "a",
+                               pairs("frontend", "checkoutservice", "cartservice", "redis", "adservice"))])
+    assert score.pooled.n == 1
+    assert (score.pooled.ac(1), score.pooled.ac(3), score.pooled.ac(5)) == (0, 1, 1)
+    assert score.pooled.avg5 == pytest.approx(0.8)
+    assert score.pooled.mean_length == 5
+
+
+def test_an_empty_ranking_is_a_miss_at_every_k_and_stays_in_the_denominator(tmp_path):
+    score = ranked(tmp_path, [
+        ("cpu", "COMPLETED", RANK_TRUTH, "UNKNOWN|UNKNOWN", "a", ""),
+        ("cpu", "COMPLETED", RANK_TRUTH, RANK_TRUTH, "b", pairs("checkoutservice")),
+    ])
+    assert score.pooled.n == 2
+    assert score.pooled.hits == (1, 1, 1, 1, 1)
+    assert (score.pooled.ac(1), score.pooled.ac(3), score.pooled.ac(5), score.pooled.avg5) == (0.5, 0.5, 0.5, 0.5)
+    assert score.pooled.mean_length == 0.5
+
+
+def test_a_repeated_service_counts_once_before_the_cut(tmp_path):
+    # Undeduplicated, the truth would be fourth, a miss at k = 3. Deduplicated, it is second.
+    score = ranked(tmp_path, [("cpu", "COMPLETED", RANK_TRUTH, "frontend|A", "a",
+                               "frontend|A;frontend|B;frontend|C;checkoutservice|A")])
+    assert score.pooled.hits == (0, 1, 1, 1, 1)
+    assert score.pooled.ac(3) == 1
+    assert score.pooled.mean_length == 2
+
+
+def test_a_timed_out_row_with_candidates_has_an_empty_ranking(tmp_path):
+    score = ranked(tmp_path, [("cpu", "TIMED_OUT", RANK_TRUTH, RANK_TRUTH, "a", pairs("checkoutservice", "frontend"))])
+    assert score.pooled.hits == (0, 0, 0, 0, 0)
+    assert score.pooled.avg5 == 0
+    assert score.pooled.mean_length == 0
+
+
+def test_a_single_answer_has_every_ranked_metric_equal_to_ac1(tmp_path):
+    score = ranked(tmp_path, [
+        ("cpu", "COMPLETED", RANK_TRUTH, RANK_TRUTH, "a", ""),
+        ("cpu", "COMPLETED", RANK_TRUTH, "frontend|UNKNOWN", "b", ""),
+    ], route="cloud")
+    assert (score.pooled.ac(1), score.pooled.ac(3), score.pooled.ac(5), score.pooled.avg5) == (0.5, 0.5, 0.5, 0.5)
+    assert score.pooled.mean_length == 1
+
+
+def test_healthy_rows_stay_out_of_the_ranked_metrics(tmp_path):
+    score = ranked(tmp_path, [
+        ("cpu", "COMPLETED", RANK_TRUTH, RANK_TRUTH, "a", pairs("checkoutservice")),
+        ("none", "COMPLETED", "NONE|NONE", "frontend|UNKNOWN", "h", pairs("frontend", "NONE")),
+    ])
+    assert score.pooled.n == 1
+    assert [fault.fault for fault in score.faults] == ["cpu"]
+    assert score.pooled.ac(1) == 1
+
+
+def test_a_config_with_healthy_rows_only_has_no_ranked_score(tmp_path):
+    score = ranked(tmp_path, [("none", "COMPLETED", "NONE|NONE", "UNKNOWN|UNKNOWN", "h", "")])
+    assert score.pooled is None
+    assert score.faults == []
+
+
+def test_ranked_metrics_per_fault_and_pooled_with_wilson_on_the_cuts(tmp_path):
+    score = ranked(tmp_path, [
+        ("cpu", "COMPLETED", RANK_TRUTH, RANK_TRUTH, "a", pairs("checkoutservice", "frontend")),
+        ("cpu", "COMPLETED", RANK_TRUTH, "frontend|UNKNOWN", "b", pairs("frontend", "adservice", "checkoutservice")),
+        ("delay", "COMPLETED", RANK_TRUTH, "frontend|UNKNOWN", "c", pairs("frontend", "adservice")),
+    ])
+    assert [(f.fault, f.hits) for f in score.faults] == [("cpu", (1, 1, 2, 2, 2)), ("delay", (0, 0, 0, 0, 0))]
+    assert score.pooled.hits == (1, 1, 2, 2, 2)
+    assert score.pooled.avg5 == pytest.approx(8 / 15)
+    assert score.pooled.mean_length == pytest.approx(7 / 3)
+    for k, hits in ((1, 1), (3, 2), (5, 2)):
+        assert score.pooled.ci(k) == wilson(hits, 3)
+
+
+def test_the_ranking_ignores_the_route_while_candidate_recall_does_not(tmp_path):
+    path = write_ranked_tsv(tmp_path / "summary.tsv", [
+        ("cpu", "COMPLETED", RANK_TRUTH, "frontend|UNKNOWN", "a", pairs("frontend", "checkoutservice"))],
+        route="local", report="plain")
+    rows = read_summary(path, service_only=True)
+    assert rows[0].candidates is None
+    assert rows[0].ranking == ("frontend", "checkoutservice")
+    assert summarize(rows)[0].pooled.candidate_recall is None
+
+
+def test_chance_with_eleven_services():
+    assert chance_ac(1, 11) == pytest.approx(0.0909, abs=5e-5)
+    assert chance_ac(3, 11) == pytest.approx(0.2727, abs=5e-5)
+    assert chance_ac(5, 11) == pytest.approx(0.4545, abs=5e-5)
+    assert chance_avg5(11) == pytest.approx(0.2727, abs=5e-5)
+
+
+def test_chance_caps_at_one_when_the_list_covers_the_services():
+    assert chance_ac(1, 3) == pytest.approx(1 / 3)
+    assert chance_ac(3, 3) == 1
+    assert chance_ac(5, 3) == 1
+    assert chance_avg5(3) == pytest.approx(0.8)
+
+
+def test_service_count_of_the_real_topology():
+    from pathlib import Path
+
+    topology = Path(__file__).resolve().parents[2] / "agent/src/main/resources/topology/re2-ob.json"
+    assert read_service_count(topology) == 11
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]", "{}", '{"services": "a"}', '{"services": []}',
+                                     '{"services": ["a", 1]}', '{"services": ["a", ""]}', '{"services": ["a", "a"]}'])
+def test_a_malformed_topology_is_refused_naming_the_file(tmp_path, content):
+    path = tmp_path / "topology.json"
+    path.write_text(content)
+    with pytest.raises(ValueError, match="topology.json"):
+        read_service_count(path)
+
+
+def test_a_missing_topology_is_refused_naming_the_file(tmp_path):
+    with pytest.raises(ValueError, match="nowhere.json"):
+        read_service_count(tmp_path / "nowhere.json")

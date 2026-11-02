@@ -606,6 +606,7 @@ python3 -m kintsugi_evals score --service-only --label 0 ../infra/scripts/out/re
 - The test JVM gets `-Dkintsugi.agent.topology=classpath:topology/re2-ob.json`, so the gatherer, the rules and the loop read Online Boutique's topology. A lab run (`--dataset lab`, the default) gets the lab's file, as before.
 - Decision mode only: the converter writes one decision case per RCAEval case, in `dev` (repetition 1), or in `holdout` only under a committed holdout plan.
 - `score --service-only` counts a report correct when its service is the truth's, whatever its category, still with Wilson 95% CIs; the report's first line per config ends with `; AC@1 on the service only`. Without the flag the scorer compares the whole `service|category`.
+- `score --service-only --topology agent/src/main/resources/topology/re2-ob.json`, with the path relative to where it runs, adds AC@1, AC@3, AC@5, Avg@5 and their chance levels over that topology's services to the report, and `--out` also writes `ranked.tsv` (REQ-13). The lab never passes it. Without `--service-only` it is refused.
 
 ### Choose the rules version
 
