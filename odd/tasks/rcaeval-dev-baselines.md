@@ -41,6 +41,7 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 - [x] T3 Fresh 0 and 0R runs; verdicts equal to the earlier ones. Route: inline commands.
 - [x] T4 D's run, after the human's go-ahead. Route: inline commands.
 - [x] T5 A's overnight run; the scored result committed. Route: inline commands.
+- [ ] T5b A at a 2100 s deadline, under `evals/plans/2026-11-02-a-deadline-re2ob-dev.md` (the human's choice, 2026-11-02). Route: inline commands.
 - [ ] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
 - [ ] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
 - [ ] T8 BARO's plan, run and result. Route: inline commands.
@@ -77,4 +78,4 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
 
 ## Next step
 
-The human decides how A is measured on RCAEval. Any change of deadline needs a new plan. BARO (T6–T8) does not depend on it.
+T5b's plan is committed. Its run takes about 12 to 17.5 h of CPU and waits for the human's go-ahead. BARO (T6–T8) does not depend on it.
