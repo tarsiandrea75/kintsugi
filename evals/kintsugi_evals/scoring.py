@@ -110,13 +110,14 @@ def parse_candidates(raw, route, report):
 
 
 def ranking_of(status, reported, raw_candidates):
-    """The services a row names, best first: reported, then candidates, each once, and none unless COMPLETED.
+    """The services a row names, best first: reported, then candidates, each once, and none unless it answered.
 
     Why not Row.candidates: that one governs candidate recall and is None off the rules and hybrid rows, while a
     ranking has one rule for every route, so a single-answer route ranks its one answer. The dedupe comes before any
     cut at k, as in RCAEval's evaluator: a service repeated with another category does not push the truth down.
+    A row that abstains has no ranking even with candidates, so ranked AC@1 cannot differ from REQ-7's AC@1.
     """
-    if status != "COMPLETED":
+    if status != "COMPLETED" or service_of(reported) in NO_SERVICE:
         return ()
     answers = [reported] + (raw_candidates.split(";") if raw_candidates else [])
     services = (service_of(answer) for answer in answers)

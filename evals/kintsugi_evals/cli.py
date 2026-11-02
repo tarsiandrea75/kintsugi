@@ -236,9 +236,9 @@ def score(args):
 
 
 def _score(args):
-    if args.topology and not args.service_only:
+    if args.topology is not None and not args.service_only:
         raise SystemExit("score: --topology needs --service-only: the ranked metrics name the service alone")
-    services = read_service_count(args.topology) if args.topology else None
+    services = read_service_count(args.topology) if args.topology is not None else None
     sources = [(name, path) for name, path in args.label] + [(None, path) for path in args.dirs]
     if not sources:
         raise SystemExit("score needs at least one replay dir")
@@ -258,7 +258,7 @@ def _score(args):
     holm_p = [None] * len(pairs)
     for i, adjusted in zip(tested, holm([pairs[i].mcnemar_p for i in tested])):
         holm_p[i] = adjusted
-    ranked = [summarize_ranked(rows)[0] for _, _, rows in inputs] if args.topology else None
+    ranked = [summarize_ranked(rows)[0] for _, _, rows in inputs] if args.topology is not None else None
     report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations, args.service_only, ranked,
                      args.topology, services)
     sys.stdout.write(report)

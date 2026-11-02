@@ -301,6 +301,18 @@ def test_score_refuses_topology_without_service_only(tmp_path, capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_score_refuses_an_empty_topology_value(tmp_path, capsys):
+    # An unset shell variable passed as --topology "$TOPO" must not silently drop the ranked metrics.
+    run = ranked_run(tmp_path)
+    out_dir = tmp_path / "out"
+    without_service_only = error_of(["score", "--topology", "", "--label", "B", str(run), "--out", str(out_dir)], capsys)
+    assert "--service-only" in str(without_service_only.code)
+    with_service_only = error_of(["score", "--service-only", "--topology", "", "--label", "B", str(run),
+                                  "--out", str(out_dir)], capsys)
+    assert str(with_service_only.code).startswith("score:")
+    assert not out_dir.exists()
+
+
 def test_score_reports_a_malformed_topology_without_a_traceback(tmp_path, capsys):
     run = ranked_run(tmp_path)
     path = tmp_path / "topology.json"
