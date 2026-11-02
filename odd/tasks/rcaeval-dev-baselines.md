@@ -79,6 +79,7 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
   - The plan's rule: 30 of 30 finished, at least 15, so 2100 s is the proposal for M4. Report time: median 877 s (14.6 minutes), maximum 1,051 s. At that median, 200 holdout cases take about 49 h of CPU.
   - Prompt check: 29 samples at most 5,828 tokens; one at 10,877, the only one at 8,000 or more, read as two attempts because it is about twice the others (not separately proved). No sign of a cut.
   - A never abstains: its 11 misses are wrong answers, 10 of them `frontend` or `checkoutservice`. 0R and A together are right on 26 of 30, and each has cases the other misses.
+- 2026-11-02: native review of `3d8fb7a..d1177db`: one reliability lens, **approved** and acknowledged (lineage `review-e6c6ac93b3616320`).
 
 ## Next step
 
