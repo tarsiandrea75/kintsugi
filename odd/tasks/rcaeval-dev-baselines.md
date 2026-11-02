@@ -42,8 +42,8 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 - [x] T4 D's run, after the human's go-ahead. Route: inline commands.
 - [x] T5 A's overnight run; the scored result committed. Route: inline commands.
 - [x] T5b A at a 2100 s deadline, under `evals/plans/2026-11-02-a-deadline-re2ob-dev.md` (the human's choice, 2026-11-02). Route: inline commands.
-- [ ] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
-- [ ] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
+- [x] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
+- [x] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
 - [ ] T8 BARO's plan, run and result. Route: inline commands.
 
 ## Acceptance criteria
@@ -80,7 +80,9 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
   - Prompt check: 29 samples at most 5,828 tokens; one at 10,877, the only one at 8,000 or more, read as two attempts because it is about twice the others (not separately proved). No sign of a cut.
   - A never abstains: its 11 misses are wrong answers, 10 of them `frontend` or `checkoutservice`. 0R and A together are right on 26 of 30, and each has cases the other misses.
 - 2026-11-02: native review of `3d8fb7a..d1177db`: one reliability lens, **approved** and acknowledged (lineage `review-e6c6ac93b3616320`).
+- 2026-11-02: the human accepted 2100 s; ADR-023 (`6216e1a`). T6 done: ADR-024 (`371b783`), then corrected after T7 (the scale threshold, no abstention, the unseen published pipeline).
+- 2026-11-02: T7 done by a delegated writer (`ad6a75d`) on `feat/rcaeval-dev-baselines-01-baro`: `baro-rcaeval`, REQ-12, goldens from `RCAEval` 1.11.0 on synthetic series. RED `ImportError` at collection; GREEN 44 passed in `tests/test_baro.py`; parent spot check `pytest -q` 182 passed. About 800 authored lines without generated fixtures, over the heuristic, mostly the generator and the tests. Not run on real cases. AC6 holds.
 
 ## Next step
 
-The human accepts or rejects 2100 s as A's deadline on RCAEval, against M4's budget; if accepted, an ADR records it before any holdout is read. Then BARO (T6–T8).
+T8: BARO's plan, then its run.

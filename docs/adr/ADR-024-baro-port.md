@@ -25,13 +25,13 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 2. In each segment separately, drop `time` and drop every column constant in that segment. A later `NaN` counts as different from the first value, as pandas' `!=` does.
 3. Divide columns ending in `_mem` by 1e6.
 4. Keep the columns present in both segments, in the normal segment's order.
-5. Per column, `RobustScaler` as fitted on the normal segment: centre at the median, scale by the difference of the 75th and 25th percentiles with linear interpolation, ignoring `NaN`; a scale of 0 becomes 1.
+5. Per column, `RobustScaler` as fitted on the normal segment: centre at the median, scale by the difference of the 75th and 25th percentiles with linear interpolation, ignoring `NaN`; a scale below 10 machine epsilons becomes 1 (`sklearn.preprocessing._data._handle_zeros_in_scale`), not only an exact 0.
 6. A column's score is Python's `max` over its scaled anomalous values, in order, which is order-dependent on `NaN`. Sort descending and stably with Python's `sorted`.
 7. A column's service is the text before its first `_`, with `-db` removed (`RCAEval.benchmark.scoring.to_service`). The service ranking keeps each service's first occurrence. `frontend-external` and `redis` remain their own names, as published.
 
 **Proof of equality.** A generator run once, in a throwaway virtual environment with `RCAEval==1.11.0` installed without dependencies plus numpy, pandas and scikit-learn, writes goldens of the original's ranking and scores on synthetic series. They are committed as a fixture with the generator and its versions, and the port's test compares against them. The goldens never touch RCAEval case data.
 
-**Output.** One `summary.tsv` the scorer reads as is: route `baro`, `reported` as `<service>|UNKNOWN` for the top service, `candidates` holding the top 5. BARO always answers. The truth, taken from the case directory for the `truth` column, never reaches the ranking.
+**Output.** One `summary.tsv` the scorer reads as is: route `baro`, `reported` as `<service>|UNKNOWN` for the top service, `candidates` holding the top 5. BARO has no abstention. A case with no column left to rank, or with input the port refuses, fails the whole run and writes nothing, so no `UNKNOWN` is invented. The truth, taken from the case directory for the `truth` column, never reaches the ranking.
 
 ## Alternatives considered
 
@@ -41,7 +41,9 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 
 ## Consequences
 
-- The port can differ from the original on inputs the goldens do not cover. T8's plan adds a check on the 30 dev cases in the throwaway environment.
+- The port can differ from the original on inputs the goldens do not cover, and float parsing can differ by an ulp, which could swap two nearly tied columns. T8's plan adds a check of exact rankings on the 30 dev cases in the throwaway environment.
+- **The port equals the function, not necessarily the published pipeline.** The wheel holds no benchmark entry point, so how the published evaluation windows and feeds `baro` was not seen. Published numbers are not comparable to this one until that is checked.
+- The window is inclusive at both ends, while the converter's are half-open, so a sample exactly at +600 s reaches BARO and not the dossier.
 - A new `RCAEval` release does not move this baseline. The pinned version is the one reported.
 - BARO reads raw case files, so it gets the guard the converter has: only repetitions a committed plan names, and no holdout before M4.
 - AC@3 and Avg@5 for comparison with the published numbers are outside this ADR.
