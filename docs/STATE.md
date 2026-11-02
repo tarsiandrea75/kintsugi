@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-02 (session 01)
+2026-11-02 (session 02)
 
 ## Milestone
 
@@ -16,7 +16,12 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-This session (journal `docs/journal/2026-11-02-01.md`), all on local branches, nothing pushed: `resource-facts`, T1–T7 (`odd/tasks/resource-facts.md`, ADR-021), chain `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules`.
+Latest (journal `docs/journal/2026-11-02-02.md`): `rcaeval-dev-baselines`, T1–T10 complete (`odd/tasks/rcaeval-dev-baselines.md`, ADR-022, ADR-023, ADR-024), chain `feat/rcaeval-dev-baselines` → `-01-baro`. RE2-OB dev, service-only, 30 cases (`evals/results/2026-11-02-baselines-re2ob-dev/`, `evals/results/2026-11-02-a-deadline-re2ob-dev/`, `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`):
+- 0 4/30, 13% [5%, 30%]; 0R 20/30, 67% [49%, 81%]; D 11/30, 37% [22%, 54%]; A at a 2100 s deadline 19/30, 63% [46%, 78%]; BARO with the published pipeline 4/30, 13% [5%, 30%].
+- D − 0R −30 points (p = 0.049, Holm 0.12); A2100 − 0R −3 points (p = 1); BARO − 0R −53 points (Holm 0.01). All 26 of BARO's misses name `redis`, and the truth is second in 22 of them.
+- T9 and T10 have no native review: it refused both candidates with `lens_context_budget_exceeded` (the regenerated fixtures). The writer's checks, the parent's spot check and T10's conformance on 30 cases stand in for it.
+
+Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, nothing pushed: `resource-facts`, T1–T7 (`odd/tasks/resource-facts.md`, ADR-021), chain `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules`.
 - Three resource metrics on both tracks: `processor_usage`, `memory_used`, `open_files` (not `cpu_usage`: the converter's guard rejects the `cpu` token). They are in the dossier's `## Resources` section.
 - Config 0R (`--rules v2`): Config 0's rules unchanged, then R-RES (incident mean at least twice the previous mean and above the previous max). Config 0 (`v1`) is unchanged, with verdicts identical on lab dev, lab holdout and RE2-OB dev.
 - RE2-OB dev, service-only (`evals/results/2026-11-01-config0r-re2ob-dev/`, `evals/results/2026-11-01-hybrid-rules-v2-re2ob-dev/`): 0 4/30, 13% [5%, 30%]; **0R 20/30, 67% [49%, 81%]**; **HR 23/30, 77% [59%, 88%]**. 0R − 0 +53 points, exact McNemar p = 3.1e-05; HR − 0R +10 points, 3 discordant cases all for HR, p = 0.25 (the plan fixed before the run that HR could not win: ceiling 24/30). HR kept all 20 of 0R's right answers and gained 3 of the 4 lists where the truth was second or third.
@@ -30,7 +35,8 @@ This session (journal `docs/journal/2026-11-02-01.md`), all on local branches, n
 5. Done 2026-11-01: the RCAEval converter (above).
 6. Done 2026-11-01: H − 0 on RE2-OB dev (`odd/tasks/hybrid.md` T9–T10, plan `evals/plans/2026-11-01-hybrid-re2ob-dev.md`, branch `feat/hybrid-rcaeval`). H 5/30, 17% [7%, 34%] against 0 4/30, 13% [5%, 30%]; H − 0 +3 points, McNemar p = 1. **The stop rule is not met**, as the plan fixed before the run: 19 of 30 candidate lists are empty, so H's ceiling was 5/30, and it reached it (Qon's one real choice went right). The limit on RCAEval is the rules' recall, i.e. the dossier's missing resource facts (vision M3).
 7. Done 2026-11-02: `resource-facts` (Last action). The stop rule's reading is the human's: the paired win on RE2-OB dev is 0R − 0 (rules only, p = 3.1e-05); HR − 0R is not a win (p = 0.25).
-8. **Next: the human reads the stop rule (vision §7) and chooses the next feature.** Candidates from the results: the holdout (RE2-OB repetitions 2–3, holdout A) for 0R and HR under a plan committed first; the 2 `INVALID_REPORT` on loss; delay (1/5 for every config).
+8. Done 2026-11-02: `rcaeval-dev-baselines` (Last action). ADR-023 fixes A's RCAEval deadline at 2100 s; at A's median report time, 200 holdout cases take about 49 h of CPU.
+9. **Next: AC@3 and Avg@5 in the scorer** (vision §6: RCAEval only, with the evaluator's semantics and the chance level shown), so BARO can be compared with the published baselines (human's choice, 2026-11-02). Still the human's: reading the stop rule (vision §7). The holdout is out until M4 (the freeze check); the 2 `INVALID_REPORT` on loss and delay stay as candidates.
 
 ## Local branch chains (not pushed)
 
@@ -51,7 +57,7 @@ This session (journal `docs/journal/2026-11-02-01.md`), all on local branches, n
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -71,6 +77,11 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+Session of 2026-11-02, rcaeval-dev-baselines (details in `odd/tasks/rcaeval-dev-baselines.md`):
+- `evals/tests/test_baro.py:209` tests a repetition that does not exist (review WARNING R3-rep-guard-unproved).
+- Timed-out samples record no `promptTokens`, so a cut prompt cannot be checked on them.
+- Generated fixtures can push a commit past the native review's context budget.
 
 Session of 2026-11-01/02, resource-facts (details in `odd/tasks/resource-facts.md`):
 - `summary.tsv`'s `model` column cannot tell HR from H; `tools-list.json` holds the old `query_metric` description; second report attempts are not recorded in the incident JSON.
