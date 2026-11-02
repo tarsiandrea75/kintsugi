@@ -38,7 +38,7 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 
 - [x] T1 ADR-022 and the vision amendment. Route: inline (docs; the human approved the amendment on 2026-11-02). Passive docs, structural readback.
 - [x] T2 The plan for 0, 0R, D and A (`evals/plans/2026-11-02-baselines-re2ob-dev.md`). Route: inline (docs). Passive docs, structural readback.
-- [ ] T3 Fresh 0 and 0R runs; verdicts equal to the earlier ones. Route: inline commands.
+- [x] T3 Fresh 0 and 0R runs; verdicts equal to the earlier ones. Route: inline commands.
 - [ ] T4 D's run, after the human's go-ahead. Route: inline commands.
 - [ ] T5 A's overnight run; the scored result committed. Route: inline commands.
 - [ ] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
@@ -66,8 +66,9 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
 
 ## Progress
 
-- 2026-11-02: T1–T2 written, committed on `feat/rcaeval-dev-baselines`. T3 onward not started.
+- 2026-11-02: T1–T2 done (`49f7978`, `4d34cfd`). Native assessment of the range: passive, no review.
+- 2026-11-02: T3 done on `4d34cfd`. Runs `replay-20261102T003836Z-rules` (v1) and `replay-20261102T003846Z-rules` (v2): 30 samples each, all `COMPLETED`, `unrecorded` 0, coverage 1.00. Every column but `seconds` equals `evals/results/2026-11-01-config0r-re2ob-dev/inputs/`, and `recordings.tsv` is identical. AC3 holds.
 
 ## Next step
 
-T3, then the human's go-ahead for T4.
+The human's go-ahead for T4 (about $0.03 to $0.07), then T5 overnight.
