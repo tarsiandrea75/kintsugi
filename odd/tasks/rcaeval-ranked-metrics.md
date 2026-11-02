@@ -91,6 +91,7 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
   - **BARO and 0R tie on Avg@5 at 76%, by different routes:** 0R puts the truth first in 20 cases and has it nowhere in 6, while BARO puts it first in 4 and has it in the top 5 in 29. So BARO's AC@1 understated its ranking, and Avg@5 alone hides the difference.
   - 0's Avg@5 of 16% is under the 27% chance level because 19 of its lists are empty and an abstention counts as a miss, so it does not mean its answers are worse than random. D's and A's numbers measure one answer, not a ranking.
   - Not tested: no paired test on AC@3 or Avg@5. The tie is a description on 30 cases, not a result.
+- 2026-11-02: native review of `b468288` to the feature's close: one reliability lens, **approved** and acknowledged (lineage `review-6522cc9aa1262ccf`). Advisory, not fixed: SUGGESTION R3-001, `ranking_of`'s abstention test covers a reported `UNKNOWN` with candidates, not `none` or empty.
 
 ## Next step
 
