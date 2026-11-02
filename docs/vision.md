@@ -170,7 +170,7 @@ The agent never calls a model directly: it goes through a `ModelRouter` interfac
 |---|---|---|
 | 0 | Rules only, Java, over the same dossier | what do the lab's rules alone get from the same facts, on any system? |
 | 0R | Config 0's rules plus R-RES, the resource rule (ADR-021) | what do the rules alone get from the same facts, resources included? H1's baseline (ADR-022) |
-| A | Local 8B | is laptop hardware enough? |
+| A | Local 8B; report deadline 600 s on the lab, 2100 s on RCAEval (ADR-023) | is laptop hardware enough? |
 | B | Local 14B, on a paired subset of about 60 cases | how much does a bigger local model buy? |
 | C | Local first, escalating to D on abstention, an L2/L3 failure or low confidence (threshold set on dev). Computed from the paired A and D outputs, with no extra runs | near-D quality at a fraction of the cost? |
 | D | `claude-haiku-5-5`, the cheapest API model (ADR-012) | the API reference, and its price |
