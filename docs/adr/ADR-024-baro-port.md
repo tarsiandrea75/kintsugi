@@ -42,7 +42,7 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 ## Consequences
 
 - The port can differ from the original on inputs the goldens do not cover, and float parsing can differ by an ulp, which could swap two nearly tied columns. T8's plan adds a check of exact rankings on the 30 dev cases in the throwaway environment.
-- **The port equals the function, not necessarily the published pipeline.** The wheel holds no benchmark entry point, so how the published evaluation windows and feeds `baro` was not seen. Published numbers are not comparable to this one until that is checked.
+- **The port equals the function, not necessarily the published pipeline.** The wheel holds no benchmark entry point, so how the published evaluation windows and feeds `baro` was not seen. Published numbers are not comparable to this one until that is checked. Checked after T8 on the repository's `main.py` (`main` branch, 2026-11-02, not necessarily 1.11.0): before calling `baro` it drops `_latency-50` columns, turns infinities into `NaN`, then applies `ffill` and `fillna(0)`, and renames `_latency-90` to `_latency`. Its default `--length 20` gives the same 600 samples on each side. The port does none of these, so it is not yet the published baseline.
 - The window is inclusive at both ends, while the converter's are half-open, so a sample exactly at +600 s reaches BARO and not the dossier.
 - A new `RCAEval` release does not move this baseline. The pinned version is the one reported.
 - BARO reads raw case files, so it gets the guard the converter has: only repetitions a committed plan names, and no holdout before M4.
