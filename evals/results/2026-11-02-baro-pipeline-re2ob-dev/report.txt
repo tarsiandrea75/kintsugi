@@ -1,0 +1,63 @@
+0: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0  cpu      0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  disk     0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  loss     2/5   AC@1  40%  [12%, 77%]  recall 60%
+0  mem      1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  socket   0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 37%  selective 36%  recall 17%
+0R: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0R  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+0R  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0R  disk     4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+0R  mem      4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  socket   4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%  recall 80%
+D: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+D  cpu      1/5   AC@1  20%  [4%, 62%]
+D  delay    0/5   AC@1   0%  [0%, 43%]
+D  disk     2/5   AC@1  40%  [12%, 77%]
+D  loss     4/5   AC@1  80%  [38%, 96%]
+D  mem      2/5   AC@1  40%  [12%, 77%]
+D  socket   2/5   AC@1  40%  [12%, 77%]
+D  pooled  11/30  AC@1  37%  [22%, 54%]  coverage 43%  selective 85%
+A2100: route local, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+A2100  cpu      3/5   AC@1  60%  [23%, 88%]
+A2100  delay    2/5   AC@1  40%  [12%, 77%]
+A2100  disk     2/5   AC@1  40%  [12%, 77%]
+A2100  loss     5/5   AC@1 100%  [57%, 100%]
+A2100  mem      4/5   AC@1  80%  [38%, 96%]
+A2100  socket   3/5   AC@1  60%  [23%, 88%]
+A2100  pooled  19/30  AC@1  63%  [46%, 78%]  coverage 100%  selective 63%
+BAROfn: route baro, mode decision, view -; 30 fault cases, 0 healthy; AC@1 on the service only
+BAROfn  cpu      0/5   AC@1   0%  [0%, 43%]
+BAROfn  delay    0/5   AC@1   0%  [0%, 43%]
+BAROfn  disk     3/5   AC@1  60%  [23%, 88%]
+BAROfn  loss     1/5   AC@1  20%  [4%, 62%]
+BAROfn  mem      2/5   AC@1  40%  [12%, 77%]
+BAROfn  socket   1/5   AC@1  20%  [4%, 62%]
+BAROfn  pooled   7/30  AC@1  23%  [12%, 41%]  coverage 100%  selective 23%
+BARO: route baro, mode decision, view -; 30 fault cases, 0 healthy; AC@1 on the service only
+BARO  cpu      0/5   AC@1   0%  [0%, 43%]
+BARO  delay    0/5   AC@1   0%  [0%, 43%]
+BARO  disk     0/5   AC@1   0%  [0%, 43%]
+BARO  loss     2/5   AC@1  40%  [12%, 77%]
+BARO  mem      2/5   AC@1  40%  [12%, 77%]
+BARO  socket   0/5   AC@1   0%  [0%, 43%]
+BARO  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 100%  selective 13%
+0R - 0: 30 cases, 0R only 16, 0 only 0, exact McNemar p = 3.1e-05 (Holm 0.00046); difference +53 points, cluster bootstrap 95% [+33, +70] (seed 1, 10000 resamples)
+D - 0: 30 cases, D only 8, 0 only 1, exact McNemar p = 0.039 (Holm 0.35); difference +23 points, cluster bootstrap 95% [+7, +40] (seed 1, 10000 resamples)
+A2100 - 0: 30 cases, A2100 only 15, 0 only 0, exact McNemar p = 6.1e-05 (Holm 0.00085); difference +50 points, cluster bootstrap 95% [+33, +67] (seed 1, 10000 resamples)
+BAROfn - 0: 30 cases, BAROfn only 7, 0 only 4, exact McNemar p = 0.55 (Holm 1); difference +10 points, cluster bootstrap 95% [-10, +30] (seed 1, 10000 resamples)
+BARO - 0: 30 cases, BARO only 4, 0 only 4, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [-17, +20] (seed 1, 10000 resamples)
+D - 0R: 30 cases, D only 4, 0R only 13, exact McNemar p = 0.049 (Holm 0.35); difference -30 points, cluster bootstrap 95% [-53, -3] (seed 1, 10000 resamples)
+A2100 - 0R: 30 cases, A2100 only 6, 0R only 7, exact McNemar p = 1 (Holm 1); difference -3 points, cluster bootstrap 95% [-27, +20] (seed 1, 10000 resamples)
+BAROfn - 0R: 30 cases, BAROfn only 3, 0R only 16, exact McNemar p = 0.0044 (Holm 0.044); difference -43 points, cluster bootstrap 95% [-67, -20] (seed 1, 10000 resamples)
+BARO - 0R: 30 cases, BARO only 3, 0R only 19, exact McNemar p = 0.00086 (Holm 0.01); difference -53 points, cluster bootstrap 95% [-77, -27] (seed 1, 10000 resamples)
+A2100 - D: 30 cases, A2100 only 10, D only 2, exact McNemar p = 0.039 (Holm 0.35); difference +27 points, cluster bootstrap 95% [+7, +47] (seed 1, 10000 resamples)
+BAROfn - D: 30 cases, BAROfn only 4, D only 8, exact McNemar p = 0.39 (Holm 1); difference -13 points, cluster bootstrap 95% [-37, +10] (seed 1, 10000 resamples)
+BARO - D: 30 cases, BARO only 3, D only 10, exact McNemar p = 0.092 (Holm 0.55); difference -23 points, cluster bootstrap 95% [-47, +0] (seed 1, 10000 resamples)
+BAROfn - A2100: 30 cases, BAROfn only 1, A2100 only 13, exact McNemar p = 0.0018 (Holm 0.02); difference -40 points, cluster bootstrap 95% [-60, -20] (seed 1, 10000 resamples)
+BARO - A2100: 30 cases, BARO only 0, A2100 only 15, exact McNemar p = 6.1e-05 (Holm 0.00085); difference -50 points, cluster bootstrap 95% [-67, -33] (seed 1, 10000 resamples)
+BARO - BAROfn: 30 cases, BARO only 1, BAROfn only 4, exact McNemar p = 0.38 (Holm 1); difference -10 points, cluster bootstrap 95% [-23, +3] (seed 1, 10000 resamples)

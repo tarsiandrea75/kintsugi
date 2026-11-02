@@ -45,8 +45,8 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 - [x] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
 - [x] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
 - [x] T8 BARO's plan, run and result. Route: inline commands.
-- [ ] T9 The port gains the published pipeline's preprocessing (ADR-024, revised; the human's choice, 2026-11-02); goldens and `compare_dev.py` follow, with its three review advisories fixed. Route: delegated writer.
-- [ ] T10 BARO's new plan, run and result. Route: inline commands.
+- [x] T9 The port gains the published pipeline's preprocessing (ADR-024, revised; the human's choice, 2026-11-02); goldens and `compare_dev.py` follow, with its three review advisories fixed. Route: delegated writer.
+- [x] T10 BARO's new plan, run and result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -90,6 +90,12 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
   - Without that fill, 6 cases have `NaN` scores, and on 5 of them a `NaN` column sits first because of how `sorted` treats it. The first non-`NaN` column would give 5/30 instead of 7/30 (exploratory, not in the plan). `conformance.tsv`'s score difference prints `nan` on those rows; `compare_dev.py` does not separate both-`NaN` from one-`NaN`, though the equal rankings bound the effect.
 - 2026-11-02: native review of `c1fef5c..bc3d80e`: one reliability lens, **approved** and acknowledged (lineage `review-6c329853c3a8a04d`). Advisory on `compare_dev.py`, not fixed: R3-conformance-gate-vacuous-pass WARNING (no case gives exit 0; this run had 30), R3-nan-max-order-dependent WARNING (the score difference on `NaN`), R3-refusal-contract-not-implemented SUGGESTION (the docstring promises a refusal comparison the code does not make). To fix with the pipeline change.
 
+- 2026-11-02: T9 done by a delegated writer (`d3df17f`): the port follows `main.py` of tag `1.11.0`; goldens regenerated; the three `compare_dev.py` advisories fixed. RED 45 failed; GREEN 86 passed in `tests/test_baro.py`, 25 of 25 mutants killed; parent spot check `pytest -q` 224 passed. About 676 authored lines without fixtures, over the heuristic, mostly tests and golden scenarios. The dev cases' `time` columns have a 1 s step and 720 and 721 rows around the injection, so 600 rows are 600 s.
+- 2026-11-02: T10 done under `evals/plans/2026-11-02-baro-pipeline-re2ob-dev.md` (`4d12c2b`). Conformance: 30 of 30 compared, same service and column rankings, every score within 1e-9, no `NaN`. Results in `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`: **BARO 4/30, 13% [5%, 30%]**, which replaces T8's 7/30 as M3's number. BARO − 0R −53 points (3 for BARO, 19 for 0R, Holm 0.01); BARO − A2100 −50 (Holm 0.00085); BARO − 0 +0.
+  - All 26 misses name `redis`, with `redis_diskio` the top column. The truth is second in 22 of them. `redis` is in `topology/re2-ob.json`, so the other configs may name it too.
+  - Exploratory, outside the plan: without `redis` BARO would score 26/30, and its Avg@5 by a quick calculation with all services is 0.76, not the published evaluator's. No `redis` filter is adopted: it would be fitted on dev. AC@3 and Avg@5 are not in the scorer yet, and vision §6 asks for them to compare with the published baselines.
+  - Vision §7's pre-close check was not run: this branch changes nothing under `agent/`, and T3 ran the rules on RE2-OB.
+
 ## Next step
 
-T9, then T10.
+The feature is complete. The human chooses the next one.
