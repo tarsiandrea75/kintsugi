@@ -45,6 +45,8 @@ Out of scope: any holdout (the freeze check forbids a read before M4), config C'
 - [x] T6 ADR for BARO: pinned package or port, after checking its current version. Route: inline (docs).
 - [x] T7 BARO in `evals/`, tests first, on synthetic fixtures; `openspec/specs/evals/spec.md` updated. Route: delegated writer.
 - [x] T8 BARO's plan, run and result. Route: inline commands.
+- [ ] T9 The port gains the published pipeline's preprocessing (ADR-024, revised; the human's choice, 2026-11-02); goldens and `compare_dev.py` follow, with its three review advisories fixed. Route: delegated writer.
+- [ ] T10 BARO's new plan, run and result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -90,4 +92,4 @@ Forecast: about 150 authored lines of docs and plans for T1–T2, about 300 for 
 
 ## Next step
 
-The human decides whether the port gains the published pipeline's preprocessing and BARO runs again under a new plan. Until then, this BARO is not the published baseline.
+T9, then T10.

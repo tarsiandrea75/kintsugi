@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted by the agent on 2026-11-02, as a reversible implementation choice inside the human's approved scope (`odd/tasks/rcaeval-dev-baselines.md`, T6). The package version was checked on PyPI that day.
+Accepted by the agent on 2026-11-02, as a reversible implementation choice inside the human's approved scope (`odd/tasks/rcaeval-dev-baselines.md`, T6). The package version was checked on PyPI that day. Revised the same day, with the human's approval, after T8: the port now covers the published pipeline's preprocessing (step 1).
 
 ## Date
 
@@ -21,7 +21,7 @@ Port the function to `evals/kintsugi_evals/rcaeval/baro.py` with the standard li
 
 The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_series.preprocess` with a non-null dataset and `dk_select_useful` false:
 
-1. Read `simple_metrics.csv`, keep samples within 600 s on each side of `inject_time` (vision §2). Samples with `time < inject_time` are normal, the rest anomalous.
+1. The published pipeline, `main.py` of tag `1.11.0` (commit `dc9f48786db5`), lines 236–264, in its order. Read `simple_metrics.csv`; drop `time.1`; drop columns ending in `_latency-50`; turn infinities into `NaN`; forward-fill every column over the whole file, then fill what remains with 0. Samples with `time < inject_time` are normal, and only the last 600 rows are kept; the rest are anomalous, and only the first 600 are kept (`--length 20`, the default, and vision §2). `_latency-90` is renamed `_latency` (lines 279–285), which changes no service.
 2. In each segment separately, drop `time` and drop every column constant in that segment. A later `NaN` counts as different from the first value, as pandas' `!=` does.
 3. Divide columns ending in `_mem` by 1e6.
 4. Keep the columns present in both segments, in the normal segment's order.
@@ -29,7 +29,7 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 6. A column's score is Python's `max` over its scaled anomalous values, in order, which is order-dependent on `NaN`. Sort descending and stably with Python's `sorted`.
 7. A column's service is the text before its first `_`, with `-db` removed (`RCAEval.benchmark.scoring.to_service`). The service ranking keeps each service's first occurrence. `frontend-external` and `redis` remain their own names, as published.
 
-**Proof of equality.** A generator run once, in a throwaway virtual environment with `RCAEval==1.11.0` installed without dependencies plus numpy, pandas and scikit-learn, writes goldens of the original's ranking and scores on synthetic series. They are committed as a fixture with the generator and its versions, and the port's test compares against them. The goldens never touch RCAEval case data.
+**Proof of equality.** A generator run once, in a throwaway virtual environment with `RCAEval==1.11.0` installed without dependencies plus numpy, pandas and scikit-learn, writes goldens of the original's ranking and scores on synthetic series. They are committed as a fixture with the generator and its versions, and the port's test compares against them. The published pipeline's lines cannot be imported, because `main.py` imports every method's dependencies, so the generator holds a verbatim copy of them with the tag, the commit and the line numbers. The goldens never touch RCAEval case data.
 
 **Output.** One `summary.tsv` the scorer reads as is: route `baro`, `reported` as `<service>|UNKNOWN` for the top service, `candidates` holding the top 5. BARO has no abstention. A case with no column left to rank, or with input the port refuses, fails the whole run and writes nothing, so no `UNKNOWN` is invented. The truth, taken from the case directory for the `truth` column, never reaches the ranking.
 
@@ -42,8 +42,8 @@ The port's semantics, each from `RCAEval.e2e.baro.baro` and `RCAEval.io.time_ser
 ## Consequences
 
 - The port can differ from the original on inputs the goldens do not cover, and float parsing can differ by an ulp, which could swap two nearly tied columns. T8's plan adds a check of exact rankings on the 30 dev cases in the throwaway environment.
-- **The port equals the function, not necessarily the published pipeline.** The wheel holds no benchmark entry point, so how the published evaluation windows and feeds `baro` was not seen. Published numbers are not comparable to this one until that is checked. Checked after T8 on the repository's `main.py` (`main` branch, 2026-11-02, not necessarily 1.11.0): before calling `baro` it drops `_latency-50` columns, turns infinities into `NaN`, then applies `ffill` and `fillna(0)`, and renames `_latency-90` to `_latency`. Its default `--length 20` gives the same 600 samples on each side. The port does none of these, so it is not yet the published baseline.
-- The window is inclusive at both ends, while the converter's are half-open, so a sample exactly at +600 s reaches BARO and not the dossier.
+- **The first port equalled the function only.** The wheel holds no benchmark entry point, so T8 ran without the pipeline's preprocessing: BARO 7/30, with 22 of 23 misses naming `redis`, in `evals/results/2026-11-02-baro-re2ob-dev/`. That result is kept and is not the published baseline. `main.py` was read after it.
+- The pipeline's window counts rows and is half-open at the injection, as the converter's windows are. On a case with gaps in its samples it is not exactly 600 s; that is the published behaviour, kept.
 - A new `RCAEval` release does not move this baseline. The pinned version is the one reported.
 - BARO reads raw case files, so it gets the guard the converter has: only repetitions a committed plan names, and no holdout before M4.
 - AC@3 and Avg@5 for comparison with the published numbers are outside this ADR.
