@@ -49,7 +49,7 @@ The upstream README's sentence gives "0.64, and 0.8" for delay and loss, one num
 
 ## Tasks
 
-- [ ] T1 The port on RE2-TT, `compare_dev.py`, spec and docs, tests first. Route: delegated writer (several non-trivial files).
+- [x] T1 The port on RE2-TT, `compare_dev.py`, spec and docs, tests first. Route: delegated writer (several non-trivial files).
 - [ ] T2 The plan, with the published values and the decision rule. Route: inline (docs).
 - [ ] T3 The run, conformance first, and the result. Route: inline commands.
 
@@ -76,6 +76,11 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
 
 - 2026-11-02: the human chose this feature. RE2-TT.zip, 2.8 GB, Zenodo record 14590730, md5 `a7fbcd1ada406067dcc50771ae398408`.
 
+- 2026-11-02: T1 done by a delegated writer (`e17daf1`). RED 23 failed; GREEN 290 passed. 461 authored lines, over the forecast, mostly refusal tests on both systems; fixtures 52 lines. AC1 and AC2 hold.
+  - Upstream's branches, at the pin: the `ts-` filter (`main.py`:246-250) needs `mm-tt` or `torai-TT` in the path, so RE2-TT keeps its non-`ts-` columns; the SLI (`main.py`:297-300) is passed but `baro` never reads it; `preprocess` takes the same branch for RE2-OB and RE2-TT. So the port's ranking steps did not change.
+  - To check before the run: `main.py`:153-155 globs `**/data.csv` first and falls back to `simple_metrics.csv`. If RE2-TT holds any `data.csv`, upstream reads other files than the port.
+  - The writer's choices: `baro.SYSTEM_DIRS` is separate, so `rcaeval-convert` still refuses `re2-tt`; `compare_dev.py --system re2-tt` refuses a root not named `RE2-TT`, because that mode reads every repetition under its root.
+
 ## Next step
 
-T1.
+T2.
