@@ -49,9 +49,9 @@ After:
 
 ## Tasks
 
-- [ ] T1 The latency table as pairs, tests first; goldens; the agent's living spec. Route: delegated writer.
-- [ ] T2 `audit-latency` reads both shapes, tests first; REQ-14. Route: the same writer, its own commit.
-- [ ] T3 The plan. Route: inline (docs).
+- [x] T1 The latency table as pairs, tests first; goldens; the agent's living spec. Route: delegated writer.
+- [x] T2 `audit-latency` reads both shapes, tests first; REQ-14. Route: the same writer, its own commit.
+- [x] T3 The plan. Route: inline (docs).
 - [ ] T4 The pre-close check, D's run, the audit, the score and the result. Route: inline commands.
 
 ## Acceptance criteria
@@ -75,7 +75,12 @@ Forecast: about 200 authored lines for T1 without goldens, about 100 for T2, abo
 ## Progress
 
 - 2026-11-03: the human approved the change.
+- 2026-11-03: T1 and T2 done by a delegated writer. T1 `d4bb2bf`: RED 5 failed in `DossierRendererTest`; GREEN `./mvnw test` 697 run, 0 failures; about 142 authored lines, 24 golden lines. T2 `0834509`: RED 6 failed; GREEN 317 passed; parent spot check `pytest -q` 317 passed. AC1 and AC3 hold.
+  - No rule reads the rendered text: `RulesDiagnosis.java`:30 and `ResourceRule.java`:48 take the typed `Dossier`. `ReportCheck` looks a quote's line up by number (`ReportCheck.java`:342, :479). `Prompts.java` names none of the old columns, unchanged.
+  - The writer's choice: a failed row is `| svc | - | - | - | - |`, no `- → -`, since it has no value in either window.
+  - Not touched: the recorded prompts under `agent/src/test/resources/replay/` keep the old table; no test compares them.
+- 2026-11-03: T3 done: `evals/plans/2026-11-03-latency-pairs-re2ob-dev.md`.
 
 ## Next step
 
-T1.
+T4.
