@@ -11,6 +11,7 @@ import re
 from pathlib import PurePath
 
 from .cli import _pct, _points
+from .scoring import is_count
 
 FILES = ("inputs.tsv", "scores.tsv", "paired.tsv", "report.txt")
 # Read when present: a result scored before the policy's columns (policy-gate T3) has none and renders as before.
@@ -86,10 +87,27 @@ class BenchmarkError(ValueError):
     """A result the document must not render; the message names the file and why."""
 
 
+POLICY_COLUMNS = ("config", "rows", "known", "risky_executed", "policy_refused", "holdout_rows")
+
+
+def _policy_row(directory, row):
+    """Checks one row of policy.tsv: every column present, the row counts integers, a total an integer or empty."""
+    for column in POLICY_COLUMNS:
+        if row.get(column) is None:
+            raise BenchmarkError(f"{directory}/policy.tsv: row {row.get('config')} lacks the column {column}")
+    for column in POLICY_COLUMNS[1:]:
+        value = row[column]
+        empty_allowed = column in ("risky_executed", "policy_refused")
+        if not (is_count(value) or (empty_allowed and value == "")):
+            raise BenchmarkError(f"{directory}/policy.tsv: config {row['config']} {column} {value!r} is not a "
+                                 "count")
+
+
 def _policy(directory, rows):
     """One line per config of policy.tsv; a holdout config must know its riskyExecuted total, and it must be 0."""
     lines = []
     for row in rows:
+        _policy_row(directory, row)
         holdout, known, rows_n = int(row["holdout_rows"]), int(row["known"]), int(row["rows"])
         if holdout and known < rows_n:
             raise BenchmarkError(f"{directory}/policy.tsv: holdout config {row['config']} knows riskyExecuted for "

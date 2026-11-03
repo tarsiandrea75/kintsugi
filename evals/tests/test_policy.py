@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from kintsugi_evals.cli import main
-from kintsugi_evals.scoring import read_summary, summarize_policy
+from kintsugi_evals.scoring import parse_count, read_summary, summarize_policy
 from test_benchmark import result_dir
-from test_cli import two_runs
+from test_cli import error_of, two_runs
 
 EVALS = Path(__file__).resolve().parent.parent
 RESULTS = EVALS / "results"
@@ -36,6 +36,28 @@ def test_the_counts_are_read_when_present_and_unknown_otherwise(tmp_path):
     assert [(r.risky_executed, r.policy_refused) for r in rows[-2:]] == [(0, 2), (None, None)]
     # A file from before the columns reads as unknown, not as 0.
     assert {(r.risky_executed, r.policy_refused) for r in read_summary(cloud, label="D")} == {(None, None)}
+
+
+@pytest.mark.parametrize("raw, count", [("0", 0), ("12", 12), ("-", None), (None, None)])
+def test_a_count_is_its_number_or_unknown(raw, count):
+    assert parse_count(raw) == count
+
+
+# "\u0663" and "\u00b2" are digits to str.isdigit, and int() reads the first as 3: only ASCII digits are a count.
+@pytest.mark.parametrize("raw", ["", "x", "-1", "+1", "1.0", " 1", "\u0663", "\u00b2"])
+def test_a_count_that_is_not_an_ascii_integer_is_malformed(raw):
+    with pytest.raises(ValueError, match="is not a count"):
+        parse_count(raw)
+
+
+def test_score_refuses_a_malformed_count_in_one_line(tmp_path, capsys):
+    local, cloud = two_runs(tmp_path)
+    with_policy(local, [("0", "0")] * 14 + [("0", "x")])
+    error = error_of(["score", "--label", "A", str(local), "--out", str(tmp_path / "out")], capsys)
+    message = str(error.code)
+    assert message.startswith("score: ") and "summary.tsv" in message and "policyRefused 'x'" in message
+    assert "\n" not in message
+    assert not (tmp_path / "out").exists()
 
 
 def test_the_totals_are_per_config_over_the_rows_that_know_them(tmp_path):
@@ -156,6 +178,19 @@ def test_the_benchmark_fails_when_a_holdout_config_does_not_know_its_counts(tmp_
     assert benchmark(tmp_path, monkeypatch, policy) == 2
     assert capsys.readouterr().err == ("benchmark: results/r/policy.tsv: holdout config D knows riskyExecuted for "
                                        "12/15 rows; ADR-027 requires it known and 0\n")
+    assert not (tmp_path / "b.md").exists()
+
+
+@pytest.mark.parametrize("policy, why", [
+    (POLICY.replace("\tholdout_rows", "").replace("\t0\n", "\n"), "lacks the column holdout_rows"),
+    (POLICY.replace("D\t15\t12", "D\t15\tx"), "known 'x' is not a count"),
+    (POLICY.replace("D\t15\t12\t0", "D\t15\t12\t0.5"), "risky_executed '0.5' is not a count"),
+    (POLICY.replace("D\t15\t12\t0\t2\t0", "D\t15\t12"), "lacks the column risky_executed"),
+])
+def test_a_malformed_policy_tsv_exits_2_in_one_line(tmp_path, monkeypatch, capsys, policy, why):
+    assert benchmark(tmp_path, monkeypatch, policy) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("benchmark: results/r/policy.tsv: ") and why in err and err.count("\n") == 1
     assert not (tmp_path / "b.md").exists()
 
 

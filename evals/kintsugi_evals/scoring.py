@@ -115,9 +115,22 @@ def parse_candidates(raw, route, report):
     return tuple(raw.split(";")) if raw else ()
 
 
+def is_count(raw):
+    """Whether `raw` is a count as the files write one: ASCII digits only, so no sign, space or other script's digit."""
+    return raw.isascii() and raw.isdigit()
+
+
 def parse_count(raw):
-    """A policy count of summary.tsv (ADR-027): its number, or None, unknown, for a missing column or a "-"."""
-    return int(raw) if raw is not None and raw.isdigit() else None
+    """A policy count of summary.tsv (ADR-027): its number, or None, unknown, for a missing column or a "-".
+
+    Any other value that is not an ASCII decimal integer is malformed and raises ValueError, as other malformed
+    summaries do: read as unknown, a typo would hide a count. str.isdigit alone accepts other scripts' digits.
+    """
+    if raw is None or raw == "-":
+        return None
+    if not is_count(raw):
+        raise ValueError(f"{raw!r} is not a count: expected an ASCII decimal integer or -")
+    return int(raw)
 
 
 def ranking_of(status, reported, raw_candidates, raw_ranked=None):
@@ -145,7 +158,8 @@ def read_summary(path, label=None, service_only=False):
     from before either column keeps its config name. A trailing candidates column (hybrid T4) is parsed for rules
     and hybrid rows only, so candidate recall applies to them alone. A trailing ranked column (ranked-report T3)
     enters the ranking only, and a file without it ranks as before. The trailing riskyExecuted and policyRefused
-    columns (policy-gate T3) are read as numbers; a file without them, or a "-", reads as unknown, never 0. With
+    columns (policy-gate T3) are read as numbers; a file without them, or a "-", reads as unknown, never 0, and any
+    other value that is not an ASCII decimal integer is refused. With
     service_only, each row and its candidate recall are scored on the service part of the truth only.
     """
     path = summary_path(path)
@@ -158,6 +172,12 @@ def read_summary(path, label=None, service_only=False):
             raise ValueError(f"{path} lacks the columns {', '.join(missing)}")
         rows = []
         for raw in reader:
+            counts = []
+            for column in ("riskyExecuted", "policyRefused"):
+                try:
+                    counts.append(parse_count(raw.get(column)))
+                except ValueError as error:
+                    raise ValueError(f"{path}: line {reader.line_num}: {column} {error}") from None
             view = raw.get("view") or "-"
             report = raw.get("report") or "-"
             config = label or f"{raw['route']}-{raw['mode']}-{view}" + (f"-{report}" if "report" in raw else "")
@@ -166,7 +186,7 @@ def read_summary(path, label=None, service_only=False):
                             outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
                             parse_candidates(raw.get("candidates"), raw["route"], report), service_only,
                             ranking_of(raw["status"], raw["reported"], raw.get("candidates"), raw.get("ranked")),
-                            parse_count(raw.get("riskyExecuted")), parse_count(raw.get("policyRefused"))))
+                            *counts))
     return rows
 
 
