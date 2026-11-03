@@ -58,6 +58,22 @@ class PromptsTest {
 	}
 
 	@Test
+	void aResourceRiseIsWarrantedAsRunningOutRightAfterItsDefinition() {
+		// d-abstention: D saw the true service's resource rise and dismissed it when latency was normal or nothing
+		// logged an error (odd/tasks/resource-warrant.md). The warrant gives no number and no threshold.
+		String warrant = "The dossier shows how much of a resource a component uses, not its limit: use that rises "
+				+ "sharply from the previous window to the incident window is evidence that the component is running "
+				+ "out, even when it logs no error and answers quickly.";
+		String system = Prompts.system(LAB, "orders are slow", 15);
+
+		assertThat(system).contains("- RESOURCE_EXHAUSTION: a component has run out of a limited resource, such as "
+				+ "connections, memory, disk or threads. " + warrant + "\n- UNKNOWN:");
+		assertThat(system.indexOf(warrant)).isEqualTo(system.lastIndexOf(warrant));
+		assertThat(system).contains("- Prefer UNKNOWN to a guess: name a component or a category only when the "
+				+ "evidence supports it.\n");
+	}
+
+	@Test
 	void aTimeoutIsNotACallerThatCannotReachItsDependency() {
 		assertThat(Prompts.system(LAB, "orders are slow", 15)).contains("or the host is unknown; a timeout is not this case)");
 	}

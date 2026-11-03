@@ -1391,12 +1391,15 @@ The system message MUST also say **(T5c8)**:
 - the components and the call path, rendered from the loaded `Topology` (**topology-data T4**); for the lab file, byte for byte the text of before T4: `Its components are gateway-mock, payment-service, order-service, inventory-service and their database, postgres. The call path: order-service calls inventory-service and payment-service; payment-service calls gateway-mock; the three services keep their data in postgres.` The rule: the services in display order joined by `, `, then ` and their database, <datastore>` (` and their databases, <list>` for several; the services as a list for none); one clause `<caller> calls <targets>` per calling service, in the order it first calls in the edges, its targets in edge order as a list, the clauses joined by `; ` (`no component calls another` for none); then, when there are datastores and services that own a table or a source, `; the <count> services keep their data in <datastores>`, the count in words up to twelve (`<service> keeps its data in <datastores>` for one). A list is `a`, `a and b` or `a, b and c`. The values of `rootCauseService` it lists are the topology's causes (the services, the datastores, `UNKNOWN`), joined by `, ` with `, or ` before the last;
 - that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING`, `rootCauseService` is the component where the slowness or the error answer starts, not its caller: name B when A waits for B or gets an error answer from B, and if B in turn waits for C or gets an error answer from C, name C; follow the calls down to the last component that is slow or refuses, and an answer that takes long is that component's own failure even when it ends in success and logs no error **(F3 T5)**;
 - that `DEPENDENCY_REJECTING` means B is reached and answers with an error, and `CONFIGURATION` includes a wrong address or port of a component A calls; when A cannot reach B at all (connection refused or closed, unknown host; a timeout is not this case) while B shows no failure of its own (no errors, no restarts, healthy metrics), B is not the cause and A's own setting for B, a `CONFIGURATION` of A, is suspected **(F3 T3)**;
+- right after the `RESOURCE_EXHAUSTION` definition, and once: `The dossier shows how much of a resource a component uses, not its limit: use that rises sharply from the previous window to the incident window is evidence that the component is running out, even when it logs no error and answers quickly.` It gives no number and no threshold, and `Prefer UNKNOWN to a guess` stays as it is **(resource-warrant T3)**;
 - that an affected order to trace is found with `recent_events` with `source=order`, not an older `PAID` one, and that its `orderId` is copied from a result, never a placeholder;
 - that an order never paid stays `PAYMENT_PENDING`, with `PAYMENT_UNAVAILABLE` order events, so `source=order` is filtered by `type=PAYMENT_UNAVAILABLE` or `outcome=PAYMENT_PENDING`, or not at all, and by `outcome=PAYMENT_FAILED` only when `status_summary` shows `PAYMENT_FAILED` orders **(T5c9)**.
 
 Why (F3 T3): the recorded F3 runs applied "if A times out or fails because B does, name B" to a caller that could not connect at all, and named the healthy callee `DEPENDENCY_REJECTING`, although a connect failure means the callee was never reached. The rule now separates an error or slow answer from B, which names B, from a failure to reach a B that shows no failure of its own, which points at the caller's setting. It describes categories, never a fault, service or port of the lab.
 
 Why (F3 T5): after T3 every recorded F1 run named the caller of the slow component (`payment-service|DEPENDENCY_LATENCY` for a slow gateway-mock, 0/6 against 3/6 before), while F3 went from 0/6 to 3/6. The model applied the rule one hop only, read a slow answer that ended in success with no warning or error as healthy, and risked reading a caller's timeout as "cannot reach". The rule now follows the calls down to the last slow or refusing component, says a slow success is still that component's failure, and excludes a timeout from "cannot reach". It still describes categories, never a fault, service or port of the lab.
+
+Why (resource-warrant T3): in 8 of the 12 resource cases decision mode abstained on in RE2-OB dev, the model saw the true service's resource rise and dismissed it, mostly because latency was normal or nothing logged an error (`odd/tasks/d-abstention.md`). The prompt gave latency a warrant but resources none, and defined `RESOURCE_EXHAUSTION` as a component that has run out, which the dossier cannot show: it holds use, not limits. The sentence mirrors the latency warrant and names no threshold, so the rules' thresholds are not read aloud to the model ([feature document](../../../odd/tasks/resource-warrant.md)).
 
 Why (T5c9): in the fifth full run one incident filtered `source=order` by `outcome=PAYMENT_FAILED` while its orders were `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, so it saw nothing. The line describes the order states the lab records, never a cause the lab may be put through.
 
@@ -1424,7 +1427,7 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 - WHEN the loop builds the system message
 - THEN it says `Its components are a, b, c and their database, db. The call path: a calls b; b calls c; the three services keep their data in db.`
 - AND it lists `a, b, c, db, or UNKNOWN` as the values of `rootCauseService`, the report schema's enum is the same list, and the gatherer reads `a`, `b`, `c` in that order
-- AND with the lab file the message, the schemas and the gathered lists are the same as before T4, byte for byte
+- AND with the lab file the message, the schemas and the gathered lists are the same as before T4, byte for byte, but for the system message's resource warrant (resource-warrant T3)
 
 #### Scenario: A caller that cannot reach a healthy dependency points at its own setting (F3 T3)
 - GIVEN A's calls to B fail because the connection is refused or closed, or the host is unknown
@@ -1439,6 +1442,12 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 - THEN it says to name C, the last component on the calls that is slow or refuses, not A or B
 - AND it says that an answer that takes long is that component's own failure even when it ends in success and logs no error
 - AND it says that a timeout is not a case of A failing to reach B
+
+#### Scenario: A sharp rise in a resource's use is evidence of running out (resource-warrant T3)
+- GIVEN a dossier that shows a component's use of a resource, not its limit
+- WHEN the loop builds the system message, in any mode and on any route
+- THEN right after the `RESOURCE_EXHAUSTION` definition it says, once, that use rising sharply from the previous window to the incident window is evidence that the component is running out, even when it logs no error and answers quickly
+- AND it gives no number or threshold, and still says to prefer `UNKNOWN` to a guess
 
 ### Requirement: The report
 

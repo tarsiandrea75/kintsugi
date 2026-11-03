@@ -67,7 +67,9 @@ final class Prompts {
 			- CONFIGURATION: a component runs with a wrong setting, such as the address or port of a component it \
 			calls, so it misbehaves although what it depends on is healthy.
 			- RESOURCE_EXHAUSTION: a component has run out of a limited resource, such as connections, memory, \
-			disk or threads.
+			disk or threads. The dossier shows how much of a resource a component uses, not its limit: use that \
+			rises sharply from the previous window to the incident window is evidence that the component is \
+			running out, even when it logs no error and answers quickly.
 			- UNKNOWN: the evidence does not support one of the above.
 			For DEPENDENCY_LATENCY and DEPENDENCY_REJECTING, rootCauseService is the component where the slowness \
 			or the error answer starts, not its caller: name B when A waits for B or gets an error answer from B, \

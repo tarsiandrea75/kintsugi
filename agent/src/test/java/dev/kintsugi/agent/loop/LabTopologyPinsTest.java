@@ -19,7 +19,8 @@ import dev.kintsugi.agent.lab.Phase;
  * Pins what the model reads and what code checks against for the lab topology (odd/tasks/topology-data.md T4): the
  * system message, every report schema that holds the cause enum, and the enum errors of the plan and report checks.
  * The expected values were captured from the code before T4 derived them from the topology, under
- * {@code src/test/resources/topology-pins}; they must never change. Only the helpers at the bottom name the API, so a
+ * {@code src/test/resources/topology-pins}; they change only when a text changes on purpose, by that text alone (the
+ * system message gained the resource warrant in odd/tasks/resource-warrant.md T3). Only the helpers at the bottom name the API, so a
  * signature change touches them and nothing else.
  */
 class LabTopologyPinsTest {
