@@ -1,0 +1,16 @@
+BARO: route baro, mode decision, view -; 90 fault cases, 0 healthy; AC@1 on the service only
+BARO  cpu      7/15  AC@1  47%  [25%, 70%]
+BARO  delay    7/15  AC@1  47%  [25%, 70%]
+BARO  disk    15/15  AC@1 100%  [80%, 100%]
+BARO  loss     8/15  AC@1  53%  [30%, 75%]
+BARO  mem     14/15  AC@1  93%  [70%, 99%]
+BARO  socket   9/15  AC@1  60%  [36%, 80%]
+BARO  pooled  60/90  AC@1  67%  [56%, 76%]  coverage 100%  selective 67%
+BARO  ranked cpu     15  AC@1 7/15 47% [25%, 70%]  AC@3 12/15 80% [55%, 93%]  AC@5 13/15 87% [62%, 96%]  Avg@5 72%  mean list 5.00
+BARO  ranked delay   15  AC@1 7/15 47% [25%, 70%]  AC@3 10/15 67% [42%, 85%]  AC@5 10/15 67% [42%, 85%]  Avg@5 63%  mean list 5.00
+BARO  ranked disk    15  AC@1 15/15 100% [80%, 100%]  AC@3 15/15 100% [80%, 100%]  AC@5 15/15 100% [80%, 100%]  Avg@5 100%  mean list 5.00
+BARO  ranked loss    15  AC@1 8/15 53% [30%, 75%]  AC@3 9/15 60% [36%, 80%]  AC@5 11/15 73% [48%, 89%]  Avg@5 64%  mean list 5.00
+BARO  ranked mem     15  AC@1 14/15 93% [70%, 99%]  AC@3 15/15 100% [80%, 100%]  AC@5 15/15 100% [80%, 100%]  Avg@5 99%  mean list 5.00
+BARO  ranked socket  15  AC@1 9/15 60% [36%, 80%]  AC@3 13/15 87% [62%, 96%]  AC@5 14/15 93% [70%, 99%]  Avg@5 83%  mean list 5.00
+BARO  ranked pooled  90  AC@1 60/90 67% [56%, 76%]  AC@3 74/90 82% [73%, 89%]  AC@5 78/90 87% [78%, 92%]  Avg@5 80%  mean list 5.00
+chance with 68 services (out/rcaeval/baro-re2-tt/services.json): AC@1 1.47%  AC@3 4.41%  AC@5 7.35%  Avg@5 4.41%
