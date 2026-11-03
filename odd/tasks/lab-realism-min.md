@@ -52,7 +52,7 @@ A discrete set, drawn uniformly, so each value has about 5 cases and a per-value
 - [x] T1 This document. Route: inline (docs).
 - [x] T2 The schedule generator and its tests. Route: delegated writer (while A runs).
 - [x] T3 `check-freeze.sh` condition 3 as ADR-026 Decision 4 says, and its tests. Route: the same writer, its own commit.
-- [ ] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
+- [x] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
 - [ ] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
 - [ ] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
 
@@ -86,6 +86,10 @@ Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain
 
 - 2026-11-03: native review of `878622f..1f71e4d`: four lenses, **approved** and acknowledged (lineage `review-62d4772ac1b693b6`). SUGGESTIONs only, not fixed beyond the amendment's name: a test comment's bound wording, a duplicated fixture setup, the ancestry check's git-error branch untested.
 
+- 2026-11-03: T4 done by a delegated writer on `feat/lab-realism-min-01-injector` (`be929c3`). `POST /faults` takes an optional `parameters` object: F1 `gatewayLatencyMs` ∈ {2000, 5000, 10000, 20000}, F2 `gatewayErrorStatus` ∈ {429, 500, 503}, declared once in `Fault.java`; any other name, value, type, or a parameter for F3 or F4 is refused with a 400 before anything is written. Without parameters every fault behaves as before. `injections.parameters` stores the applied values; the root-cause sentence names the applied value; service and category never change. gateway-mock allows exactly 429, 500 and 503 (`GatewayBehavior.java`:25). RED at compile level; GREEN `./mvnw test` 174 run, 0 failures (125 before). About 522 authored lines. AC3 holds.
+  - The writer's choices: a nested `parameters` object, since Spring Boot ignores unknown top-level fields; refusal reasons name no parameter and list no value, so the leak scan holds.
+  - Gap: a parameter put outside `parameters` is ignored silently and the default applied. T5's harness must nest it, and T6 must confirm the stored value.
+
 ## Next step
 
-T4, after A's run.
+T5.
