@@ -70,6 +70,9 @@ Forecast: about 250 authored lines. Branch `feat/check-freeze`, from `feat/a-set
   - **Condition 4:** RCAEval holdouts carry the split `holdout`, like lab holdout-1, so the script recomputes each row's blinded id (sha256 of `RE2-SYS/<case>/<rep>`, `convert.py`:146-149) from its fault and truth, and flags RE2-OB repetitions 2–3 and RE2-SS whatever the split label. It reads every version committed before the M4 date, deleted ones included. Today nothing is flagged; lab holdout-1 is read by two committed results (`2026-10-30-holdout1-lab`, `2026-10-31-qwen-holdout1`), each config once, as the plans fixed.
   - The writer's choices: `--repo DIR` for tests; condition 2 also fails on uncommitted files under `agent/src/main/`; condition 3 does not count to 75.
 
+- 2026-11-03: native review of `312d14d..53b4b41`: four lenses, **approved** and acknowledged (lineage `review-a4b54053d317c473`). Its WARNINGs named two fail-open paths in condition 4 (C-quoted paths skipped; tables without `split` skipped), a Python 3.11 dependency, a test that would break once the tag exists, and a stale `docs/STATE.md` line.
+- 2026-11-03: those fixed by a delegated writer (`74577f6`), with the four SUGGESTIONs: `git log -z`; the id check on every table with fault, truth and recording; exit 2 below Python 3.11; the missing-tag case in a throwaway repository; an explicit `seed_failure`; `expect_no_line` anchored; the test's blinded id computed by the converter's own code, proved by a mutation. RED observed on every item but the moved test, which needs a tag in the real repository to fail. GREEN 33 cases; parent spot check the same. 114 authored lines. Today's output unchanged.
+
 ## Next step
 
 The feature is complete, but condition 3 stays failing until the holdout-2 recording feature records a seed and its time. That feature is the human's to plan.

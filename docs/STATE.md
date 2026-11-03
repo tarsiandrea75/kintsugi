@@ -47,7 +47,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 15. Done 2026-11-03: suspects with an abstention (ADR-025's amendment, `feat/ranked-report-02-abstain-suspects`, `evals/results/2026-11-03-abstain-suspects-re2ob-dev/`). DS 26/30, AC@3 27/30, 3 abstentions, all listing the truth among their suspects; retries 7 → 3. Kept by the plan's rule (0 net against DR).
 16. Done 2026-11-03: `check-freeze.sh` (`odd/tasks/check-freeze.md`, branch `feat/check-freeze`). Today it fails, as it should: no tag `freeze-m3`. Its condition 3 cannot pass until the holdout-2 recording feature adds the split `holdout-2` and records a seed and its time, which nothing records today.
 17. Running since 2026-11-03: A with today's agent on RE2-OB dev (`evals/plans/2026-11-03-a-settled-re2ob-dev.md`), about 8 h; nothing under `agent/` changes until it ends.
-18. **Next:** after A's run, on RE2-OB dev once the agent is settled (retry and cut rates under 512 tokens); then policy and approval, lab realism, `check-freeze.sh` (not written yet), before the freeze on 2026-12-01. Still the human's: reading the stop rule (vision §7). The holdout is out until M4.
+18. **Next:** read A's run (retry, cut and timeout rates under 512 tokens and 2100 s); fix `check-freeze.sh`'s review warnings; then policy and approval, lab realism, and the holdout-2 recording feature (its split and seed), before the freeze on 2026-12-01. Still the human's: reading the stop rule (vision §7). The holdout is out until M4.
 
 ## Local branch chains (not pushed)
 
