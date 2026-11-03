@@ -32,8 +32,8 @@ ADR-025. The prompt's `REPORT_TASK` gains, after the causes line: "alternatives:
 
 - [x] T1 ADR-025. Route: inline (docs).
 - [x] T2 The agent: schema, `ReportCheck`, prompt, stored report, `ranked` column; tests first; pins; the agent's living spec. Route: delegated writer.
-- [ ] T3 The scorer reads `ranked` (REQ-13), tests first. Route: delegated writer, own commit.
-- [ ] T4 The plan. Route: inline (docs).
+- [x] T3 The scorer reads `ranked` (REQ-13), tests first. Route: delegated writer, own commit.
+- [x] T4 The plan. Route: inline (docs).
 - [ ] T5 D's run, the rules check, the score and the result. Route: inline commands.
 
 ## Acceptance criteria
@@ -61,6 +61,10 @@ Forecast: about 350 authored lines for T2, 80 for T3, 150 for T1, T4 and T5; ove
   - The writer's choices: the schema's alternative enums leave out `UNKNOWN`, so the local grammar cannot write it; no alternative is dropped, every breach makes the report invalid with the existing retry.
   - Pins: the three plain report schemas gain the field before `confidence`; the plain instruction gains the Design's sentence; the summary header ends `candidates\tranked`. `system-*.txt` and the assessed schema are unchanged.
 
+- 2026-11-03: native review of `d772623..7d48f5e`: one reliability lens, **approved** and acknowledged (lineage `review-7371ca44004e6d3e`). Three SUGGESTIONs, not fixed: no loop-level test of a bad `alternatives` answer's retry; no test that an assessed stored report has no `alternatives`; the hybrid no-candidate stored report has no `alternatives` field, while the spec says it is shaped like the plain report (the `ranked` column reads a missing array as empty).
+- 2026-11-03: T3 done by a delegated writer on `feat/ranked-report-01-scorer` (`5f0d8f0`): `ranking_of` reads `reported`, `ranked`, `candidates`; a file without `ranked` scores as before, proved on the six committed inputs of the resource-warrant result. RED 5 failed; GREEN 328 passed. 99 authored lines. `audit_latency.py` and `cli.py` read columns by name, unchanged. AC4 holds.
+- 2026-11-03: T4 done: `evals/plans/2026-11-03-ranked-report-re2ob-dev.md`.
+
 ## Next step
 
-T3.
+T5.
