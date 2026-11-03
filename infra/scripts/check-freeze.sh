@@ -38,8 +38,8 @@ the file or commit, then a RESULT line:
 3. holdout-2 (ADR-026): the seed (infra/holdout2/seed.txt) was first committed in a commit that descends from the tag
    and is later than the tag's commit time, and never changed since; the generator as of the tag
    (infra/scripts/holdout2-schedule.py), run on the seed, gives exactly the committed schedule
-   (infra/holdout2/schedule.tsv); and the manifest (agent/src/test/resources/replay/recordings.tsv) names every
-   schedule case in the case column of exactly one holdout-2 row, whose incident startedAt is later than the tag's
+   (infra/holdout2/schedule.tsv), whose first commit descends from the seed's first commit (or is it); and the
+   manifest (agent/src/test/resources/replay/recordings.tsv) names every schedule case in the case column of exactly one holdout-2 row, whose incident startedAt is later than the tag's
    commit time and than the schedule's first commit. All are read at HEAD. Commit times are written by the committer,
    so this proves the order of the history as written, not that it was written honestly (ADR-026, amendment).
 4. results: no .tsv under evals/results/, in any commit of HEAD's history before the M4 date, holds a row of lab
@@ -112,7 +112,8 @@ check_unchanged() {
   echo "PASS  unchanged: ${FROZEN_PATHS[*]} unchanged since $TAG"
 }
 
-# Condition 3: the seed descends from and postdates the tag, the schedule follows from the seed, and every schedule case
+# Condition 3: the seed descends from and postdates the tag, the schedule follows from the seed and descends from it, and
+# every schedule case
 # has exactly one holdout-2 recording, which postdates the tag and the schedule (ADR-026, Decision 4 and amendment).
 check_holdout2() {
   local tag_time
@@ -211,6 +212,21 @@ def check_schedule():
     return []
 
 
+def check_order():
+    """The order's failure: the schedule's first commit must descend from the seed's first commit (the same commit
+    counts), since a schedule committed before its seed means the seed was known earlier."""
+    if show_bytes(seed) is None or show_bytes(schedule) is None:
+        return []
+    seed_first, schedule_first_commit = commits_of(seed)[-1][0], commits_of(schedule)[-1][0]
+    ancestry = subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", seed_first, schedule_first_commit],
+                              capture_output=True).returncode
+    if ancestry == 0:
+        return []
+    return ["%s was first committed at %s, which %s %s's first commit %s" % (
+        schedule, schedule_first_commit, "does not descend from" if ancestry == 1 else "git cannot compare with", seed,
+        seed_first)]
+
+
 def schedule_cases():
     """The case numbers the committed schedule holds, as text, in its order."""
     text = show(schedule)
@@ -238,7 +254,7 @@ def recording_time(path):
         return "has no readable startedAt"
 
 
-failures += check_seed() + check_schedule()
+failures += check_seed() + check_schedule() + check_order()
 cases, schedule_at = schedule_cases(), schedule_first()
 text = show(manifest)
 reader = csv.DictReader([] if text is None else text.splitlines(), delimiter="\t")

@@ -103,6 +103,7 @@ add_holdout2_row() {
 # and a manifest with a case column, committed on 2026-11-20 and tagged freeze-m3; then the seed alone at $2, the
 # schedule on 2026-12-01, and holdout-2 recordings committed on 2026-12-02: one started at $3 naming schedule case $4,
 # then one started at 2026-12-02T10:00:00Z for each case in $5 (default cases 2-75, so case 1 completes the schedule).
+# With $schedule_before_seed set, the same schedule is committed on 2026-11-30, after the tag but before the seed.
 make_holdout2_repo() {
   local repo=$1 seed_at=$2 started=$3 case=$4 others=${5-$(seq -s ' ' 2 75)} other
   mkdir -p "$repo/agent/src/main/java" "$repo/agent/src/test/resources/replay/F1" "$repo/infra/scripts" \
@@ -115,10 +116,17 @@ make_holdout2_repo() {
   printf '%s\tcase\n' "$manifest_header" >"$repo/agent/src/test/resources/replay/recordings.tsv"
   commit_at "$repo" 2026-11-20T10:00:00Z "before the freeze"
   git -C "$repo" tag freeze-m3
+  if [[ -n "${schedule_before_seed-}" ]]; then
+    printf '%s\n' "$seed_hex" >"$WORK/early-seed.txt"
+    python3 -I "$generator" "$WORK/early-seed.txt" --out "$repo/infra/holdout2/schedule.tsv"
+    commit_at "$repo" 2026-11-30T10:00:00Z "the schedule, before the seed"
+  fi
   printf '%s\n' "$seed_hex" >"$repo/infra/holdout2/seed.txt"
   commit_at "$repo" "$seed_at" "the seed"
-  python3 -I "$generator" "$repo/infra/holdout2/seed.txt" --out "$repo/infra/holdout2/schedule.tsv"
-  commit_at "$repo" 2026-12-01T10:00:00Z "the schedule"
+  if [[ -z "${schedule_before_seed-}" ]]; then
+    python3 -I "$generator" "$repo/infra/holdout2/seed.txt" --out "$repo/infra/holdout2/schedule.tsv"
+    commit_at "$repo" 2026-12-01T10:00:00Z "the schedule"
+  fi
   add_holdout2_row "$repo" "$holdout2_file" "$case" "$started"
   for other in $others; do
     add_holdout2_row "$repo" "F1/h2-$other.json" "$other" 2026-12-02T10:00:00Z
@@ -297,6 +305,16 @@ make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-01T09:30:00Z 1
 out=$(run_check --repo "$repo")
 expect_line "a recording started before the schedule's first commit fails condition 3" "$out" \
   "FAIL  holdout-2: $holdout2_file started 2026-12-01T09:30:00Z, not after infra/holdout2/schedule.tsv was first committed at $(git -C "$repo" log --format=%h -- infra/holdout2/schedule.tsv) (2026-12-01T10:00:00Z)"
+
+# Order (ADR-026): a schedule first committed before the seed's first commit means the seed was known earlier, so it
+# fails even though both postdate the tag and the schedule follows from the seed.
+repo="$WORK/h2-schedule-before-seed"
+schedule_before_seed=1 make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1
+out=$(run_check --repo "$repo")
+expect_line "a schedule committed before its seed fails condition 3" "$out" \
+  "FAIL  holdout-2: infra/holdout2/schedule.tsv was first committed at $(git -C "$repo" log --format=%h -- infra/holdout2/schedule.tsv), which does not descend from infra/holdout2/seed.txt's first commit $(git -C "$repo" log --format=%h -- infra/holdout2/seed.txt)"
+expect_no_line "a schedule committed before its seed still follows from it" "$out" \
+  "FAIL  holdout-2: infra/holdout2/schedule.tsv differs"
 
 # A short row: a manifest with a case column, and a holdout-2 row with fewer fields than the header, names no case.
 repo="$WORK/h2-short-row"

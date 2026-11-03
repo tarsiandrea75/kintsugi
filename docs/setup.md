@@ -651,6 +651,7 @@ It prints one PASS line per condition that holds and one FAIL line per failure, 
 3. `holdout-2` ([ADR-026](adr/ADR-026-holdout2-seed.md)), all read at HEAD:
    - the seed `infra/holdout2/seed.txt` was first committed in a commit that descends from the tag (`git merge-base --is-ancestor`) and is later than the tag's commit time, and never changed since;
    - the generator as of the tag, `infra/scripts/holdout2-schedule.py`, run on that seed gives exactly the committed `infra/holdout2/schedule.tsv`;
+   - the schedule's first commit descends from the seed's first commit, or is it: a schedule committed before its seed means the seed was known earlier;
    - every schedule case is named in the `case` column of exactly one `holdout-2` manifest row: a missing case fails, naming the first five, and a second row for one case fails, naming both files;
    - every `holdout-2` recording's incident `startedAt` is later than the tag's commit time and than the schedule's first commit.
 
