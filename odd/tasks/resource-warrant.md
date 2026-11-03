@@ -31,10 +31,10 @@ The sentence, after `- RESOURCE_EXHAUSTION: …`:
 
 ## Tasks
 
-- [ ] T1 The plan. Route: inline (docs).
-- [ ] T2 DP2 and DP3, with the current prompt. Route: inline commands.
-- [ ] T3 The sentence, tests first; the living spec. Route: delegated writer.
-- [ ] T4 DW's run, the rules check, the score and the result. Route: inline commands.
+- [x] T1 The plan. Route: inline (docs).
+- [x] T2 DP2 and DP3, with the current prompt. Route: inline commands.
+- [x] T3 The sentence, tests first; the living spec. Route: delegated writer.
+- [x] T4 DW's run, the rules check, the score and the result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -55,7 +55,25 @@ Forecast: about 60 authored lines for T3, about 150 for the plan and results. Br
 ## Progress
 
 - 2026-11-03: the human approved the change.
+- 2026-11-03: T1 done (`9d1b21c`). T2 on `9d1b21c`: DP2 `replay-20261103T132743Z-cloud` 17/30, DP3 `replay-20261103T132932Z-cloud` 15/30, both 30 rows, `COMPLETED`, the plan's configuration, DP1's recordings, the pairs in every dossier. Against DP1: 3 won and 2 lost, 2 won and 3 lost.
+- 2026-11-03: T3 done by a delegated writer (`c775fc2`). The sentence is in `SYSTEM_RULES` once, after "disk or threads.", and reaches every route and mode through `AgentLoop.Run` (`AgentLoop.java`:1019, :1035). The two whole-prompt pins changed only by the sentence. RED 1 failed; GREEN `./mvnw -q test` 698 run, 0 failures. 38 authored lines. AC1 holds.
+- 2026-11-03: T4 done on `c775fc2`, with a clean tree. Results in `evals/results/2026-11-03-resource-warrant-re2ob-dev/`.
+  - Pre-close check passed: rules v1 and v2 (`replay-20261103T133807Z-rules`, `-133811Z-`) equal `-114625Z-` and `-114630Z-` in every column but `seconds`. AC2 holds.
+  - DW `replay-20261103T133833Z-cloud`: 30 rows, `COMPLETED`, the plan's configuration, DP1's recordings; about $0.03. The incident JSON does not store the system prompt, so the sentence's presence rests on the run's commit and clean tree, not on the run's own record. AC3 and AC4 hold.
+
+| Run | AC@1 [Wilson 95%] | Coverage | Selective |
+|---|---|---|---|
+| DP1–DP3 | 16, 17, 15 of 30 | 50% to 60% | 89% to 100% |
+| **DW** | **25/30, 83% [66%, 93%]** | 90% | 93% |
+| 0R | 20/30, 67% [49%, 81%] | 90% | 74% |
+
+  - **The gain rule's first part is met:** against DP1, DP2 and DP3, DW wins 10 and loses 1, wins 10 and loses 2, wins 12 and loses 2, so net 9, 8 and 10, against 7 needed.
+  - **Its second part is not:** DW − 0R is +17 points, 8 for DW and 3 for 0R, exact McNemar p = 0.23. So **the sentence is not kept as a gain** by the plan's rule. It is the first D run ahead of 0R.
+  - On the 20 cpu, mem, disk and socket cases: DW abstains on 2 and gets 16 right; DP1–DP3 abstain on 12, 10 and 13 and get 7, 10 and 7 right.
+  - **Reading the risk:** of DW's 16 right resource answers, 0R also gets 13 right and misses 3. So most of the gain is on cases the rule already solves. That fits the worry that the sentence brings the model closer to R-RES. It also fits a model that now reads facts it used to dismiss. These numbers cannot tell the two apart.
+  - DW − 0: +70 points, p = 9.5e-07, not a criterion.
+  - **Limits:** one run, and the sentence was written after a diagnosis of these same 30 cases, so dev cannot say how much is fitted. The holdout read in M4 can.
 
 ## Next step
 
-T1.
+The plan leaves the decision to the human: keep the sentence, revert it, or neither yet. No further change to D on these 30 cases without its own plan.
