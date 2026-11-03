@@ -67,6 +67,41 @@ def test_rendering_variants_of_the_row():
     assert latency_row("| a | / | - | - | - | - | - | - |") is None
 
 
+# The same row as rendered since latency-pairs T1: each cell is previous → incident.
+PAIRS = "| frontend | / | 0.054 → 1.325 | 0.061 → 1.477 | 29/29 → 29/29 |"
+WHYS = [
+    "mean 0.054s incident vs 0.061s before",
+    "frontend latency mean rose to 1.325 from 0.054",
+    "max 1.477s in the incident window",
+    "frontend is slow",
+]
+
+
+@pytest.mark.parametrize("why", WHYS)
+def test_the_same_values_in_both_shapes_give_the_same_class(why):
+    assert classify(PAIRS, why) == classify(ROW, why)
+
+
+def test_a_pair_row_maps_to_the_cells_of_the_old_row():
+    assert latency_row("D51 " + PAIRS) == latency_row(ROW)
+    assert classify(PAIRS, "mean 0.054s incident vs 0.061s before") == "previous_only"
+
+
+def test_a_dash_on_either_side_of_an_arrow():
+    assert latency_row("| a | / | - → 0.231 | - → 0.400 | 0/11 → 9/11 |") == (
+        "a", "/", "-", "0.231", "-", "0.400", "0/11", "9/11")
+    assert classify("| a | / | - → 0.231 | - → 0.400 | 0/11 → 9/11 |", "0.231 s") == "incident_cited"
+    assert classify("| a | / | 0.012 → - | 0.013 → - | 10/10 → 0/11 |", "was 0.012") == "previous_only"
+    assert latency_row("| a | / | - → - | - → - | 0/11 → 0/11 |") is None
+
+
+def test_a_pair_shaped_resource_or_failed_row_is_ignored():
+    assert latency_row(RESOURCE) is None
+    assert latency_row("| a | - | - | - | - |") is None
+    assert latency_row("| a | no rows | - | - | - |") is None
+    assert latency_row("| a | / | 0.054 | 1.325 | 29/29 → 29/29 |") is None
+
+
 def test_numbers_inside_words_and_other_units_are_not_read():
     assert why_numbers("D35 shows 45.08MB, about 0.061.") == [Decimal("0.061")]
     assert why_numbers("0.002-0.008s") == [Decimal("0.002"), Decimal("0.008")]

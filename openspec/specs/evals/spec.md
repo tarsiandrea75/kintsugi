@@ -357,7 +357,7 @@ The report MUST gain, after each config's lines, one `ranked` line per fault and
 ### REQ-14 Latency-citation audit (d-abstention T1)
 `audit-latency --label NAME DIR [--label NAME DIR ...] [--out DIR]` MUST classify, for each replay run, every evidence item whose `quote` is a row of the dossier's latency table, because a model that compares two previous values as if one were the incident reads a slowdown as flat, and that misread must be counted before the table or the prompt changes. It MUST read only each incident's `report.evidence` and `report.rootCauseService`, from the file `<fault>-<mode>-<recording>-<sample>.json` that each `summary.tsv` row names; the report's summary is not tied to a row and MUST NOT be read.
 
-A quote MUST be a latency row by shape alone: after an optional `D<n> ` line label, a pipe-delimited row of eight cells split on unescaped pipes, whose third to sixth cells (previous mean, incident mean, previous max, incident max) are each a number or `-`, at least one a number. A resource row, with seven cells, MUST NOT match. The numbers in the item's `why` MUST be read as seconds, with or without `s`, and a number followed by `ms` divided by 1000; a number inside a word, such as `D35`, or followed by another unit, such as `45.08MB`, MUST NOT be read. A `why` number MUST match a row value when they differ by at most half a unit of the row value's last printed digit, both ends included.
+A quote MUST be a latency row by shape alone: after an optional `D<n> ` line label, a pipe-delimited row of eight cells split on unescaped pipes, whose third to sixth cells (previous mean, incident mean, previous max, incident max) are each a number or `-`, at least one a number; or **(latency-pairs T2)** a row of five cells whose third to fifth cells are each `<previous> → <incident>` (mean, max, points), the shape the dossier renders since latency-pairs T1, read as the same eight cells: previous mean, incident mean, previous max, incident max, previous points, incident points, with the same condition on the four times. Both shapes MUST be read, so the audit still reads D1–D4's runs. A resource row, with seven cells, a failed or `no rows` latency row, and a five-cell row whose value cells are not all pairs MUST NOT match. The numbers in the item's `why` MUST be read as seconds, with or without `s`, and a number followed by `ms` divided by 1000; a number inside a word, such as `D35`, or followed by another unit, such as `45.08MB`, MUST NOT be read. A `why` number MUST match a row value when they differ by at most half a unit of the row value's last printed digit, both ends included.
 
 An item MUST be `incident_cited` when a `why` number matches the incident mean or the incident max, else `previous_only` when one matches the previous mean or the previous max, else `no_number`. The rule MUST be stated as a lower bound on the misread: it cannot see a `why` that cites an incident value wrongly, nor a misread in the summary only.
 
@@ -387,6 +387,16 @@ Per run, the report MUST state the samples, how many abstained (`rootCauseServic
 - GIVEN a latency-row quote whose why names none of its four values, and a resource-row quote
 - WHEN the run is audited
 - THEN the first is `no_number` and the second is not an item
+
+#### Scenario: The same values in both shapes (latency-pairs T2)
+- GIVEN the quotes `| frontend | / | 0.054 | 1.325 | 0.061 | 1.477 | 29/29 | 29/29 |` and `| frontend | / | 0.054 → 1.325 | 0.061 → 1.477 | 29/29 → 29/29 |`, each with the same why
+- WHEN they are classified
+- THEN both get the same class: `previous_only` for "mean 0.054s incident vs 0.061s before", `incident_cited` for a why naming 1.325 or 1.477, `no_number` for one naming none
+
+#### Scenario: A missing value in a pair (latency-pairs T2)
+- GIVEN the quote `| a | / | - → 0.231 | - → 0.400 | 0/11 → 9/11 |` with why "0.231 s", and `| a | / | 0.012 → - | 0.013 → - | 10/10 → 0/11 |` with why "was 0.012"
+- WHEN they are classified
+- THEN the first is `incident_cited` and the second `previous_only`, and a pair row with `-` on both sides of every time is not an item
 
 #### Scenario: Abstaining and answering samples
 - GIVEN a run with one sample reporting `UNKNOWN` and one reporting a service

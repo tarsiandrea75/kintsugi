@@ -1,8 +1,10 @@
 """`python -m kintsugi_evals audit-latency`: which latency values a report's evidence cites (REQ-14, d-abstention).
 
-For every evidence item whose quote is a row of the dossier's latency table (DossierRenderer.latency:
-`| service | uri | previous mean | incident mean | previous max | incident max | points | points |`), the numbers in
-its `why` are matched to the row's four values. An item is `incident_cited` when it names the incident mean or max,
+For every evidence item whose quote is a row of the dossier's latency table (DossierRenderer.latency), in either of
+its shapes, the numbers in its `why` are matched to the row's four values. The eight-cell shape of D1-D4,
+`| service | uri | previous mean | incident mean | previous max | incident max | points | points |`, and the
+five-cell shape of latency-pairs T1, `| service | uri | mean, p → i | max, p → i | points, p → i |`, give the same
+four values, so the same rule classifies both. An item is `incident_cited` when it names the incident mean or max,
 `previous_only` when it names a previous value and neither incident value, the signature of a model that compares two
 previous values as if one were the incident, and `no_number` otherwise. Only `report.evidence` is read: the summary
 is not tied to a row. The rule cannot see an incident value cited wrongly, or a misread in the summary, so its
@@ -24,6 +26,8 @@ LINE_LABEL = re.compile(r"^D\d+ ")
 SEPARATOR = re.compile(r"(?<!\\)\|")
 VALUE = re.compile(r"^\d+(?:\.\d+)?$")
 NO_VALUE = "-"
+# Between a pair cell's previous and incident values (DossierRenderer.ARROW).
+ARROW = " → "
 # A number not inside a word or another number, with an optional unit; MB or any other unit is not a time.
 WHY_NUMBER = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?:\s*(ms|s))?(?!\w)(?!\.\d)")
 SUMMARY_COLUMNS = ("fault", "mode", "sample", "recording")
@@ -34,16 +38,32 @@ def latency_row(quote):
     """The eight cells of a latency-table row, or None for any other quote.
 
     The shape decides: eight cells whose middle four are each a number or `-` (a window without values), with at
-    least one number. A resource row has seven cells, so it never matches.
+    least one number. A five-cell row whose last three cells are each `previous → incident` is split into the same
+    eight cells, in the same order. A resource row has seven cells, so it never matches.
     """
     text = LINE_LABEL.sub("", quote.strip())
     if not (text.startswith("|") and text.endswith("|")) or len(text) < 2:
         return None
     cells = tuple(cell.strip() for cell in SEPARATOR.split(text[1:-1]))
+    if len(cells) == 5:
+        cells = _unpaired(cells)
+        if cells is None:
+            return None
     values = cells[2:6]
     if len(cells) != 8 or not all(VALUE.match(v) or v == NO_VALUE for v in values):
         return None
     return cells if any(VALUE.match(v) for v in values) else None
+
+
+def _unpaired(cells):
+    """A five-cell pair row as the eight cells of the old shape, or None when a value cell is not a pair."""
+    pairs = [cell.split(ARROW) for cell in cells[2:]]
+    if not all(len(pair) == 2 for pair in pairs):
+        return None
+    (previous_mean, incident_mean), (previous_max, incident_max), (previous_points, incident_points) = (
+        [side.strip() for side in pair] for pair in pairs)
+    return (cells[0], cells[1], previous_mean, incident_mean, previous_max, incident_max, previous_points,
+            incident_points)
 
 
 def why_numbers(why):
