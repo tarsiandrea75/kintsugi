@@ -46,10 +46,10 @@ True causes:
 |-------|----------------------|-----------------------|--------------|
 | F1 | gateway-mock | `DEPENDENCY_LATENCY` | The payment gateway answers authorizations after 10 s, so payments and the orders waiting on them stay pending. |
 | F2 | gateway-mock | `DEPENDENCY_REJECTING` | The payment gateway rejects every authorization with 429 (rate limited), so payments fail. |
-
-The sentences above are for the defaults. With a chosen value, F1's says the applied latency in whole seconds ("after 2 s", "after 5 s", "after 20 s"), and F2's the applied status and its meaning ("with 500 (internal server error)", "with 503 (service unavailable)").
 | F3 | order-service | `CONFIGURATION` | order-service is deployed with a wrong payment-service URL (`http://payment-service:9999`), so its payment calls fail to connect. |
 | F4 | inventory-service | `RESOURCE_EXHAUSTION` | inventory-service runs with a database pool of 2 and reservations that hold a connection for 5 s, so the pool is exhausted and reservations fail. |
+
+The F1 and F2 sentences above are for the defaults. With a chosen value, F1's says the applied latency in whole seconds ("after 2 s", "after 5 s", "after 20 s"), and F2's the applied status and its meaning ("with 500 (internal server error)", "with 503 (service unavailable)").
 
 ## Lab control
 

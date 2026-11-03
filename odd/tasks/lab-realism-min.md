@@ -90,6 +90,8 @@ Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain
   - The writer's choices: a nested `parameters` object, since Spring Boot ignores unknown top-level fields; refusal reasons name no parameter and list no value, so the leak scan holds.
   - Gap: a parameter put outside `parameters` is ignored silently and the default applied. T5's harness must nest it, and T6 must confirm the stored value.
 
+- 2026-11-03: native review of `cb48362..741c630` (the policy count fixes and T4): one reliability lens, **approved** and acknowledged (lineage `review-f72393b4297d1264`). SUGGESTION R3-split-truth-table fixed: the injector spec's truth table was split by a paragraph. Follow-up, not fixed: WARNING R3-fragile-pool-end-detection, the policy timeout test (`AgentLoopDossierModeTest.java`:421-426) spins on a JDK method name and fails only by its 30 s timeout if the executor changes.
+
 ## Next step
 
 T5.
