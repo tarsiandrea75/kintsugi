@@ -84,9 +84,22 @@ Forecast: about 350 authored lines for T2, 80 for T3, 150 for T1, T4 and T5; ove
   - The 4 "alternatives with `UNKNOWN`" retries show the model wanting to abstain while still naming suspects. ADR-025 forbids it, so that the list never ranks below an abstention. Whether to allow it is a design question for the human, not a fix to fit these cases.
 
 - 2026-11-03: the human chose to allow suspects with an abstention, if a measurement shows no harm: ADR-025's amendment and `evals/plans/2026-11-03-abstain-suspects-re2ob-dev.md`, branch `feat/ranked-report-02-abstain-suspects`. Tasks:
-- [ ] T6 Drop the rule from `ReportCheck` and the prompt, tests first; pins; spec. Route: delegated writer.
-- [ ] T7 DS's run, the rules check, the score and the result. Route: inline commands.
+- [x] T6 Drop the rule from `ReportCheck` and the prompt, tests first; pins; spec. Route: delegated writer.
+- [x] T7 DS's run, the rules check, the score and the result. Route: inline commands.
+- 2026-11-03: T6 done by a delegated writer (`4d8ea5c`). RED 3 failed; GREEN `./mvnw -q test` 714 run, 0 failures. 82 authored lines. The hybrid's text and schema pins pass unchanged; the plain instruction pin changes only by the sentence.
+- 2026-11-03: T7 done on `4d8ea5c`. Results in `evals/results/2026-11-03-abstain-suspects-re2ob-dev/`. Rules v1 and v2 (`replay-20261103T150856Z-rules`, `-150901Z-`) equal `-145625Z-` and `-145633Z-` in every column but `seconds`. DS `replay-20261103T150905Z-cloud`: 30 rows, all `COMPLETED`, DR's configuration and recordings; about $0.03.
+
+| Config | AC@1 [Wilson 95%] | AC@3 [Wilson 95%] | Avg@5 | Abstentions | Retries |
+|---|---|---|---|---|---|
+| DR | 26/30, 87% [70%, 95%] | 26/30, 87% [70%, 95%] | 87% | 4 | 7 |
+| **DS** | **26/30, 87% [70%, 95%]** | **27/30, 90% [74%, 97%]** | 89% | 3 | 3 |
+
+  - **The plan's rule holds, so the amendment is kept:** against DR, 2 won and 2 lost, so losses minus wins 0, at most 2 allowed; 3 abstentions, at most 6; no `INVALID_REPORT`.
+  - **Retries fell from 7 to 3,** all 3 for a service named twice; none for a cut.
+  - **All 3 abstentions list suspects, and the truth is among them in all 3.** The scorer gives those rows an empty ranking, so this changes no score. It is what Config C's escalation could use.
+  - **The first readable alternative:** DS's one wrong first answer has the truth second, so AC@3 is 27/30.
+  - DS − 0R: +20 points, 9 against 3, p = 0.15, not a paired win.
 
 ## Next step
 
-T6. A's next run must check the retry and cut rates under 512 tokens.
+The feature is complete. A's next run must check the retry and cut rates under 512 tokens.
