@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tests for check-freeze.sh (odd/tasks/check-freeze.md): on the real repository read-only (AC1, AC5), and on throwaway
-# git repositories built under a temporary directory (AC2-AC4), never in the real one. Needs git and python3 only; it
+# Tests for check-freeze.sh (odd/tasks/check-freeze.md): on the real repository read-only (AC5), and on throwaway
+# git repositories built under a temporary directory (AC1-AC4), never in the real one. Needs git and python3 only; it
 # runs no build and no replay. Run: infra/scripts/test-check-freeze.sh. Exits non-zero on the first failing case.
 set -uo pipefail
 
@@ -26,10 +26,13 @@ expect_line() {
 # Fails when a line of $2 starts with $3.
 expect_no_line() {
   cases=$((cases + 1))
-  if grep -qF -- "$3" <<<"$2"; then
-    printf 'FAIL  %s\n  unexpected line starting: %s\n  output:\n%s\n' "$1" "$3" "$2"
-    exit 1
-  fi
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" == "$3"* ]]; then
+      printf 'FAIL  %s\n  unexpected line starting: %s\n  output:\n%s\n' "$1" "$3" "$2"
+      exit 1
+    fi
+  done <<<"$2"
 }
 
 WORK=$(mktemp -d)
@@ -50,8 +53,13 @@ commit_at() {
   GIT_AUTHOR_DATE="$2" GIT_COMMITTER_DATE="$2" git -C "$1" commit -q -m "$3"
 }
 
-# The RCAEval converter's recording id (evals/kintsugi_evals/rcaeval/convert.py blinded) of case $1 (RE2-OB/<case>/<rep>).
-blinded() { python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:16])' "$1"; }
+# The RCAEval converter's recording id of system $1 (RE2-OB, RE2-SS), case $2 (<service>_<fault>) and repetition $3,
+# computed by the converter's own code (evals/kintsugi_evals/rcaeval/convert.py blinded, stdlib only). Every condition 4
+# case below flags a row by this id, so a change in the converter that the script does not follow fails them.
+blinded() {
+  python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from kintsugi_evals.rcaeval.convert import blinded
+print(blinded(sys.argv[2], sys.argv[3], int(sys.argv[4]))[0])' "$real_repo/evals" "$@"
+}
 
 summary_header="fault${tab}truth${tab}reported${tab}split${tab}recording"
 manifest_header="fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split"
@@ -78,13 +86,30 @@ make_repo() {
   commit_at "$repo" 2026-12-02T12:00:00Z "holdout-2"
 }
 
-# AC1, AC5: the real repository has no tag today; the run names it and changes nothing.
+# The helpers: expect_no_line matches a line's start, not a substring.
+(expect_no_line "helper" $'x FAIL  y\nz' "FAIL  y") >/dev/null
+expect "expect_no_line ignores a match that does not start a line" "$?" "0"
+(expect_no_line "helper" $'x\nFAIL  y z' "FAIL  y") >/dev/null
+expect "expect_no_line fails on a line that starts with the text" "$?" "1"
+
+# AC5: a run on the real repository changes nothing in it. Its exit status is not asserted: it changes on the day the
+# tag is created.
 before=$(git -C "$real_repo" status --porcelain --untracked-files=all)
-out=$(run_check)
+run_check >/dev/null
 after=$(git -C "$real_repo" status --porcelain --untracked-files=all)
-expect_line "the real repository today: the missing tag is named" "$out" "FAIL  tag: no tag freeze-m3"
-expect_line "the real repository today: the run fails" "$out" "exit 1"
 expect "a run on the real repository changes nothing in it" "$after" "$before"
+
+# AC1: a repository with no tag fails, naming the missing tag.
+repo="$WORK/no-tag"
+mkdir -p "$repo/agent/src/main/java"
+git -C "$repo" init -q -b main
+git -C "$repo" config user.name test
+git -C "$repo" config user.email test@example.invalid
+echo 'class Loop {}' >"$repo/agent/src/main/java/Loop.java"
+commit_at "$repo" 2026-11-20T10:00:00Z "no tag"
+out=$(run_check --repo "$repo")
+expect_line "a repository with no tag: the missing tag is named" "$out" "FAIL  tag: no tag freeze-m3"
+expect_line "a repository with no tag: the run fails" "$out" "exit 1"
 
 # AC2: a tag and no change since it passes condition 2; a change under a frozen path fails it, naming the file.
 repo="$WORK/unchanged"
@@ -130,13 +155,23 @@ git -C "$repo" tag freeze-m3
 out=$(run_check --repo "$repo")
 expect_line "a manifest with no holdout-2 recording fails condition 3" "$out" \
   "FAIL  holdout-2: agent/src/test/resources/replay/recordings.tsv has no holdout-2 recording"
+repo="$WORK/seeded"
+make_repo "$repo" 2026-12-02T10:00:00Z
+manifest="$repo/agent/src/test/resources/replay/recordings.tsv"
+python3 -I -c 'import sys; lines = open(sys.argv[1]).read().splitlines()
+lines = [lines[0] + "\tseed"] + [line + "\ts" + str(i) for i, line in enumerate(lines[1:], 1)]
+open(sys.argv[1], "w").write("\n".join(lines) + "\n")' "$manifest"
+commit_at "$repo" 2026-12-02T13:00:00Z "a seed column"
+out=$(run_check --repo "$repo")
+expect_line "a seed column the check does not read yet fails condition 3 closed" "$out" \
+  "FAIL  holdout-2: agent/src/test/resources/replay/recordings.tsv has a seed column this check does not read yet, so the seeds cannot be shown to postdate freeze-m3"
 
 # AC4: an RE2-OB repetition 2 row committed before the M4 date fails condition 4; lab holdout-1 rows do not.
 repo="$WORK/unchanged"
 out=$(run_check --repo "$repo")
 expect_line "lab holdout-1 rows pass condition 4" "$out" \
   "PASS  results: no result under evals/results/ committed before 2026-12-07 read a holdout"
-rep2=$(blinded RE2-OB/checkoutservice_cpu/2)
+rep2=$(blinded RE2-OB checkoutservice_cpu 2)
 mkdir -p "$repo/evals/results/a-holdout/inputs"
 printf '%s\ncpu\tcheckoutservice|RESOURCE_EXHAUSTION\tcheckoutservice|RESOURCE_EXHAUSTION\tholdout\t%s\n' \
   "$summary_header" "$rep2" >"$repo/evals/results/a-holdout/inputs/A-summary.tsv"
@@ -154,7 +189,7 @@ out=$(run_check --repo "$repo")
 expect_line "a holdout read deleted later still fails condition 4" "$out" \
   "FAIL  results: evals/results/a-holdout/inputs/A-summary.tsv at $commit (2026-12-04): 1 row(s) of RCAEval holdout A (RE2-OB repetition 2), first $rep2"
 repo="$WORK/old-holdout2"
-ss=$(blinded RE2-SS/carts-db_mem/1)
+ss=$(blinded RE2-SS carts-db_mem 1)
 mkdir -p "$repo/evals/results/mislabelled/inputs"
 printf '%s\nmem\tcarts|RESOURCE_EXHAUSTION\tcarts|RESOURCE_EXHAUSTION\tdev\t%s\nF1\tx|y\tx|y\tholdout-2\tverify-agent-20261202T100000Z-r1-F1\n' \
   "$summary_header" "$ss" >"$repo/evals/results/mislabelled/inputs/A-summary.tsv"
@@ -167,6 +202,22 @@ expect_line "a holdout-2 row before M4 fails condition 4" "$out" \
   "FAIL  results: evals/results/mislabelled/inputs/A-summary.tsv at $commit (2026-12-04): 1 row(s) of lab holdout-2, first verify-agent-20261202T100000Z-r1-F1"
 expect_line "the summary counts the failed conditions" "$out" "RESULT: FAIL (2 of 4 conditions failed)"
 
+# Condition 4 reads every committed table: under a path git would quote, and with no split column.
+repo="$WORK/fail-open"
+make_repo "$repo" 2026-12-02T10:00:00Z
+mkdir -p "$repo/evals/results/città/inputs" "$repo/evals/results/no-split/inputs"
+printf '%s\ncpu\tcheckoutservice|RESOURCE_EXHAUSTION\tcheckoutservice|RESOURCE_EXHAUSTION\tholdout\t%s\n' \
+  "$summary_header" "$rep2" >"$repo/evals/results/città/inputs/A-summary.tsv"
+printf 'fault\ttruth\treported\trecording\ncpu\tcheckoutservice|RESOURCE_EXHAUSTION\tcheckoutservice|RESOURCE_EXHAUSTION\t%s\n' \
+  "$rep2" >"$repo/evals/results/no-split/inputs/A-summary.tsv"
+commit_at "$repo" 2026-12-04T10:00:00Z "read holdout A twice"
+commit=$(git -C "$repo" rev-parse --short HEAD)
+out=$(run_check --repo "$repo")
+expect_line "a holdout read under a non-ASCII directory name fails condition 4" "$out" \
+  "FAIL  results: evals/results/città/inputs/A-summary.tsv at $commit (2026-12-04): 1 row(s) of RCAEval holdout A (RE2-OB repetition 2), first $rep2"
+expect_line "a holdout read in a table with no split column fails condition 4" "$out" \
+  "FAIL  results: evals/results/no-split/inputs/A-summary.tsv at $commit (2026-12-04): 1 row(s) of RCAEval holdout A (RE2-OB repetition 2), first $rep2"
+
 # Options.
 out=$(run_check --m4-date 2026-13-01)
 expect_line "a wrong --m4-date exits 2" "$out" "exit 2"
@@ -176,5 +227,12 @@ out=$(run_check --bogus)
 expect_line "an unknown option exits 2" "$out" "exit 2"
 out=$(run_check --help)
 expect_line "--help exits 0" "$out" "exit 0"
+expect_line "--help states the Python version" "$out" "writes to the repository. Needs git and python3 3.11 or later."
+mkdir -p "$WORK/old-python"
+printf '#!/usr/bin/env bash\necho "Python 3.9.18"\nexit 1\n' >"$WORK/old-python/python3"
+chmod +x "$WORK/old-python/python3"
+out=$(PATH="$WORK/old-python:$PATH" run_check --repo "$WORK/unchanged")
+expect_line "a python3 older than 3.11 exits 2" "$out" "exit 2"
+expect_line "a python3 older than 3.11 is named" "$out" "python3 3.11 or later is required (datetime.fromisoformat reads a trailing Z from 3.11)"
 
 echo "PASS  $cases cases"

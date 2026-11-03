@@ -636,7 +636,7 @@ REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset
 
 ### Freeze check
 
-M3 closes when `check-freeze.sh` passes ([vision](vision.md) §7, `odd/tasks/check-freeze.md`). It is read-only: it reads git, the recordings' manifest and the committed results, and writes nothing.
+M3 closes when `check-freeze.sh` passes ([vision](vision.md) §7, `odd/tasks/check-freeze.md`). It is read-only: it reads git, the recordings' manifest and the committed results, and writes nothing. It needs git and Python 3.11 or later, and exits 2 on an older `python3`.
 
 ```bash
 infra/scripts/check-freeze.sh                          # tag freeze-m3, M4 from 2026-12-07
@@ -649,7 +649,7 @@ It prints one PASS line per condition that holds and one FAIL line per failure, 
 1. `tag`: the tag exists.
 2. `unchanged`: nothing under `agent/src/main/` (the loop, the rules, the prompt, the taxonomy) changed between the tag and HEAD, and nothing there is uncommitted or untracked.
 3. `holdout-2`: the manifest at HEAD holds `holdout-2` recordings, each with an incident `startedAt` later than the tag's commit time, and each seed with a later time too. No seed is recorded anywhere yet, so this condition fails closed until one is.
-4. `results`: no `.tsv` under `evals/results/`, in any commit before midnight UTC of the M4 date (a version deleted later included), holds a row of lab `holdout-2` or of an RCAEval holdout: A (RE2-OB repetitions 2-3) or B (RE2-SS). RCAEval rows are found by their recording id, recomputed from the row's fault and truth as the converter blinds it, and by split `holdout` on a recording that is not a lab `verify-agent-*` one. Lab holdout-1 rows are allowed: they were read once in M2 by plan.
+4. `results`: no `.tsv` under `evals/results/`, in any commit before midnight UTC of the M4 date (a version deleted later included), holds a row of lab `holdout-2` or of an RCAEval holdout: A (RE2-OB repetitions 2-3) or B (RE2-SS). RCAEval rows are found by their recording id, recomputed from the row's fault and truth as the converter blinds it in every table with a fault, a truth and a recording or file column (a split column or not), and by split `holdout` on a recording that is not a lab `verify-agent-*` one. Lab holdout-1 rows are allowed: they were read once in M2 by plan.
 
 The tag name, the M4 date, the frozen paths and the split name are set once at the top of the script.
 

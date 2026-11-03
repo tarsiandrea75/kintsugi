@@ -36,10 +36,11 @@ the file or commit, then a RESULT line:
 4. results: no .tsv under evals/results/, in any commit of HEAD's history before the M4 date, holds a row of lab
    holdout-2 or of an RCAEval holdout: holdout A (RE2-OB repetitions 2-3) or holdout B (RE2-SS). A row is found by
    its split (holdout-2; holdout on a recording that is not a lab verify-agent-* one) or by its recording id, which
-   is recomputed from the row's fault and truth as the converter blinds it. Lab holdout-1 rows (split holdout on a
-   verify-agent-* recording) are allowed: they were read once in M2 by plan.
-Exits 0 only when all four hold, 1 when one fails, 2 on a wrong argument. Read-only: it never writes to the
-repository. Needs git and python3.
+   is recomputed from the row's fault and truth as the converter blinds it, in every table with a fault, a truth and
+   a recording or file column, split column or not. Lab holdout-1 rows (split holdout on a verify-agent-* recording)
+   are allowed: they were read once in M2 by plan.
+Exits 0 only when all four hold, 1 when one fails, 2 on a wrong argument or an older python3. Read-only: it never
+writes to the repository. Needs git and python3 3.11 or later.
 EOF
 }
 
@@ -57,6 +58,9 @@ while (( $# )); do
   esac
 done
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 2; }
+# Condition 3 reads startedAt and git's commit time with datetime.fromisoformat, which reads a trailing Z only from 3.11.
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null \
+  || { echo "python3 3.11 or later is required (datetime.fromisoformat reads a trailing Z from 3.11)" >&2; exit 2; }
 [[ -n "$TAG" ]] || { echo "--tag needs a name" >&2; exit 2; }
 python3 -c 'import datetime, sys; datetime.date.fromisoformat(sys.argv[1])' "$M4_DATE" 2>/dev/null \
   && [[ "$M4_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
@@ -139,9 +143,21 @@ def recording_time(path):
         return "has no readable startedAt"
 
 
+def seed_failure(columns):
+    """Why the seeds cannot be shown to postdate the tag. Vision §7 wants each holdout-2 recording's seed to postdate
+    the tag, but no seed is recorded anywhere today (no manifest column, no field in the incident), so there is no time
+    to compare and the condition fails closed. The holdout-2 recording feature, which records the seed and its time,
+    replaces this function with the comparison; until then a seed column is not read either."""
+    if "seed" in columns:
+        return "%s has a seed column this check does not read yet, so the seeds cannot be shown to postdate %s" % (
+            manifest, tag)
+    return "no %s seed carries a time (%s has no seed), so the seeds cannot be shown to postdate %s" % (
+        split, manifest, tag)
+
+
 text = show(manifest)
-rows = [] if text is None else [row for row in csv.DictReader(text.splitlines(), delimiter="\t")
-                                if row.get("split") == split]
+reader = csv.DictReader([] if text is None else text.splitlines(), delimiter="\t")
+rows = [row for row in reader if row.get("split") == split]
 if text is None:
     failures.append("%s is not committed at HEAD" % manifest)
 elif not rows:
@@ -153,10 +169,7 @@ for row in rows:
         failures.append("%s %s, so it cannot be shown to postdate %s" % (file, started, tag))
     elif started[0] <= tag_at:
         failures.append("%s started %s, not after %s (%s)" % (file, started[1], tag, tag_time.replace("+00:00", "Z")))
-# The seeds: vision §7 wants each holdout-2 recording's seed to postdate the tag, but no seed is recorded anywhere
-# today (no manifest column, no field in the incident), so there is no time to compare: the condition fails closed.
-failures.append("no %s seed carries a time (%s has no seed), so the seeds cannot be shown to postdate %s"
-                % (split, manifest, tag))
+failures.append(seed_failure(reader.fieldnames or []))
 for failure in failures:
     print("FAIL  holdout-2: " + failure)
 if failures:
@@ -216,29 +229,35 @@ def holdout_of(row):
     return None
 
 
-# Every .tsv version committed under results_dir before midnight UTC of the M4 date, oldest first.
-log = git("log", "--reverse", "--before=%sT00:00:00Z" % m4_date, "--diff-filter=AMR", "--name-only",
-          "--format=commit %h %cs", "--", results_dir)
+# Every .tsv version committed under results_dir before midnight UTC of the M4 date, oldest first. -z keeps each path
+# raw and NUL-terminated (no C-quoting of non-ASCII or special characters); a \x01 starts each commit's header.
+log = git("log", "-z", "--reverse", "--before=%sT00:00:00Z" % m4_date, "--diff-filter=AMR", "--name-only",
+          "--format=%x01%h %cs", "--", results_dir)
 versions, commit = [], None
-for line in log.splitlines():
-    if line.startswith("commit "):
-        commit = line.split()[1:]
-    elif line.endswith(".tsv") and commit:
-        versions.append((commit[0], commit[1], line))
+for field in log.split("\0"):
+    field = field.lstrip("\n")
+    if field.startswith("\x01"):
+        commit = field[1:].split()
+    elif field.endswith(".tsv") and commit:
+        versions.append((commit[0], commit[1], field))
 
 failures = 0
 for short, day, path in versions:
     text = git("show", "%s:%s" % (short, path))
-    rows = list(csv.DictReader(text.splitlines(), delimiter="\t"))
-    if not rows or "split" not in rows[0]:
+    reader = csv.DictReader(text.splitlines(), delimiter="\t")
+    columns = set(reader.fieldnames or [])
+    # The recording-id check needs a fault, a truth and a recording or file; the split checks need a split.
+    by_id = {"fault", "truth"} <= columns and bool({"recording", "file"} & columns)
+    if not by_id and "split" not in columns:
         continue
+    rows = list(reader)
     found = {}
     for row in rows:
         if not row.get("recording") and row.get("file"):
             row["recording"] = row["file"].rsplit("/", 1)[-1].removesuffix(".json")
         holdout = holdout_of(row)
         if holdout:
-            found.setdefault(holdout, []).append(row["recording"])
+            found.setdefault(holdout, []).append(row.get("recording") or "?")
     for holdout, recordings in found.items():
         failures += 1
         print("FAIL  results: %s at %s (%s): %d row(s) of %s, first %s"
