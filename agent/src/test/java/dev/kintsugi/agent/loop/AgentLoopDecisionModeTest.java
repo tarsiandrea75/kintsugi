@@ -83,8 +83,8 @@ class AgentLoopDecisionModeTest {
 
 	/** The alternatives' sentence of the plain report's task, its leading space included. */
 	private static final String ALTERNATIVES_TASK = " alternatives: up to 4 other causes you have not ruled out, best "
-			+ "first, each {rootCauseService, rootCauseCategory}, no service twice and none UNKNOWN; an empty list when "
-			+ "both causes are UNKNOWN.";
+			+ "first, each {rootCauseService, rootCauseCategory}, no service twice and none UNKNOWN; when both causes are "
+			+ "UNKNOWN, the causes you suspect but cannot support, or an empty list.";
 
 	/**
 	 * The instruction of a decision run's report call with the plain report, as the commit before the assessed report
@@ -102,8 +102,8 @@ class AgentLoopDecisionModeTest {
 			header, line is the number at the start of one line of that summary (2 for the line that starts with \
 			"2: "), and why is at most 200 characters. rootCauseService and rootCauseCategory, from the values listed \
 			in the system message, as your summary concludes. alternatives: up to 4 other causes you have not ruled \
-			out, best first, each {rootCauseService, rootCauseCategory}, no service twice and none UNKNOWN; an empty \
-			list when both causes are UNKNOWN. confidence: a number from 0 to 1. To cite the dossier, \
+			out, best first, each {rootCauseService, rootCauseCategory}, no service twice and none UNKNOWN; when both \
+			causes are UNKNOWN, the causes you suspect but cannot support, or an empty list. confidence: a number from 0 to 1. To cite the dossier, \
 			write toolCallId "dossier" and tool "dossier", with the number of the line you cite: D7 is line 7. \
 			Citable toolCallIds: dossier.""";
 

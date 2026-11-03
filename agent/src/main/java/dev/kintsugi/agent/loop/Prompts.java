@@ -140,7 +140,8 @@ final class Prompts {
 	 */
 	private static final String REPORT_ALTERNATIVES = """
 			 alternatives: up to 4 other causes you have not ruled out, best first, each {rootCauseService, \
-			rootCauseCategory}, no service twice and none UNKNOWN; an empty list when both causes are UNKNOWN.""";
+			rootCauseCategory}, no service twice and none UNKNOWN; when both causes are UNKNOWN, \
+			the causes you suspect but cannot support, or an empty list.""";
 
 	private static final String REPORT_CONFIDENCE = " confidence: a number from 0 to 1.";
 

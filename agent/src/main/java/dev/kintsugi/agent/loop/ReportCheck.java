@@ -200,7 +200,7 @@ final class ReportCheck {
 		boolean unknown = Causes.UNKNOWN.equals(report.path("rootCauseService").asString(""))
 				&& Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""));
 		if (ranked) {
-			alternatives(report, unknown, topology, errors);
+			alternatives(report, topology, errors);
 		}
 		JsonNode evidence = report.get("evidence");
 		if (evidence == null || !evidence.isArray()) {
@@ -469,19 +469,16 @@ final class ReportCheck {
 	/**
 	 * Adds to {@code errors} each rule the plain report's alternatives break (ranked-report T2; ADR-025): an array of
 	 * at most {@value #MAX_ALTERNATIVES} items {@code {rootCauseService, rootCauseCategory}}, from the cause's enums,
-	 * none UNKNOWN in either field, each service named once, the first cause's included, and none at all when both
-	 * causes are UNKNOWN. Every breach rejects the report, for the one retry: no alternative is dropped, since the list
-	 * is the model's ranking and a list code had cut would be a ranking nobody made.
-	 * @param unknown whether both causes are UNKNOWN
+	 * none UNKNOWN in either field, each service named once, the first cause's included. When both causes are UNKNOWN
+	 * the same rules hold, and the list is the causes the model suspects but cannot support (ADR-025, amendment
+	 * 2026-11-03): an UNKNOWN first cause names no service, so it blocks none. Every breach rejects the report, for the
+	 * one retry: no alternative is dropped, since the list is the model's ranking and a list code had cut would be a
+	 * ranking nobody made.
 	 */
-	private static void alternatives(JsonNode report, boolean unknown, Topology topology, List<String> errors) {
+	private static void alternatives(JsonNode report, Topology topology, List<String> errors) {
 		JsonNode alternatives = report.get("alternatives");
 		if (alternatives == null || !alternatives.isArray()) {
 			errors.add(ALTERNATIVES_SHAPE);
-			return;
-		}
-		if (unknown && !alternatives.isEmpty()) {
-			errors.add("alternatives must be empty when both causes are UNKNOWN");
 			return;
 		}
 		if (alternatives.size() > MAX_ALTERNATIVES) {

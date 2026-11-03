@@ -330,6 +330,23 @@ class ReplayDriverTest {
 		assertThat(decisionSample("dev", "a", "MISS").rankedColumn()).isEmpty();
 	}
 
+	/**
+	 * An abstaining report's suspects (ADR-025, amendment 2026-11-03) are stored and written to the ranked column, as
+	 * any alternatives are; the scorer, not the driver, gives an abstaining row its empty ranking.
+	 */
+	@Test
+	void anAbstainingReportsSuspectsAreTheRankedColumn() {
+		this.model.text(ScriptedChatModel.rankedReport("UNKNOWN", "UNKNOWN",
+				List.of("payment-service|DEPENDENCY_LATENCY", "order-service|CONFIGURATION")));
+
+		ReplayDriver.Sample sample = this.driver.decisionSample(this.driver.decisionCases("stress", List.of("F1")).get(0),
+				1);
+
+		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
+		assertThat(sample.rankedColumn()).isEqualTo("payment-service|DEPENDENCY_LATENCY;order-service|CONFIGURATION");
+		assertThat(sample.summaryLine()).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn());
+	}
+
 	@Test
 	void aDecisionCaseIsServedItsOwnRecordingAlone() throws IOException {
 		// Two cases of F1 hold the dossier's first call with different outputs: neither is served the other's.

@@ -530,9 +530,26 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void alternativesAfterAnUnknownCauseAreInvalid() {
-		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN", List.of("postgres|CONFIGURATION"))))
-			.containsExactly("alternatives must be empty when both causes are UNKNOWN");
+	void anAbstentionWithValidSuspectsPasses() {
+		// ADR-025, amendment 2026-11-03: an abstaining report may list the causes it suspects but cannot support.
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN",
+				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION",
+						"inventory-service|RESOURCE_EXHAUSTION")))).isEmpty();
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN", List.of("postgres|CONFIGURATION")))).isEmpty();
+	}
+
+	@Test
+	void anAbstentionsSuspectsKeepEveryOtherRule() {
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN",
+				List.of("postgres|CONFIGURATION", "postgres|RESOURCE_EXHAUSTION"))))
+			.containsExactly("alternatives[1].rootCauseService \"postgres\" is already named; name each service once, "
+					+ "rootCauseService included");
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN", List.of("UNKNOWN|CONFIGURATION"))))
+			.containsExactly("alternatives[0] must not be UNKNOWN: leave out a cause you cannot name");
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN",
+				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION",
+						"inventory-service|RESOURCE_EXHAUSTION", "order-service|CONFIGURATION"))))
+			.containsExactly("alternatives must hold at most 4 items");
 	}
 
 	@Test
