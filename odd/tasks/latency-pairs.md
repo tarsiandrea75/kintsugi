@@ -91,7 +91,7 @@ Forecast: about 200 authored lines for T1 without goldens, about 100 for T2, abo
 | **DP, pairs** | **16/30, 53% [36%, 70%]** | 60% | 89% |
 | 0R | 20/30, 67% [49%, 81%] | 90% | 74% |
 
-  - **The misread is gone:** 0 `previous_only` items out of 50 latency-row items (46 `incident_cited`, 4 `no_number`), against at least one in 26 of 67 abstaining samples and 17 of 53 answering ones before.
+  - **REQ-14 detects no misread now:** 0 `previous_only` items out of 50 latency-row items (46 `incident_cited`, 4 `no_number`), against at least one in 26 of 67 abstaining samples and 17 of 53 answering ones before. The rule is a lower bound, so this is not proof that every misread is gone. At least one other kind remains: `5c748506` quotes `| emailservice | / | 0.003 → 0.012 | 0.003 → 0.067 |` and writes "max rose from 0.067 to 0.012", which crosses the incident values of the two cells. The rule counts that item as `incident_cited`.
   - **The gain rule is not met:** wins minus losses against D1–D4 are 7−2, 7−3, 8−4, 7−4, so net 5, 4, 4, 3, all under 7. DP − 0R is −13 points, 9 for DP against 13 for 0R, p = 0.52, so no paired win. **So the layout is not kept as a gain.**
   - DP − 0: +40 points, 13 against 1, p = 0.0018, Holm 0.037. This was not a criterion of the plan.
   - Of the 13 cases that abstained in all of D1–D4, DP answers 7 and gets 6 right.
@@ -99,4 +99,5 @@ Forecast: about 200 authored lines for T1 without goldens, about 100 for T2, abo
 
 ## Next step
 
-The plan leaves one decision to the human: whether to keep the layout without a measured gain. It changes no rule and costs nothing at run time, and it removes a misread that this run shows gone. Before the freeze on 2026-12-01, no further change to D on these 30 cases without its own plan.
+The plan leaves one decision to the human: whether to keep the layout without a measured gain. It changes no rule and costs nothing at run time, and REQ-14 no longer detects the misread it targeted, though other misreads remain possible.
+- 2026-11-03: native review of `89698fb..689421d`: one reliability lens, **approved** and acknowledged (lineage `review-8a1de7e1ae34d63b`). WARNING R3-misread-gone-overclaim, fixed above: "gone" became "not detected". SUGGESTION R3-exact-arrow-spacing, not fixed: a quoted pair cell with other spacing around the arrow is dropped from the audit, not counted. Before the freeze on 2026-12-01, no further change to D on these 30 cases without its own plan.
