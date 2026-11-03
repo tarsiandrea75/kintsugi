@@ -48,7 +48,7 @@ The rule cannot see a misread that cites an incident value wrongly, or one in th
 
 ## Tasks
 
-- [ ] T1 The audit command, tests first, on synthetic incident JSON; the living spec. Route: delegated writer.
+- [x] T1 The audit command, tests first, on synthetic incident JSON; the living spec. Route: delegated writer.
 - [ ] T2 The plan for the repeats and the audit. Route: inline (docs).
 - [ ] T3 Three D runs, the audit on four runs, the score and the result. Route: inline commands.
 
@@ -71,7 +71,11 @@ Forecast: about 250 authored lines for T1, about 100 for T2–T3. Branch `feat/d
 ## Progress
 
 - 2026-11-03: diagnosis read-only (above). The human approved the audit and the three repeats.
+- 2026-11-03: T1 done by a delegated writer (`8b5c488`): `audit-latency`, REQ-14. RED 19 failed against a stub; GREEN 310 passed. About 402 authored lines.
+  - **Order, stated plainly:** the writer's smoke check ran the audit on D1 before the plan was committed. The plan's text was written before that output and is committed unchanged. On D1: 31 latency-row items; abstaining samples 7 `incident_cited`, 9 `previous_only`, 2 `no_number`; answering samples 7, 6, 0.
+  - The writer's reading, not acted on: about half the `previous_only` items are on rows that barely moved, where naming the previous column changes nothing. The plan's rule counts them anyway; it is not changed after seeing this.
+  - Precision on 880fd526: "mean 0.054s incident vs 0.061s before" is in the report's summary; its evidence `why` reads "0.054 mean in incident window, comparable to previous 0.061 max". Both pair the previous mean with the previous max.
 
 ## Next step
 
-T1.
+T2 committed, then T3.
