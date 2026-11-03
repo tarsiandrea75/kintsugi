@@ -51,7 +51,7 @@ The upstream README's sentence gives "0.64, and 0.8" for delay and loss, one num
 
 - [x] T1 The port on RE2-TT, `compare_dev.py`, spec and docs, tests first. Route: delegated writer (several non-trivial files).
 - [x] T2 The plan, with the published values and the decision rule. Route: inline (docs).
-- [ ] T3 The run, conformance first, and the result. Route: inline commands.
+- [x] T3 The run, conformance first, and the result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -84,6 +84,23 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
 - 2026-11-03: native review of `277f47f..9efe133`: one reliability lens, **approved** and acknowledged (lineage `review-2fbba651778bcab5`). Two WARNINGs, both closed for this run by the plan's checks, not in code: R3-silent-partial-re2-tt (`baro-rcaeval` skips a misnamed directory silently) and R3-data-csv-not-conformance-checked (`compare_dev.py` cannot see a `data.csv`).
 - 2026-11-03: T2 done: `evals/plans/2026-11-03-baro-re2tt-reproduction.md`. Config 0 does not run alongside: a deliberate exception, since this checks the port against a table and Config 0 has no RE2-TT run.
 
+- 2026-11-03: T3 done on `167b673`, results in `evals/results/2026-11-03-baro-re2tt-reproduction/`. The plan's checks passed: 0 `data.csv` and 90 `simple_metrics.csv` under `RE2-TT/`; 90 rows, 15 per fault, all `COMPLETED`; `compare_dev.py` exit 0 on 90 cases, same service and column rankings, every score within 1e-9. **Reproduced: all 21 cells equal Table 6 at two decimals**, so the tolerance was not needed. AC3–AC6 hold.
+
+| Fault | AC@1 [Wilson 95%] | AC@3 [Wilson 95%] | Avg@5 | Table 6 |
+|---|---|---|---|---|
+| cpu | 7/15, 47% [25%, 70%] | 12/15, 80% [55%, 93%] | 72% | 0.47, 0.8, 0.72 |
+| mem | 14/15, 93% [70%, 99%] | 15/15, 100% [80%, 100%] | 99% | 0.93, 1, 0.99 |
+| disk | 15/15, 100% [80%, 100%] | 15/15, 100% [80%, 100%] | 100% | 1, 1, 1 |
+| socket | 9/15, 60% [36%, 80%] | 13/15, 87% [62%, 96%] | 83% | 0.6, 0.87, 0.83 |
+| delay | 7/15, 47% [25%, 70%] | 10/15, 67% [42%, 85%] | 63% | 0.47, 0.67, 0.63 |
+| loss | 8/15, 53% [30%, 75%] | 9/15, 60% [36%, 80%] | 64% | 0.53, 0.6, 0.64 |
+| pooled | 60/90, 67% [56%, 76%] | 74/90, 82% [73%, 89%] | 80% | 0.67, 0.82, 0.8 |
+
+  - Chance with 68 services, the union ranked (the paper counts 64 services; the headers also hold names such as `rabbitmq` and `kube-proxy`): AC@1 1.47%, AC@3 4.41%, Avg@5 4.41%.
+  - **What this proves:** the port, the published pipeline, the scorer's AC@k and Avg@k and its per-fault pooling together give the published table. **What it does not:** that RE2-OB behaves as RE2-TT does. BARO's `redis` first on RE2-OB is the same code on another system, with no published number to check it against.
+  - The first two runs of the plan's checks are by hand: `baro-rcaeval` still skips a misnamed directory silently (R3-silent-partial-re2-tt), and `compare_dev.py` still cannot see a `data.csv` (R3-data-csv-not-conformance-checked). Both matter only for a future read of new data.
+  - Config 0 did not run alongside, by the plan's stated exception.
+
 ## Next step
 
-T3, once the download ends.
+The feature is complete. The human chooses the next one.

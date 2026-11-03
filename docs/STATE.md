@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-02 (session 02)
+2026-11-03 (session 01)
 
 ## Milestone
 
@@ -37,7 +37,8 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 7. Done 2026-11-02: `resource-facts` (Last action). The stop rule's reading is the human's: the paired win on RE2-OB dev is 0R − 0 (rules only, p = 3.1e-05); HR − 0R is not a win (p = 0.25).
 8. Done 2026-11-02: `rcaeval-dev-baselines` (Last action). ADR-023 fixes A's RCAEval deadline at 2100 s; at A's median report time, 200 holdout cases take about 49 h of CPU.
 9. Done 2026-11-02: AC@3 and Avg@5 in the scorer (`odd/tasks/rcaeval-ranked-metrics.md`, REQ-13, `score --service-only --topology PATH`). RE2-OB dev, `evals/results/2026-11-02-ranked-re2ob-dev/`, chance at n = 11 AC@3 27%, Avg@5 27%: 0 AC@3 17%, Avg@5 16%; 0R 80%, 76%; D 37%, 37% and A2100 63%, 63%, one answer each, so equal to their AC@1 by construction; BARO 87%, 76%. No published RE2-OB number was found to compare with: the RCAEval paper's Table 6 and the README give Train Ticket only.
-10. **Next: the human reads the stop rule (vision §7) and chooses the next feature.** Candidates: reproducing BARO's published Avg@5 on RE2-TT, the only check of the port against a published number found so far; the 2 `INVALID_REPORT` on loss; delay. The holdout is out until M4 (the freeze check).
+10. Done 2026-11-03: BARO reproduced on RE2-TT (`odd/tasks/rcaeval-baro-reproduction.md`, `evals/results/2026-11-03-baro-re2tt-reproduction/`): all 21 cells of the RCAEval paper's Table 6 equal at two decimals, pooled AC@1 60/90, 67% [56%, 76%], AC@3 82%, Avg@5 80%; conformance on 90 cases. The port, the pipeline and the scorer's ranked metrics together give the published table. It supports BARO's RE2-OB column, including `redis` first, and does not prove it: same code, another system.
+11. **Next: the human reads the stop rule (vision §7) and chooses the next feature.** Candidates: the 2 `INVALID_REPORT` on loss; delay. The holdout is out until M4 (the freeze check).
 
 ## Local branch chains (not pushed)
 
@@ -58,7 +59,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -78,6 +79,10 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+Session of 2026-11-03, rcaeval-baro-reproduction (details in `odd/tasks/rcaeval-baro-reproduction.md`):
+- `baro-rcaeval` skips a misnamed case directory silently and does not count 90 cases; `compare_dev.py` cannot see a `data.csv`. The plan checked both by hand; a future read of new data needs them again.
+- `ranking_of`'s abstention test covers a reported `UNKNOWN` with candidates, not `none` or empty (SUGGESTION R3-001).
 
 Session of 2026-11-02, rcaeval-dev-baselines (details in `odd/tasks/rcaeval-dev-baselines.md`):
 - `evals/tests/test_baro.py:209` tests a repetition that does not exist (review WARNING R3-rep-guard-unproved).
