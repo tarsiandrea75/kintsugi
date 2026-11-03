@@ -1,5 +1,7 @@
 """Tests of the replay TSV reader and the scoring rule (ADR-015, openspec/specs/evals)."""
 
+from pathlib import Path
+
 import pytest
 
 from kintsugi_evals.scoring import (
@@ -294,11 +296,15 @@ RANK_TRUTH = "checkoutservice|RESOURCE_EXHAUSTION"
 
 
 def write_ranked_tsv(path, rows, route="baro", report="-"):
-    """A summary.tsv whose rows are (fault, status, truth, reported, recording, candidates)."""
-    lines = ["\t".join(HEADER + ["view", "report", "candidates"])]
-    for fault, status, truth, reported, recording, candidates in rows:
+    """A summary.tsv whose rows are (fault, status, truth, reported, recording, candidates[, ranked]).
+
+    Rows with a seventh value add the trailing ranked column (ranked-report T3); every row then needs one.
+    """
+    with_ranked = any(len(row) == 7 for row in rows)
+    lines = ["\t".join(HEADER + ["view", "report", "candidates"] + (["ranked"] if with_ranked else []))]
+    for fault, status, truth, reported, recording, candidates, *rest in rows:
         lines.append("\t".join([fault, "decision", route, "1", status, truth, reported, "-", "-", "-", "-", "-", "0",
-                                "0", "-", "dev", recording, "-", report, candidates]))
+                                "0", "-", "dev", recording, "-", report, candidates] + rest))
     path.write_text("\n".join(lines) + "\n")
     return path
 
@@ -422,6 +428,62 @@ def test_the_ranking_ignores_the_route_while_candidate_recall_does_not(tmp_path)
     assert summarize(rows)[0].pooled.candidate_recall is None
 
 
+def test_ranking_reads_the_ranked_column_between_reported_and_candidates():
+    assert ranking_of("COMPLETED", "a|X", "c|Y;d|Y", "b|Z;UNKNOWN|UNKNOWN;none") == ("a", "b", "c", "d")
+
+
+def test_a_service_in_ranked_and_candidates_counts_once_at_its_first_place():
+    assert ranking_of("COMPLETED", "a|X", "c|Y;b|Y", "b|Z;c|Z") == ("a", "b", "c")
+    assert ranking_of("COMPLETED", "a|X", "b|Y", "a|Z;b|Z") == ("a", "b")
+
+
+def test_a_row_that_abstains_has_an_empty_ranking_even_with_ranked():
+    assert ranking_of("COMPLETED", "UNKNOWN|UNKNOWN", "a|X", "b|Y") == ()
+    assert ranking_of("TIMED_OUT", "a|X", "", "b|Y") == ()
+
+
+def test_an_empty_ranked_column_is_today_s_ranking():
+    assert ranking_of("COMPLETED", "a|X", "b|Y", "") == ranking_of("COMPLETED", "a|X", "b|Y")
+    assert ranking_of("COMPLETED", "a|X", None, None) == ("a",)
+
+
+def test_the_ranked_column_moves_the_truth_up_in_the_file(tmp_path):
+    path = write_ranked_tsv(tmp_path / "summary.tsv", [
+        ("cpu", "COMPLETED", RANK_TRUTH, "frontend|UNKNOWN", "a", pairs("cartservice", "checkoutservice"),
+         "checkoutservice|RESOURCE_EXHAUSTION")], route="local", report="plain")
+    rows = read_summary(path, service_only=True)
+    assert rows[0].ranking == ("frontend", "checkoutservice", "cartservice")
+    # ranked is not candidates: candidate recall still reads the candidates column alone.
+    assert rows[0].candidates is None
+    [score] = summarize_ranked(rows)
+    assert score.pooled.hits == (0, 1, 1, 1, 1)
+
+
+# The ranked hits and mean list length of each committed input, as scored before the ranked column (ranked-report T3).
+COMMITTED_RANKED = {
+    "0": ((4, 5, 5, 5, 5), 19 / 30),
+    "0R": ((20, 22, 24, 24, 24), 38 / 30),
+    "DP1": ((16, 16, 16, 16, 16), 18 / 30),
+    "DP2": ((17, 17, 17, 17, 17), 17 / 30),
+    "DP3": ((15, 15, 15, 15, 15), 15 / 30),
+    "DW": ((25, 25, 25, 25, 25), 27 / 30),
+}
+
+
+@pytest.mark.parametrize("label", sorted(COMMITTED_RANKED))
+def test_a_committed_input_without_the_ranked_column_scores_as_before(label):
+    inputs = Path(__file__).resolve().parents[1] / "results/2026-11-03-resource-warrant-re2ob-dev/inputs"
+    path = inputs / f"{label}-summary.tsv"
+    assert "ranked" not in path.read_text().splitlines()[0].split("\t")
+    rows = read_summary(path, label=label, service_only=True)
+    [score] = summarize(rows)
+    [ranked_score] = summarize_ranked(rows)
+    hits, mean_length = COMMITTED_RANKED[label]
+    assert ranked_score.pooled.hits[0] == score.pooled.correct
+    assert ranked_score.pooled.hits == hits
+    assert ranked_score.pooled.mean_length == pytest.approx(mean_length)
+
+
 def test_chance_with_eleven_services():
     assert chance_ac(1, 11) == pytest.approx(0.0909, abs=5e-5)
     assert chance_ac(3, 11) == pytest.approx(0.2727, abs=5e-5)
@@ -437,8 +499,6 @@ def test_chance_caps_at_one_when_the_list_covers_the_services():
 
 
 def test_service_count_of_the_real_topology():
-    from pathlib import Path
-
     topology = Path(__file__).resolve().parents[2] / "agent/src/main/resources/topology/re2-ob.json"
     assert read_service_count(topology) == 11
 

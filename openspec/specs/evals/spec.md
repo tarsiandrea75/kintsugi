@@ -291,7 +291,7 @@ Each row MUST have route `baro`, mode `decision`, status `COMPLETED`, split `dev
 ### REQ-13 Ranked metrics (rcaeval-ranked-metrics T1)
 `score --service-only --topology PATH` MUST add AC@1, AC@3, AC@5, Avg@5 and their chance levels to the output, with the semantics of RCAEval's evaluator at tag `1.11.0`, because the published baselines report Avg@5 and AC@1 alone cannot see a truth ranked second (vision §6). `--topology` without `--service-only` MUST exit with a one-line message and write nothing. Without `--topology`, the report and every output file MUST be byte-identical to what REQ-9 writes.
 
-A row's ranking MUST be its `reported` service followed by the services of its raw `candidates` column, whatever the route, each service's first occurrence kept before any cut, with `UNKNOWN`, `none` and empty services dropped. A row whose status is not `COMPLETED`, or whose `reported` service is one of those dropped, MUST have an empty ranking, even with candidates, so ranked AC@1 equals REQ-7's AC@1. The ranking is separate from candidate recall: REQ-7a still governs which rows recall applies to, and how it counts.
+A row's ranking MUST be its `reported` service followed by the services of its `ranked` column (the model's alternatives, ADR-025), then those of its raw `candidates` column, whatever the route, each service's first occurrence kept before any cut, with `UNKNOWN`, `none` and empty services dropped. A file without the `ranked` column MUST read as an empty `ranked`, so every result scored before the column scores the same. A row whose status is not `COMPLETED`, or whose `reported` service is one of those dropped, MUST have an empty ranking, even with `ranked` or candidates, so ranked AC@1 equals REQ-7's AC@1. The ranking is separate from candidate recall: `ranked` is not candidates, and REQ-7a still governs which rows recall applies to, and how it counts.
 
 Per config, per fault and pooled, on fault rows only: AC@k MUST be the share of rows whose truth's service is in the ranking's first k, an empty ranking counting in the denominator with no hit; Avg@5 MUST be the mean of AC@1 to AC@5; the mean list length MUST be reported, so that a route with one answer per row, whose AC@3, AC@5 and Avg@5 equal its AC@1, is not read as a ranking's result. AC@1, AC@3 and AC@5 MUST carry their Wilson 95% interval; Avg@5 MUST be a point value, being a mean of nested proportions on the same cases.
 
@@ -318,6 +318,16 @@ The report MUST gain, after each config's lines, one `ranked` line per fault and
 - GIVEN a `TIMED_OUT` fault row whose candidates hold the truth's service
 - WHEN the ranked metrics are computed
 - THEN its ranking is empty and it is a miss at every k
+
+#### Scenario: The model's alternatives come before the rules' candidates
+- GIVEN a COMPLETED fault row reporting `frontend|UNKNOWN`, with `ranked` `checkoutservice|RESOURCE_EXHAUSTION` and candidates `cartservice|UNKNOWN;checkoutservice|UNKNOWN`, and truth service `checkoutservice`
+- WHEN the ranked metrics are computed
+- THEN the ranking is `frontend`, `checkoutservice`, `cartservice`, the row is a hit from k = 2, and its candidate recall is unchanged
+
+#### Scenario: A result from before the ranked column
+- GIVEN the committed inputs of `evals/results/2026-11-03-resource-warrant-re2ob-dev/`, which have no `ranked` column
+- WHEN the ranked metrics are computed
+- THEN every ranked AC@1 equals its AC@1 and every hit count and mean list length is as before the column
 
 #### Scenario: A single answer
 - GIVEN fault rows with a `reported` answer and no candidates

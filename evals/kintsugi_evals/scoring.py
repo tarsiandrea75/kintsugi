@@ -109,17 +109,19 @@ def parse_candidates(raw, route, report):
     return tuple(raw.split(";")) if raw else ()
 
 
-def ranking_of(status, reported, raw_candidates):
-    """The services a row names, best first: reported, then candidates, each once, and none unless it answered.
+def ranking_of(status, reported, raw_candidates, raw_ranked=None):
+    """The services a row names, best first: reported, ranked, then candidates, each once, and none unless it answered.
 
     Why not Row.candidates: that one governs candidate recall and is None off the rules and hybrid rows, while a
     ranking has one rule for every route, so a single-answer route ranks its one answer. The dedupe comes before any
     cut at k, as in RCAEval's evaluator: a service repeated with another category does not push the truth down.
-    A row that abstains has no ranking even with candidates, so ranked AC@1 cannot differ from REQ-7's AC@1.
+    A row that abstains has no ranking even with candidates or ranked, so ranked AC@1 cannot differ from REQ-7's AC@1.
+    ranked is the model's own alternatives (ADR-025), so they come before the rules' candidates; a file from before
+    the column reads as an empty ranked and ranks as it did.
     """
     if status != "COMPLETED" or service_of(reported) in NO_SERVICE:
         return ()
-    answers = [reported] + (raw_candidates.split(";") if raw_candidates else [])
+    answers = [reported] + [answer for raw in (raw_ranked, raw_candidates) if raw for answer in raw.split(";")]
     services = (service_of(answer) for answer in answers)
     return tuple(dict.fromkeys(service for service in services if service not in NO_SERVICE))
 
@@ -130,7 +132,8 @@ def read_summary(path, label=None, service_only=False):
     The config is the label when given, else route-mode-view, with -report appended when the file has a report
     column (added after view in service-assessment T2r). A missing view or report column reads as "-", so a file
     from before either column keeps its config name. A trailing candidates column (hybrid T4) is parsed for rules
-    and hybrid rows only, so candidate recall applies to them alone. With service_only, each row and its
+    and hybrid rows only, so candidate recall applies to them alone. A trailing ranked column (ranked-report T3)
+    enters the ranking only, and a file without it ranks as before. With service_only, each row and its
     candidate recall are scored on the service part of the truth only.
     """
     path = summary_path(path)
@@ -150,7 +153,7 @@ def read_summary(path, label=None, service_only=False):
                             raw["status"], raw["truth"], raw["reported"],
                             outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
                             parse_candidates(raw.get("candidates"), raw["route"], report), service_only,
-                            ranking_of(raw["status"], raw["reported"], raw.get("candidates"))))
+                            ranking_of(raw["status"], raw["reported"], raw.get("candidates"), raw.get("ranked"))))
     return rows
 
 
