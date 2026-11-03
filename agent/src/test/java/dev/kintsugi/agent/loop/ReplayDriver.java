@@ -100,7 +100,7 @@ final class ReplayDriver {
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
 			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
-			"reportTimeout", "candidates");
+			"reportTimeout", "candidates", "ranked");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
@@ -788,13 +788,30 @@ final class ReplayDriver {
 					this.status.name(), this.truth, this.reported, this.verdict, String.valueOf(this.recorded),
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
-					this.recording, viewColumn(), reportColumn(), this.settings.columns(), candidatesColumn());
+					this.recording, viewColumn(), reportColumn(), this.settings.columns(), candidatesColumn(),
+					rankedColumn());
 		}
 
 		/** The candidates as {@code summary.tsv} writes them: each {@code service|category}, in order, joined by ';'. */
 		String candidatesColumn() {
 			return this.candidates.stream()
 				.map(candidate -> candidate.service() + "|" + candidate.category())
+				.collect(Collectors.joining(";"));
+		}
+
+		/**
+		 * The model's ranked alternatives as {@code summary.tsv} writes them (ranked-report T2; ADR-025): each
+		 * {@code service|category} of the stored report's {@code alternatives}, in order, joined by ';'. Empty when the
+		 * sample has none: a rules sample, a hybrid or assessed one, or a run that stored no report.
+		 */
+		String rankedColumn() {
+			JsonNode alternatives = this.incident.path("report").path("alternatives");
+			if (!alternatives.isArray()) {
+				return "";
+			}
+			return alternatives.valueStream()
+				.map(item -> item.path("rootCauseService").asString("") + "|"
+						+ item.path("rootCauseCategory").asString(""))
 				.collect(Collectors.joining(";"));
 		}
 

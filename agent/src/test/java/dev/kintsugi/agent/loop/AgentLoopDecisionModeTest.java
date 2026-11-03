@@ -6,7 +6,10 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.assessedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.hybridReport;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.rankedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownHybridReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -70,9 +73,22 @@ class AgentLoopDecisionModeTest {
 
 	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
 
+	/** The alternatives' property in the plain report's schema (ranked-report T2; ADR-025), its comma included. */
+	private static final String ALTERNATIVES_SCHEMA = "\"alternatives\":{\"type\":\"array\",\"minItems\":0,"
+			+ "\"maxItems\":4,\"items\":{\"type\":\"object\",\"properties\":{\"rootCauseService\":{\"type\":"
+			+ "\"string\",\"enum\":[\"gateway-mock\",\"payment-service\",\"order-service\",\"inventory-service\","
+			+ "\"postgres\"]},\"rootCauseCategory\":{\"type\":\"string\",\"enum\":[\"DEPENDENCY_LATENCY\","
+			+ "\"DEPENDENCY_REJECTING\",\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\"]}},\"required\":["
+			+ "\"rootCauseService\",\"rootCauseCategory\"],\"additionalProperties\":false}},";
+
+	/** The alternatives' sentence of the plain report's task, its leading space included. */
+	private static final String ALTERNATIVES_TASK = " alternatives: up to 4 other causes you have not ruled out, best "
+			+ "first, each {rootCauseService, rootCauseCategory}, no service twice and none UNKNOWN; an empty list when "
+			+ "both causes are UNKNOWN.";
+
 	/**
 	 * The instruction of a decision run's report call with the plain report, as the commit before the assessed report
-	 * wrote it (service-assessment T2): the plain report stays today's, byte for byte.
+	 * wrote it (service-assessment T2), with the alternatives' sentence after the cause (ranked-report T2; ADR-025).
 	 */
 	private static final String PLAIN_INSTRUCTION = """
 			Phase: CONCLUDE (the phases run in order: CONCLUDE)
@@ -85,7 +101,9 @@ class AgentLoopDecisionModeTest {
 			item cites a step and the number of one line of its summary: toolCallId and tool come from the summary's \
 			header, line is the number at the start of one line of that summary (2 for the line that starts with \
 			"2: "), and why is at most 200 characters. rootCauseService and rootCauseCategory, from the values listed \
-			in the system message, as your summary concludes. confidence: a number from 0 to 1. To cite the dossier, \
+			in the system message, as your summary concludes. alternatives: up to 4 other causes you have not ruled \
+			out, best first, each {rootCauseService, rootCauseCategory}, no service twice and none UNKNOWN; an empty \
+			list when both causes are UNKNOWN. confidence: a number from 0 to 1. To cite the dossier, \
 			write toolCallId "dossier" and tool "dossier", with the number of the line you cite: D7 is line 7. \
 			Citable toolCallIds: dossier.""";
 
@@ -99,9 +117,19 @@ class AgentLoopDecisionModeTest {
 			+ "\"additionalProperties\":false}},\"rootCauseService\":{\"type\":\"string\",\"enum\":[\"gateway-mock\","
 			+ "\"payment-service\",\"order-service\",\"inventory-service\",\"postgres\",\"UNKNOWN\"]},"
 			+ "\"rootCauseCategory\":{\"type\":\"string\",\"enum\":[\"DEPENDENCY_LATENCY\",\"DEPENDENCY_REJECTING\","
-			+ "\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\",\"UNKNOWN\"]},\"confidence\":{\"type\":\"number\","
+			+ "\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\",\"UNKNOWN\"]}," + ALTERNATIVES_SCHEMA
+			+ "\"confidence\":{\"type\":\"number\","
 			+ "\"minimum\":0,\"maximum\":1}},\"required\":[\"summary\",\"evidence\",\"rootCauseService\","
-			+ "\"rootCauseCategory\",\"confidence\"],\"additionalProperties\":false}";
+			+ "\"rootCauseCategory\",\"alternatives\",\"confidence\"],\"additionalProperties\":false}";
+
+	/**
+	 * The hybrid report's instruction before its candidates and its schema (hybrid T3; ADR-019): the plain report's
+	 * before the alternatives, byte for byte, since ADR-025 leaves the hybrid report unchanged.
+	 */
+	private static final String HYBRID_INSTRUCTION = PLAIN_INSTRUCTION.replace(ALTERNATIVES_TASK, "");
+
+	private static final String HYBRID_SCHEMA = PLAIN_SCHEMA.replace(ALTERNATIVES_SCHEMA, "")
+		.replace("\"alternatives\",", "");
 
 	private final IncidentRepository incidents = new IncidentRepository(AgentDatabase.asAgentApp(), JSON);
 
@@ -152,6 +180,24 @@ class AgentLoopDecisionModeTest {
 		String first = dossier.lines().filter(line -> line.startsWith("D1 ")).findFirst().orElseThrow();
 		assertThat(stored.get("evidence")).hasSize(1);
 		assertThat(stored.get("evidence").get(0).get("quote").asString()).isEqualTo(first.substring("D1 ".length()));
+	}
+
+	/**
+	 * The ranked report (ranked-report T2; ADR-025): the stored report keeps the model's alternatives, in its order,
+	 * and the cause is still the first one, the one the verdict reads.
+	 */
+	@Test
+	void theStoredPlainReportKeepsTheAlternativesInOrder() {
+		this.model.text(rankedReport("payment-service", "DEPENDENCY_REJECTING",
+				List.of("gateway-mock|DEPENDENCY_LATENCY", "order-service|CONFIGURATION"), dossierEvidence(1)));
+
+		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
+
+		JsonNode stored = storedReport();
+		assertThat(stored.get("rootCauseService").asString()).isEqualTo("payment-service");
+		assertThat(stored.get("alternatives")).extracting(item -> item.get("rootCauseService").asString() + "|"
+				+ item.get("rootCauseCategory").asString())
+			.containsExactly("gateway-mock|DEPENDENCY_LATENCY", "order-service|CONFIGURATION");
 	}
 
 	/**
@@ -683,7 +729,7 @@ class AgentLoopDecisionModeTest {
 		List<RulesCandidate> candidates = candidates(hybridLab(), clock);
 		assertThat(candidates).isNotEmpty();
 		RulesCandidate first = candidates.getFirst();
-		this.model.text(report(first.service(), first.category(), dossierEvidence(1)));
+		this.model.text(hybridReport(first.service(), first.category(), dossierEvidence(1)));
 		this.loop = loop(hybridLab(), DossierView.TABLES, clock);
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
@@ -700,12 +746,13 @@ class AgentLoopDecisionModeTest {
 		block.append("\nPick exactly one candidate: write its rootCauseService and rootCauseCategory as listed, or "
 				+ "both UNKNOWN when the evidence supports none of them. Say in the summary why you picked it, and cite "
 				+ "the dossier lines that support it.");
-		assertThat(last(prompt)).isEqualTo(PLAIN_INSTRUCTION + block);
-		assertThat(schema(prompt)).isEqualTo(PLAIN_SCHEMA);
+		assertThat(last(prompt)).isEqualTo(HYBRID_INSTRUCTION + block);
+		assertThat(schema(prompt)).isEqualTo(HYBRID_SCHEMA);
 		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
 		JsonNode stored = storedReport();
 		assertThat(stored.get("rootCauseService").asString()).isEqualTo(first.service());
 		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo(first.category());
+		assertThat(stored.has("alternatives")).isFalse();
 	}
 
 	@Test
@@ -717,8 +764,8 @@ class AgentLoopDecisionModeTest {
 		// postgres is in no rule's reach: it is never a candidate.
 		String outside = "rootCauseService|rootCauseCategory postgres|DEPENDENCY_LATENCY is not a listed candidate: "
 				+ "name one of " + allowed + ", or UNKNOWN|UNKNOWN";
-		this.model.text(report("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1)))
-			.text(report("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1)));
+		this.model.text(hybridReport("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1)))
+			.text(hybridReport("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1)));
 		this.loop = loop(hybridLab(), DossierView.TABLES, clock);
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.INVALID_REPORT);
@@ -734,7 +781,7 @@ class AgentLoopDecisionModeTest {
 	@Test
 	void aHybridRetryWithBothCausesUnknownCompletesTheRun() {
 		Clock clock = fixedClock();
-		this.model.text(report("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1))).text(unknownReport());
+		this.model.text(hybridReport("postgres", "DEPENDENCY_LATENCY", dossierEvidence(1))).text(unknownHybridReport());
 		this.loop = loop(hybridLab(), DossierView.SHEETS, clock);
 
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
@@ -815,7 +862,7 @@ class AgentLoopDecisionModeTest {
 		this.loop.close();
 
 		this.id = open();
-		this.model.text(report("payment-service", "RESOURCE_EXHAUSTION", dossierEvidence(1)));
+		this.model.text(hybridReport("payment-service", "RESOURCE_EXHAUSTION", dossierEvidence(1)));
 		this.loop = hybridLoop(resourceLab(clock), RulesVersion.V2, clock);
 		assertThat(this.loop.run(this.id)).isEqualTo(IncidentStatus.COMPLETED);
 

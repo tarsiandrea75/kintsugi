@@ -5,6 +5,7 @@ import static dev.kintsugi.agent.loop.PlanCheck.unexpected;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,13 +41,34 @@ import dev.kintsugi.agent.summary.ToolSummaries;
 final class ReportCheck {
 
 	/**
-	 * The fields the model writes, in the order it writes them and the stored report keeps: the reasoning before the
-	 * cause it leads to (report-field-order), since a model writes left to right.
+	 * The fields the model writes in the plain report, in the order it writes them and the stored report keeps: the
+	 * reasoning before the cause it leads to (report-field-order), since a model writes left to right, and the
+	 * alternatives after the cause, ranked below it (ranked-report T2; ADR-025).
 	 */
 	static final List<String> MODEL_FIELDS = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory",
-			"confidence");
+			"alternatives", "confidence");
 
 	private static final Set<String> FIELDS = Set.copyOf(MODEL_FIELDS);
+
+	/**
+	 * The fields of the hybrid report (hybrid T3; ADR-019), the plain report's before the alternatives: ADR-025 leaves
+	 * it unchanged, a closed choice of one candidate. An assessed report is stored with them too, after its assessments.
+	 */
+	static final List<String> HYBRID_FIELDS = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory",
+			"confidence");
+
+	private static final Set<String> HYBRID_FIELD_SET = Set.copyOf(HYBRID_FIELDS);
+
+	/** The most alternatives a plain report ranks after its cause (ADR-025): five causes in all. */
+	static final int MAX_ALTERNATIVES = 4;
+
+	/** The fields of one alternative, in the order the model writes them. */
+	static final List<String> ALTERNATIVE_FIELDS = List.of("rootCauseService", "rootCauseCategory");
+
+	private static final Set<String> ALTERNATIVE_FIELD_SET = Set.copyOf(ALTERNATIVE_FIELDS);
+
+	private static final String ALTERNATIVES_SHAPE = "alternatives must be an array of 0 to " + MAX_ALTERNATIVES
+			+ " items {rootCauseService, rootCauseCategory}";
 
 	/**
 	 * The fields of the assessed report (service-assessment T2), in the order the model writes them: the assessments
@@ -160,19 +182,31 @@ final class ReportCheck {
 	 */
 	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
 			Topology topology) {
+		return check(report, toolSteps, mode, dossier, topology, true);
+	}
+
+	/**
+	 * Checks {@code report} as {@link #check} does; {@code ranked} says whether it is the plain report, with its
+	 * alternatives (ADR-025), or the hybrid one, which has none.
+	 */
+	private static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
+			Topology topology, boolean ranked) {
 		if (report == null || !report.isObject()) {
 			return invalid(List.of(NOT_AN_OBJECT));
 		}
 		List<String> errors = new ArrayList<>();
-		unexpected(report, FIELDS, "", errors);
+		unexpected(report, ranked ? FIELDS : HYBRID_FIELD_SET, "", errors);
 		causesAndConfidence(report, topology, errors);
+		boolean unknown = Causes.UNKNOWN.equals(report.path("rootCauseService").asString(""))
+				&& Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""));
+		if (ranked) {
+			alternatives(report, unknown, topology, errors);
+		}
 		JsonNode evidence = report.get("evidence");
 		if (evidence == null || !evidence.isArray()) {
 			errors.add("evidence must be an array of at most 5 items");
 			return invalid(errors);
 		}
-		boolean unknown = Causes.UNKNOWN.equals(report.path("rootCauseService").asString(""))
-				&& Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""));
 		if (evidence.size() > 5) {
 			errors.add("evidence must hold at most 5 items");
 		}
@@ -212,7 +246,7 @@ final class ReportCheck {
 	 */
 	static Result checkHybrid(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
 			List<RulesCandidate> candidates, Topology topology) {
-		Result checked = check(report, toolSteps, mode, dossier, topology);
+		Result checked = check(report, toolSteps, mode, dossier, topology, false);
 		if (report == null || !report.isObject()) {
 			return checked;
 		}
@@ -429,6 +463,57 @@ final class ReportCheck {
 		if (confidence == null || !confidence.isNumber() || confidence.doubleValue() < 0
 				|| confidence.doubleValue() > 1) {
 			errors.add("confidence must be a number from 0 to 1");
+		}
+	}
+
+	/**
+	 * Adds to {@code errors} each rule the plain report's alternatives break (ranked-report T2; ADR-025): an array of
+	 * at most {@value #MAX_ALTERNATIVES} items {@code {rootCauseService, rootCauseCategory}}, from the cause's enums,
+	 * none UNKNOWN in either field, each service named once, the first cause's included, and none at all when both
+	 * causes are UNKNOWN. Every breach rejects the report, for the one retry: no alternative is dropped, since the list
+	 * is the model's ranking and a list code had cut would be a ranking nobody made.
+	 * @param unknown whether both causes are UNKNOWN
+	 */
+	private static void alternatives(JsonNode report, boolean unknown, Topology topology, List<String> errors) {
+		JsonNode alternatives = report.get("alternatives");
+		if (alternatives == null || !alternatives.isArray()) {
+			errors.add(ALTERNATIVES_SHAPE);
+			return;
+		}
+		if (unknown && !alternatives.isEmpty()) {
+			errors.add("alternatives must be empty when both causes are UNKNOWN");
+			return;
+		}
+		if (alternatives.size() > MAX_ALTERNATIVES) {
+			errors.add("alternatives must hold at most " + MAX_ALTERNATIVES + " items");
+		}
+		Set<String> named = new HashSet<>();
+		named.add(report.path("rootCauseService").asString(""));
+		for (int i = 0; i < alternatives.size(); i++) {
+			JsonNode item = alternatives.get(i);
+			String at = "alternatives[" + i + "]";
+			if (!item.isObject()) {
+				errors.add(at + " must be an object {rootCauseService, rootCauseCategory}");
+				continue;
+			}
+			unexpected(item, ALTERNATIVE_FIELD_SET, at + ".", errors);
+			String service = Causes.enumError(at + ".rootCauseService", item.get("rootCauseService"),
+					topology.causes());
+			String category = Causes.enumError(at + ".rootCauseCategory", item.get("rootCauseCategory"),
+					Causes.CATEGORIES);
+			addIfError(errors, service);
+			addIfError(errors, category);
+			if (service != null || category != null) {
+				continue;
+			}
+			if (Causes.UNKNOWN.equals(item.get("rootCauseService").asString())
+					|| Causes.UNKNOWN.equals(item.get("rootCauseCategory").asString())) {
+				errors.add(at + " must not be UNKNOWN: leave out a cause you cannot name");
+			}
+			else if (!named.add(item.get("rootCauseService").asString())) {
+				errors.add(at + ".rootCauseService " + Causes.shown(item.get("rootCauseService"))
+						+ " is already named; name each service once, rootCauseService included");
+			}
 		}
 	}
 

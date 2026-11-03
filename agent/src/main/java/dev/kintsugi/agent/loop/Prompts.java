@@ -124,7 +124,7 @@ final class Prompts {
 			tool of this phase most likely to show the cause, with real argument values. Write no plan and no \
 			text: code reads only the tool call.""";
 
-	private static final String REPORT_TASK = """
+	private static final String REPORT_CAUSES = """
 			Task: write the final report as a JSON object with these fields, in this order: summary first, then \
 			the evidence, then the cause they lead to. summary: your reasoning in brief, at most 500 characters \
 			(about 80 words). evidence: 1 to \
@@ -132,7 +132,23 @@ final class Prompts {
 			and the number of one line of its summary: toolCallId and tool come from the summary's header, line is \
 			the number at the start of one line of that summary (2 for the line that starts with "2: "), and why \
 			is at most 200 characters. rootCauseService and rootCauseCategory, from the values listed in the \
-			system message, as your summary concludes. confidence: a number from 0 to 1.""";
+			system message, as your summary concludes.""";
+
+	/**
+	 * The alternatives of the plain report (ranked-report T2; ADR-025), after the cause: the rules
+	 * {@link ReportCheck} checks, so that a first answer can follow them.
+	 */
+	private static final String REPORT_ALTERNATIVES = """
+			 alternatives: up to 4 other causes you have not ruled out, best first, each {rootCauseService, \
+			rootCauseCategory}, no service twice and none UNKNOWN; an empty list when both causes are UNKNOWN.""";
+
+	private static final String REPORT_CONFIDENCE = " confidence: a number from 0 to 1.";
+
+	/** The plain report's task. */
+	private static final String REPORT_TASK = REPORT_CAUSES + REPORT_ALTERNATIVES + REPORT_CONFIDENCE;
+
+	/** The hybrid report's task before its candidates: the plain one without the alternatives (ADR-025). */
+	private static final String HYBRID_REPORT_TASK = REPORT_CAUSES + REPORT_CONFIDENCE;
 
 	/** How the report cites the dossier, when the run has one (T5b). */
 	private static final String REPORT_DOSSIER = """
@@ -361,7 +377,7 @@ final class Prompts {
 	/**
 	 * The instruction of a hybrid report call (hybrid T3; ADR-019): decision mode, when
 	 * {@code kintsugi.agent.decision.report} is {@code hybrid} and the rules proposed at least one candidate. It is the
-	 * plain report's instruction, then the candidates numbered in the rules' order, each its pair, rule and facts, then
+	 * plain report's instruction without the alternatives (ADR-025), then the candidates numbered in the rules' order, each its pair, rule and facts, then
 	 * the rule {@link ReportCheck#checkHybrid} checks: one listed pair or UNKNOWN. {@code errors} come last, as for the
 	 * plain report.
 	 * @param candidates the rules' candidates, at least one
@@ -375,7 +391,7 @@ final class Prompts {
 				.append(candidate.rule()).append(": ").append(String.join("; ", candidate.facts()));
 		}
 		block.append('\n').append(HYBRID_CHOICE);
-		return state.text() + "\n\n" + REPORT_TASK + (state.dossier() ? REPORT_DOSSIER : "")
+		return state.text() + "\n\n" + HYBRID_REPORT_TASK + (state.dossier() ? REPORT_DOSSIER : "")
 				+ citable(toolSteps, state.dossier()) + block + retry("report", errors);
 	}
 

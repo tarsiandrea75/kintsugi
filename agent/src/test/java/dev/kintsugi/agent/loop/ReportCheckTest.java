@@ -6,6 +6,8 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.assessedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.evidence;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.hybridReport;
+import static dev.kintsugi.agent.loop.ScriptedChatModel.rankedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
 import static java.util.stream.Collectors.joining;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -443,13 +445,130 @@ class ReportCheckTest {
 	void theSchemaPutsTheReasoningBeforeTheCause() {
 		// report-field-order: the model writes left to right, so the summary and the evidence come before the cause
 		// they lead to.
-		List<String> order = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory", "confidence");
+		List<String> order = List.of("summary", "evidence", "rootCauseService", "rootCauseCategory", "alternatives",
+				"confidence");
 		for (AgentMode mode : AgentMode.values()) {
 			JsonNode report = JsonMapper.shared().readTree(Schemas.report(mode, LAB));
 			assertThat(report.get("properties").propertyNames()).as(mode.value()).containsExactlyElementsOf(order);
 			assertThat(report.get("required")).extracting(JsonNode::asString).containsExactlyElementsOf(order);
 		}
 		assertThat(ReportCheck.MODEL_FIELDS).containsExactlyElementsOf(order);
+	}
+
+	/**
+	 * The ranked report (ranked-report T2; ADR-025): up to 4 alternatives after the cause, best first, each a cause of
+	 * the same enums but UNKNOWN; the local grammar honours the bounds, and ReportCheck enforces them on both routes.
+	 */
+	@Test
+	void theSchemaAsksForUpToFourAlternativesFromTheEnumsButUnknown() {
+		for (AgentMode mode : AgentMode.values()) {
+			JsonNode report = JsonMapper.shared().readTree(Schemas.report(mode, LAB));
+			JsonNode alternatives = report.at("/properties/alternatives");
+			assertThat(alternatives.get("type").asString()).as(mode.value()).isEqualTo("array");
+			assertThat(alternatives.get("minItems").intValue()).isZero();
+			assertThat(alternatives.get("maxItems").intValue()).isEqualTo(4);
+			JsonNode item = alternatives.get("items");
+			assertThat(item.get("properties").propertyNames()).containsExactly("rootCauseService", "rootCauseCategory");
+			assertThat(item.get("required")).extracting(JsonNode::asString)
+				.containsExactly("rootCauseService", "rootCauseCategory");
+			assertThat(item.get("additionalProperties").booleanValue()).isFalse();
+			assertThat(item.at("/properties/rootCauseService/enum")).extracting(JsonNode::asString)
+				.containsExactly("gateway-mock", "payment-service", "order-service", "inventory-service", "postgres");
+			assertThat(item.at("/properties/rootCauseCategory/enum")).extracting(JsonNode::asString)
+				.containsExactly("DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION", "RESOURCE_EXHAUSTION");
+		}
+	}
+
+	@Test
+	void theHybridSchemaIsThePlainOneWithoutTheAlternatives() {
+		for (AgentMode mode : AgentMode.values()) {
+			JsonNode plain = JsonMapper.shared().readTree(Schemas.report(mode, LAB));
+			((tools.jackson.databind.node.ObjectNode) plain.get("properties")).remove("alternatives");
+			((tools.jackson.databind.node.ArrayNode) plain.get("required")).remove(4);
+			assertThat(JsonMapper.shared().readTree(Schemas.hybridReport(mode, LAB))).as(mode.value()).isEqualTo(plain);
+		}
+		assertThat(ReportCheck.HYBRID_FIELDS)
+			.containsExactly("summary", "evidence", "rootCauseService", "rootCauseCategory", "confidence");
+	}
+
+	@Test
+	void aReportWithValidAlternativesPassesAndAnEmptyListToo() {
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION",
+						"inventory-service|RESOURCE_EXHAUSTION"),
+				evidence(4, "search_logs", 2)))).isEmpty();
+		assertThat(errors(report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2)))).isEmpty();
+		assertThat(errors(report("UNKNOWN", "UNKNOWN"))).isEmpty();
+	}
+
+	@Test
+	void aServiceNamedTwiceCountingTheFirstCauseIsInvalid() {
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION", List.of("order-service|DEPENDENCY_LATENCY"),
+				evidence(4, "search_logs", 2)))).containsExactly("alternatives[0].rootCauseService \"order-service\" is "
+						+ "already named; name each service once, rootCauseService included");
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+				List.of("postgres|CONFIGURATION", "postgres|RESOURCE_EXHAUSTION"), evidence(4, "search_logs", 2))))
+			.containsExactly("alternatives[1].rootCauseService \"postgres\" is already named; name each service once, "
+					+ "rootCauseService included");
+	}
+
+	@Test
+	void anUnknownAlternativeIsInvalid() {
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+				List.of("UNKNOWN|CONFIGURATION", "postgres|UNKNOWN"), evidence(4, "search_logs", 2))))
+			.containsExactly("alternatives[0] must not be UNKNOWN: leave out a cause you cannot name",
+					"alternatives[1] must not be UNKNOWN: leave out a cause you cannot name");
+	}
+
+	@Test
+	void fiveAlternativesAreInvalid() {
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION",
+						"inventory-service|RESOURCE_EXHAUSTION", "postgres|RESOURCE_EXHAUSTION"),
+				evidence(4, "search_logs", 2))))
+			.contains("alternatives must hold at most 4 items");
+	}
+
+	@Test
+	void alternativesAfterAnUnknownCauseAreInvalid() {
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN", List.of("postgres|CONFIGURATION"))))
+			.containsExactly("alternatives must be empty when both causes are UNKNOWN");
+	}
+
+	@Test
+	void anAlternativeOutsideTheEnumsOrTheItemShapeIsInvalid() {
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION", List.of("payment-gateway|SLOW"),
+				evidence(4, "search_logs", 2)))).containsExactly(
+						"alternatives[0].rootCauseService must be one of gateway-mock, payment-service, order-service, "
+								+ "inventory-service, postgres, UNKNOWN; got \"payment-gateway\"",
+						"alternatives[0].rootCauseCategory must be one of DEPENDENCY_LATENCY, DEPENDENCY_REJECTING, "
+								+ "CONFIGURATION, RESOURCE_EXHAUSTION, UNKNOWN; got \"SLOW\"");
+		String shapes = rankedReport("order-service", "CONFIGURATION", List.of(), evidence(4, "search_logs", 2))
+			.replace("\"alternatives\":[]", "\"alternatives\":[\"postgres\",{\"rootCauseService\":\"postgres\","
+					+ "\"rootCauseCategory\":\"CONFIGURATION\",\"why\":\"x\"}]");
+		assertThat(errors(shapes)).containsExactly(
+				"alternatives[0] must be an object {rootCauseService, rootCauseCategory}",
+				"alternatives[1].unexpected field \"why\"; allowed: rootCauseCategory, rootCauseService");
+	}
+
+	@Test
+	void aPlainReportWithoutAlternativesIsInvalid() {
+		String answer = hybridReport("order-service", "CONFIGURATION", evidence(4, "search_logs", 2));
+
+		assertThat(errors(answer)).containsExactly(
+				"alternatives must be an array of 0 to 4 items {rootCauseService, rootCauseCategory}");
+		assertThat(errors(answer.replace("\"summary\"", "\"alternatives\":{},\"summary\""))).containsExactly(
+				"alternatives must be an array of 0 to 4 items {rootCauseService, rootCauseCategory}");
+	}
+
+	@Test
+	void aHybridReportWithAlternativesIsInvalid() {
+		// ADR-025: the hybrid report is unchanged, so the field is one it does not have.
+		ReportCheck.Result result = checkHybrid(rankedReport("order-service", "CONFIGURATION",
+				List.of("payment-service|DEPENDENCY_LATENCY"), dossierEvidence(17)));
+
+		assertThat(result.errors()).containsExactly("unexpected field \"alternatives\"; allowed: confidence, evidence, "
+				+ "rootCauseCategory, rootCauseService, summary");
 	}
 
 	@Test
@@ -724,7 +843,7 @@ class ReportCheckTest {
 
 	@Test
 	void aHybridReportNamingAListedCandidateIsCheckedAsAPlainOne() {
-		ReportCheck.Result result = checkHybrid(report("order-service", "CONFIGURATION", dossierEvidence(17)));
+		ReportCheck.Result result = checkHybrid(hybridReport("order-service", "CONFIGURATION", dossierEvidence(17)));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.evidence()).extracting(item -> item.get("quote").asString())
@@ -733,7 +852,7 @@ class ReportCheckTest {
 
 	@Test
 	void aHybridReportWithBothCausesUnknownIsValid() {
-		ReportCheck.Result result = checkHybrid(report("UNKNOWN", "UNKNOWN"));
+		ReportCheck.Result result = checkHybrid(hybridReport("UNKNOWN", "UNKNOWN"));
 
 		assertThat(result.errors()).isEmpty();
 		assertThat(result.evidence()).isEmpty();
@@ -742,7 +861,7 @@ class ReportCheckTest {
 	@Test
 	void aHybridReportNamingAPairOutsideTheListIsInvalidAndTheErrorNamesTheAllowedPairs() {
 		// The service is listed, but with another category: the pair, not the service, must be listed.
-		ReportCheck.Result result = checkHybrid(report("order-service", "DEPENDENCY_LATENCY", dossierEvidence(17)));
+		ReportCheck.Result result = checkHybrid(hybridReport("order-service", "DEPENDENCY_LATENCY", dossierEvidence(17)));
 
 		assertThat(result.errors()).containsExactly(HYBRID_OUTSIDE.formatted("order-service|DEPENDENCY_LATENCY"));
 		assertThat(result.evidence()).isNull();
@@ -750,7 +869,7 @@ class ReportCheckTest {
 
 	@Test
 	void aHybridReportBreakingAnotherRuleGetsBothErrorsForTheRetry() {
-		ReportCheck.Result result = checkHybrid(report("postgres", "RESOURCE_EXHAUSTION"));
+		ReportCheck.Result result = checkHybrid(hybridReport("postgres", "RESOURCE_EXHAUSTION"));
 
 		assertThat(result.errors()).containsExactly("evidence must hold 1 to 5 items unless both causes are UNKNOWN",
 				HYBRID_OUTSIDE.formatted("postgres|RESOURCE_EXHAUSTION"));

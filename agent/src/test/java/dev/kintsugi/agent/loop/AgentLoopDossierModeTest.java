@@ -256,7 +256,7 @@ class AgentLoopDossierModeTest {
 		// jsonb keeps the fields, not their order.
 		List<String> fields = storedReport().propertyNames().stream().toList();
 		assertThat(fields).containsExactlyInAnyOrder("incidentId", "mode", "route", "model", "rootCauseService", "rootCauseCategory", "summary",
-				"confidence", "evidence", "stepsUsed");
+				"alternatives", "confidence", "evidence", "stepsUsed");
 	}
 
 	@Test

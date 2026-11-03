@@ -40,10 +40,18 @@ final class Schemas {
 	 * the dossier, dossier (T5b) and decision mode, it is a step number or {@code "dossier"}; the rest is the same.
 	 */
 	static String report(AgentMode mode, Topology topology) {
-		return JSON.writeValueAsString(report(mode.gathersDossier(), topology.causes()));
+		return JSON.writeValueAsString(report(mode.gathersDossier(), topology.causes(), true));
 	}
 
-	private static ObjectNode report(boolean dossier, List<String> causes) {
+	/**
+	 * The hybrid report's schema (hybrid T3; ADR-019): the plain report's of {@code mode} without the alternatives,
+	 * which ADR-025 leaves out of the hybrid report's closed choice.
+	 */
+	static String hybridReport(AgentMode mode, Topology topology) {
+		return JSON.writeValueAsString(report(mode.gathersDossier(), topology.causes(), false));
+	}
+
+	private static ObjectNode report(boolean dossier, List<String> causes, boolean ranked) {
 		// Evidence-by-reference (ADR-013): an item cites a line by its number, and code fills in its text.
 		ObjectNode item = object(List.of("toolCallId", "tool", "line", "why"));
 		ObjectNode stepNo = JSON.createObjectNode().put("type", "integer").put("minimum", 1);
@@ -61,12 +69,20 @@ final class Schemas {
 		item.withObject("properties").set("line", JSON.createObjectNode().put("type", "integer").put("minimum", 1));
 		item.withObject("properties").set("why", string(0, 200));
 		// The properties in ReportCheck.MODEL_FIELDS' order, the reasoning before the cause (report-field-order).
-		ObjectNode report = object(ReportCheck.MODEL_FIELDS);
+		ObjectNode report = object(ranked ? ReportCheck.MODEL_FIELDS : ReportCheck.HYBRID_FIELDS);
 		ObjectNode properties = report.withObject("properties");
 		properties.set("summary", string(1, 500));
 		properties.set("evidence", array(item, 0, 5));
 		properties.set("rootCauseService", enumOf(causes));
 		properties.set("rootCauseCategory", enumOf(Causes.CATEGORIES));
+		if (ranked) {
+			// ranked-report T2 (ADR-025): the causes below the first, from the same enums but UNKNOWN, which a ranked
+			// cause never is; the cloud route drops maxItems, and ReportCheck enforces it on both routes.
+			ObjectNode alternative = object(ReportCheck.ALTERNATIVE_FIELDS);
+			alternative.withObject("properties").set("rootCauseService", enumOf(named(causes)));
+			alternative.withObject("properties").set("rootCauseCategory", enumOf(named(Causes.CATEGORIES)));
+			properties.set("alternatives", array(alternative, 0, ReportCheck.MAX_ALTERNATIVES));
+		}
 		properties.set("confidence", JSON.createObjectNode().put("type", "number").put("minimum", 0).put("maximum", 1));
 		return report;
 	}
@@ -100,6 +116,11 @@ final class Schemas {
 		fields.forEach(required::add);
 		object.put("additionalProperties", false);
 		return object;
+	}
+
+	/** {@code values} without UNKNOWN. */
+	private static List<String> named(List<String> values) {
+		return values.stream().filter(value -> !Causes.UNKNOWN.equals(value)).toList();
 	}
 
 	private static ObjectNode enumOf(List<String> values) {

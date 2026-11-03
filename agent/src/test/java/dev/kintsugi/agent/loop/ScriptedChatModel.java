@@ -224,8 +224,26 @@ final class ScriptedChatModel implements ChatModel {
 				+ "\",\"why\":\"a first guess\"}],\"nextTools\":[" + tools + "]}";
 	}
 
-	/** A report whose evidence items are already JSON objects. */
+	/** A plain report with no alternatives, whose evidence items are already JSON objects. */
 	static String report(String service, String category, String... evidence) {
+		return rankedReport(service, category, List.of(), evidence);
+	}
+
+	/**
+	 * A plain report ranking {@code alternatives}, each {@code service|category}, after its cause (ranked-report T2;
+	 * ADR-025).
+	 */
+	static String rankedReport(String service, String category, List<String> alternatives, String... evidence) {
+		String ranked = alternatives.stream().map(pair -> pair.split("\\|", -1))
+			.map(pair -> "{\"rootCauseService\":\"" + pair[0] + "\",\"rootCauseCategory\":\"" + pair[1] + "\"}")
+			.collect(Collectors.joining(","));
+		return "{\"rootCauseService\":\"" + service + "\",\"rootCauseCategory\":\"" + category
+				+ "\",\"alternatives\":[" + ranked + "],\"summary\":\"what the evidence shows\",\"confidence\":0.7,"
+				+ "\"evidence\":[" + String.join(",", evidence) + "]}";
+	}
+
+	/** A hybrid report (hybrid T3; ADR-019): the plain report as it was before the alternatives, which it never has. */
+	static String hybridReport(String service, String category, String... evidence) {
 		return "{\"rootCauseService\":\"" + service + "\",\"rootCauseCategory\":\"" + category
 				+ "\",\"summary\":\"what the evidence shows\",\"confidence\":0.7,\"evidence\":["
 				+ String.join(",", evidence) + "]}";
@@ -252,6 +270,12 @@ final class ScriptedChatModel implements ChatModel {
 	}
 
 	static String unknownReport() {
+		return "{\"rootCauseService\":\"UNKNOWN\",\"rootCauseCategory\":\"UNKNOWN\",\"alternatives\":[],"
+				+ "\"summary\":\"no clear cause\",\"confidence\":0.1,\"evidence\":[]}";
+	}
+
+	/** {@link #unknownReport} as a hybrid report writes it: no alternatives. */
+	static String unknownHybridReport() {
 		return "{\"rootCauseService\":\"UNKNOWN\",\"rootCauseCategory\":\"UNKNOWN\",\"summary\":\"no clear cause\","
 				+ "\"confidence\":0.1,\"evidence\":[]}";
 	}

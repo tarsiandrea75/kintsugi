@@ -654,7 +654,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					: candidates != null ? Prompts.hybridReport(state, errors, run.toolSteps.values(), candidates)
 							: Prompts.report(state, errors, run.toolSteps.values())));
 			Answer answer = call(run, ModelTask.REPORT, Phase.CONCLUDE, false, messages, List.of(),
-					assessed ? this.assessedSchema : Schemas.report(run.mode, this.topology));
+					assessed ? this.assessedSchema
+							: candidates != null ? Schemas.hybridReport(run.mode, this.topology)
+									: Schemas.report(run.mode, this.topology));
 			JsonNode report = Answers.json(answer.text());
 			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets, this.topology)
 					: candidates != null
@@ -674,7 +676,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					answer.promptTokens(), answer.completionTokens(), null, null, null, null,
 					verdict(errors, checked.dropped()), answer.text(), answer.latencyMs(), now()));
 			if (errors.isEmpty()) {
-				return stored(run, report, checked, assessed);
+				return stored(run, report, checked, assessed,
+						assessed || candidates != null ? ReportCheck.HYBRID_FIELDS : ReportCheck.MODEL_FIELDS);
 			}
 		}
 		throw new RunEnd(IncidentStatus.INVALID_REPORT, REPORT_INVALID);
@@ -700,7 +703,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), null, null, null, null, null, null, null,
 				null, NO_CANDIDATE, null, 0, now()));
 		ReportCheck.Result checked = new ReportCheck.Result(List.of(), List.of(), List.of(), NO_CANDIDATE_SUMMARY);
-		return stored(run, report, checked, false);
+		return stored(run, report, checked, false, ReportCheck.HYBRID_FIELDS);
 	}
 
 	/**
@@ -711,9 +714,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * (evidence-by-reference). The dropped items stay in the {@code REPORT} step's answer, and its summary names them.
 	 * The summary is stored as {@link ReportCheck} kept it, cut when it was too long (report-field-order). An assessed
 	 * report (T2) also keeps its checked assessments, first, and its evidence is the one code derived from them, so
-	 * that storage and scoring read it as they read a plain report.
+	 * that storage and scoring read it as they read a plain report. Only the plain report keeps the model's checked
+	 * {@code alternatives}, after the cause (ranked-report T2; ADR-025); the hybrid and assessed reports have none.
+	 * @param fields the model's fields, in order: {@link ReportCheck#MODEL_FIELDS} for the plain report,
+	 * {@link ReportCheck#HYBRID_FIELDS} for the others
 	 */
-	private String stored(Run run, JsonNode report, ReportCheck.Result checked, boolean assessed) {
+	private String stored(Run run, JsonNode report, ReportCheck.Result checked, boolean assessed, List<String> fields) {
 		ObjectNode stored = JSON.createObjectNode();
 		stored.put("incidentId", run.incident.id().toString());
 		stored.put("mode", run.mode.value());
@@ -723,7 +729,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			stored.set("assessments", report.get("assessments"));
 		}
 		// An assessed report has no evidence of its own: its place is kept for the derived one, set below.
-		ReportCheck.MODEL_FIELDS.forEach(field -> stored.set(field, report.get(field)));
+		fields.forEach(field -> stored.set(field, report.get(field)));
 		stored.put("summary", checked.summary());
 		stored.putArray("evidence").addAll(checked.evidence());
 		stored.put("stepsUsed", run.steps);

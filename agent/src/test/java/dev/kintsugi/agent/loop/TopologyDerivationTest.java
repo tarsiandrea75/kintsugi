@@ -73,6 +73,10 @@ class TopologyDerivationTest {
 		for (AgentMode mode : AgentMode.values()) {
 			assertThat(values(JSON.readTree(Schemas.report(mode, CHAIN)).at("/properties/rootCauseService/enum")))
 				.isEqualTo(causes);
+			// The alternatives name the same causes but UNKNOWN (ranked-report T2; ADR-025).
+			assertThat(values(JSON.readTree(Schemas.report(mode, CHAIN))
+				.at("/properties/alternatives/items/properties/rootCauseService/enum")))
+				.isEqualTo(List.of("a", "b", "c", "db"));
 		}
 		assertThat(values(JSON.readTree(Schemas.assessedReport(CHAIN)).at("/properties/rootCauseService/enum")))
 			.isEqualTo(causes);
