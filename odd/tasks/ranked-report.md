@@ -30,8 +30,8 @@ ADR-025. The prompt's `REPORT_TASK` gains, after the causes line: "alternatives:
 
 ## Tasks
 
-- [ ] T1 ADR-025. Route: inline (docs).
-- [ ] T2 The agent: schema, `ReportCheck`, prompt, stored report, `ranked` column; tests first; pins; the agent's living spec. Route: delegated writer.
+- [x] T1 ADR-025. Route: inline (docs).
+- [x] T2 The agent: schema, `ReportCheck`, prompt, stored report, `ranked` column; tests first; pins; the agent's living spec. Route: delegated writer.
 - [ ] T3 The scorer reads `ranked` (REQ-13), tests first. Route: delegated writer, own commit.
 - [ ] T4 The plan. Route: inline (docs).
 - [ ] T5 D's run, the rules check, the score and the result. Route: inline commands.
@@ -56,6 +56,11 @@ Forecast: about 350 authored lines for T2, 80 for T3, 150 for T1, T4 and T5; ove
 
 - 2026-11-03: the human chose the design and to keep NETWORK and CODE_DEFECT for a later feature.
 
+- 2026-11-03: T1 done (`dd4a2a9`). T2 done by a delegated writer (`a94908b`). RED: 125 failures against stubs; GREEN `./mvnw -q test` 712 run, 0 failures. About 595 authored lines, over the heuristic, mostly AC1 tests and every scripted answer moving with the field. AC1 and AC2 hold.
+  - The hybrid keeps today's schema and text byte for byte through `Schemas.hybridReport` and `HYBRID_REPORT_TASK`; a hybrid answer with `alternatives` is refused as an unexpected field. The assessed report is untouched.
+  - The writer's choices: the schema's alternative enums leave out `UNKNOWN`, so the local grammar cannot write it; no alternative is dropped, every breach makes the report invalid with the existing retry.
+  - Pins: the three plain report schemas gain the field before `confidence`; the plain instruction gains the Design's sentence; the summary header ends `candidates\tranked`. `system-*.txt` and the assessed schema are unchanged.
+
 ## Next step
 
-T2.
+T3.
