@@ -50,8 +50,8 @@ A discrete set, drawn uniformly, so each value has about 5 cases and a per-value
 ## Tasks
 
 - [x] T1 This document. Route: inline (docs).
-- [ ] T2 The schedule generator and its tests. Route: delegated writer (while A runs).
-- [ ] T3 `check-freeze.sh` condition 3 as ADR-026 Decision 4 says, and its tests. Route: the same writer, its own commit.
+- [x] T2 The schedule generator and its tests. Route: delegated writer (while A runs).
+- [x] T3 `check-freeze.sh` condition 3 as ADR-026 Decision 4 says, and its tests. Route: the same writer, its own commit.
 - [ ] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
 - [ ] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
 - [ ] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
@@ -75,7 +75,10 @@ Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain
 ## Progress
 
 - 2026-11-03: the human chose the minimal version and ADR-026's seed.
+- 2026-11-03: T2 and T3 done by a delegated writer, with no Maven or docker while A's run took the CPU. T2 `afad141`: `holdout2-schedule.py`; RED the script missing; GREEN 22 cases; a golden of the first 5 rows for a fixed test seed, checked by a separate reimplementation. T3 `b7a0092`: condition 3 checks the seed's first commit is after the tag and never edited, the schedule equals the generator's output **as of the tag** on the committed seed, and every `holdout-2` row names a schedule case in a `case` column and starts after the tag; RED on the old script; GREEN 44 cases. Parent spot check: 22 and 44 pass. 422 authored lines. AC1 and AC2 hold. Today's output unchanged: condition 3 fails on the missing tag.
+  - The writer's choices: the generator is run as of the tag, so a generator changed after the freeze cannot produce another schedule; it must therefore be committed before the tag. Draws are uniform per case, so about 5 cases per value in expectation, not exactly.
+  - Not checked yet: that the seed commit holds the seed alone; that a manifest row's fault matches its schedule case's class and parameter (T5 defines the manifest's healthy rows).
 
 ## Next step
 
-T2.
+T4, after A's run.
