@@ -73,6 +73,8 @@ Forecast: about 250 authored lines. Branch `feat/check-freeze`, from `feat/a-set
 - 2026-11-03: native review of `312d14d..53b4b41`: four lenses, **approved** and acknowledged (lineage `review-a4b54053d317c473`). Its WARNINGs named two fail-open paths in condition 4 (C-quoted paths skipped; tables without `split` skipped), a Python 3.11 dependency, a test that would break once the tag exists, and a stale `docs/STATE.md` line.
 - 2026-11-03: those fixed by a delegated writer (`74577f6`), with the four SUGGESTIONs: `git log -z`; the id check on every table with fault, truth and recording; exit 2 below Python 3.11; the missing-tag case in a throwaway repository; an explicit `seed_failure`; `expect_no_line` anchored; the test's blinded id computed by the converter's own code, proved by a mutation. RED observed on every item but the moved test, which needs a tag in the real repository to fail. GREEN 33 cases; parent spot check the same. 114 authored lines. Today's output unchanged.
 
+- 2026-11-03: native review of `53b4b41..1add21b`: four lenses, **approved** and acknowledged (lineage `review-2904c664285e6982`); three lenses were relaunched once, as STATUS reoffered them, after a usage limit stopped them. WARNING R2-stale-next-step fixed in `docs/STATE.md`. SUGGESTIONs not fixed: a comment on the `lstrip("\n")` of the `-z` parse; the `--help` test tied to the text's wrap; one dense sentence in `docs/setup.md`.
+
 ## Next step
 
 The feature is complete, but condition 3 stays failing until the holdout-2 recording feature records a seed and its time. That feature is the human's to plan.
