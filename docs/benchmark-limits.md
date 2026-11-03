@@ -27,4 +27,5 @@ The limits `docs/benchmark.md` must state next to H1–H3 (vision §7, M4). `ben
 
 ## Safety
 
-- **No write tool exists**, so "zero risky actions without approval" is structural until the policy gate lands, and measured only through the gate afterwards.
+- **The zero is the policy gate's** (ADR-027): every tool call passes a deterministic policy that refuses anything not classified as a read, and the counts are recorded per incident. No write tool exists, so no run has been offered a write to refuse; the gate is proved by tests, not by runs.
+- **No human approval exists.** Every write is refused, by vision §7's cut order item 6; the demo shows no approval.

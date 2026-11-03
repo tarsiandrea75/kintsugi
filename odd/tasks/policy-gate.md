@@ -28,8 +28,8 @@ Out of scope: any write tool, an approval channel, report or prompt changes.
 
 - [x] T1 ADR-027 and this document. Route: inline (docs).
 - [x] T2 The agent: risk table, `Policy`, `REFUSED_POLICY`, migration, counts, summary columns; tests first, including a scripted model that calls an unknown tool and gets `REFUSED_POLICY` with no call made; the agent's spec. Route: delegated writer.
-- [ ] T3 The scorer's totals and `benchmark.md`'s line; tests first; the evals' spec. Route: delegated writer, own commit.
-- [ ] T4 The pre-close check: rules v1 and v2 on lab dev, lab holdout and RE2-OB dev unchanged but for the new columns; the agent's full test suite. Route: inline commands.
+- [x] T3 The scorer's totals and `benchmark.md`'s line; tests first; the evals' spec. Route: delegated writer, own commit.
+- [x] T4 The pre-close check: rules v1 and v2 on lab dev, lab holdout and RE2-OB dev unchanged but for the new columns; the agent's full test suite. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -53,6 +53,12 @@ Forecast: about 300 authored lines. Branch `feat/policy-gate`. Nothing is pushed
   - The writer's choices: a name no phase offers is stopped by the phase check first, so the policy's own test uses an injected empty table; `riskyExecuted` is counted from the steps that ran, not set to 0, so a write that got through would show.
   - **Gap:** a gatherer refusal throws and ends as the existing "gathering failed" message, so it is not counted in `policyRefused`. No current tool triggers it.
 
+- 2026-11-03: native review of `42de768..319f860`: one reliability lens, **approved** and acknowledged (lineage `review-250cfd398e044aad`). WARNINGs: a gatherer refusal not counted in `policyRefused`, nor calls that ran before a gathering timeout in `riskyExecuted`; no loop-level test of a refused gathering call. SUGGESTION: the replay's rules rows used fixed counts.
+- 2026-11-03: fixed by a delegated writer (`5420f20`): a `PolicyTally` the gatherer fills before each call and refusal, so the counts hold whether the gathering finished, failed or timed out; loop tests in dossier and decision mode; the rules rows count from the actual tally. RED: counts `[0, 0]` where `[0, 1]` was expected; GREEN 728 run, 0 failures.
+- 2026-11-03: T3 done by the same writer (`bd334e1`): the scorer reads both columns (missing or `-` is unknown, never 0), prints a per-config policy line and writes `policy.tsv` only when an input knows the counts, so every committed result regenerates as before; `benchmark.py` renders the line and exits 2 if a config with holdout rows has a `riskyExecuted` total that is not 0 or not known for every row. RED `ImportError`; GREEN 364 passed. REQ-15. AC4 holds.
+  - Found on the way: five older results (before `candidate_recall`) do not regenerate `scores.tsv` byte for byte, which was already so; their `report.txt` and `paired.tsv` do.
+- 2026-11-03: T4 done on `bd334e1`: rules v1 and v2 on RE2-OB dev (`replay-20261103T232445Z-rules`, `-232449Z-`), lab dev (`-232453Z-`, `-232457Z-`) and lab holdout (`-232501Z-`, `-232506Z-`) equal the earlier runs in every column but `seconds`, `ranked` and the two new ones; all 120 samples record `riskyExecuted` 0 and `policyRefused` 0.
+
 ## Next step
 
-T3.
+The feature is complete. `docs/benchmark-limits.md`: the zero is now the gate's, not structural.
