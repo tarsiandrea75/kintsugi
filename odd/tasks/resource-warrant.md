@@ -59,7 +59,7 @@ Forecast: about 60 authored lines for T3, about 150 for the plan and results. Br
 - 2026-11-03: T3 done by a delegated writer (`c775fc2`). The sentence is in `SYSTEM_RULES` once, after "disk or threads.", and reaches every route and mode through `AgentLoop.Run` (`AgentLoop.java`:1019, :1035). The two whole-prompt pins changed only by the sentence. RED 1 failed; GREEN `./mvnw -q test` 698 run, 0 failures. 38 authored lines. AC1 holds.
 - 2026-11-03: T4 done on `c775fc2`, with a clean tree. Results in `evals/results/2026-11-03-resource-warrant-re2ob-dev/`.
   - Pre-close check passed: rules v1 and v2 (`replay-20261103T133807Z-rules`, `-133811Z-`) equal `-114625Z-` and `-114630Z-` in every column but `seconds`. AC2 holds.
-  - DW `replay-20261103T133833Z-cloud`: 30 rows, `COMPLETED`, the plan's configuration, DP1's recordings; about $0.03. The incident JSON does not store the system prompt, so the sentence's presence rests on the run's commit and clean tree, not on the run's own record. AC3 and AC4 hold.
+  - DW `replay-20261103T133833Z-cloud`: 30 rows, `COMPLETED`, the plan's configuration, DP1's recordings; about $0.03. The incident JSON does not store the system prompt, but the run's record shows the sentence: on all 30 cases DW's `promptTokens` is exactly 64 above DP1's, DP2's and DP3's on the same recording, so one fixed addition and no other drift (the closing review's SUGGESTION R3-prompt-presence-observable, lineage `review-966a2ef82345b230`, approved and acknowledged). AC3 and AC4 hold.
 
 | Run | AC@1 [Wilson 95%] | Coverage | Selective |
 |---|---|---|---|
