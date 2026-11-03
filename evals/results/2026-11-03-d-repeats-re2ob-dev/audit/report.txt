@@ -1,0 +1,64 @@
+D1: 30 samples, 17 abstained; 31 latency-row items
+D1  abstained  incident_cited 7  previous_only 9  no_number 2
+D1  answered   incident_cited 7  previous_only 6  no_number 0
+D1  all        incident_cited 14  previous_only 15  no_number 2
+D1  previous_only  cpu 4490c7f4fb1d2bf7 sample 1 abstained line 60: | currencyservice | / | 0.062 | 0.061 | 0.066 | 0.065 | 29/29 | 29/29 |  why: currencyservice latency is 0.062s mean; its calls from checkoutservice are fast and successful (D35).
+D1  previous_only  cpu 1bc72e388176b043 sample 1 abstained line 52: | checkoutservice | / | 0.315 | 0.258 | 0.485 | 0.345 | 29/29 | 29/29 |  why: checkoutservice server latency mean rose to 0.315 with max 0.485 while its callees show near-flat latency.
+D1  previous_only  cpu d90da82bc7174dcc sample 1 abstained line 57: | productcatalogservice | / | 0.002 | 0.003 | 0.002 | 0.003 | 29/29 | 29/29 |  why: productcatalogservice latency is low (0.002s) while its processor_usage rose sharply, showing a resource anomaly without caller-visible slowness.
+D1  previous_only  cpu d90da82bc7174dcc sample 1 abstained line 52: | checkoutservice | / | 0.314 | 0.257 | 0.458 | 0.345 | 29/29 | 29/29 |  why: checkoutservice server latency mean rose to 0.314s with max 0.458s in the incident window.
+D1  previous_only  cpu dd26c6f80907eb1f sample 1 abstained line 51: | frontend | / | 0.183 | 0.235 | 0.199 | 0.276 | 29/29 | 29/29 |  why: Frontend server latency mean rose only from 0.183 to 0.199s, a modest increase that does not clearly explain user-visible degradation.
+D1  previous_only  mem 77586d7c845941a2 sample 1 answered line 54: | recommendationservice | / | 0.008 | 0.183 | 0.008 | 0.807 | 29/29 | 29/29 |  why: recommendationservice latency is low (0.008s mean), so the fault is an error answer, not slowness.
+D1  previous_only  disk 12655c1b463873a6 sample 1 answered line 60: | currencyservice | / | 0.061 | 0.060 | 0.064 | 0.064 | 29/29 | 29/29 |  why: currencyservice latency mean 0.061s, the only downstream service with notably higher latency than peers
+D1  previous_only  disk 12655c1b463873a6 sample 1 answered line 52: | checkoutservice | / | 0.269 | 0.368 | 0.374 | 0.458 | 29/29 | 29/29 |  why: checkoutservice server latency 0.269s mean, elevated relative to other services and feeding frontend
+D1  previous_only  disk 12655c1b463873a6 sample 1 answered line 51: | frontend | / | 0.182 | 0.183 | 0.198 | 0.201 | 29/29 | 29/29 |  why: frontend server latency 0.182s mean, the user-visible symptom
+D1  previous_only  disk f67706f2794cf2dd sample 1 answered line 60: | currencyservice | / | 0.057 | 0.275 | 0.061 | 0.362 | 29/29 | 29/29 |  why: currencyservice server latency mean rose to 0.057s with max 0.361s, while other dependencies stay near 0.002-0.008s.
+D1  previous_only  disk 72f4804e8b4a79ea sample 1 abstained line 52: | checkoutservice | / | 0.274 | 0.258 | 0.383 | 0.374 | 29/29 | 29/29 |  why: checkoutservice server latency mean rose to 0.274s with max 0.383s, indicating slowdown on the user path.
+D1  previous_only  delay 3ae525f8f8fb807e sample 1 abstained line 52: | checkoutservice | / | 0.105 | 0.298 | 0.139 | 0.355 | 29/29 | 29/29 |  why: checkoutservice server latency mean rose from 0.105s to 0.139s in the incident window, the largest latency shift in the dossier.
+D1  previous_only  delay 880fd5269a9d8b3c sample 1 abstained line 51: | frontend | / | 0.054 | 1.325 | 0.061 | 1.477 | 29/29 | 29/29 |  why: frontend server latency for / is 0.054 mean in incident window, comparable to previous 0.061 max; no sign of degradation.
+D1  previous_only  delay cca1ac0113aa95c3 sample 1 abstained line 51: | frontend | / | 0.055 | 0.329 | 0.063 | 0.367 | 29/29 | 29/29 |  why: Frontend GET latency mean rose only slightly (0.055 to 0.063s) with no sharp increase in the incident window.
+D1  previous_only  socket fdb7bfa35fde2397 sample 1 answered line 53: | recommendationservice | / | 0.007 | 0.188 | 0.008 | 0.249 | 29/29 | 29/29 |  why: recommendationservice server latency is 0.007s, so its own answers are not slow, yet resources spiked.
+D2: 30 samples, 17 abstained; 31 latency-row items
+D2  abstained  incident_cited 12  previous_only 8  no_number 0
+D2  answered   incident_cited 8  previous_only 2  no_number 1
+D2  all        incident_cited 20  previous_only 10  no_number 1
+D2  previous_only  cpu 1ca11ec53cdff1c8 sample 1 answered line 52: | checkoutservice | / | 0.105 | 0.194 | 0.151 | 0.247 | 29/29 | 29/29 |  why: checkoutservice latency mean rises to 0.105s with max 0.151s, the largest service latency increase
+D2  previous_only  cpu 1bc72e388176b043 sample 1 abstained line 60: | currencyservice | / | 0.062 | 0.060 | 0.070 | 0.063 | 29/29 | 29/29 |  why: currencyservice latency mean 0.062s in incident, slightly up; not clearly a fault source.
+D2  previous_only  cpu d90da82bc7174dcc sample 1 answered line 57: | productcatalogservice | / | 0.002 | 0.003 | 0.002 | 0.003 | 29/29 | 29/29 |  why: productcatalogservice latency_avg stays at 0.002s, so the slowdown is not visible in its own latency metric.
+D2  previous_only  cpu dd26c6f80907eb1f sample 1 abstained line 51: | frontend | / | 0.183 | 0.235 | 0.199 | 0.276 | 29/29 | 29/29 |  why: Frontend server latency for / is 0.183s mean with max 0.199 in incident window, a modest degradation with no error signal.
+D2  previous_only  cpu dd26c6f80907eb1f sample 1 abstained line 52: | checkoutservice | / | 0.274 | 0.268 | 0.387 | 0.342 | 29/29 | 29/29 |  why: checkoutservice latency rose (mean 0.274, max 0.387), the largest server-side latency increase among dependencies.
+D2  previous_only  disk 72f4804e8b4a79ea sample 1 abstained line 51: | frontend | / | 0.183 | 0.198 | 0.203 | 0.215 | 29/29 | 29/29 |  why: Frontend server latency for / is 0.183s mean, 0.203s max in incident window, with 29/29 points.
+D2  previous_only  delay 1644ae3e1ded0834 sample 1 abstained line 51: | frontend | / | 0.053 | 0.392 | 0.059 | 0.433 | 29/29 | 29/29 |  why: Frontend server latency mean rose only modestly (0.053s) with all 29 points present; no clear failing component.
+D2  previous_only  delay 3ae525f8f8fb807e sample 1 abstained line 52: | checkoutservice | / | 0.105 | 0.298 | 0.139 | 0.355 | 29/29 | 29/29 |  why: checkoutservice server latency mean 0.105 incident vs 0.139 previous; slight max change, no errors
+D2  previous_only  delay cca1ac0113aa95c3 sample 1 abstained line 51: | frontend | / | 0.055 | 0.329 | 0.063 | 0.367 | 29/29 | 29/29 |  why: Frontend server latency mean rose only from 0.055 to 0.063 s; no sharp degradation shown.
+D2  previous_only  socket fdb7bfa35fde2397 sample 1 abstained line 51: | frontend | / | 0.051 | 0.191 | 0.058 | 0.253 | 29/29 | 29/29 |  why: frontend latency is flat (0.051 incident mean), so it does not show a latency increase.
+D3: 30 samples, 16 abstained; 29 latency-row items
+D3  abstained  incident_cited 9  previous_only 7  no_number 0
+D3  answered   incident_cited 8  previous_only 5  no_number 0
+D3  all        incident_cited 17  previous_only 12  no_number 0
+D3  previous_only  cpu d90da82bc7174dcc sample 1 answered line 57: | productcatalogservice | / | 0.002 | 0.003 | 0.002 | 0.003 | 29/29 | 29/29 |  why: productcatalogservice server latency stays low (mean 0.002s), so the slowdown is not visible there.
+D3  previous_only  cpu dd26c6f80907eb1f sample 1 abstained line 51: | frontend | / | 0.183 | 0.235 | 0.199 | 0.276 | 29/29 | 29/29 |  why: Frontend server latency for / is 0.183s mean in incident vs 0.199s previous, with no clear regression at the frontend.
+D3  previous_only  mem f16c5adcad116437 sample 1 answered line 51: | frontend | / | 0.062 | 0.443 | 0.075 | 0.603 | 29/29 | 29/29 |  why: frontend server latency mean is 0.062s in the incident window, the symptom users see.
+D3  previous_only  mem d84c1989afa6ee83 sample 1 abstained line 51: | frontend | / | 0.061 | 0.066 | 0.072 | 0.077 | 29/29 | 29/29 |  why: Frontend server latency for / barely changed (mean 0.061 to 0.072 max), showing no clear degradation.
+D3  previous_only  disk 12655c1b463873a6 sample 1 answered line 60: | currencyservice | / | 0.061 | 0.060 | 0.064 | 0.064 | 29/29 | 29/29 |  why: currencyservice server latency is 0.061s mean; checkoutservice and frontend latency rise via this path
+D3  previous_only  disk da45478718f4ba65 sample 1 answered line 51: | frontend | / | 0.183 | 0.332 | 0.205 | 0.384 | 29/29 | 29/29 |  why: frontend server latency mean 0.183s, elevated relative to downstream services
+D3  previous_only  disk 72f4804e8b4a79ea sample 1 abstained line 51: | frontend | / | 0.183 | 0.198 | 0.203 | 0.215 | 29/29 | 29/29 |  why: frontend server latency mean is 0.183s with no meaningful change, so the degradation is not clearly visible in latency.
+D3  previous_only  delay 1644ae3e1ded0834 sample 1 abstained line 51: | frontend | / | 0.053 | 0.392 | 0.059 | 0.433 | 29/29 | 29/29 |  why: Frontend server latency mean ~0.053s, max 0.059s in incident; no sign of latency degradation.
+D3  previous_only  delay 880fd5269a9d8b3c sample 1 abstained line 51: | frontend | / | 0.054 | 1.325 | 0.061 | 1.477 | 29/29 | 29/29 |  why: Frontend server latency mean 0.054s in incident window, max 0.061s; no clear degradation signal versus previous window.
+D3  previous_only  socket 6cf8e0404a734a1b sample 1 abstained line 51: | frontend | / | 0.061 | 0.064 | 0.072 | 0.080 | 29/29 | 29/29 |  why: Frontend server latency mean 0.061s, max 0.072s, stable versus previous window.
+D3  previous_only  socket 5c74850639d9db90 sample 1 abstained line 52: | checkoutservice | / | 0.113 | 0.131 | 0.151 | 0.173 | 29/29 | 29/29 |  why: checkoutservice mean latency 0.113s, highest among frontend-path services
+D3  previous_only  socket fdb7bfa35fde2397 sample 1 answered line 51: | frontend | / | 0.051 | 0.191 | 0.058 | 0.253 | 29/29 | 29/29 |  why: Frontend server mean latency 0.051s in incident window, max 0.058s.
+D4: 30 samples, 17 abstained; 28 latency-row items
+D4  abstained  incident_cited 10  previous_only 5  no_number 0
+D4  answered   incident_cited 7  previous_only 6  no_number 0
+D4  all        incident_cited 17  previous_only 11  no_number 0
+D4  previous_only  cpu 4490c7f4fb1d2bf7 sample 1 answered line 51: | frontend | / | 0.186 | 0.181 | 0.198 | 0.199 | 29/29 | 29/29 |  why: Frontend server latency mean rose to 0.186s, showing the user-facing degradation.
+D4  previous_only  cpu 1ca11ec53cdff1c8 sample 1 answered line 60: | currencyservice | / | 0.004 | 0.036 | 0.004 | 0.050 | 29/29 | 29/29 |  why: currencyservice latency mean stayed at 0.004, so no visible slowdown in its answers
+D4  previous_only  cpu d90da82bc7174dcc sample 1 answered line 57: | productcatalogservice | / | 0.002 | 0.003 | 0.002 | 0.003 | 29/29 | 29/29 |  why: productcatalogservice server latency stays around 0.002s, so the slowness is not yet visible in its own latency metric.
+D4  previous_only  mem f16c5adcad116437 sample 1 abstained line 51: | frontend | / | 0.062 | 0.443 | 0.075 | 0.603 | 29/29 | 29/29 |  why: Frontend server latency mean 0.062s and max 0.075s in incident window, barely above baseline; no clear degradation signal.
+D4  previous_only  mem d84c1989afa6ee83 sample 1 abstained line 51: | frontend | / | 0.061 | 0.066 | 0.072 | 0.077 | 29/29 | 29/29 |  why: Frontend mean latency stable around 0.061s, no sign of degradation.
+D4  previous_only  mem 4591fecf590a2cbe sample 1 abstained line 52: | checkoutservice | / | 0.147 | 0.158 | 0.164 | 0.175 | 29/29 | 29/29 |  why: checkoutservice server latency mean 0.147s in incident window, far above its peers, while its dependencies are fast.
+D4  previous_only  mem 4591fecf590a2cbe sample 1 abstained line 51: | frontend | / | 0.066 | 0.146 | 0.078 | 0.167 | 29/29 | 29/29 |  why: frontend server latency for / is 0.066s mean, the user-facing symptom.
+D4  previous_only  delay 1644ae3e1ded0834 sample 1 abstained line 52: | checkoutservice | / | 0.098 | 0.597 | 0.130 | 0.776 | 29/29 | 29/29 |  why: checkoutservice latency mean 0.098s incident; no clear degradation signal in latency table versus previous window
+D4  previous_only  loss 74b7f07db33ffa89 sample 1 answered line 53: | checkoutservice | / | 0.266 | 0.445 | 0.419 | 0.700 | 29/29 | 29/29 |  why: checkoutservice server latency mean 0.266s, max 0.419s in incident window, the slowest internal hop.
+D4  previous_only  socket 5c74850639d9db90 sample 1 answered line 52: | checkoutservice | / | 0.113 | 0.131 | 0.151 | 0.173 | 29/29 | 29/29 |  why: checkoutservice latency mean rises to 0.113 with max 0.151, a downstream symptom of slow calls.
+D4  previous_only  socket d81f18c94642be9f sample 1 answered line 51: | frontend | / | 0.055 | 0.570 | 0.066 | 0.652 | 29/29 | 29/29 |  why: frontend latency for / rose from 0.055 mean to 0.066 max, showing the degraded symptom.
