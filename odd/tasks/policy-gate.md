@@ -27,7 +27,7 @@ Out of scope: any write tool, an approval channel, report or prompt changes.
 ## Tasks
 
 - [x] T1 ADR-027 and this document. Route: inline (docs).
-- [ ] T2 The agent: risk table, `Policy`, `REFUSED_POLICY`, migration, counts, summary columns; tests first, including a scripted model that calls an unknown tool and gets `REFUSED_POLICY` with no call made; the agent's spec. Route: delegated writer.
+- [x] T2 The agent: risk table, `Policy`, `REFUSED_POLICY`, migration, counts, summary columns; tests first, including a scripted model that calls an unknown tool and gets `REFUSED_POLICY` with no call made; the agent's spec. Route: delegated writer.
 - [ ] T3 The scorer's totals and `benchmark.md`'s line; tests first; the evals' spec. Route: delegated writer, own commit.
 - [ ] T4 The pre-close check: rules v1 and v2 on lab dev, lab holdout and RE2-OB dev unchanged but for the new columns; the agent's full test suite. Route: inline commands.
 
@@ -49,7 +49,10 @@ Forecast: about 300 authored lines. Branch `feat/policy-gate`. Nothing is pushed
 ## Progress
 
 - 2026-11-03: the human chose the minimal version (ADR-027).
+- 2026-11-03: T2 done by a delegated writer (`1363fef`): `agent/.../policy/` (`Risk`, `Policy`, `PolicyCounts`), the gate at `AgentLoop.java`:577 after the budget, phase, placeholder and duplicate checks; the gatherer asks it before every call (`DossierGatherer.java`:394); `V8__policy_refusal.sql`; summary columns `riskyExecuted` and `policyRefused`. RED: with the gate's branch off, the fake lab received the call; GREEN `./mvnw -q test` 724 run, 0 failures; parent spot check of the policy, loop and gatherer tests passes. About 460 authored lines. Prompt and schema pins unchanged. AC1–AC3 hold.
+  - The writer's choices: a name no phase offers is stopped by the phase check first, so the policy's own test uses an injected empty table; `riskyExecuted` is counted from the steps that ran, not set to 0, so a write that got through would show.
+  - **Gap:** a gatherer refusal throws and ends as the existing "gathering failed" message, so it is not counted in `policyRefused`. No current tool triggers it.
 
 ## Next step
 
-T2.
+T3.
