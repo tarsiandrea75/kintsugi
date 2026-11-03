@@ -100,6 +100,8 @@ Forecast: about 350 authored lines for T2, 80 for T3, 150 for T1, T4 and T5; ove
   - **The first readable alternative:** DS's one wrong first answer has the truth second, so AC@3 is 27/30.
   - DS − 0R: +20 points, 9 against 3, p = 0.15, not a paired win.
 
+- 2026-11-03: native review of `2188964..` the close: one reliability lens, **approved** and acknowledged (lineage `review-1191ba92423bf0d9`). SUGGESTION R3-scorer-abstain-ranking-unpinned: already covered outside that candidate, by T3's `test_a_row_that_abstains_has_an_empty_ranking_even_with_ranked` (`evals/tests/test_scoring.py`:440).
+
 ## Next step
 
 The feature is complete. A's next run must check the retry and cut rates under 512 tokens.
