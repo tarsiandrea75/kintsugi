@@ -24,6 +24,15 @@ Vision §2's harness loop says what should vary: "Pick a fault from the catalog,
 
 The classes, their counts and the parameter ranges are decided in their own feature, with this ADR's mechanism.
 
+### Amendment, 2026-11-03: what the check can and cannot prove
+
+The closing review of the first implementation (lineage `review-e6bedfd6bed304aa`) found four gaps; three are closed in code, one is a stated limit.
+
+- **The schedule no longer depends on `random`.** Python promises a stable sequence only for `random()`, not for `shuffle` or `choice`, so a later Python could break condition 3 on a correct schedule. Every draw now comes from SHA-256 of the seed and a counter, which no interpreter version can change.
+- **The seed commit must descend from the tag**, as well as carry a later time.
+- **Every scheduled case is recorded exactly once, and the schedule's commit precedes the first recording.** A missing case or a second row for one case fails condition 3. A failed recording is not imported; its redo takes the same case.
+- **The limit:** git commit times are written by the committer and can be set to anything. The repository stays local, with no remote and no posts (standing preference since 2026-10-07), so nothing outside the author attests the seed's time. Condition 3 therefore proves the ordering of the history as written, not that it was written honestly. What constrains it is the backup bundles kept outside the laptop, whose dates a reader can compare. `benchmark.md` states this limit with H1–H3. A public timestamp of the seed's hash would close it, and remains the human's decision.
+
 ## Alternatives considered
 
 - **A seed per case.** Rejected: 75 seeds to date and check, for no gain over one seed and a deterministic schedule.
