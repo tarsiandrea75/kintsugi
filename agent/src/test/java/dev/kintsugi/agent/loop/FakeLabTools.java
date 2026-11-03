@@ -100,6 +100,10 @@ final class FakeLabTools implements LabTools {
 		return phase.tools().stream().<ToolCallback>map(FakeLabTools::definition).toList();
 	}
 
+	/**
+	 * The tool of every call that reached this lab, in order: bare names without arguments, so that
+	 * {@code doesNotContain(tool)} can fail.
+	 */
 	List<String> calls() {
 		return this.calls;
 	}

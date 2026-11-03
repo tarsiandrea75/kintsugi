@@ -17,16 +17,21 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -345,6 +350,79 @@ class AgentLoopDossierModeTest {
 		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "ACT:INVESTIGATE", "ACT:KNOWLEDGE", "REPORT:CONCLUDE");
 		// The calls made before the refusal were reads, and the refused one is counted (ADR-027).
 		assertThat(outcome.policy()).isEqualTo(new PolicyCounts(0, 1));
+	}
+
+	/**
+	 * A gathering the loop stops waiting for is counted as it stood at its deadline (ADR-027): the abandoned thread goes
+	 * on, and the refusal it meets after the deadline is not in the run's outcome. Latches order the threads: the third
+	 * call holds the gathering past its deadline, and the loop's next phase lets it go on and waits until it has ended,
+	 * so the late refusal is recorded before the run counts.
+	 */
+	@Test
+	@Timeout(30)
+	void anAbandonedGatheringIsCountedAsItStoodAtItsDeadline() {
+		CountDownLatch held = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		AtomicReference<Thread> gatherer = new AtomicReference<>();
+		AtomicBoolean ended = new AtomicBoolean();
+		LabTools holding = new LabTools() {
+
+			@Override
+			public ToolResult call(String tool, String jsonArgs) {
+				if (AgentLoopDossierModeTest.this.lab.calls().size() == 2) {
+					gatherer.set(Thread.currentThread());
+					held.countDown();
+					awaitIgnoringInterrupts(release);
+				}
+				return AgentLoopDossierModeTest.this.lab.call(tool, jsonArgs);
+			}
+
+			@Override
+			public List<ToolCallback> toolsFor(Phase phase) {
+				// The loop's thread, once it has stopped waiting: the gathering goes on and meets traffic_counts.
+				if (held.getCount() == 0 && !ended.getAndSet(true)) {
+					release.countDown();
+					awaitEnd(gatherer.get());
+				}
+				return AgentLoopDossierModeTest.this.lab.toolsFor(phase);
+			}
+
+		};
+		this.model.quiet().quiet().text(unknownReport());
+		this.loop = new AgentLoop(this.incidents, router(Duration.ofMillis(500)), holding, settings(),
+				Clock.systemUTC(), LAB, AgentMode.DOSSIER, DossierView.TABLES, DecisionReport.PLAIN, RulesVersion.V1,
+				refusing("traffic_counts"));
+
+		AgentLoop.Outcome outcome = this.loop.runToOutcome(this.id);
+
+		assertThat(outcome.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(this.model.prompts().get(0).getInstructions().get(1).getText())
+			.isEqualTo(Prompts.dossierNotGathered("the gathering took longer than 500 ms"));
+		// Three reads made before the deadline, the third held past it, two more after it, then the refusal that ended
+		// the abandoned gathering.
+		assertThat(this.lab.calls()).containsExactly("service_restarts", "status_summary", "status_summary",
+				"status_summary", "status_summary");
+		assertThat(outcome.policy()).isEqualTo(PolicyCounts.NONE);
+	}
+
+	/** Waits for {@code latch}, as a call the loop has abandoned does: the loop's interrupt does not end it. */
+	private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+		while (true) {
+			try {
+				latch.await();
+				return;
+			}
+			catch (InterruptedException interrupted) {
+				// The loop cancels the gathering it stops waiting for; this call goes on regardless.
+			}
+		}
+	}
+
+	/** Waits until {@code worker}, a pool thread, has ended its task and waits for the next one. */
+	private static void awaitEnd(Thread worker) {
+		while (Arrays.stream(worker.getStackTrace()).noneMatch(frame -> frame.getMethodName().equals("getTask"))) {
+			Thread.onSpinWait();
+		}
 	}
 
 	@Test

@@ -312,12 +312,13 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * What the policy did in {@code run}: the calls that ran, the dossier's and the model's, whose risk is a write, and
-	 * the calls refused, the gathering's and the model's {@code REFUSED_POLICY} steps. The gathering's come from its
-	 * tally, which holds them whether it completed, failed or ran past its bound.
+	 * the calls refused, the gathering's and the model's {@code REFUSED_POLICY} steps. The gathering's come from the
+	 * snapshot of its tally taken when the loop stopped waiting, whether it completed, failed or ran past its bound: an
+	 * abandoned gathering may go on recording, and what it records later is not counted.
 	 */
 	private PolicyCounts policyCounts(Run run) {
-		List<String> executed = new ArrayList<>(run.gathering.executed());
-		int refused = run.gathering.refused();
+		List<String> executed = new ArrayList<>(run.gathered.executed());
+		int refused = run.gathered.refused();
 		for (ToolStep step : run.toolSteps.values()) {
 			if (Policy.REFUSED_POLICY.equals(step.outcome())) {
 				refused++;
@@ -459,6 +460,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			future.cancel(true);
 			Thread.currentThread().interrupt();
 			throw new RunEnd(IncidentStatus.FAILED, "the run was interrupted during " + GATHERING + " of the dossier");
+		}
+		finally {
+			// The run counts the gathering as it stood now: an abandoned one may go on, and the run no longer uses it.
+			run.gathered = run.gathering.snapshot();
 		}
 		run.dossier = message;
 		write(run, new StepRow(run.steps + 1, "DOSSIER", DOSSIER_PHASE, null, null, null, null, null, null, calls,
@@ -1038,6 +1043,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		/** What the policy did to the gathering's calls, filled as they are made (ADR-027); empty when none was made. */
 		final PolicyTally gathering = new PolicyTally();
+
+		/**
+		 * The gathering's tally when the loop stopped waiting for it, completed, failed or timed out: what the run
+		 * counts; empty when the run gathered no dossier.
+		 */
+		PolicyTally.Snapshot gathered = PolicyTally.Snapshot.NONE;
 
 		/** The summaries of the tool steps, in step order. */
 		final List<String> evidence = new ArrayList<>();
