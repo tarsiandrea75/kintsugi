@@ -1,0 +1,4 @@
+DP: 30 samples, 12 abstained; 50 latency-row items
+DP  abstained  incident_cited 14  previous_only 0  no_number 1
+DP  answered   incident_cited 32  previous_only 0  no_number 3
+DP  all        incident_cited 46  previous_only 0  no_number 4
