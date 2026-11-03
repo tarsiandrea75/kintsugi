@@ -83,6 +83,10 @@ Forecast: about 350 authored lines for T2, 80 for T3, 150 for T1, T4 and T5; ove
   - **A cost the plan did not count: 7 of 30 reports needed the retry**, and all 7 passed on it. 4 wrote alternatives with both causes `UNKNOWN`, 2 named a service twice, and 1 was cut at the 768-token cap. Their completion tokens reach 1,355, over the cap, because both attempts count. On the cloud that costs cents. On the local route a retry is a second report of about 15 minutes, so A's next run may run longer and cut more under its 512-token cap.
   - The 4 "alternatives with `UNKNOWN`" retries show the model wanting to abstain while still naming suspects. ADR-025 forbids it, so that the list never ranks below an abstention. Whether to allow it is a design question for the human, not a fix to fit these cases.
 
+- 2026-11-03: the human chose to allow suspects with an abstention, if a measurement shows no harm: ADR-025's amendment and `evals/plans/2026-11-03-abstain-suspects-re2ob-dev.md`, branch `feat/ranked-report-02-abstain-suspects`. Tasks:
+- [ ] T6 Drop the rule from `ReportCheck` and the prompt, tests first; pins; spec. Route: delegated writer.
+- [ ] T7 DS's run, the rules check, the score and the result. Route: inline commands.
+
 ## Next step
 
-The feature is complete. Open for the human: whether an abstaining report may list suspects (ADR-025, Decision 3); A's next run must check the retry and cut rates under 512 tokens.
+T6. A's next run must check the retry and cut rates under 512 tokens.

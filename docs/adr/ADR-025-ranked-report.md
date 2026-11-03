@@ -27,6 +27,16 @@ Two constraints from the routes: the local report cap is 512 tokens, sized for o
 5. **Where it applies:** the plain report, in every mode. The assessed and hybrid reports are unchanged: the hybrid picks one of the rules' candidates, and ADR-019's closed choice stays closed.
 6. **Output:** the replay driver writes the model's list to a new last `summary.tsv` column, `ranked`, as `service|category` joined by `;`. The `candidates` column keeps the rules' list. The scorer's ranking (REQ-13) becomes `reported`, then `ranked`, then `candidates`, each service once, so ranked AC@1 still equals AC@1. REQ-7a's candidate recall is unchanged.
 
+### Amendment, 2026-11-03: suspects with an abstention
+
+**Status:** accepted, pending its measurement (`evals/plans/2026-11-03-abstain-suspects-re2ob-dev.md`). If the measurement fails, the amendment is reverted and Decision 3 stands as written.
+
+**Context:** on the first ranked run, 7 of 30 reports needed the retry, and 4 of those because the model abstained while listing suspects (`odd/tasks/ranked-report.md`, T5). On the local route a retry is a second report of about 15 minutes.
+
+**Decision:** Decision 3's last rule is dropped. When both causes are `UNKNOWN`, `alternatives` may list up to 4 suspects with the same rules: enums, no `UNKNOWN` item, no service twice. They are stored and written to `ranked`. The scorer still gives an abstaining row an empty ranking (REQ-13), so they change no score. The prompt says: "when both causes are UNKNOWN, the causes you suspect but cannot support, or an empty list".
+
+**Risk:** with suspects allowed, abstaining may become the easier answer, and AC@1 fall. The plan's rule tests it.
+
 ## Alternatives considered
 
 - **An array of candidates replacing the two cause fields.** Rejected: every consumer of `reported` would change, and AC@1 would move from a field the model fills to an index we choose.
