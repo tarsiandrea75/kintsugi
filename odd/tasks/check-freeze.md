@@ -42,7 +42,7 @@ Each condition becomes one function with its own exit status:
 
 ## Tasks
 
-- [ ] T1 The script and its tests; the setup section. Route: delegated writer.
+- [x] T1 The script and its tests; the setup section. Route: delegated writer.
 
 ## Acceptance criteria
 
@@ -64,6 +64,12 @@ Forecast: about 250 authored lines. Branch `feat/check-freeze`, from `feat/a-set
 
 - 2026-11-03: the human approved the feature, to be written while A's run takes the CPU.
 
+- 2026-11-03: T1 done by a delegated writer (`da6e874`): `check-freeze.sh` and `test-check-freeze.sh`, a "Freeze check" section in `docs/setup.md`. RED: the script missing, exit 127; GREEN: 25 cases pass; parent spot check the same. 459 authored lines, over the forecast, mostly the tests' throwaway repositories. AC1, AC3, AC4 and AC5 hold; AC2 holds per condition, not as an overall pass (below).
+  - **Today's output:** tag, unchanged and holdout-2 FAIL (no tag `freeze-m3`); results PASS. Exit 1.
+  - **Condition 3 cannot pass yet: no seed is recorded anywhere.** The manifest (`agent/src/test/resources/replay/recordings.tsv`) has no seed column and no incident has a seed field; the only mention is `odd/tasks/vision-revision.md`:93. A recording's time is its incident's `startedAt`. The splits allowed today are `dev`, `holdout`, `stress`, `probe` (`record-replay.sh`:60): `holdout-2` does not exist yet. Both belong to the holdout-2 recording feature, before 2026-12-01.
+  - **Condition 4:** RCAEval holdouts carry the split `holdout`, like lab holdout-1, so the script recomputes each row's blinded id (sha256 of `RE2-SYS/<case>/<rep>`, `convert.py`:146-149) from its fault and truth, and flags RE2-OB repetitions 2–3 and RE2-SS whatever the split label. It reads every version committed before the M4 date, deleted ones included. Today nothing is flagged; lab holdout-1 is read by two committed results (`2026-10-30-holdout1-lab`, `2026-10-31-qwen-holdout1`), each config once, as the plans fixed.
+  - The writer's choices: `--repo DIR` for tests; condition 2 also fails on uncommitted files under `agent/src/main/`; condition 3 does not count to 75.
+
 ## Next step
 
-T1.
+The feature is complete, but condition 3 stays failing until the holdout-2 recording feature records a seed and its time. That feature is the human's to plan.
