@@ -1,0 +1,63 @@
+0: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0  cpu      0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  disk     0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  loss     2/5   AC@1  40%  [12%, 77%]  recall 60%
+0  mem      1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  socket   0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 37%  selective 36%  recall 17%
+0R: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0R  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+0R  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0R  disk     4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+0R  mem      4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  socket   4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%  recall 80%
+DP1: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+DP1  cpu      1/5   AC@1  20%  [4%, 62%]
+DP1  delay    4/5   AC@1  80%  [38%, 96%]
+DP1  disk     1/5   AC@1  20%  [4%, 62%]
+DP1  loss     5/5   AC@1 100%  [57%, 100%]
+DP1  mem      4/5   AC@1  80%  [38%, 96%]
+DP1  socket   1/5   AC@1  20%  [4%, 62%]
+DP1  pooled  16/30  AC@1  53%  [36%, 70%]  coverage 60%  selective 89%
+DP2: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+DP2  cpu      2/5   AC@1  40%  [12%, 77%]
+DP2  delay    2/5   AC@1  40%  [12%, 77%]
+DP2  disk     1/5   AC@1  20%  [4%, 62%]
+DP2  loss     5/5   AC@1 100%  [57%, 100%]
+DP2  mem      5/5   AC@1 100%  [57%, 100%]
+DP2  socket   2/5   AC@1  40%  [12%, 77%]
+DP2  pooled  17/30  AC@1  57%  [39%, 73%]  coverage 57%  selective 100%
+DP3: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+DP3  cpu      1/5   AC@1  20%  [4%, 62%]
+DP3  delay    3/5   AC@1  60%  [23%, 88%]
+DP3  disk     1/5   AC@1  20%  [4%, 62%]
+DP3  loss     5/5   AC@1 100%  [57%, 100%]
+DP3  mem      3/5   AC@1  60%  [23%, 88%]
+DP3  socket   2/5   AC@1  40%  [12%, 77%]
+DP3  pooled  15/30  AC@1  50%  [33%, 67%]  coverage 50%  selective 100%
+DW: route cloud, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+DW  cpu      4/5   AC@1  80%  [38%, 96%]
+DW  delay    4/5   AC@1  80%  [38%, 96%]
+DW  disk     4/5   AC@1  80%  [38%, 96%]
+DW  loss     5/5   AC@1 100%  [57%, 100%]
+DW  mem      4/5   AC@1  80%  [38%, 96%]
+DW  socket   4/5   AC@1  80%  [38%, 96%]
+DW  pooled  25/30  AC@1  83%  [66%, 93%]  coverage 90%  selective 93%
+0R - 0: 30 cases, 0R only 16, 0 only 0, exact McNemar p = 3.1e-05 (Holm 0.00043); difference +53 points, cluster bootstrap 95% [+33, +70] (seed 1, 10000 resamples)
+DP1 - 0: 30 cases, DP1 only 13, 0 only 1, exact McNemar p = 0.0018 (Holm 0.022); difference +40 points, cluster bootstrap 95% [+20, +60] (seed 1, 10000 resamples)
+DP2 - 0: 30 cases, DP2 only 14, 0 only 1, exact McNemar p = 0.00098 (Holm 0.013); difference +43 points, cluster bootstrap 95% [+23, +63] (seed 1, 10000 resamples)
+DP3 - 0: 30 cases, DP3 only 13, 0 only 2, exact McNemar p = 0.0074 (Holm 0.081); difference +37 points, cluster bootstrap 95% [+17, +57] (seed 1, 10000 resamples)
+DW - 0: 30 cases, DW only 21, 0 only 0, exact McNemar p = 9.5e-07 (Holm 1.4e-05); difference +70 points, cluster bootstrap 95% [+53, +87] (seed 1, 10000 resamples)
+DP1 - 0R: 30 cases, DP1 only 9, 0R only 13, exact McNemar p = 0.52 (Holm 1); difference -13 points, cluster bootstrap 95% [-43, +17] (seed 1, 10000 resamples)
+DP2 - 0R: 30 cases, DP2 only 8, 0R only 11, exact McNemar p = 0.65 (Holm 1); difference -10 points, cluster bootstrap 95% [-37, +20] (seed 1, 10000 resamples)
+DP3 - 0R: 30 cases, DP3 only 9, 0R only 14, exact McNemar p = 0.4 (Holm 1); difference -17 points, cluster bootstrap 95% [-47, +13] (seed 1, 10000 resamples)
+DW - 0R: 30 cases, DW only 8, 0R only 3, exact McNemar p = 0.23 (Holm 1); difference +17 points, cluster bootstrap 95% [-3, +37] (seed 1, 10000 resamples)
+DP2 - DP1: 30 cases, DP2 only 3, DP1 only 2, exact McNemar p = 1 (Holm 1); difference +3 points, cluster bootstrap 95% [-10, +17] (seed 1, 10000 resamples)
+DP3 - DP1: 30 cases, DP3 only 2, DP1 only 3, exact McNemar p = 1 (Holm 1); difference -3 points, cluster bootstrap 95% [-17, +10] (seed 1, 10000 resamples)
+DW - DP1: 30 cases, DW only 10, DP1 only 1, exact McNemar p = 0.012 (Holm 0.12); difference +30 points, cluster bootstrap 95% [+10, +50] (seed 1, 10000 resamples)
+DP3 - DP2: 30 cases, DP3 only 1, DP2 only 3, exact McNemar p = 0.62 (Holm 1); difference -7 points, cluster bootstrap 95% [-20, +7] (seed 1, 10000 resamples)
+DW - DP2: 30 cases, DW only 10, DP2 only 2, exact McNemar p = 0.039 (Holm 0.31); difference +27 points, cluster bootstrap 95% [+7, +47] (seed 1, 10000 resamples)
+DW - DP3: 30 cases, DW only 12, DP3 only 2, exact McNemar p = 0.013 (Holm 0.12); difference +33 points, cluster bootstrap 95% [+10, +53] (seed 1, 10000 resamples)
