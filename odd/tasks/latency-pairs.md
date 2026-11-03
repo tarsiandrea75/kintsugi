@@ -97,7 +97,9 @@ Forecast: about 200 authored lines for T1 without goldens, about 100 for T2, abo
   - Of the 13 cases that abstained in all of D1–D4, DP answers 7 and gets 6 right.
   - **One run only:** a gain of 3 to 5 is inside what identical runs can differ by, which is why the rule asked for 7.
 
+- 2026-11-03: **the human kept the layout** as a format change, not as a measured gain. The claim stays what the numbers say: DP 16/30 in one run; the gain rule not met; REQ-14 detects no previous-only citation. Every later D measurement uses the pairs, so D1–D4 are the old-table baseline, and a later change to D is compared with DP runs.
+
 ## Next step
 
-The plan leaves one decision to the human: whether to keep the layout without a measured gain. It changes no rule and costs nothing at run time, and REQ-14 no longer detects the misread it targeted, though other misreads remain possible.
+The feature is complete. Decided: the layout stays. Before that decision, the plan left it to the human: whether to keep the layout without a measured gain. It changes no rule and costs nothing at run time, and REQ-14 no longer detects the misread it targeted, though other misreads remain possible.
 - 2026-11-03: native review of `89698fb..689421d`: one reliability lens, **approved** and acknowledged (lineage `review-8a1de7e1ae34d63b`). WARNING R3-misread-gone-overclaim, fixed above: "gone" became "not detected". SUGGESTION R3-exact-arrow-spacing, not fixed: a quoted pair cell with other spacing around the arrow is dropped from the audit, not counted. Before the freeze on 2026-12-01, no further change to D on these 30 cases without its own plan.
