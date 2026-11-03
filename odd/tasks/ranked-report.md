@@ -34,7 +34,7 @@ ADR-025. The prompt's `REPORT_TASK` gains, after the causes line: "alternatives:
 - [x] T2 The agent: schema, `ReportCheck`, prompt, stored report, `ranked` column; tests first; pins; the agent's living spec. Route: delegated writer.
 - [x] T3 The scorer reads `ranked` (REQ-13), tests first. Route: delegated writer, own commit.
 - [x] T4 The plan. Route: inline (docs).
-- [ ] T5 D's run, the rules check, the score and the result. Route: inline commands.
+- [x] T5 D's run, the rules check, the score and the result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -65,6 +65,24 @@ Forecast: about 350 authored lines for T2, 80 for T3, 150 for T1, T4 and T5; ove
 - 2026-11-03: T3 done by a delegated writer on `feat/ranked-report-01-scorer` (`5f0d8f0`): `ranking_of` reads `reported`, `ranked`, `candidates`; a file without `ranked` scores as before, proved on the six committed inputs of the resource-warrant result. RED 5 failed; GREEN 328 passed. 99 authored lines. `audit_latency.py` and `cli.py` read columns by name, unchanged. AC4 holds.
 - 2026-11-03: T4 done: `evals/plans/2026-11-03-ranked-report-re2ob-dev.md`.
 
+- 2026-11-03: T5 done on `6c62c1d`. Results in `evals/results/2026-11-03-ranked-report-re2ob-dev/`.
+  - Pre-close check passed: rules v1 and v2 (`replay-20261103T145625Z-rules`, `-145633Z-`) equal `-133807Z-` and `-133811Z-` in every column but `seconds`, and `ranked` is empty on every rules row. AC3 holds.
+  - DR `replay-20261103T145641Z-cloud`: 30 rows, all `COMPLETED`, the plan's configuration, DW's recordings; about $0.03. AC5 holds.
+
+| Config | AC@1 [Wilson 95%] | AC@3 | Avg@5 | Mean list |
+|---|---|---|---|---|
+| DR | 26/30, 87% [70%, 95%] | 87% | 87% | 2.60 |
+| DW | 25/30, 83% [66%, 93%] | 83% | 83% | 0.90 |
+| 0R | 20/30, 67% [49%, 81%] | 80% | 76% | 1.27 |
+| BARO | 4/30, 13% [5%, 30%] | 87% | 76% | 5.00 |
+| chance, n = 11 | 9% | 27% | 27% | |
+
+  - **The plan's rule is met, so the ranked report is kept:** against DW, DR wins 2 and loses 1 (losses minus wins −1, at most 2 allowed), and has no `INVALID_REPORT`.
+  - DR − 0R: +20 points, 10 against 4, p = 0.18. Not a criterion here; still not a paired win.
+  - **The alternatives cannot be read on this run:** DR answers 26 cases and gets all 26 right, with a mean of 2.0 alternatives each, and abstains on 4. With no wrong first answer, AC@3 and Avg@5 equal AC@1, so the descriptive question (is the truth among the alternatives?) has no case to answer it.
+  - **A cost the plan did not count: 7 of 30 reports needed the retry**, and all 7 passed on it. 4 wrote alternatives with both causes `UNKNOWN`, 2 named a service twice, and 1 was cut at the 768-token cap. Their completion tokens reach 1,355, over the cap, because both attempts count. On the cloud that costs cents. On the local route a retry is a second report of about 15 minutes, so A's next run may run longer and cut more under its 512-token cap.
+  - The 4 "alternatives with `UNKNOWN`" retries show the model wanting to abstain while still naming suspects. ADR-025 forbids it, so that the list never ranks below an abstention. Whether to allow it is a design question for the human, not a fix to fit these cases.
+
 ## Next step
 
-T5.
+The feature is complete. Open for the human: whether an abstaining report may list suspects (ADR-025, Decision 3); A's next run must check the retry and cut rates under 512 tokens.
