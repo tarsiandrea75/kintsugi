@@ -68,11 +68,14 @@ class ReplayDriverTest {
 	/** The settings columns of the tests' local route: granite, no think field, a 512-token report in 5 s. */
 	private static final String LOCAL_COLUMNS = "\tgranite4.1:8b\tdefault\t512\t5s";
 
+	/** The policy's last two columns of a run with no write executed and no call refused (ADR-027). */
+	private static final String NO_POLICY_EVENT = "\t0\t0";
+
 	/**
-	 * The end of a summary line on that route with no candidates and no ranked alternatives: the settings, then the two
-	 * empty last columns.
+	 * The end of a summary line on that route with no candidates, no ranked alternatives and no policy event: the
+	 * settings, the two empty columns, then the policy's two counts.
 	 */
-	private static final String LOCAL_LINE_END = LOCAL_COLUMNS + "\t\t";
+	private static final String LOCAL_LINE_END = LOCAL_COLUMNS + "\t\t" + NO_POLICY_EVENT;
 
 	/** The settings of a hand-made local sample, as the route of application.yaml would record them. */
 	private static final ReplayDriver.Settings LOCAL = new ReplayDriver.Settings("granite4.1:8b", "default", "512",
@@ -162,7 +165,7 @@ class ReplayDriverTest {
 		assertThat(summary).hasSize(2);
 		assertThat(summary.get(0)).isEqualTo(ReplayDriver.SUMMARY_HEADER);
 		String[] line = summary.get(1).split("\t", -1);
-		assertThat(line).hasSize(25);
+		assertThat(line).hasSize(27);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
 				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "12", "1.00");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
@@ -177,10 +180,12 @@ class ReplayDriverTest {
 		assertThat(List.of(line).subList(19, 23)).containsExactly("granite4.1:8b", "default", "512", "5s");
 		// The rules' candidates come after them (hybrid T4): only rules and hybrid samples have any.
 		assertThat(line[23]).isEmpty();
-		// The model's ranked alternatives come last (ranked-report T2; ADR-025): this report has none.
+		// The model's ranked alternatives come next (ranked-report T2; ADR-025): this report has none.
 		assertThat(line[24]).isEmpty();
-		assertThat(summary.get(0))
-			.endsWith("\tview\treport\tmodel\tthink\treportCap\treportTimeout\tcandidates\tranked");
+		// The policy's counts come last (ADR-027): the dossier's calls ran no write and none was refused.
+		assertThat(List.of(line).subList(25, 27)).containsExactly("0", "0");
+		assertThat(summary.get(0)).endsWith(
+				"\tview\treport\tmodel\tthink\treportCap\treportTimeout\tcandidates\tranked\triskyExecuted\tpolicyRefused");
 
 		JsonNode incident = JSON.readTree(this.out.resolve("F1-dossier-" + F1_DOSSIER_STEM + "-1.json").toFile());
 		assertThat(incident.path("status").asString()).isEqualTo("COMPLETED");
@@ -188,6 +193,9 @@ class ReplayDriverTest {
 		assertThat(incident.path("sinceMinutes").asInt()).isEqualTo(12);
 		assertThat(incident.path("steps").get(0).path("kind").asString()).isEqualTo("DOSSIER");
 		assertThat(incident.path("report").path("rootCauseService").asString()).isEqualTo("UNKNOWN");
+		// The incident file records what the policy did, as its summary line does (ADR-027).
+		assertThat(incident.path("riskyExecuted").asInt(-1)).isZero();
+		assertThat(incident.path("policyRefused").asInt(-1)).isZero();
 		// "Now" is the recorded incident's start, so the windows match the recorded timestamps.
 		Instant startedAt = Instant.parse(incident.path("startedAt").asString());
 		assertThat(Duration.between(F1_DOSSIER_START, startedAt).abs()).isLessThan(Duration.ofMinutes(1));
@@ -325,7 +333,7 @@ class ReplayDriverTest {
 
 		assertThat(sample.reported()).isEqualTo(F1_TRUTH);
 		assertThat(sample.rankedColumn()).isEqualTo("payment-service|DEPENDENCY_LATENCY;order-service|CONFIGURATION");
-		assertThat(sample.summaryLine()).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn());
+		assertThat(sample.summaryLine()).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn() + NO_POLICY_EVENT);
 		// A sample whose incident holds no report, as a failed run's, writes none.
 		assertThat(decisionSample("dev", "a", "MISS").rankedColumn()).isEmpty();
 	}
@@ -344,7 +352,7 @@ class ReplayDriverTest {
 
 		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
 		assertThat(sample.rankedColumn()).isEqualTo("payment-service|DEPENDENCY_LATENCY;order-service|CONFIGURATION");
-		assertThat(sample.summaryLine()).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn());
+		assertThat(sample.summaryLine()).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn() + NO_POLICY_EVENT);
 	}
 
 	@Test
@@ -619,7 +627,7 @@ class ReplayDriverTest {
 		assertThat(hybrid.incident().path("rules").asString()).isEqualTo("v1");
 		assertThat(hybrid.summaryLine())
 			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\thybrid" + LOCAL_COLUMNS + "\t"
-					+ rules.candidatesColumn() + "\t");
+					+ rules.candidatesColumn() + "\t" + NO_POLICY_EVENT);
 		// The aggregate keeps its columns: the candidates are per sample.
 		assertThat(ReplayDriver.aggregate(List.of(hybrid)).get(1)).endsWith(LOCAL_COLUMNS);
 	}
@@ -635,7 +643,8 @@ class ReplayDriverTest {
 
 		assertThat(rules.candidatesColumn())
 			.isEqualTo("gateway-mock|DEPENDENCY_LATENCY;payment-service|DEPENDENCY_REJECTING");
-		assertThat(rules.summaryLine()).endsWith("\trules-v1\t-\t-\t-\t" + rules.candidatesColumn() + "\t");
+		// A hand-made sample's incident records no policy counts, so its last two columns are "-" (ADR-027).
+		assertThat(rules.summaryLine()).endsWith("\trules-v1\t-\t-\t-\t" + rules.candidatesColumn() + "\t\t-\t-");
 		assertThat(decisionSample("dev", "a", "MATCH").candidatesColumn()).isEmpty();
 	}
 
@@ -826,7 +835,7 @@ class ReplayDriverTest {
 		assertThat(sample.dossierResourceUnrecorded()).isEqualTo(RESOURCE_CALLS);
 
 		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
-		assertThat(line).hasSize(25);
+		assertThat(line).hasSize(27);
 		assertThat(List.of(line).subList(0, 8)).containsExactly("F1", "decision", "rules", "1", "COMPLETED", F1_TRUTH,
 				F1_TRUTH, "MATCH");
 		// The rules' candidates on the same dossier (hybrid T4), their verdict first, written service|category in order
@@ -840,6 +849,8 @@ class ReplayDriverTest {
 		// The rules write no ranked alternatives: only a model's plain report has them (ranked-report T2; ADR-025).
 		assertThat(line[24]).isEmpty();
 		assertThat(sample.rankedColumn()).isEmpty();
+		// The gatherer's calls passed the policy gate (ADR-027): no write ran, none was refused.
+		assertThat(List.of(line).subList(25, 27)).containsExactly("0", "0");
 		assertThat(List.of(line).subList(12, 14)).containsExactly("0", "0");
 		assertThat(List.of(line).subList(15, 19)).containsExactly("dev", r1.stem(), "tables", "plain");
 		// Config 0 calls no model: its model is the rules' version, and it has no thinking, cap or deadline.
@@ -909,7 +920,7 @@ class ReplayDriverTest {
 
 		assertThat(decision.settings()).isEqualTo(new ReplayDriver.Settings("qwen3.5:9b", "on", "2048", "1800s"));
 		assertThat(decision.summaryLine())
-			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain\tqwen3.5:9b\ton\t2048\t1800s\t\t");
+			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain\tqwen3.5:9b\ton\t2048\t1800s\t\t" + NO_POLICY_EVENT);
 		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1)).endsWith("\tqwen3.5:9b\ton\t2048\t1800s");
 		// The report call carried the thinking setting and the cap the line names.
 		OllamaChatOptions sent = (OllamaChatOptions) this.model.prompts().get(0).getOptions();

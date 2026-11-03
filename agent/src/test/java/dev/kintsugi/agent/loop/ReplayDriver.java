@@ -46,6 +46,8 @@ import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
+import dev.kintsugi.agent.policy.Policy;
+import dev.kintsugi.agent.policy.PolicyCounts;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
 import dev.kintsugi.agent.rules.RulesVersion;
@@ -100,7 +102,7 @@ final class ReplayDriver {
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
 			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
-			"reportTimeout", "candidates", "ranked");
+			"reportTimeout", "candidates", "ranked", "riskyExecuted", "policyRefused");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
@@ -392,6 +394,8 @@ final class ReplayDriver {
 		verdict.facts().forEach(facts::add);
 		incident.put("view", this.decisionView.value());
 		incident.put("decisionReport", this.decisionReport.value());
+		// The gatherer's calls are the sample's only calls, and each passed the policy gate (ADR-027).
+		policy(incident, Policy.DEFAULT.counts(dossier.calls().stream().map(ToolResult::tool).toList(), 0));
 		incident.putArray("steps");
 
 		String truth = recording.truth();
@@ -462,6 +466,7 @@ final class ReplayDriver {
 		IncidentStatus status = outcome.status();
 
 		ObjectNode incident = incident(id);
+		policy(incident, outcome.policy());
 		// A hybrid sample's candidates came from the run's rules version, which its model column does not name.
 		if (mode.reportFrom(this.decisionReport).orElse(null) == DecisionReport.HYBRID) {
 			incident.put("rules", this.rules.value());
@@ -490,6 +495,15 @@ final class ReplayDriver {
 				tools.conflicts(), total(incident, "promptTokens"),
 				total(incident, "completionTokens"), seconds, dossier.size(), dossierUnrecorded, incident,
 				Settings.of(this.router.route(ModelTask.REPORT)), outcome.candidates(), dossierResourceUnrecorded);
+	}
+
+	/**
+	 * Records in the sample's incident what the policy did (ADR-027): {@code riskyExecuted} and {@code policyRefused},
+	 * the last two columns of {@code summary.tsv}.
+	 */
+	private static void policy(ObjectNode incident, PolicyCounts counts) {
+		incident.put("riskyExecuted", counts.riskyExecuted());
+		incident.put("policyRefused", counts.refused());
 	}
 
 	/** The fault's first recording made in {@code mode}, if any. */
@@ -789,7 +803,16 @@ final class ReplayDriver {
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
 					this.recording, viewColumn(), reportColumn(), this.settings.columns(), candidatesColumn(),
-					rankedColumn());
+					rankedColumn(), policyColumn("riskyExecuted"), policyColumn("policyRefused"));
+		}
+
+		/**
+		 * One of the policy's counts as {@code summary.tsv} writes them (ADR-027): the number its incident records, or
+		 * {@code -} for a hand-made sample whose incident records none.
+		 */
+		String policyColumn(String field) {
+			JsonNode count = this.incident.path(field);
+			return count.isInt() ? String.valueOf(count.asInt()) : NONE;
 		}
 
 		/** The candidates as {@code summary.tsv} writes them: each {@code service|category}, in order, joined by ';'. */

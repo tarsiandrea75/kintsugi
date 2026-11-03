@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,9 @@ import dev.kintsugi.agent.dossier.Dossier.TrafficRow;
 import dev.kintsugi.agent.dossier.Dossier.UriLatency;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.lab.ToolOutcome;
+import dev.kintsugi.agent.lab.ToolResult;
+import dev.kintsugi.agent.policy.Policy;
+import dev.kintsugi.agent.policy.PolicyCounts;
 
 /**
  * The dossier's gathering (agent spec, "Evidence dossier gathering"; ADR-011): the same calls in the same order for
@@ -47,6 +51,35 @@ class DossierGathererTest {
 
 	private static final List<String> SERVICES = List.of("order-service", "payment-service", "inventory-service",
 			"gateway-mock");
+
+	/**
+	 * The gatherer's calls go through the same policy gate as the model's (ADR-027): every one of them passes the
+	 * production table, so the counts of a gathering show no write.
+	 */
+	@Test
+	void everyCallOfTheGatheringPassesThePolicyGate() {
+		RecordedLab lab = new RecordedLab("healthy");
+
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB, Policy.DEFAULT).gather(10);
+
+		List<String> tools = dossier.calls().stream().map(ToolResult::tool).toList();
+		assertThat(tools).hasSize(lab.calls().size()).allSatisfy(tool -> assertThat(Policy.DEFAULT.authorizes(tool)).isTrue());
+		assertThat(Policy.DEFAULT.counts(tools, 0)).isEqualTo(PolicyCounts.NONE);
+	}
+
+	/**
+	 * A gathering call the policy refuses never reaches the lab: the gathering fails at once, since its calls are code's
+	 * and a refused one is a tool someone added to the gatherer without classifying it.
+	 */
+	@Test
+	void aGatheringCallThePolicyRefusesIsNeverMade() {
+		RecordedLab lab = new RecordedLab("healthy");
+		DossierGatherer gatherer = new DossierGatherer(lab, CLOCK, LAB, new Policy(Map.of()));
+
+		assertThatThrownBy(() -> gatherer.gather(10)).isInstanceOf(IllegalStateException.class)
+			.hasMessage("the policy refuses service_restarts: its risk is WRITE");
+		assertThat(lab.calls()).isEmpty();
+	}
 
 	@Test
 	void callsEveryToolForBothWindowsInAFixedOrder() {

@@ -200,7 +200,7 @@ class AgentStoreTest {
 	void stepsAcceptTheSpecValues() {
 		UUID incident = insertIncident("RUNNING", "NULL", "NULL", "NULL");
 		List<String> outcomes = List.of("OK", "INVALID_PARAMETER", "UPSTREAM_ERROR", "CLIENT_ERROR", "REFUSED_PHASE",
-				"REFUSED_BUDGET");
+				"REFUSED_BUDGET", "REFUSED_PLACEHOLDER", "REFUSED_DUPLICATE", "REFUSED_POLICY");
 		int stepNo = 1;
 		for (String outcome : outcomes) {
 			insertStep(incident, stepNo++, "TOOL_CALL", "TRIAGE", outcome);
@@ -212,7 +212,7 @@ class AgentStoreTest {
 			insertStep(incident, stepNo++, "PLAN", phase, null);
 		}
 		assertThat(AgentDatabase.admin().sql("SELECT count(*) FROM incident_steps").query(Integer.class).single())
-			.isEqualTo(11);
+			.isEqualTo(14);
 	}
 
 	@ParameterizedTest

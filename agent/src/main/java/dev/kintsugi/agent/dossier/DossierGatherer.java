@@ -37,13 +37,16 @@ import dev.kintsugi.agent.dossier.Dossier.Window;
 import dev.kintsugi.agent.lab.LabTools;
 import dev.kintsugi.agent.lab.ToolOutcome;
 import dev.kintsugi.agent.lab.ToolResult;
+import dev.kintsugi.agent.policy.Policy;
 
 /**
  * Gathers the {@link Dossier} of an incident through {@link LabTools}, the agent's one way into the lab (agent spec,
  * "Evidence dossier gathering"; ADR-011). It makes the same calls, with the same arguments, in the same order for every
  * incident: nothing depends on the symptom or on any tool's output. The calls are code's, not the model's: they do
  * not pass the loop's checks and do not count against its tool budget. A failed call becomes a fact in its section;
- * the gathering never stops early.
+ * the gathering never stops early. Every call passes the {@link Policy} first, as the model's do (ADR-027): a call it
+ * refuses is never made, and the gathering fails at once, since its tools are code's and a refused one is a tool added
+ * to the gatherer without being classified.
  */
 public final class DossierGatherer {
 
@@ -72,6 +75,8 @@ public final class DossierGatherer {
 
 	private final Clock clock;
 
+	private final Policy policy;
+
 	/** The services, in the order of the call path ({@link Topology#gatherOrder()}). */
 	private final List<String> services;
 
@@ -86,8 +91,14 @@ public final class DossierGatherer {
 	 * (odd/tasks/topology-data.md T4): the services down the call path, the tables and sources in file order.
 	 */
 	public DossierGatherer(LabTools tools, Clock clock, Topology topology) {
+		this(tools, clock, topology, Policy.DEFAULT);
+	}
+
+	/** A gatherer as above whose every call is first authorized by {@code policy}. */
+	public DossierGatherer(LabTools tools, Clock clock, Topology topology, Policy policy) {
 		this.tools = tools;
 		this.clock = clock;
+		this.policy = Objects.requireNonNull(policy, "policy");
 		this.services = topology.gatherOrder();
 		this.statusTables = topology.statusTables();
 		this.eventSources = topology.eventSources();
@@ -374,8 +385,16 @@ public final class DossierGatherer {
 			return args.setAll(args(window));
 		}
 
-		/** One call; a call that throws, which {@link LabTools} should never do, is recorded as a client error. */
+		/**
+		 * One call, once the policy authorizes it; a call that throws, which {@link LabTools} should never do, is recorded
+		 * as a client error.
+		 * @throws IllegalStateException when the policy refuses {@code tool}: the call is not made
+		 */
 		private ToolResult call(String tool, String args) {
+			if (!DossierGatherer.this.policy.authorizes(tool)) {
+				throw new IllegalStateException("the policy refuses " + tool + ": its risk is "
+						+ DossierGatherer.this.policy.risk(tool));
+			}
 			try {
 				return DossierGatherer.this.tools.call(tool, args);
 			}

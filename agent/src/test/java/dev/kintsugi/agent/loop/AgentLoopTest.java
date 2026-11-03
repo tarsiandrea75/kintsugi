@@ -44,7 +44,11 @@ import tools.jackson.databind.json.JsonMapper;
 import dev.kintsugi.agent.AgentDatabase;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
+import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.lab.Phase;
+import dev.kintsugi.agent.policy.Policy;
+import dev.kintsugi.agent.policy.PolicyCounts;
+import dev.kintsugi.agent.rules.RulesVersion;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -459,6 +463,67 @@ class AgentLoopTest {
 			.containsEntry("tool_name", null)
 			.containsEntry("tool_outcome", "REFUSED_PHASE");
 		assertThat((String) step(2).get("summary")).startsWith("toolCallId=2 tool=\"null\" outcome=REFUSED_PHASE");
+	}
+
+	/**
+	 * The policy gate (ADR-027): a tool the risk table does not know is a write, refused after the phase check and
+	 * before the call. Every current tool is in the production table, so the test's policy knows none of them: the
+	 * phase offers {@code status_summary}, and the policy still refuses it.
+	 */
+	@Test
+	void aToolUnknownToTheRiskTableIsRefusedByThePolicyAndNeverCalled() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.quiet()
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+		this.loop = loop(new Policy(Map.of()));
+
+		AgentLoop.Outcome outcome = this.loop.runToOutcome(this.id);
+
+		assertThat(outcome.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(this.lab.calls()).isEmpty();
+		assertThat(step(2)).containsEntry("kind", "TOOL_CALL")
+			.containsEntry("tool_name", "status_summary")
+			.containsEntry("tool_outcome", "REFUSED_POLICY")
+			.containsEntry("tool_output", null);
+		assertThat((String) step(2).get("summary")).startsWith("toolCallId=2 tool=status_summary outcome=REFUSED_POLICY")
+			.contains("the call was refused and did not run: status_summary is not authorized by the policy");
+		// The loop goes on as after any refusal: the call has consumed its units, and the model is told why.
+		assertThat(userText(this.model.prompts().get(1))).contains("Tool calls left: 1 in this phase, 7 in the incident");
+		assertThat(toolResponseText(this.model.prompts().get(1))).contains("not authorized by the policy");
+		assertThat(outcome.policy()).isEqualTo(new PolicyCounts(0, 1));
+	}
+
+	/** Every current tool passes the production gate: a run's reads execute, and the counts show no write. */
+	@Test
+	void theDefaultPolicyAuthorizesTheCurrentToolsAndCountsNothing() {
+		this.model.planned(call("status_summary", "{\"table\":\"orders\"}"))
+			.quiet()
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+		this.loop = loop(Policy.DEFAULT);
+
+		AgentLoop.Outcome outcome = this.loop.runToOutcome(this.id);
+
+		assertThat(this.lab.calls()).containsExactly("status_summary");
+		assertThat(step(2)).containsEntry("tool_outcome", "OK");
+		assertThat(outcome.policy()).isEqualTo(PolicyCounts.NONE);
+	}
+
+	/** The phase check comes first: a name no phase offers is {@code REFUSED_PHASE}, and the policy is not reached. */
+	@Test
+	void aToolNoPhaseOffersIsRefusedByThePhaseBeforeThePolicy() {
+		this.model.planned(call("restart_service", "{\"service\":\"order-service\"}"))
+			.quiet()
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+		this.loop = loop(Policy.DEFAULT);
+
+		AgentLoop.Outcome outcome = this.loop.runToOutcome(this.id);
+
+		assertThat(this.lab.calls()).isEmpty();
+		assertThat(step(2)).containsEntry("tool_outcome", "REFUSED_PHASE");
+		assertThat(outcome.policy()).isEqualTo(PolicyCounts.NONE);
 	}
 
 	@Test
@@ -1180,6 +1245,15 @@ class AgentLoopTest {
 	private AgentLoop loop(LoopSettings settings, CallTimeouts callTimeouts) {
 		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, callTimeouts, CAPS);
 		return new AgentLoop(this.incidents, router, this.lab, settings, Clock.systemUTC(), LAB);
+	}
+
+	/** An explorer loop with the default settings, gated by {@code policy}. */
+	private AgentLoop loop(Policy policy) {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		ModelRouter router = task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS);
+		return new AgentLoop(this.incidents, router, this.lab, settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				Clock.systemUTC(), LAB, AgentMode.EXPLORER, DossierView.TABLES, DecisionReport.PLAIN, RulesVersion.V1,
+				policy);
 	}
 
 	private static UUID open(UUID id, String status) {

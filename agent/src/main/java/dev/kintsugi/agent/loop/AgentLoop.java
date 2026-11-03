@@ -58,6 +58,8 @@ import dev.kintsugi.agent.lab.LabToolsUnavailableException;
 import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.AgentMode.DossierGathering;
+import dev.kintsugi.agent.policy.Policy;
+import dev.kintsugi.agent.policy.PolicyCounts;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesVersion;
 import dev.kintsugi.agent.summary.ToolSummaries;
@@ -66,7 +68,7 @@ import dev.kintsugi.agent.summary.ToolSummaries;
  * The diagnosing loop (agent spec, "Phases and their tools" to "One log line per step"; ADR-010, "The loop"). Our code
  * drives it, not Spring AI's tool loop: it calls the {@code ChatModel} directly, checks every tool call the model
  * requests, runs the allowed ones one at a time through {@link LabTools}, and records every step before the next one
- * starts.
+ * starts. The last check before any call, the model's or the dossier's, is the {@link Policy} (ADR-027).
  *
  * <p>
  * A run starts with one warm-up request, which loads the model and counts against no budget. In dossier mode
@@ -156,6 +158,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	/** Runs each model call, so that the loop can stop waiting for it at its time budget. */
 	private final ExecutorService modelCalls;
 
+	/** Authorizes every tool call before it is made, the model's and the dossier's (ADR-027). */
+	private final Policy policy;
+
 	/** An explorer-mode loop. */
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, Topology topology) {
@@ -198,6 +203,19 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	public AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings,
 			Clock clock, Topology topology, AgentMode mode, DossierView decisionView, DecisionReport decisionReport,
 			RulesVersion rules) {
+		this(incidents, router, labTools, settings, clock, topology, mode, decisionView, decisionReport, rules,
+				Policy.DEFAULT);
+	}
+
+	/**
+	 * A loop as above whose tool calls, the model's and the dossier's, are authorized by {@code policy} rather than the
+	 * production {@link Policy#DEFAULT} (ADR-027).
+	 * @throws NullPointerException when {@code policy} is null
+	 */
+	AgentLoop(IncidentRepository incidents, ModelRouter router, LabTools labTools, LoopSettings settings, Clock clock,
+			Topology topology, AgentMode mode, DossierView decisionView, DecisionReport decisionReport,
+			RulesVersion rules, Policy policy) {
+		this.policy = Objects.requireNonNull(policy, "policy");
 		this.rules = Objects.requireNonNull(rules, "rules");
 		this.topology = Objects.requireNonNull(topology, "topology");
 		this.assessedSchema = Schemas.assessedReport(topology);
@@ -206,7 +224,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		// Checked before any thread is started: the assessed report reads the sheets' line owners.
 		mode.reportFrom(decisionReport).ifPresent(report -> report.checkView(decisionView));
 		this.mode = mode;
-		this.gatherer = new DossierGatherer(labTools, clock, topology);
+		this.gatherer = new DossierGatherer(labTools, clock, topology, policy);
 		this.incidents = incidents;
 		this.router = router;
 		this.labTools = labTools;
@@ -280,14 +298,33 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			reason = "unexpected error: " + describe(unexpected);
 		}
 		finish(run, status, reason, report);
-		return new Outcome(status, run.candidates == null ? List.of() : run.candidates);
+		return new Outcome(status, run.candidates == null ? List.of() : run.candidates, policyCounts(run));
 	}
 
 	/**
-	 * How a run ended: its status, and the rules' candidates a hybrid run's report task listed, in order; empty when
-	 * the run asked for another report, its gathering gave no dossier, or the rules proposed none.
+	 * How a run ended: its status, the rules' candidates a hybrid run's report task listed, in order, empty when the run
+	 * asked for another report, its gathering gave no dossier, or the rules proposed none; and what the policy did
+	 * (ADR-027).
 	 */
-	record Outcome(IncidentStatus status, List<RulesCandidate> candidates) {
+	record Outcome(IncidentStatus status, List<RulesCandidate> candidates, PolicyCounts policy) {
+	}
+
+	/**
+	 * What the policy did in {@code run}, counted from its recorded steps: the calls that ran, the dossier's and the
+	 * model's, whose risk is a write, and the steps refused {@code REFUSED_POLICY}.
+	 */
+	private PolicyCounts policyCounts(Run run) {
+		List<String> executed = new ArrayList<>(run.dossierTools);
+		int refused = 0;
+		for (ToolStep step : run.toolSteps.values()) {
+			if (Policy.REFUSED_POLICY.equals(step.outcome())) {
+				refused++;
+			}
+			else if (!step.refused()) {
+				executed.add(step.tool());
+			}
+		}
+		return this.policy.counts(executed, refused);
 	}
 
 	private String investigate(Run run) {
@@ -372,7 +409,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * The first step of dossier mode, after the warm-up (T5a), and of decision mode, before it (decision-instrument):
 	 * code gathers the evidence dossier through {@link LabTools} and renders it, and
 	 * the result becomes the dossier message every later call reads right after the system message. Its 33 calls are
-	 * code's: they pass no check, count against no tool budget and get no {@code toolCallId} (a report cites the dossier
+	 * code's: they pass no check but the policy's, which the gatherer applies (ADR-027), count against no tool budget and get no {@code toolCallId} (a report cites the dossier
 	 * as a whole, as {@code "dossier"}, T5b); they are stored in the
 	 * {@code DOSSIER} step's {@code tool_output}, with the message the model sees in its {@code summary}. The gathering
 	 * counts against the incident's time and is bounded by the {@code ACT} call deadline; a failed call is a fact in
@@ -403,6 +440,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					: null;
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
+			run.dossierTools = dossier.calls().stream().map(ToolResult::tool).toList();
 		}
 		catch (TimeoutException slow) {
 			// The calls already made cannot be taken back; the thread is interrupted and its result ignored.
@@ -448,7 +486,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 	/**
 	 * The phase's tool calls. The model is offered the phase's tools only; each call it requests is checked in order
-	 * (budget, then phase) and runs only when both allow it. The phase ends when the model answers without a tool call
+	 * (budget, then phase, then the policy) and runs only when all three allow it. The phase ends when the model answers without a tool call
 	 * or nothing is left of the phase's allowance or of the incident's budget. An answer with text but no tool call
 	 * gets one retry per phase first, which asks for one call and no plan (T5c12); an empty answer is the task's way to
 	 * move on, and ends the phase at once. The first answer also carries the phase's plan in its text: it is checked
@@ -535,6 +573,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 						summary = refuse(run, phase, call, answer.model(), waste.outcome(), waste.why()
 								+ "; it counts against the budget, since the " + LoopSettings.UNCOUNTED_REFUSALS
 								+ " uncounted refusals of this incident are used up");
+					}
+					else if (!this.policy.authorizes(call.name())) {
+						// The last check before the call (ADR-027): a write, or a tool the risk table does not name.
+						summary = refuse(run, phase, call, answer.model(), Policy.REFUSED_POLICY, label(call.name())
+								+ " is not authorized by the policy: its risk is " + this.policy.risk(call.name())
+								+ ", and the policy refuses every write");
 					}
 					else {
 						summary = runTool(run, phase, call, answer.model());
@@ -989,6 +1033,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 
 		/** Every tool step, refusals included, by step number: what the evidence check reads. */
 		final Map<Integer, ToolStep> toolSteps = new LinkedHashMap<>();
+
+		/** The tools of the dossier's calls, one per call made; empty when no dossier was gathered. */
+		List<String> dossierTools = List.of();
 
 		/** The summaries of the tool steps, in step order. */
 		final List<String> evidence = new ArrayList<>();
