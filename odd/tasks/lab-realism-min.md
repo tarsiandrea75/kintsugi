@@ -1,0 +1,81 @@
+# lab-realism-min
+
+## Objective
+
+Make holdout-2 more than a copy of holdout-1, within the time left before the freeze on 2026-12-01: healthy controls, parameters drawn for F1 and F2, and a seeded schedule (ADR-026), so the lab can record 75 holdout-2 cases on 2026-12-01 to 05.
+
+## Problem
+
+Holdout-1 and dev hold 5 each of F1, F2 and F3, with fixed parameters, in a fixed order (`verify-agent.sh`). The fault injector's parameters are constants (`Fault.java`), `POST /faults` takes only an id, and no recording is healthy. A holdout-2 recorded the same way would test the agent on cases it has already seen in kind, and could not measure a false alarm.
+
+## Why
+
+The human chose on 2026-11-03 the minimal version of vision's lab-realism, by the cut order of vision §7: items 1–4 (Config B, D+ and the cloud repeats, L4 probes, TT and RE3) are not in progress, and item 5 cuts "lab parameters beyond F1 and F2". Healthy controls and F1/F2 parameters stay, because they are what makes holdout-2 new and what measures false alarms.
+
+## Scope
+
+- A schedule generator: seed in, `schedule.tsv` out (ADR-026).
+- `check-freeze.sh` condition 3 checks the seed, the schedule and the recordings (ADR-026, Decision 4).
+- The fault injector accepts F1's and F2's parameters, within ranges declared in its catalog.
+- The harness records a schedule: a fault with its parameters, or a healthy control.
+- The `holdout-2` split and a schedule-case column in the manifest.
+- ADR-015's healthy truth `NONE|NONE` made final.
+
+Out of scope, by the cut order, and to be stated in `benchmark.md`: a load generator, F3 and F4 parameters, F4 and F8 in the eval, concurrent traffic.
+
+## Constraints
+
+- **While A's run takes the CPU** (until about 21:30 UTC on 2026-11-03): no Maven, no docker, nothing under `agent/` or `lab/`. Only T2 and T3 can run then.
+- The freeze tag covers `agent/src/main/`; the generator and the catalog's ranges must be committed before it.
+- A parameter never changes a case's truth: F1 is still gateway-mock `DEPENDENCY_LATENCY`, F2 still gateway-mock `DEPENDENCY_REJECTING`. T6 checks it on dev recordings.
+
+## Design
+
+**Classes and counts, 75 cases:** 20 F1, 20 F2, 20 F3, 15 healthy, in an order the seed shuffles.
+
+**Declared ranges:**
+
+| Fault | Parameter | Values | Why |
+|---|---|---|---|
+| F1 | gateway latency | 2 s, 5 s, 10 s, 20 s | straddles the callers' read timeouts: below order → payment's 3 s, between it and payment → gateway's 15 s, and above both |
+| F2 | gateway error status | 429, 500, 503 | vision §2's list |
+| F3 | wrong port | 9999, as today | not drawn (cut order, item 5) |
+
+A discrete set, drawn uniformly, so each value has about 5 cases and a per-value reading is possible.
+
+**The generator:** Python standard library, `infra/scripts/holdout2-schedule.py`. Input: the seed's hex and the counts. Output: `case, class, parameter, value` rows, the order and every draw from one `random.Random` seeded with the integer of the seed's 256 bits. Same seed, same file, byte for byte.
+
+**A healthy control:** the same harness, baseline and symptom text as a fault case, with no injection. Truth `NONE|NONE`; `UNKNOWN|UNKNOWN` is correct and any cause a false alarm (ADR-015).
+
+## Tasks
+
+- [x] T1 This document. Route: inline (docs).
+- [ ] T2 The schedule generator and its tests. Route: delegated writer (while A runs).
+- [ ] T3 `check-freeze.sh` condition 3 as ADR-026 Decision 4 says, and its tests. Route: the same writer, its own commit.
+- [ ] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
+- [ ] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
+- [ ] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
+
+## Acceptance criteria
+
+- AC1: the generator is deterministic, gives the stated counts, and draws only declared values.
+- AC2: condition 3 passes in a test repository with a seed after the tag, a matching schedule and later recordings; it fails on a seed before the tag, an edited schedule, a recording before the tag, or a recording naming no schedule case.
+- AC3: `POST /faults` with a parameter outside the declared values is refused with a 400; without parameters, today's behaviour is unchanged.
+- AC4: a healthy recording passes `check-recordings.sh` and holds no injection.
+- AC5: T6's recordings keep their truths at every parameter value.
+
+## Checks
+
+- T2, T3: the scripts' tests, red first. T4, T5: the modules' tests, red first. T6: the plan's checks.
+
+## Delivery
+
+Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain`: `feat/lab-realism-min` for T1–T3, `-01-injector` for T4, `-02-harness` for T5–T6. Nothing is pushed.
+
+## Progress
+
+- 2026-11-03: the human chose the minimal version and ADR-026's seed.
+
+## Next step
+
+T2.
