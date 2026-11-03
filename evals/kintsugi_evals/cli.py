@@ -7,6 +7,8 @@ AC@3, AC@5, Avg@5 and their chance levels to the report, and writes ranked.tsv.
 `python -m kintsugi_evals convert-rcaeval` turns RCAEval RE2 cases into replay recordings (ADR-020).
 
 `python -m kintsugi_evals baro-rcaeval` ranks RCAEval RE2 dev cases with BARO into a summary.tsv (ADR-024).
+
+`python -m kintsugi_evals audit-latency` classifies the latency values a run's evidence cites (REQ-14).
 """
 
 import argparse
@@ -103,6 +105,10 @@ def _parser():
     bar.add_argument("--rep", required=True, type=_repetition, metavar="N|all",
                      help="the repetition; only RE2-OB repetition 1, and 'all' on RE2-TT, are accepted")
     bar.add_argument("--out", help="the output directory (default: evals/out/rcaeval/baro-<system>-rep<rep>/)")
+    audit = commands.add_parser("audit-latency", help="classify the latency values a run's evidence cites")
+    audit.add_argument("--label", nargs=2, action="append", default=[], metavar=("NAME", "DIR"),
+                       help="a replay run dir and its label; repeatable")
+    audit.add_argument("--out", help="write audit.tsv and report.txt to this directory")
     return parser
 
 
@@ -322,7 +328,14 @@ def baro_rcaeval(args):
     return 0
 
 
+def audit_latency(args):
+    from .audit_latency import audit_latency as run
+
+    return run(args)
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
-    commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval, "baro-rcaeval": baro_rcaeval}
+    commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval, "baro-rcaeval": baro_rcaeval,
+                "audit-latency": audit_latency}
     return commands.get(args.command, score)(args)

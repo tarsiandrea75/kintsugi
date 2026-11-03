@@ -353,3 +353,47 @@ The report MUST gain, after each config's lines, one `ranked` line per fault and
 - GIVEN the committed inputs of `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`
 - WHEN `score --service-only` runs on them with the same labels and seed
 - THEN `report.txt`, `scores.tsv` and `paired.tsv` are byte-identical to the committed files, and no `ranked.tsv` is written
+
+### REQ-14 Latency-citation audit (d-abstention T1)
+`audit-latency --label NAME DIR [--label NAME DIR ...] [--out DIR]` MUST classify, for each replay run, every evidence item whose `quote` is a row of the dossier's latency table, because a model that compares two previous values as if one were the incident reads a slowdown as flat, and that misread must be counted before the table or the prompt changes. It MUST read only each incident's `report.evidence` and `report.rootCauseService`, from the file `<fault>-<mode>-<recording>-<sample>.json` that each `summary.tsv` row names; the report's summary is not tied to a row and MUST NOT be read.
+
+A quote MUST be a latency row by shape alone: after an optional `D<n> ` line label, a pipe-delimited row of eight cells split on unescaped pipes, whose third to sixth cells (previous mean, incident mean, previous max, incident max) are each a number or `-`, at least one a number. A resource row, with seven cells, MUST NOT match. The numbers in the item's `why` MUST be read as seconds, with or without `s`, and a number followed by `ms` divided by 1000; a number inside a word, such as `D35`, or followed by another unit, such as `45.08MB`, MUST NOT be read. A `why` number MUST match a row value when they differ by at most half a unit of the row value's last printed digit, both ends included.
+
+An item MUST be `incident_cited` when a `why` number matches the incident mean or the incident max, else `previous_only` when one matches the previous mean or the previous max, else `no_number`. The rule MUST be stated as a lower bound on the misread: it cannot see a `why` that cites an incident value wrongly, nor a misread in the summary only.
+
+Per run, the report MUST state the samples, how many abstained (`rootCauseService` is `UNKNOWN` or absent) and the latency-row items, then each class's count for abstaining samples, answering samples and all, then every `previous_only` item with its fault, recording, sample, line, quote and why, runs in `--label` order. `--out` MUST write that report as `report.txt` and `audit.tsv`, one row per latency-row item: `label`, `fault`, `recording`, `sample`, `abstained`, `line`, `class`, `quote`, `why`. No `--label`, a repeated label, a missing `summary.tsv`, or a missing incident file MUST exit with a one-line message and write nothing.
+
+#### Scenario: The previous mean against the previous max
+- GIVEN the quote `| frontend | / | 0.054 | 1.325 | 0.061 | 1.477 | 29/29 | 29/29 |` with why "mean 0.054s incident vs 0.061s before"
+- WHEN it is classified
+- THEN it is `previous_only`
+
+#### Scenario: An incident value cited
+- GIVEN the same quote with a why naming 1.325, or 1325 ms
+- WHEN it is classified
+- THEN it is `incident_cited`
+
+#### Scenario: Milliseconds
+- GIVEN the same quote with why "mean 54 ms against 61 ms"
+- WHEN it is classified
+- THEN 54 ms matches 0.054 and the item is `previous_only`
+
+#### Scenario: Half a unit
+- GIVEN the same quote with why 1.3245 or 1.3255, and with why 1.3244 or 1.3256
+- WHEN they are classified
+- THEN the first two are `incident_cited` and the last two are `no_number`
+
+#### Scenario: No number and other quotes
+- GIVEN a latency-row quote whose why names none of its four values, and a resource-row quote
+- WHEN the run is audited
+- THEN the first is `no_number` and the second is not an item
+
+#### Scenario: Abstaining and answering samples
+- GIVEN a run with one sample reporting `UNKNOWN` and one reporting a service
+- WHEN `audit-latency --label D DIR` runs
+- THEN each class is counted for the abstaining sample, the answering sample and both, and each `previous_only` item is listed with its recording and line
+
+#### Scenario: A repeated label
+- GIVEN `audit-latency --label D DIR --label D DIR`
+- WHEN it runs
+- THEN it exits naming the label, and writes nothing
