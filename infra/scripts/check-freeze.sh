@@ -35,11 +35,13 @@ the file or commit, then a RESULT line:
 1. tag: the tag exists.
 2. unchanged: nothing under agent/src/main/ (the loop, the rules, the prompt, the taxonomy) changed between the tag
    and HEAD, or has uncommitted or untracked changes.
-3. holdout-2 (ADR-026): the seed (infra/holdout2/seed.txt) was first committed later than the tag's commit time and
-   never changed since; the generator as of the tag (infra/scripts/holdout2-schedule.py), run on the seed, gives
-   exactly the committed schedule (infra/holdout2/schedule.tsv); and the manifest
-   (agent/src/test/resources/replay/recordings.tsv) holds holdout-2 recordings, each naming a schedule case in its
-   case column and with an incident startedAt later than the tag's commit time. All are read at HEAD.
+3. holdout-2 (ADR-026): the seed (infra/holdout2/seed.txt) was first committed in a commit that descends from the tag
+   and is later than the tag's commit time, and never changed since; the generator as of the tag
+   (infra/scripts/holdout2-schedule.py), run on the seed, gives exactly the committed schedule
+   (infra/holdout2/schedule.tsv); and the manifest (agent/src/test/resources/replay/recordings.tsv) names every
+   schedule case in the case column of exactly one holdout-2 row, whose incident startedAt is later than the tag's
+   commit time and than the schedule's first commit. All are read at HEAD. Commit times are written by the committer,
+   so this proves the order of the history as written, not that it was written honestly (ADR-026, amendment).
 4. results: no .tsv under evals/results/, in any commit of HEAD's history before the M4 date, holds a row of lab
    holdout-2 or of an RCAEval holdout: holdout A (RE2-OB repetitions 2-3) or holdout B (RE2-SS). A row is found by
    its split (holdout-2; holdout on a recording that is not a lab verify-agent-* one) or by its recording id, which
@@ -110,8 +112,8 @@ check_unchanged() {
   echo "PASS  unchanged: ${FROZEN_PATHS[*]} unchanged since $TAG"
 }
 
-# Condition 3: the seed postdates the tag, the schedule follows from the seed, and every holdout-2 recording postdates
-# the tag and names a schedule case (ADR-026, Decision 4).
+# Condition 3: the seed descends from and postdates the tag, the schedule follows from the seed, and every schedule case
+# has exactly one holdout-2 recording, which postdates the tag and the schedule (ADR-026, Decision 4 and amendment).
 check_holdout2() {
   local tag_time
   if ! tag_time=$(git log -1 --format=%cI "refs/tags/$TAG^{commit}" 2>/dev/null); then
@@ -126,11 +128,20 @@ import os
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 repo, tag, tag_time, manifest, replay_dir, split, seed, schedule, generator = sys.argv[1:]
+# At most this many missing cases are named in one failure.
+MISSING_SHOWN = 5
+
+
+def shown(at):
+    """A time, as a datetime or ISO 8601 text, shown in UTC with a trailing Z."""
+    at = datetime.fromisoformat(at) if isinstance(at, str) else at
+    return at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 tag_at = datetime.fromisoformat(tag_time)
-tag_shown = tag_time.replace("+00:00", "Z")
 failures = []
 
 
@@ -146,18 +157,29 @@ def show(path):
     return None if data is None else data.decode("utf-8", errors="replace")
 
 
+def commits_of(path):
+    """HEAD's commits that changed path, newest first, as [short hash, commit time]; git's times are self-asserted."""
+    log = subprocess.run(["git", "-C", repo, "log", "--format=%h %cI", "--", path], capture_output=True, text=True,
+                         check=True).stdout.split("\n")
+    return [line.split() for line in log if line]
+
+
 def check_seed():
-    """The seed's failures: it must be committed at HEAD, first committed after the tag, and never changed since."""
+    """The seed's failures: it must be committed at HEAD, first in a commit that descends from the tag and is later
+    than it, and never changed since."""
     if show_bytes(seed) is None:
         return ["%s is not committed at HEAD, so no seed can be shown to postdate %s" % (seed, tag)]
-    log = subprocess.run(["git", "-C", repo, "log", "--format=%h %cI", "--", seed], capture_output=True, text=True,
-                         check=True).stdout.split("\n")
-    commits = [line.split() for line in log if line]
+    commits = commits_of(seed)
     first, first_time = commits[-1]
     found = []
+    ancestry = subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", "refs/tags/" + tag, first],
+                              capture_output=True).returncode
+    if ancestry != 0:
+        found.append("%s was first committed at %s, which %s %s" % (
+            seed, first, "does not descend from" if ancestry == 1 else "git cannot compare with", tag))
     if datetime.fromisoformat(first_time) <= tag_at:
         found.append("%s was first committed at %s (%s), not after %s (%s)" % (
-            seed, first, first_time.replace("+00:00", "Z"), tag, tag_shown))
+            seed, first, shown(first_time), tag, shown(tag_at)))
     if len(commits) > 1:
         found.append("%s was changed after its first commit %s, last at %s" % (seed, first, commits[0][0]))
     return found
@@ -173,12 +195,12 @@ def check_schedule():
     code = show_bytes(generator, "refs/tags/" + tag)
     if code is None:
         return ["%s is not committed at %s, so %s cannot be regenerated" % (generator, tag, schedule)]
+    # Run in the temporary directory with relative paths, so the generator's messages name no temporary path.
     with tempfile.TemporaryDirectory() as work:
         for name, data in (("generator.py", code), ("seed.txt", seed_bytes)):
             with open(os.path.join(work, name), "wb") as file:
                 file.write(data)
-        done = subprocess.run([sys.executable, "-I", os.path.join(work, "generator.py"), os.path.join(work, "seed.txt")],
-                              capture_output=True)
+        done = subprocess.run([sys.executable, "-I", "generator.py", "seed.txt"], cwd=work, capture_output=True)
     if done.returncode != 0:
         reason = (done.stderr.decode("utf-8", errors="replace").strip().splitlines() or ["no message"])[-1]
         return ["%s as of %s refused %s: %s" % (generator, tag, seed, reason)]
@@ -190,13 +212,19 @@ def check_schedule():
 
 
 def schedule_cases():
-    """The case numbers the committed schedule holds, as text."""
+    """The case numbers the committed schedule holds, as text, in its order."""
     text = show(schedule)
-    return set() if text is None else {row.get("case") for row in csv.DictReader(text.splitlines(), delimiter="\t")}
+    return [] if text is None else [row.get("case") for row in csv.DictReader(text.splitlines(), delimiter="\t")]
+
+
+def schedule_first():
+    """The schedule's first commit as (short hash, time), or None when HEAD has none."""
+    commits = commits_of(schedule) if show_bytes(schedule) is not None else []
+    return (commits[-1][0], datetime.fromisoformat(commits[-1][1])) if commits else None
 
 
 def recording_time(path):
-    """The recording's start, the incident's startedAt as (time, text), or a text that says why there is none."""
+    """The recording's start, the incident's startedAt as a time, or a text that says why there is none."""
     text = show(path)
     if text is None:
         return "is not committed at HEAD"
@@ -205,42 +233,62 @@ def recording_time(path):
         if not isinstance(started, str):
             return "has no startedAt"
         at = datetime.fromisoformat(started)
-        return (at, started) if at.tzinfo else "has a startedAt with no time zone"
+        return at if at.tzinfo else "has a startedAt with no time zone"
     except (ValueError, AttributeError):
         return "has no readable startedAt"
 
 
 failures += check_seed() + check_schedule()
-cases = schedule_cases()
+cases, schedule_at = schedule_cases(), schedule_first()
 text = show(manifest)
 reader = csv.DictReader([] if text is None else text.splitlines(), delimiter="\t")
 rows = [row for row in reader if row.get("split") == split]
+has_case = "case" in (reader.fieldnames or [])
 if text is None:
     failures.append("%s is not committed at HEAD" % manifest)
 elif not rows:
     failures.append("%s has no %s recording: %s is not recorded yet" % (manifest, split, split))
-elif "case" not in (reader.fieldnames or []):
+elif not has_case:
     failures.append("%s has no case column, so its %s recordings name no schedule case" % (manifest, split))
+recorded = {}
 for row in rows:
     file = row.get("file") or "?"
     started = recording_time(replay_dir + "/" + file)
     if isinstance(started, str):
         failures.append("%s %s, so it cannot be shown to postdate %s" % (file, started, tag))
-    elif started[0] <= tag_at:
-        failures.append("%s started %s, not after %s (%s)" % (file, started[1], tag, tag_shown))
-    case = row.get("case")
-    if case is None:
+    else:
+        if started <= tag_at:
+            failures.append("%s started %s, not after %s (%s)" % (file, shown(started), tag, shown(tag_at)))
+        if schedule_at and started <= schedule_at[1]:
+            failures.append("%s started %s, not after %s was first committed at %s (%s)"
+                            % (file, shown(started), schedule, schedule_at[0], shown(schedule_at[1])))
+    if not has_case:
         continue
+    # A row shorter than the header has no value for case (None), as an empty field has "".
+    case = row.get("case")
     if not case:
         failures.append("%s names no schedule case" % file)
     elif case not in cases:
         failures.append("%s names case %s, which %s does not hold" % (file, case, schedule))
+    else:
+        recorded.setdefault(case, []).append(file)
+# Every schedule case is recorded exactly once: a missing case or a second recording of one fails (ADR-026, amendment).
+if rows and has_case and cases:
+    missing = [case for case in cases if case not in recorded]
+    if missing:
+        failures.append("%d of %d schedule case(s) have no %s recording: %s" % (
+            len(missing), len(cases), split,
+            ", ".join(missing[:MISSING_SHOWN] + (["..."] if len(missing) > MISSING_SHOWN else []))))
+    for case in cases:
+        if len(recorded.get(case, [])) > 1:
+            failures.append("case %s is named by %d %s recordings: %s"
+                            % (case, len(recorded[case]), split, ", ".join(recorded[case])))
 for failure in failures:
     print("FAIL  holdout-2: " + failure)
 if failures:
     sys.exit(1)
-print("PASS  holdout-2: %s postdates %s, %s follows from it, and %d recording(s) name a schedule case and postdate %s"
-      % (seed, tag, schedule, len(rows), tag))
+print("PASS  holdout-2: %s descends from and postdates %s, %s follows from it, and each of its %d case(s) is recorded "
+      "once, after %s and the schedule" % (seed, tag, schedule, len(cases), tag))
 EOF
 }
 

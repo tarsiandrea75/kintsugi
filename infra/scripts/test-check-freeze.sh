@@ -91,18 +91,27 @@ seed_hex=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
 generator="$real_repo/infra/scripts/holdout2-schedule.py"
 holdout2_file=F1/verify-agent-20261202T100000Z-r1-F1.json
 
-# Builds a repository at $1 for condition 3 (ADR-026): frozen sources, the generator and a manifest with a case column,
-# committed on 2026-11-20 and tagged freeze-m3; then the seed alone at $2, the schedule on 2026-12-01, and one holdout-2
-# recording started at $3 naming schedule case $4, committed on 2026-12-02.
+# Appends to repository $1's manifest one holdout-2 row for file $2 naming case $3, and writes that recording, started
+# at $4. Commits nothing.
+add_holdout2_row() {
+  printf 'F1\tdecision\tcloud\tgateway-mock|DEPENDENCY_LATENCY\t%s\tid-2\tholdout-2\t%s\n' "$2" "$3" \
+    >>"$1/agent/src/test/resources/replay/recordings.tsv"
+  echo "{\"startedAt\":\"$4\"}" >"$1/agent/src/test/resources/replay/$2"
+}
+
+# Builds a repository at $1 for condition 3 (ADR-026): frozen sources, the generator (unless $no_tag_generator is set)
+# and a manifest with a case column, committed on 2026-11-20 and tagged freeze-m3; then the seed alone at $2, the
+# schedule on 2026-12-01, and holdout-2 recordings committed on 2026-12-02: one started at $3 naming schedule case $4,
+# then one started at 2026-12-02T10:00:00Z for each case in $5 (default cases 2-75, so case 1 completes the schedule).
 make_holdout2_repo() {
-  local repo=$1 seed_at=$2 started=$3 case=$4
+  local repo=$1 seed_at=$2 started=$3 case=$4 others=${5-$(seq -s ' ' 2 75)} other
   mkdir -p "$repo/agent/src/main/java" "$repo/agent/src/test/resources/replay/F1" "$repo/infra/scripts" \
     "$repo/infra/holdout2"
   git -C "$repo" init -q -b main
   git -C "$repo" config user.name test
   git -C "$repo" config user.email test@example.invalid
   echo 'class Loop {}' >"$repo/agent/src/main/java/Loop.java"
-  cp "$generator" "$repo/infra/scripts/holdout2-schedule.py"
+  [[ -n "${no_tag_generator-}" ]] || cp "$generator" "$repo/infra/scripts/holdout2-schedule.py"
   printf '%s\tcase\n' "$manifest_header" >"$repo/agent/src/test/resources/replay/recordings.tsv"
   commit_at "$repo" 2026-11-20T10:00:00Z "before the freeze"
   git -C "$repo" tag freeze-m3
@@ -110,9 +119,10 @@ make_holdout2_repo() {
   commit_at "$repo" "$seed_at" "the seed"
   python3 -I "$generator" "$repo/infra/holdout2/seed.txt" --out "$repo/infra/holdout2/schedule.tsv"
   commit_at "$repo" 2026-12-01T10:00:00Z "the schedule"
-  printf 'F1\tdecision\tcloud\tgateway-mock|DEPENDENCY_LATENCY\t%s\tid-2\tholdout-2\t%s\n' "$holdout2_file" "$case" \
-    >>"$repo/agent/src/test/resources/replay/recordings.tsv"
-  echo "{\"startedAt\":\"$started\"}" >"$repo/agent/src/test/resources/replay/$holdout2_file"
+  add_holdout2_row "$repo" "$holdout2_file" "$case" "$started"
+  for other in $others; do
+    add_holdout2_row "$repo" "F1/h2-$other.json" "$other" 2026-12-02T10:00:00Z
+  done
   commit_at "$repo" 2026-12-02T12:00:00Z "holdout-2"
 }
 
@@ -194,8 +204,8 @@ expect_line "a manifest with no holdout-2 recording fails condition 3" "$out" \
 repo="$WORK/h2-pass"
 make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1
 out=$(run_check --repo "$repo")
-expect_line "a seed after the tag, its schedule and a later recording naming a case pass condition 3" "$out" \
-  "PASS  holdout-2: infra/holdout2/seed.txt postdates freeze-m3, infra/holdout2/schedule.tsv follows from it, and 1 recording(s) name a schedule case and postdate freeze-m3"
+expect_line "a seed after the tag, its schedule and one later recording per case pass condition 3" "$out" \
+  "PASS  holdout-2: infra/holdout2/seed.txt descends from and postdates freeze-m3, infra/holdout2/schedule.tsv follows from it, and each of its 75 case(s) is recorded once, after freeze-m3 and the schedule"
 echo 'print("a generator changed after the tag")' >>"$repo/infra/scripts/holdout2-schedule.py"
 commit_at "$repo" 2026-12-02T13:00:00Z "change the generator"
 out=$(run_check --repo "$repo")
@@ -238,6 +248,82 @@ make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 76
 out=$(run_check --repo "$repo")
 expect_line "a holdout-2 recording naming an unknown case fails condition 3" "$out" \
   "FAIL  holdout-2: $holdout2_file names case 76, which infra/holdout2/schedule.tsv does not hold"
+
+# Seed ancestry (ADR-026, amendment): a seed committed later than the tag, on a branch that does not contain it, fails.
+repo="$WORK/h2-seed-off-tag"
+mkdir -p "$repo/agent/src/main/java" "$repo/agent/src/test/resources/replay/F1" "$repo/infra/scripts" "$repo/infra/holdout2"
+git -C "$repo" init -q -b main
+git -C "$repo" config user.name test
+git -C "$repo" config user.email test@example.invalid
+echo 'class Loop {}' >"$repo/agent/src/main/java/Loop.java"
+cp "$generator" "$repo/infra/scripts/holdout2-schedule.py"
+printf '%s\tcase\n' "$manifest_header" >"$repo/agent/src/test/resources/replay/recordings.tsv"
+commit_at "$repo" 2026-11-19T10:00:00Z "before the tag"
+git -C "$repo" branch side
+echo 'notes' >"$repo/notes.txt"
+commit_at "$repo" 2026-11-20T10:00:00Z "the tagged commit"
+git -C "$repo" tag freeze-m3
+git -C "$repo" checkout -q side
+printf '%s\n' "$seed_hex" >"$repo/infra/holdout2/seed.txt"
+commit_at "$repo" 2026-12-01T09:00:00Z "the seed, off the tag"
+seed_commit=$(git -C "$repo" rev-parse --short HEAD)
+git -C "$repo" checkout -q main
+GIT_AUTHOR_DATE=2026-12-01T09:30:00Z GIT_COMMITTER_DATE=2026-12-01T09:30:00Z git -C "$repo" merge -q --no-ff -m merge side
+out=$(run_check --repo "$repo")
+expect_line "a seed on a branch that does not contain the tag fails condition 3" "$out" \
+  "FAIL  holdout-2: infra/holdout2/seed.txt was first committed at $seed_commit, which does not descend from freeze-m3"
+expect_no_line "a seed off the tag but later than it passes the time part" "$out" \
+  "FAIL  holdout-2: infra/holdout2/seed.txt was first committed at $seed_commit ("
+
+# Coverage (ADR-026, amendment): every schedule case is recorded exactly once, after the schedule's first commit.
+repo="$WORK/h2-missing-few"
+make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1 "$(seq -s ' ' 2 70)"
+out=$(run_check --repo "$repo")
+expect_line "schedule cases with no recording fail condition 3, named" "$out" \
+  "FAIL  holdout-2: 5 of 75 schedule case(s) have no holdout-2 recording: 71, 72, 73, 74, 75"
+repo="$WORK/h2-missing-many"
+make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1 ""
+out=$(run_check --repo "$repo")
+expect_line "many missing cases fail condition 3, naming only the first ones" "$out" \
+  "FAIL  holdout-2: 74 of 75 schedule case(s) have no holdout-2 recording: 2, 3, 4, 5, 6, ..."
+repo="$WORK/h2-duplicate"
+make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1 "1 $(seq -s ' ' 2 75)"
+out=$(run_check --repo "$repo")
+expect_line "two recordings of one case fail condition 3, naming both" "$out" \
+  "FAIL  holdout-2: case 1 is named by 2 holdout-2 recordings: $holdout2_file, F1/h2-1.json"
+expect_no_line "a duplicated case is not also missing" "$out" "FAIL  holdout-2: 1 of 75"
+repo="$WORK/h2-before-schedule"
+make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-01T09:30:00Z 1
+out=$(run_check --repo "$repo")
+expect_line "a recording started before the schedule's first commit fails condition 3" "$out" \
+  "FAIL  holdout-2: $holdout2_file started 2026-12-01T09:30:00Z, not after infra/holdout2/schedule.tsv was first committed at $(git -C "$repo" log --format=%h -- infra/holdout2/schedule.tsv) (2026-12-01T10:00:00Z)"
+
+# A short row: a manifest with a case column, and a holdout-2 row with fewer fields than the header, names no case.
+repo="$WORK/h2-short-row"
+make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1
+printf 'F1\tdecision\tcloud\tgateway-mock|DEPENDENCY_LATENCY\tF1/h2-short.json\tid-3\tholdout-2\n' \
+  >>"$repo/agent/src/test/resources/replay/recordings.tsv"
+echo '{"startedAt":"2026-12-02T10:00:00Z"}' >"$repo/agent/src/test/resources/replay/F1/h2-short.json"
+commit_at "$repo" 2026-12-02T13:00:00Z "a short row"
+out=$(run_check --repo "$repo")
+expect_line "a holdout-2 row shorter than the header fails condition 3" "$out" \
+  "FAIL  holdout-2: F1/h2-short.json names no schedule case"
+expect_no_line "a short row is not reported as a missing case column" "$out" \
+  "FAIL  holdout-2: agent/src/test/resources/replay/recordings.tsv has no case column"
+
+# The generator at the tag: absent, or refusing the committed seed.
+repo="$WORK/h2-no-generator"
+no_tag_generator=1 make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1
+out=$(run_check --repo "$repo")
+expect_line "a generator absent at the tag fails condition 3" "$out" \
+  "FAIL  holdout-2: infra/scripts/holdout2-schedule.py is not committed at freeze-m3, so infra/holdout2/schedule.tsv cannot be regenerated"
+repo="$WORK/h2-bad-seed"
+make_holdout2_repo "$repo" 2026-12-01T09:00:00Z 2026-12-02T10:00:00Z 1
+printf 'xyz\n' >"$repo/infra/holdout2/seed.txt"
+commit_at "$repo" 2026-12-02T13:00:00Z "a malformed seed"
+out=$(run_check --repo "$repo")
+expect_line "a generator that exits non-zero on the committed seed fails condition 3, with its reason" "$out" \
+  "FAIL  holdout-2: infra/scripts/holdout2-schedule.py as of freeze-m3 refused infra/holdout2/seed.txt: seed.txt does not hold a seed of 64 hex characters"
 
 # AC4: an RE2-OB repetition 2 row committed before the M4 date fails condition 4; lab holdout-1 rows do not.
 repo="$WORK/unchanged"

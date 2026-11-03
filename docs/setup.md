@@ -648,7 +648,15 @@ It prints one PASS line per condition that holds and one FAIL line per failure, 
 
 1. `tag`: the tag exists.
 2. `unchanged`: nothing under `agent/src/main/` (the loop, the rules, the prompt, the taxonomy) changed between the tag and HEAD, and nothing there is uncommitted or untracked.
-3. `holdout-2` ([ADR-026](adr/ADR-026-holdout2-seed.md)), all read at HEAD: the seed `infra/holdout2/seed.txt` was first committed later than the tag's commit time and never changed since; the generator as of the tag, `infra/scripts/holdout2-schedule.py`, run on that seed gives exactly the committed `infra/holdout2/schedule.tsv`; and the manifest holds `holdout-2` recordings, each naming a schedule case in its `case` column and with an incident `startedAt` later than the tag's commit time. With no `holdout-2` recording yet, or none with a `case` column, it fails closed and says so.
+3. `holdout-2` ([ADR-026](adr/ADR-026-holdout2-seed.md)), all read at HEAD:
+   - the seed `infra/holdout2/seed.txt` was first committed in a commit that descends from the tag (`git merge-base --is-ancestor`) and is later than the tag's commit time, and never changed since;
+   - the generator as of the tag, `infra/scripts/holdout2-schedule.py`, run on that seed gives exactly the committed `infra/holdout2/schedule.tsv`;
+   - every schedule case is named in the `case` column of exactly one `holdout-2` manifest row: a missing case fails, naming the first five, and a second row for one case fails, naming both files;
+   - every `holdout-2` recording's incident `startedAt` is later than the tag's commit time and than the schedule's first commit.
+
+   With no `holdout-2` recording yet, or a manifest with no `case` column (reported once), it fails closed and says so. A row with no value for `case`, empty or shorter than the header, fails as naming no schedule case.
+
+   The limit: git commit times are written by the committer and can be set to anything, and the repository has no remote. So condition 3 proves the order of the history as written, not that it was written honestly; the backup bundles kept outside the laptop are what a reader can compare it against (ADR-026, amendment).
 4. `results`: no `.tsv` under `evals/results/`, in any commit before midnight UTC of the M4 date (a version deleted later included), holds a row of lab `holdout-2` or of an RCAEval holdout: A (RE2-OB repetitions 2-3) or B (RE2-SS). RCAEval rows are found by their recording id, recomputed from the row's fault and truth as the converter blinds it in every table with a fault, a truth and a recording or file column (a split column or not), and by split `holdout` on a recording that is not a lab `verify-agent-*` one. Lab holdout-1 rows are allowed: they were read once in M2 by plan.
 
 The tag name, the M4 date, the frozen paths, the split name and the holdout-2 paths are set once at the top of the script.
@@ -656,6 +664,8 @@ The tag name, the M4 date, the frozen paths, the split name and the holdout-2 pa
 ### Holdout-2 schedule
 
 Holdout-2's 75 cases (20 F1, 20 F2, 20 F3, 15 healthy controls) and their F1 and F2 parameters come from one seed drawn after the freeze tag ([ADR-026](adr/ADR-026-holdout2-seed.md), `odd/tasks/lab-realism-min.md`). The generator is deterministic: the same seed gives the same file, byte for byte, and condition 3 above reruns it as of the tag.
+
+Every draw comes from SHA-256, not from Python's `random`, whose `shuffle` and `choice` may change between Python versions. Block i (from 0) is SHA-256 of the seed's 32 bytes followed by i as 8 bytes big-endian, read as four 8-byte unsigned big-endian words in order. An integer in [0, n) takes the next word, discards it when it is at or above the largest multiple of n not over 2^64, and otherwise is the word mod n. The class list (the F1 cases, then F2, F3, healthy) is shuffled by Fisher–Yates from the last position down, swapping position k with a draw in [0, k + 1); then each F1 and F2 case, in the shuffled order, draws its value's index the same way. The generator's docstring states the same, and its tests check it against an independent reimplementation.
 
 ```bash
 # 1. Only after the tag freeze-m3 exists: 256 bits from /dev/urandom, as 64 hex characters, committed alone.
@@ -669,7 +679,7 @@ git add infra/holdout2/schedule.tsv && git commit -m "chore(holdout-2): generate
 infra/scripts/test-holdout2-schedule.sh                           # the generator's tests
 ```
 
-The schedule is a TSV with the columns `case`, `class`, `parameter` and `value`: F1 rows draw `gateway_latency_ms` from 2000, 5000, 10000, 20000; F2 rows draw `gateway_error_status` from 429, 500, 503; F3 rows have `wrong_port` 9999; healthy rows have `-`. Never edit the seed after its commit: condition 3 fails on a seed changed since. A malformed seed or a missing file exits 2.
+The schedule is a TSV with the columns `case`, `class`, `parameter` and `value`: F1 rows draw `gateway_latency_ms` from 2000, 5000, 10000, 20000; F2 rows draw `gateway_error_status` from 429, 500, 503; F3 rows have `wrong_port` 9999; healthy rows have `-`. Never edit the seed after its commit: condition 3 fails on a seed changed since. Commit the schedule before the first recording, and record each case once: a failed recording is not imported, and its redo takes the same case. A malformed seed or a missing file exits 2.
 
 ### Reset a volume
 
