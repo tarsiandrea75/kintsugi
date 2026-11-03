@@ -17,6 +17,7 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,11 +41,16 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import dev.kintsugi.agent.AgentDatabase;
+import dev.kintsugi.agent.dossier.DossierView;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.LabTools;
 import dev.kintsugi.agent.lab.Phase;
 import dev.kintsugi.agent.lab.ToolResult;
+import dev.kintsugi.agent.policy.Policy;
+import dev.kintsugi.agent.policy.PolicyCounts;
+import dev.kintsugi.agent.policy.Risk;
+import dev.kintsugi.agent.rules.RulesVersion;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
 /**
@@ -61,6 +67,10 @@ class AgentLoopDossierModeTest {
 	private static final String SYMPTOM = "Checkout orders stay pending for a long time";
 
 	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
+
+	/** The dossier message of a gathering whose {@code traffic_counts} call the policy refuses (ADR-027). */
+	static final String REFUSED_GATHERING = Prompts.dossierNotGathered(
+			"the gathering failed: IllegalStateException: the policy refuses traffic_counts: its risk is WRITE");
 
 	private final IncidentRepository incidents = new IncidentRepository(AgentDatabase.asAgentApp(), JSON);
 
@@ -313,6 +323,30 @@ class AgentLoopDossierModeTest {
 		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "ACT:INVESTIGATE", "ACT:KNOWLEDGE", "REPORT:CONCLUDE");
 	}
 
+	/**
+	 * A gathering call the policy refuses (ADR-027) is never made, and the gathering fails as any failed gathering does:
+	 * the run goes on with a message that says so, and the refusal is counted in the run's outcome.
+	 */
+	@Test
+	void aGatheringCallThePolicyRefusesFailsTheGatheringAndIsCounted() {
+		this.model.quiet().quiet().text(unknownReport());
+		this.loop = new AgentLoop(this.incidents, router(Duration.ofSeconds(5)), this.lab, settings(), Clock.systemUTC(),
+				LAB, AgentMode.DOSSIER, DossierView.TABLES, DecisionReport.PLAIN, RulesVersion.V1,
+				refusing("traffic_counts"));
+
+		AgentLoop.Outcome outcome = this.loop.runToOutcome(this.id);
+
+		assertThat(outcome.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(this.lab.calls()).isNotEmpty().doesNotContain("traffic_counts");
+		assertThat(step(1)).containsEntry("kind", "DOSSIER")
+			.containsEntry("tool_output", null)
+			.containsEntry("summary", REFUSED_GATHERING);
+		assertThat(this.model.prompts().get(0).getInstructions().get(1).getText()).isEqualTo(REFUSED_GATHERING);
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "ACT:INVESTIGATE", "ACT:KNOWLEDGE", "REPORT:CONCLUDE");
+		// The calls made before the refusal were reads, and the refused one is counted (ADR-027).
+		assertThat(outcome.policy()).isEqualTo(new PolicyCounts(0, 1));
+	}
+
 	@Test
 	void theDossierModePromptsNameNoFault() {
 		this.model.planned(call("search_logs", "{\"service\":\"order-service\",\"sinceMinutes\":15}"))
@@ -367,6 +401,16 @@ class AgentLoopDossierModeTest {
 		int estimate = (system.length() + dossier.length() + summaries + task.length()) / 3 + CAPS.report();
 
 		assertThat(estimate).isLessThanOrEqualTo(8192);
+	}
+
+	/**
+	 * The production policy but for {@code tool}, which it does not name and so refuses as a write: a gatherer tool
+	 * someone added without classifying it.
+	 */
+	static Policy refusing(String tool) {
+		Map<String, Risk> risks = new HashMap<>(Policy.RISKS);
+		risks.remove(tool);
+		return new Policy(risks);
 	}
 
 	private IncidentStatus run(AgentMode mode) {

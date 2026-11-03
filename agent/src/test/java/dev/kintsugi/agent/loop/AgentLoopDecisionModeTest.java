@@ -1,7 +1,9 @@
 package dev.kintsugi.agent.loop;
 
 import static dev.kintsugi.agent.dossier.LabTopology.LAB;
+import static dev.kintsugi.agent.loop.AgentLoopDossierModeTest.REFUSED_GATHERING;
 import static dev.kintsugi.agent.loop.AgentLoopDossierModeTest.dossierFixture;
+import static dev.kintsugi.agent.loop.AgentLoopDossierModeTest.refusing;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessedReport;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.assessment;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.dossierEvidence;
@@ -53,6 +55,7 @@ import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.incident.IncidentRepository;
 import dev.kintsugi.agent.incident.IncidentStatus;
 import dev.kintsugi.agent.lab.Phase;
+import dev.kintsugi.agent.policy.PolicyCounts;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
 import dev.kintsugi.agent.rules.RulesVersion;
@@ -232,6 +235,30 @@ class AgentLoopDecisionModeTest {
 		// The 45 calls were all made when the warm-up came, so the windows end at the incident's opening.
 		assertThat(callsAtWarmUp.get()).isEqualTo(45);
 		assertThat(this.model.warmUps()).hasSize(1);
+	}
+
+	/**
+	 * In decision mode too, a gathering call the policy refuses (ADR-027) is never made and fails the gathering as a
+	 * failed gathering: the report call reads the message that says so, and the refusal is counted in the outcome.
+	 */
+	@Test
+	void aGatheringCallThePolicyRefusesFailsTheGatheringAndIsCounted() {
+		this.model.text(unknownReport());
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		this.loop = new AgentLoop(this.incidents,
+				task -> new OllamaRoute("granite4.1:8b", this.model, 0.0, 8192, timeouts, CAPS), this.lab,
+				new LoopSettings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)), Clock.systemUTC(), LAB,
+				AgentMode.DECISION, DossierView.TABLES, DecisionReport.PLAIN, RulesVersion.V1,
+				refusing("traffic_counts"));
+
+		AgentLoop.Outcome outcome = this.loop.runToOutcome(this.id);
+
+		assertThat(outcome.status()).isEqualTo(IncidentStatus.COMPLETED);
+		assertThat(this.lab.calls()).isNotEmpty().doesNotContain("traffic_counts");
+		assertThat(kinds()).containsExactly("DOSSIER:DOSSIER", "REPORT:CONCLUDE");
+		assertThat(step(1)).containsEntry("summary", REFUSED_GATHERING);
+		assertThat(this.model.prompts().get(0).getInstructions().get(1).getText()).isEqualTo(REFUSED_GATHERING);
+		assertThat(outcome.policy()).isEqualTo(new PolicyCounts(0, 1));
 	}
 
 	@Test

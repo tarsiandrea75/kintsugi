@@ -48,6 +48,7 @@ import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
 import dev.kintsugi.agent.policy.Policy;
 import dev.kintsugi.agent.policy.PolicyCounts;
+import dev.kintsugi.agent.policy.PolicyTally;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesDiagnosis;
 import dev.kintsugi.agent.rules.RulesVersion;
@@ -369,7 +370,9 @@ final class ReplayDriver {
 		CoverageCounter counter = new CoverageCounter(tools);
 		Clock clock = clockAt(parsed.startedAt());
 		long start = System.nanoTime();
-		Dossier dossier = new DossierGatherer(counter, clock, this.topology).gather(parsed.sinceMinutes());
+		PolicyTally gathering = new PolicyTally();
+		Dossier dossier = new DossierGatherer(counter, clock, this.topology, Policy.DEFAULT).gather(parsed.sinceMinutes(),
+				gathering);
 		RulesVerdict verdict = this.rules.diagnose(dossier, this.topology);
 		double seconds = (System.nanoTime() - start) / 1e9;
 		// The candidates a hybrid run would list on the same dossier (hybrid T4); the verdict above is unchanged.
@@ -394,8 +397,8 @@ final class ReplayDriver {
 		verdict.facts().forEach(facts::add);
 		incident.put("view", this.decisionView.value());
 		incident.put("decisionReport", this.decisionReport.value());
-		// The gatherer's calls are the sample's only calls, and each passed the policy gate (ADR-027).
-		policy(incident, Policy.DEFAULT.counts(dossier.calls().stream().map(ToolResult::tool).toList(), 0));
+		// The gatherer's calls are the sample's only calls: its counts are what the gatherer's tally recorded (ADR-027).
+		policy(incident, gathering.counts(Policy.DEFAULT));
 		incident.putArray("steps");
 
 		String truth = recording.truth();

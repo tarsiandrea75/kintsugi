@@ -60,6 +60,7 @@ import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.loop.AgentMode.DossierGathering;
 import dev.kintsugi.agent.policy.Policy;
 import dev.kintsugi.agent.policy.PolicyCounts;
+import dev.kintsugi.agent.policy.PolicyTally;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.rules.RulesVersion;
 import dev.kintsugi.agent.summary.ToolSummaries;
@@ -310,12 +311,13 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * What the policy did in {@code run}, counted from its recorded steps: the calls that ran, the dossier's and the
-	 * model's, whose risk is a write, and the steps refused {@code REFUSED_POLICY}.
+	 * What the policy did in {@code run}: the calls that ran, the dossier's and the model's, whose risk is a write, and
+	 * the calls refused, the gathering's and the model's {@code REFUSED_POLICY} steps. The gathering's come from its
+	 * tally, which holds them whether it completed, failed or ran past its bound.
 	 */
 	private PolicyCounts policyCounts(Run run) {
-		List<String> executed = new ArrayList<>(run.dossierTools);
-		int refused = 0;
+		List<String> executed = new ArrayList<>(run.gathering.executed());
+		int refused = run.gathering.refused();
 		for (ToolStep step : run.toolSteps.values()) {
 			if (Policy.REFUSED_POLICY.equals(step.outcome())) {
 				refused++;
@@ -409,7 +411,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * The first step of dossier mode, after the warm-up (T5a), and of decision mode, before it (decision-instrument):
 	 * code gathers the evidence dossier through {@link LabTools} and renders it, and
 	 * the result becomes the dossier message every later call reads right after the system message. Its 33 calls are
-	 * code's: they pass no check but the policy's, which the gatherer applies (ADR-027), count against no tool budget and get no {@code toolCallId} (a report cites the dossier
+	 * code's: they pass no check but the policy's, which the gatherer applies (ADR-027) and records in the run's tally, a
+	 * refusal failing the gathering, count against no tool budget and get no {@code toolCallId} (a report cites the dossier
 	 * as a whole, as {@code "dossier"}, T5b); they are stored in the
 	 * {@code DOSSIER} step's {@code tool_output}, with the message the model sees in its {@code summary}. The gathering
 	 * counts against the incident's time and is bounded by the {@code ACT} call deadline; a failed call is a fact in
@@ -426,7 +429,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		boolean incidentBound = run.budgetStart != null && incidentLeft.compareTo(deadline) < 0;
 		Duration limit = incidentBound ? incidentLeft : deadline;
 		long start = System.nanoTime();
-		Future<Dossier> future = this.modelCalls.submit(() -> this.gatherer.gather(run.incident.sinceMinutes()));
+		Future<Dossier> future = this.modelCalls.submit(() -> this.gatherer.gather(run.incident.sinceMinutes(), run.gathering));
 		String message;
 		String calls = null;
 		try {
@@ -440,7 +443,6 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 					: null;
 			message = Prompts.dossier(run.dossierText);
 			calls = dossierCalls(dossier);
-			run.dossierTools = dossier.calls().stream().map(ToolResult::tool).toList();
 		}
 		catch (TimeoutException slow) {
 			// The calls already made cannot be taken back; the thread is interrupted and its result ignored.
@@ -1034,8 +1036,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		/** Every tool step, refusals included, by step number: what the evidence check reads. */
 		final Map<Integer, ToolStep> toolSteps = new LinkedHashMap<>();
 
-		/** The tools of the dossier's calls, one per call made; empty when no dossier was gathered. */
-		List<String> dossierTools = List.of();
+		/** What the policy did to the gathering's calls, filled as they are made (ADR-027); empty when none was made. */
+		final PolicyTally gathering = new PolicyTally();
 
 		/** The summaries of the tool steps, in step order. */
 		final List<String> evidence = new ArrayList<>();

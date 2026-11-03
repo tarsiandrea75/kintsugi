@@ -38,6 +38,7 @@ import dev.kintsugi.agent.lab.LabTools;
 import dev.kintsugi.agent.lab.ToolOutcome;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.policy.Policy;
+import dev.kintsugi.agent.policy.PolicyTally;
 
 /**
  * Gathers the {@link Dossier} of an incident through {@link LabTools}, the agent's one way into the lab (agent spec,
@@ -46,7 +47,8 @@ import dev.kintsugi.agent.policy.Policy;
  * not pass the loop's checks and do not count against its tool budget. A failed call becomes a fact in its section;
  * the gathering never stops early. Every call passes the {@link Policy} first, as the model's do (ADR-027): a call it
  * refuses is never made, and the gathering fails at once, since its tools are code's and a refused one is a tool added
- * to the gatherer without being classified.
+ * to the gatherer without being classified. What the policy did is recorded, call by call, in a {@link PolicyTally}
+ * the caller may pass, so that it is known also when the gathering fails or the caller stops waiting for it.
  */
 public final class DossierGatherer {
 
@@ -111,6 +113,17 @@ public final class DossierGatherer {
 	 * @throws IllegalArgumentException if {@code sinceMinutes} is below 1
 	 */
 	public Dossier gather(int sinceMinutes) {
+		return gather(sinceMinutes, new PolicyTally());
+	}
+
+	/**
+	 * The dossier as {@link #gather(int)} gathers it, recording in {@code tally}, as each call is made or refused, what
+	 * the policy did (ADR-027).
+	 * @throws IllegalArgumentException if {@code sinceMinutes} is below 1
+	 * @throws IllegalStateException when the policy refuses a call, which is recorded in {@code tally} and not made
+	 */
+	public Dossier gather(int sinceMinutes, PolicyTally tally) {
+		Objects.requireNonNull(tally, "tally");
 		if (sinceMinutes < 1) {
 			throw new IllegalArgumentException("sinceMinutes must be at least 1, was " + sinceMinutes);
 		}
@@ -118,7 +131,7 @@ public final class DossierGatherer {
 		Duration n = Duration.ofMinutes(sinceMinutes);
 		Window incident = new Window(sinceMinutes, 0, at.minus(n), at);
 		Window previous = new Window(2 * sinceMinutes, sinceMinutes, at.minus(n.multipliedBy(2)), at.minus(n));
-		Calls calls = new Calls();
+		Calls calls = new Calls(tally);
 
 		Gathered<List<ServiceStatus>> services = calls.read("service_restarts", args(incident),
 				result -> services(result, at, this.services));
@@ -344,6 +357,12 @@ public final class DossierGatherer {
 
 		private final List<ToolResult> made = new ArrayList<>();
 
+		private final PolicyTally tally;
+
+		Calls(PolicyTally tally) {
+			this.tally = tally;
+		}
+
 		<T> Compared<T> compared(String tool, String subjectName, String subject, Window previous, Window incident,
 				Function<JsonNode, T> facts) {
 			return new Compared<>(read(tool, windowArgs(subjectName, subject, previous), facts),
@@ -387,14 +406,17 @@ public final class DossierGatherer {
 
 		/**
 		 * One call, once the policy authorizes it; a call that throws, which {@link LabTools} should never do, is recorded
-		 * as a client error.
+		 * as a client error. The tally records the call before it is made, so that a call still running when the caller
+		 * stops waiting is counted as made.
 		 * @throws IllegalStateException when the policy refuses {@code tool}: the call is not made
 		 */
 		private ToolResult call(String tool, String args) {
 			if (!DossierGatherer.this.policy.authorizes(tool)) {
+				this.tally.recordRefusal();
 				throw new IllegalStateException("the policy refuses " + tool + ": its risk is "
 						+ DossierGatherer.this.policy.risk(tool));
 			}
+			this.tally.recordCall(tool);
 			try {
 				return DossierGatherer.this.tools.call(tool, args);
 			}

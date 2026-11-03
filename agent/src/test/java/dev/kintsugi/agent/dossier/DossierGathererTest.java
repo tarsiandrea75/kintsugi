@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,6 +38,8 @@ import dev.kintsugi.agent.lab.ToolOutcome;
 import dev.kintsugi.agent.lab.ToolResult;
 import dev.kintsugi.agent.policy.Policy;
 import dev.kintsugi.agent.policy.PolicyCounts;
+import dev.kintsugi.agent.policy.PolicyTally;
+import dev.kintsugi.agent.policy.Risk;
 
 /**
  * The dossier's gathering (agent spec, "Evidence dossier gathering"; ADR-011): the same calls in the same order for
@@ -79,6 +82,40 @@ class DossierGathererTest {
 		assertThatThrownBy(() -> gatherer.gather(10)).isInstanceOf(IllegalStateException.class)
 			.hasMessage("the policy refuses service_restarts: its risk is WRITE");
 		assertThat(lab.calls()).isEmpty();
+	}
+
+	/**
+	 * The gatherer reports what the policy did as it goes, so that a gathering that fails or is cut short still counts
+	 * (ADR-027): every call it made, and the call it refused.
+	 */
+	@Test
+	void theTallyHoldsTheCallsMadeAndTheRefusalOfAGatheringThatFails() {
+		RecordedLab lab = new RecordedLab("healthy");
+		Map<String, Risk> risks = new HashMap<>(Policy.RISKS);
+		risks.remove("traffic_counts");
+		Policy policy = new Policy(risks);
+		PolicyTally tally = new PolicyTally();
+
+		assertThatThrownBy(() -> new DossierGatherer(lab, CLOCK, LAB, policy).gather(10, tally))
+			.isInstanceOf(IllegalStateException.class);
+
+		List<String> made = lab.calls().stream().map(call -> call.substring(0, call.indexOf(' '))).toList();
+		assertThat(made).isNotEmpty().doesNotContain("traffic_counts");
+		assertThat(tally.executed()).isEqualTo(made);
+		assertThat(tally.refused()).isEqualTo(1);
+		assertThat(tally.counts(policy)).isEqualTo(new PolicyCounts(0, 1));
+	}
+
+	/** A gathering that completes reports every call it made, which are its dossier's calls, and no refusal. */
+	@Test
+	void theTallyOfACompletedGatheringIsItsDossiersCalls() {
+		RecordedLab lab = new RecordedLab("healthy");
+		PolicyTally tally = new PolicyTally();
+
+		Dossier dossier = new DossierGatherer(lab, CLOCK, LAB, Policy.DEFAULT).gather(10, tally);
+
+		assertThat(tally.executed()).isEqualTo(dossier.calls().stream().map(ToolResult::tool).toList());
+		assertThat(tally.counts(Policy.DEFAULT)).isEqualTo(PolicyCounts.NONE);
 	}
 
 	@Test
