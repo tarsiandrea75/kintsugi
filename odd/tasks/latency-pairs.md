@@ -52,7 +52,7 @@ After:
 - [x] T1 The latency table as pairs, tests first; goldens; the agent's living spec. Route: delegated writer.
 - [x] T2 `audit-latency` reads both shapes, tests first; REQ-14. Route: the same writer, its own commit.
 - [x] T3 The plan. Route: inline (docs).
-- [ ] T4 The pre-close check, D's run, the audit, the score and the result. Route: inline commands.
+- [x] T4 The pre-close check, D's run, the audit, the score and the result. Route: inline commands.
 
 ## Acceptance criteria
 
@@ -81,6 +81,22 @@ Forecast: about 200 authored lines for T1 without goldens, about 100 for T2, abo
   - Not touched: the recorded prompts under `agent/src/test/resources/replay/` keep the old table; no test compares them.
 - 2026-11-03: T3 done: `evals/plans/2026-11-03-latency-pairs-re2ob-dev.md`.
 
+- 2026-11-03: T4 done on `479d99e`. Results in `evals/results/2026-11-03-latency-pairs-re2ob-dev/` (`audit/` holds REQ-14's output).
+  - **Pre-close check passed:** fresh rules v1 and v2 on RE2-OB dev (`replay-20261103T114625Z-rules`, `-114630Z-`), lab dev (`-114634Z-`, `-114638Z-`) and lab holdout (`-114642Z-`, `-114647Z-`) equal the plan's earlier runs in every column but `seconds`. AC2 holds.
+  - **DP's run:** `replay-20261103T114659Z-cloud`, 30 rows, all `COMPLETED`, the plan's configuration, D1's recordings; about $0.03. AC4 and AC5 hold.
+
+| Run | AC@1 [Wilson 95%] | Coverage | Selective |
+|---|---|---|---|
+| D1–D4, old table | 11, 12, 12, 13 of 30 | 43% to 47% | 85% to 100% |
+| **DP, pairs** | **16/30, 53% [36%, 70%]** | 60% | 89% |
+| 0R | 20/30, 67% [49%, 81%] | 90% | 74% |
+
+  - **The misread is gone:** 0 `previous_only` items out of 50 latency-row items (46 `incident_cited`, 4 `no_number`), against at least one in 26 of 67 abstaining samples and 17 of 53 answering ones before.
+  - **The gain rule is not met:** wins minus losses against D1–D4 are 7−2, 7−3, 8−4, 7−4, so net 5, 4, 4, 3, all under 7. DP − 0R is −13 points, 9 for DP against 13 for 0R, p = 0.52, so no paired win. **So the layout is not kept as a gain.**
+  - DP − 0: +40 points, 13 against 1, p = 0.0018, Holm 0.037. This was not a criterion of the plan.
+  - Of the 13 cases that abstained in all of D1–D4, DP answers 7 and gets 6 right.
+  - **One run only:** a gain of 3 to 5 is inside what identical runs can differ by, which is why the rule asked for 7.
+
 ## Next step
 
-T4.
+The plan leaves one decision to the human: whether to keep the layout without a measured gain. It changes no rule and costs nothing at run time, and it removes a misread that this run shows gone. Before the freeze on 2026-12-01, no further change to D on these 30 cases without its own plan.
