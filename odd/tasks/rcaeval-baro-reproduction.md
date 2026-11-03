@@ -96,10 +96,13 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
 | loss | 8/15, 53% [30%, 75%] | 9/15, 60% [36%, 80%] | 64% | 0.53, 0.6, 0.64 |
 | pooled | 60/90, 67% [56%, 76%] | 74/90, 82% [73%, 89%] | 80% | 0.67, 0.82, 0.8 |
 
-  - Chance with 68 services, the union ranked (the paper counts 64 services; the headers also hold names such as `rabbitmq` and `kube-proxy`): AC@1 1.47%, AC@3 4.41%, Avg@5 4.41%.
+  - Chance with 68 services, the union ranked: AC@1 1.47%, AC@3 4.41%, Avg@5 4.41%. All 68 carry the `ts-` prefix and include datastores such as `ts-voucher-mysql`. The paper says 64 services, and the difference of 4 is not reconciled. It moves the chance level by little and no cell depends on it.
+  - Correction, from the closing review: this note first named `rabbitmq` and `kube-proxy`. Those names come from T1's synthetic golden, not from the data. In the real headers the only name without `ts-` is `istio-init`, in 5 of the 90 cases, and it is not in the ranked union. So T1's "keeps its non-`ts-` columns" is true of the code and almost empty on this data.
   - **What this proves:** the port, the published pipeline, the scorer's AC@k and Avg@k and its per-fault pooling together give the published table. **What it does not:** that RE2-OB behaves as RE2-TT does. BARO's `redis` first on RE2-OB is the same code on another system, with no published number to check it against.
   - Two of the plan's checks stay manual: `baro-rcaeval` still skips a misnamed directory silently (R3-silent-partial-re2-tt), and `compare_dev.py` still cannot see a `data.csv` (R3-data-csv-not-conformance-checked). Both matter only for a future read of new data.
   - Config 0 did not run alongside, by the plan's stated exception.
+
+- 2026-11-03: native review of `9efe133..f8d1200`: one reliability lens, **approved** and acknowledged (lineage `review-dc825d41fa79b831`). SUGGESTION R3-service-count-explanation-unsupported, fixed above. SUGGESTION R3-data-csv-check-fails-open, not fixed: the plan's `data.csv` count prints 0 on a mistyped root too, and its command block omits the 90-row check. This run is not affected: it also counted 90 `simple_metrics.csv` and 90 rows. A future read should copy those controls.
 
 ## Next step
 
