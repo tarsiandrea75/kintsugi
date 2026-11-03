@@ -337,6 +337,15 @@ def test_ranking_without_an_answer_is_empty():
 def test_ranking_of_a_row_that_abstains_is_empty_even_with_candidates():
     # REQ-7 counts this row as no answer, so its first candidate must not become a ranked AC@1 hit.
     assert ranking_of("COMPLETED", "UNKNOWN|UNKNOWN", "a|X;b|Y") == ()
+    assert ranking_of("COMPLETED", "none", "a|X;b|Y") == ()
+    assert ranking_of("COMPLETED", "", "a|X;b|Y") == ()
+
+
+def test_ranking_of_a_row_with_no_answer_is_empty_even_with_ranked():
+    # A reported none or empty is no answer, as UNKNOWN is: neither ranked nor candidates may stand in for it.
+    assert ranking_of("COMPLETED", "none", "a|X", "b|Y") == ()
+    assert ranking_of("COMPLETED", "", "a|X", "b|Y") == ()
+    assert ranking_of("COMPLETED", "", None, "b|Y") == ()
 
 
 def test_ranking_of_a_file_without_the_column_is_the_reported_service():
