@@ -3,6 +3,7 @@ package dev.kintsugi.lab.fault.control;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Map;
 
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -13,8 +14,8 @@ import dev.kintsugi.lab.fault.catalog.LabMechanism;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Applies F1 and F2 through gateway-mock's admin API: {@code PUT /admin/behavior} with the fault's catalog parameters
- * as the body, and {@code DELETE /admin/behavior} to restore. Connect and read timeouts bound every call; any error
+ * Applies F1 and F2 through gateway-mock's admin API: {@code PUT /admin/behavior} with the applied parameters as the
+ * body, and {@code DELETE /admin/behavior} to restore. Connect and read timeouts bound every call; any error
  * answer, timeout, connection failure or serialization error is a failed step ({@link LabControlException}).
  */
 public class HttpGatewayControl implements LabControl {
@@ -44,12 +45,12 @@ public class HttpGatewayControl implements LabControl {
 	}
 
 	@Override
-	public void activate(Fault fault) {
+	public void activate(Fault fault, Map<String, Object> parameters) {
 		requireGatewayFault(fault);
 		call(fault, "PUT", () -> http.put()
 			.uri(BEHAVIOR)
 			.contentType(MediaType.APPLICATION_JSON)
-			.body(json.writeValueAsString(fault.parameters()))
+			.body(json.writeValueAsString(parameters))
 			.retrieve()
 			.toBodilessEntity());
 	}

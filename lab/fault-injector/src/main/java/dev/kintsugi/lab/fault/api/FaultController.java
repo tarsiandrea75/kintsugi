@@ -43,7 +43,7 @@ class FaultController {
 
 	@PostMapping
 	ResponseEntity<Created> activate(@RequestBody ActivateRequest request) {
-		return ResponseEntity.status(HttpStatus.CREATED).body(Created.of(service.activate(request.fault())));
+		return ResponseEntity.status(HttpStatus.CREATED).body(Created.of(service.activate(request.fault(), request.requestedParameters())));
 	}
 
 	@GetMapping("/active")

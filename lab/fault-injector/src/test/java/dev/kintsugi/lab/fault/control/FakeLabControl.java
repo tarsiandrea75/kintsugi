@@ -1,6 +1,7 @@
 package dev.kintsugi.lab.fault.control;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -11,11 +12,13 @@ import dev.kintsugi.lab.fault.catalog.Fault;
 /**
  * In-memory {@link LabControl} for tests: records every call as {@code "activate F1"} or {@code "restore F1"}, and fails
  * an activation or a restore on demand. {@link #holdNextRestore} parks one restore call mid-flight, so a test can
- * interleave two restores deterministically. Real Docker and gateway-mock are exercised by the verify scripts (T5).
+ * interleave two restores deterministically. {@link #activatedParameters} keeps the parameters of each activation. Real Docker and gateway-mock are exercised by the verify scripts (T5).
  */
 public class FakeLabControl implements LabControl {
 
 	private final List<String> calls = new CopyOnWriteArrayList<>();
+
+	private final List<Map<String, Object>> activatedParameters = new CopyOnWriteArrayList<>();
 
 	private volatile boolean failActivate;
 
@@ -24,8 +27,9 @@ public class FakeLabControl implements LabControl {
 	private final AtomicReference<HeldRestore> held = new AtomicReference<>();
 
 	@Override
-	public void activate(Fault fault) {
+	public void activate(Fault fault, Map<String, Object> parameters) {
 		calls.add("activate " + fault.id());
+		activatedParameters.add(Map.copyOf(parameters));
 		if (failActivate) {
 			throw new LabControlException("fake activation failure for " + fault.targetService());
 		}
@@ -51,6 +55,11 @@ public class FakeLabControl implements LabControl {
 		return List.copyOf(calls);
 	}
 
+	/** The parameters each activation was given, in call order. */
+	public List<Map<String, Object>> activatedParameters() {
+		return List.copyOf(activatedParameters);
+	}
+
 	public void failActivate(boolean fail) {
 		this.failActivate = fail;
 	}
@@ -72,6 +81,7 @@ public class FakeLabControl implements LabControl {
 	/** Succeeds again and forgets every call. */
 	public void reset() {
 		calls.clear();
+		activatedParameters.clear();
 		held.set(null);
 		failActivate = false;
 		failRestore = false;

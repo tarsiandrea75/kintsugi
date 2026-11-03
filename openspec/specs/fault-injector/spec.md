@@ -10,12 +10,12 @@ It listens on port 8084, published on `127.0.0.1:18084`. It stores its data in t
 
 ## Catalog
 
-The catalog is fixed in code. Each entry holds the fault id, the target service, the injection parameters and the structured true cause.
+The catalog is fixed in code. Each entry holds the fault id, the target service, the injection parameters, the parameters a caller may choose with their declared values, and the structured true cause.
 
 | Fault | Target | How it is activated | How it is restored |
 |-------|--------|---------------------|--------------------|
-| F1 | gateway-mock | `PUT /admin/behavior` `{"latencyMs": 10000}` | `DELETE /admin/behavior` |
-| F2 | gateway-mock | `PUT /admin/behavior` `{"latencyMs": 0, "errorStatus": 429}` | `DELETE /admin/behavior` |
+| F1 | gateway-mock | `PUT /admin/behavior` `{"latencyMs": <latency>}`, default `10000` | `DELETE /admin/behavior` |
+| F2 | gateway-mock | `PUT /admin/behavior` `{"latencyMs": 0, "errorStatus": <status>}`, default `429` | `DELETE /admin/behavior` |
 | F3 | order-service | recreate with compose variable `ORDER_PAYMENT_BASEURL=http://payment-service:9999` | recreate without it |
 | F4 | inventory-service | recreate with compose variables `INVENTORY_POOL_SIZE=2` and `INVENTORY_RESERVATION_DELAY=5s` | recreate without them |
 
@@ -29,12 +29,25 @@ The parameters use the **compose variable** names, which the injector sets. `inf
 | `INVENTORY_POOL_SIZE` | `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE` | inventory-service |
 | `INVENTORY_RESERVATION_DELAY` | `KINTSUGI_INVENTORY_RESERVATIONDELAY` | inventory-service |
 
+### Declared parameters
+
+F1 and F2 declare one parameter each, which a caller of `POST /faults` may choose so that a schedule can draw it ([lab-realism-min](../../../odd/tasks/lab-realism-min.md), [ADR-026](../../../docs/adr/ADR-026-holdout2-seed.md)). The declared values are code too, in `Fault.java`, like the rest of the catalog: changing them is a code change.
+
+| Fault | Request name | Replaces | Declared values | Default |
+|-------|--------------|----------|-----------------|---------|
+| F1 | `gatewayLatencyMs` | `latencyMs` | `2000`, `5000`, `10000`, `20000` | `10000` |
+| F2 | `gatewayErrorStatus` | `errorStatus` | `429`, `500`, `503` | `429` |
+
+F3 and F4 declare none: their parameters stay the constants above (cut order of `docs/vision.md` §7, item 5). A value is declared only as a JSON integer equal to one of the values: a string such as `"5000"`, a decimal or `null` is not. A chosen value changes the applied parameters and the `root_cause` sentence, never `root_cause_service` or `root_cause_category`. Without a choice each fault applies its default, which is today's constant.
+
 True causes:
 
 | Fault | `root_cause_service` | `root_cause_category` | `root_cause` |
 |-------|----------------------|-----------------------|--------------|
 | F1 | gateway-mock | `DEPENDENCY_LATENCY` | The payment gateway answers authorizations after 10 s, so payments and the orders waiting on them stay pending. |
 | F2 | gateway-mock | `DEPENDENCY_REJECTING` | The payment gateway rejects every authorization with 429 (rate limited), so payments fail. |
+
+The sentences above are for the defaults. With a chosen value, F1's says the applied latency in whole seconds ("after 2 s", "after 5 s", "after 20 s"), and F2's the applied status and its meaning ("with 500 (internal server error)", "with 503 (service unavailable)").
 | F3 | order-service | `CONFIGURATION` | order-service is deployed with a wrong payment-service URL (`http://payment-service:9999`), so its payment calls fail to connect. |
 | F4 | inventory-service | `RESOURCE_EXHAUSTION` | inventory-service runs with a database pool of 2 and reservations that hold a connection for 5 s, so the pool is exhausted and reservations fail. |
 
@@ -58,7 +71,7 @@ Properties of the `docker` mode:
 | `kintsugi.lab-control.compose-project` | `kintsugi-lab` | the `-p` project name |
 | `kintsugi.lab-control.recreate-wait-timeout` | `120s` | `--wait-timeout`, in whole seconds, at least 1 |
 
-- **Gateway faults.** Activation is `PUT /admin/behavior` with the catalog parameters as the JSON body (F1 `{"latencyMs": 10000}`, F2 `{"latencyMs": 0, "errorStatus": 429}`). Restore is `DELETE /admin/behavior`. An error status, a timeout, a connection failure or a body that cannot be serialized is a failed step.
+- **Gateway faults.** Activation is `PUT /admin/behavior` with the applied parameters as the JSON body (by default F1 `{"latencyMs": 10000}`, F2 `{"latencyMs": 0, "errorStatus": 429}`; with a chosen value, that value in place of the default). gateway-mock accepts every declared value: latency 0 to 60000 ms, error status 429, 500 or 503. Restore is `DELETE /admin/behavior`. An error status, a timeout, a connection failure or a body that cannot be serialized is a failed step.
 - **Recreate faults.** The injector runs exactly this argv, with no shell: `docker`, `compose`, `-p`, `<compose-project>`, `-f`, `<compose-file>`, `up`, `-d`, `--no-deps`, `--no-build`, `--wait`, `--wait-timeout`, `<N>`, `<service>`. `--no-deps` and the single service name mean only that service is recreated: never its dependencies, the injector itself or the whole stack.
   - The process gets a minimal environment, nothing inherited: `PATH`, `HOME`, `DOCKER_HOST`, `DOCKER_CONFIG` and `DOCKER_GID` when the injector has them (`DOCKER_GID` because the compose file requires it for every command), plus, on activation, the fault's compose variables. The injector's datasource credentials never reach it. Restore runs the same argv without the fault variables, so compose falls back to its defaults.
   - Recreates of the same service are serialized: two overlapping restores never run `up` on one service at once.
@@ -69,20 +82,20 @@ Properties of the `docker` mode:
 
 ### Requirement: List the catalog without the truth
 
-`GET /faults/catalog` MUST return 200 with one entry per catalog fault, in id order: `[{"fault": "F1"}, …, {"fault": "F4"}]`. An entry MUST NOT contain the target service, the parameters or any part of the true cause.
+`GET /faults/catalog` MUST return 200 with one entry per catalog fault, in id order: `[{"fault": "F1"}, …, {"fault": "F4"}]`. An entry MUST NOT contain the target service, the parameters, the declared parameters or their values, or any part of the true cause. The declared values are not secret, but they stay out of every answer: a parameter name such as `gatewayLatencyMs` names the target, and the agent must never learn which value a case used.
 
 #### Scenario: Catalog lists fault ids only
 - GIVEN the injector is running
 - WHEN `GET /faults/catalog` is called
 - THEN the response status is 200
 - AND the body lists `F1`, `F2`, `F3` and `F4`
-- AND no field of the body names a service, a parameter or a root cause
+- AND no field of the body names a service, a parameter, a declared value or a root cause
 
 ### Requirement: Activate a fault
 
-`POST /faults` with body `{"fault": "<id>"}` MUST, in this order:
+`POST /faults` with body `{"fault": "<id>"}`, or `{"fault": "<id>", "parameters": {"<request name>": <value>}}` with declared parameters (see [Declared parameters](#declared-parameters)), MUST, in this order:
 
-1. insert one `injections` row with status `ACTIVE`, the fault id, the target service, the structured true cause, the parameters and `injected_at`, and record an `ACTIVATION_STARTED` event;
+1. insert one `injections` row with status `ACTIVE`, the fault id, the target service, the structured true cause for the applied parameters, the parameters actually applied and `injected_at`, and record an `ACTIVATION_STARTED` event;
 2. apply the fault's activation steps;
 3. record an `ACTIVATED` event;
 4. return 201 with `{"id": <injection id>, "fault": "<id>", "injectedAt": "<ISO-8601 instant>"}`.
@@ -95,6 +108,26 @@ The response MUST NOT contain the true cause.
 - THEN the response status is 201 with `id`, `fault` `F1` and `injectedAt`
 - AND gateway-mock's behavior is `{"latencyMs": 10000, "errorStatus": null}`
 - AND one `injections` row exists with `fault_id` `F1`, `root_cause_service` `gateway-mock` and status `ACTIVE`
+
+#### Scenario: F1 with a chosen latency
+- GIVEN no active fault
+- WHEN `POST /faults` is called with `{"fault": "F1", "parameters": {"gatewayLatencyMs": L}}`, for each L of `2000`, `5000`, `10000` and `20000`
+- THEN the response status is 201
+- AND gateway-mock's behavior is `{"latencyMs": L, "errorStatus": null}`
+- AND the `injections` row has `parameters` `{"latencyMs": L}`, `root_cause_category` `DEPENDENCY_LATENCY` and a `root_cause` saying L in seconds
+
+#### Scenario: F2 with a chosen status
+- GIVEN no active fault
+- WHEN `POST /faults` is called with `{"fault": "F2", "parameters": {"gatewayErrorStatus": S}}`, for each S of `429`, `500` and `503`
+- THEN the response status is 201
+- AND gateway-mock's behavior is `{"latencyMs": 0, "errorStatus": S}`
+- AND the `injections` row has `parameters` `{"latencyMs": 0, "errorStatus": S}`, `root_cause_category` `DEPENDENCY_REJECTING` and a `root_cause` naming S
+
+#### Scenario: Without parameters nothing changes
+- GIVEN no active fault
+- WHEN `POST /faults` is called with `{"fault": "F1"}`, or with `{"fault": "F2", "parameters": {}}`
+- THEN F1 applies `{"latencyMs": 10000}` and F2 `{"latencyMs": 0, "errorStatus": 429}`, as before the parameters existed
+- AND the row's `parameters` and `root_cause` are the defaults'
 
 #### Scenario: F3 is activated by a redeploy
 - GIVEN no active fault
@@ -113,6 +146,13 @@ The response MUST NOT contain the true cause.
 - GIVEN a body that is `{"fault": "F9"}`, `{"fault": null}`, `{}` or malformed JSON
 - WHEN `POST /faults` is called with each body
 - THEN each response status is 400
+- AND no `injections` row is written and the lab is not touched
+
+#### Scenario: A parameter outside the declared ones
+- GIVEN a body whose `parameters` hold a value outside the declared values (`{"gatewayLatencyMs": 3000}`, `"5000"`, `5000.5` or `null` for F1, `{"gatewayErrorStatus": 502}` for F2), a name the fault does not declare (`gatewayErrorStatus` or `latencyMs` for F1, any name for F3 and F4), or is not a JSON object
+- WHEN `POST /faults` is called with each body
+- THEN each response status is 400 with a one-line `error`: `undeclared value: …` for a declared name with another value, `undeclared parameter: …` for a name the fault does not declare, and the unknown-fault reason for `parameters` that are not an object
+- AND the reason names no parameter and lists no declared value
 - AND no `injections` row is written and the lab is not touched
 
 ### Requirement: Real lab control
@@ -272,7 +312,7 @@ The truth MUST be written before the lab is touched. If the `faults` database is
 
 ### Requirement: The truth stays invisible to the agent
 
-- No HTTP endpoint MUST ever return `root_cause_service`, `root_cause_category`, `root_cause`, the target service or the parameters.
+- No HTTP endpoint MUST ever return `root_cause_service`, `root_cause_category`, `root_cause`, the target service, the parameters, or a declared parameter or value.
 - A superuser ignores `REVOKE CONNECT`, so the isolation holds only for roles that are not superusers. The compose `postgres` keeps a bootstrap superuser (`POSTGRES_USER`) used only by the init scripts. The services MUST connect with the non-superuser application role `lab_app`, which owns only `orders`, `payments` and `inventory`.
 - The `faults` database MUST be owned by the non-superuser `faults` role, with `CONNECT` revoked from `PUBLIC`. `lab_app` MUST NOT be able to connect to it. The eval harness (M4) reads it with the `faults` role.
 - The agent's future read-only role (M2, behind `queryDb`) MUST be a non-superuser and MUST NOT have `CONNECT` on `faults`; it never gets the `faults` credentials.
@@ -331,4 +371,5 @@ Every request to the injector, its API and the actuator alike, MUST pass two che
 
 - **Root-equivalent socket.** The injector mounts the Docker socket ([ADR-009](../../../docs/adr/ADR-009-fault-injector-docker-control.md)). Acceptable only because every lab port is bound to `127.0.0.1`.
 - **No authentication.** The API has no auth; it is published on loopback only.
-- **Fixed catalog.** F1–F4 only. F5–F7 were cut on 2026-10-25 (`docs/vision.md` §2); F8, fault parameters drawn from declared ranges and injection campaigns come later.
+- **Fixed catalog.** F1–F4 only. F5–F7 were cut on 2026-10-25 (`docs/vision.md` §2); F8 and injection campaigns come later. Only F1 and F2 declare parameters; F3 and F4 keep their constants (cut order, `docs/vision.md` §7, item 5).
+- **Unknown top-level fields are ignored.** A body such as `{"fault": "F1", "gatewayLatencyMs": 5000}`, with the parameter outside `parameters`, is accepted and applies the default, as any extra field was before. Only names inside `parameters` are checked.

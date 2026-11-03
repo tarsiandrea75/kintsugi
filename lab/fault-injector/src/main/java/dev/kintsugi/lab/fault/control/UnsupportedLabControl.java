@@ -1,5 +1,7 @@
 package dev.kintsugi.lab.fault.control;
 
+import java.util.Map;
+
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -20,7 +22,7 @@ import dev.kintsugi.lab.fault.catalog.Fault;
 public class UnsupportedLabControl implements LabControl {
 
 	@Override
-	public void activate(Fault fault) {
+	public void activate(Fault fault, Map<String, Object> parameters) {
 		throw new LabControlException(
 				"lab control is not available (kintsugi.lab-control.mode=unsupported); nothing was applied");
 	}

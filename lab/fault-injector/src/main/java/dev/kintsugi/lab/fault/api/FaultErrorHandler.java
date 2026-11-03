@@ -16,6 +16,7 @@ import dev.kintsugi.lab.fault.application.InjectionNotFoundException;
 import dev.kintsugi.lab.fault.application.RestoreFailedException;
 import dev.kintsugi.lab.fault.application.TruthUnavailableException;
 import dev.kintsugi.lab.fault.application.UnknownFaultException;
+import dev.kintsugi.lab.fault.catalog.ParameterRefusedException;
 
 /**
  * Maps failures to fixed error bodies. No body echoes an exception message or the request: a lab failure message can
@@ -24,10 +25,25 @@ import dev.kintsugi.lab.fault.application.UnknownFaultException;
 @RestControllerAdvice
 class FaultErrorHandler {
 
+	/** 400 reason for a parameter name the fault does not declare. Names no parameter, so it reveals no target. */
+	static final String UNDECLARED_PARAMETER = "undeclared parameter: this fault takes no parameter of that name";
+
+	/** 400 reason for a declared parameter with a value outside its declared values. Lists none of them. */
+	static final String UNDECLARED_VALUE = "undeclared value: the value is not one of the fault's declared values";
+
 	@ExceptionHandler({ UnknownFaultException.class, HttpMessageNotReadableException.class })
 	@ResponseStatus(HttpStatus.BAD_REQUEST)
 	Error badRequest() {
 		return new Error("unknown fault: the body must be {\"fault\": \"<catalog id>\"}");
+	}
+
+	@ExceptionHandler(ParameterRefusedException.class)
+	@ResponseStatus(HttpStatus.BAD_REQUEST)
+	Error parameterRefused(ParameterRefusedException refused) {
+		return new Error(switch (refused.reason()) {
+			case UNDECLARED_PARAMETER -> UNDECLARED_PARAMETER;
+			case UNDECLARED_VALUE -> UNDECLARED_VALUE;
+		});
 	}
 
 	@ExceptionHandler({ InjectionNotFoundException.class, MethodArgumentTypeMismatchException.class })

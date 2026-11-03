@@ -58,11 +58,21 @@ class NoTruthInResponsesTest {
 	void noResponseBodyContainsAnyPartOfATrueCause() throws Exception {
 		call(get("/faults/catalog"), 200);
 		call(get("/faults/active"), 204);
-		for (String body : List.of("{\"fault\": \"F9\"}", "{}", "{\"fault\": ", "")) {
+		for (String body : List.of("{\"fault\": \"F9\"}", "{}", "{\"fault\": ", "",
+				"{\"fault\": \"F1\", \"parameters\": {\"gatewayLatencyMs\": 3000}}",
+				"{\"fault\": \"F3\", \"parameters\": {\"gatewayLatencyMs\": 5000}}",
+				"{\"fault\": \"F2\", \"parameters\": [429]}")) {
 			call(post("/faults").contentType(MediaType.APPLICATION_JSON).content(body), 400);
 		}
 		call(post("/faults/{id}/restore", UUID.randomUUID()), 404);
 		call(post("/faults/{id}/restore", "not-a-uuid"), 404);
+
+		for (String drawn : List.of("{\"fault\": \"F1\", \"parameters\": {\"gatewayLatencyMs\": 20000}}",
+				"{\"fault\": \"F2\", \"parameters\": {\"gatewayErrorStatus\": 503}}")) {
+			UUID id = id(call(post("/faults").contentType(MediaType.APPLICATION_JSON).content(drawn), 201));
+			call(get("/faults/active"), 200);
+			call(post("/faults/{id}/restore", id), 200);
+		}
 
 		for (Fault fault : Fault.values()) {
 			UUID id = id(call(activate(fault), 201));

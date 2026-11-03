@@ -16,6 +16,7 @@ import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import dev.kintsugi.lab.fault.catalog.Fault;
+import dev.kintsugi.lab.fault.catalog.ParameterRefusedException;
 import dev.kintsugi.lab.fault.control.LabControl;
 import dev.kintsugi.lab.fault.domain.Injection;
 import dev.kintsugi.lab.fault.domain.InjectionEventType;
@@ -56,18 +57,27 @@ public class FaultInjectionService {
 		this.json = json;
 	}
 
+	/** {@link #activate(String, Map)} with the catalog parameters. */
+	public Injection activate(String faultId) {
+		return activate(faultId, Map.of());
+	}
+
 	/**
 	 * Records the truth and an {@code ACTIVATION_STARTED} event in one transaction, then activates the lab and records
-	 * {@code ACTIVATED}. A failed activation is compensated by a restore and recorded.
+	 * {@code ACTIVATED}. A failed activation is compensated by a restore and recorded. The truth row holds the
+	 * parameters actually applied and their root-cause sentence.
+	 * @param requested declared parameters the caller chose, by name; empty for the catalog parameters
 	 * @throws UnknownFaultException {@code faultId} is not in the catalog
+	 * @throws ParameterRefusedException a requested parameter is not declared, or its value is not; nothing is written
 	 * @throws FaultAlreadyActiveException another injection is blocking (also on a concurrent insert)
 	 * @throws TruthUnavailableException the truth could not be written; the lab was not touched
 	 * @throws ActivationFailedException an activation step failed; the injection is {@code FAILED}, or
 	 * {@code RESTORE_PENDING} when the compensating restore failed too
 	 */
-	public Injection activate(String faultId) {
+	public Injection activate(String faultId, Map<String, ?> requested) {
 		Fault fault = Fault.byId(faultId).orElseThrow(UnknownFaultException::new);
-		Injection injection = Injection.start(fault, json.writeValueAsString(fault.parameters()), now());
+		Map<String, Object> applied = fault.applied(requested);
+		Injection injection = Injection.start(fault, fault.rootCause(applied), json.writeValueAsString(applied), now());
 		try {
 			transaction.executeWithoutResult(status -> {
 				injections.insert(injection);
@@ -83,7 +93,7 @@ public class FaultInjectionService {
 		}
 
 		try {
-			lab.activate(fault);
+			lab.activate(fault, applied);
 		}
 		catch (RuntimeException activationFailure) {
 			compensate(injection, fault, activationFailure);

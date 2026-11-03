@@ -78,13 +78,13 @@ class DockerLabControlConfigurationTest {
 				Map.of(LabMechanism.GATEWAY_BEHAVIOR, recording("gateway", calls), LabMechanism.COMPOSE_RECREATE,
 						recording("compose", calls)));
 
-		routing.activate(Fault.F1);
+		routing.activate(Fault.F1, Map.of("latencyMs", 2_000));
 		routing.restore(Fault.F2);
 		routing.activate(Fault.F3);
 		routing.restore(Fault.F4);
 
-		assertThat(calls).containsExactly("gateway activate F1", "gateway restore F2", "compose activate F3",
-				"compose restore F4");
+		assertThat(calls).containsExactly("gateway activate F1 {latencyMs=2000}", "gateway restore F2",
+				"compose activate F3 " + Fault.F3.parameters(), "compose restore F4");
 	}
 
 	@Test
@@ -97,8 +97,8 @@ class DockerLabControlConfigurationTest {
 		return new LabControl() {
 
 			@Override
-			public void activate(Fault fault) {
-				calls.add(name + " activate " + fault.id());
+			public void activate(Fault fault, Map<String, Object> parameters) {
+				calls.add(name + " activate " + fault.id() + " " + parameters);
 			}
 
 			@Override

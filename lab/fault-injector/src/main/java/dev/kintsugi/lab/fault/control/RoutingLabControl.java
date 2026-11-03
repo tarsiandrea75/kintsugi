@@ -25,8 +25,8 @@ public class RoutingLabControl implements LabControl {
 	}
 
 	@Override
-	public void activate(Fault fault) {
-		controls.get(fault.mechanism()).activate(fault);
+	public void activate(Fault fault, Map<String, Object> parameters) {
+		controls.get(fault.mechanism()).activate(fault, parameters);
 	}
 
 	@Override

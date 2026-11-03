@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -78,6 +79,69 @@ class FaultApiIntegrationTest {
 		assertThat(row(injectionId, "parameters ->> 'latencyMs'")).isEqualTo("10000");
 		assertThat(row(injectionId, "status")).isEqualTo("ACTIVE");
 		assertThat(events(injectionId)).containsExactly("ACTIVATION_STARTED", "ACTIVATED");
+	}
+
+	@Test
+	void withoutParametersF1AndF2ApplyTodaysValues() throws Exception {
+		UUID f1 = idOf(activate("F1"));
+		mvc.perform(post("/faults/{id}/restore", f1)).andExpect(status().isOk());
+		UUID f2 = idOf(mvc.perform(post("/faults").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"fault\": \"F2\", \"parameters\": {}}")));
+
+		assertThat(lab.activatedParameters()).containsExactly(Map.of("latencyMs", 10_000),
+				Map.of("latencyMs", 0, "errorStatus", 429));
+		assertThat(row(f1, "parameters")).isEqualTo("{\"latencyMs\": 10000}");
+		assertThat(row(f2, "parameters ->> 'errorStatus'")).isEqualTo("429");
+		assertThat(row(f2, "root_cause")).contains("with 429 (rate limited)");
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 2_000, 5_000, 10_000, 20_000 })
+	void eachDeclaredF1LatencyIsAppliedAndRecorded(int latencyMs) throws Exception {
+		UUID id = idOf(activate("F1", "{\"gatewayLatencyMs\": " + latencyMs + "}"));
+
+		assertThat(lab.activatedParameters()).containsExactly(Map.of("latencyMs", latencyMs));
+		assertThat(row(id, "parameters")).isEqualTo("{\"latencyMs\": " + latencyMs + "}");
+		assertThat(row(id, "root_cause")).contains("after " + latencyMs / 1000 + " s,");
+		assertThat(row(id, "root_cause_category")).isEqualTo("DEPENDENCY_LATENCY");
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 429, 500, 503 })
+	void eachDeclaredF2StatusIsAppliedAndRecorded(int status) throws Exception {
+		UUID id = idOf(activate("F2", "{\"gatewayErrorStatus\": " + status + "}"));
+
+		assertThat(lab.activatedParameters()).containsExactly(Map.of("latencyMs", 0, "errorStatus", status));
+		assertThat(row(id, "parameters ->> 'errorStatus'")).isEqualTo(Integer.toString(status));
+		assertThat(row(id, "parameters ->> 'latencyMs'")).isEqualTo("0");
+		assertThat(row(id, "root_cause")).contains("with " + status + " (");
+		assertThat(row(id, "root_cause_category")).isEqualTo("DEPENDENCY_REJECTING");
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "F1|{\"gatewayLatencyMs\": 3000}|value",
+			"F1|{\"gatewayLatencyMs\": \"5000\"}|value", "F1|{\"gatewayLatencyMs\": 5000.5}|value",
+			"F1|{\"gatewayLatencyMs\": null}|value", "F2|{\"gatewayErrorStatus\": 502}|value",
+			"F1|{\"gatewayErrorStatus\": 500}|parameter", "F1|{\"latencyMs\": 5000}|parameter",
+			"F2|{\"color\": 1}|parameter", "F3|{\"gatewayLatencyMs\": 5000}|parameter",
+			"F4|{\"gatewayErrorStatus\": 503}|parameter" })
+	void aParameterOutsideTheDeclaredOnesIsRefusedWithoutTouchingAnything(String testCase) throws Exception {
+		String[] parts = testCase.split("\\|");
+		String reason = parts[2].equals("value") ? FaultErrorHandler.UNDECLARED_VALUE
+				: FaultErrorHandler.UNDECLARED_PARAMETER;
+
+		activate(parts[0], parts[1]).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value(reason));
+
+		assertThat(lab.calls()).isEmpty();
+		assertThat(injectionCount()).isZero();
+	}
+
+	@Test
+	void parametersThatAreNotAnObjectAreRefused() throws Exception {
+		activate("F1", "[5000]").andExpect(status().isBadRequest());
+
+		assertThat(lab.calls()).isEmpty();
+		assertThat(injectionCount()).isZero();
 	}
 
 	@ParameterizedTest
@@ -268,6 +332,11 @@ class FaultApiIntegrationTest {
 
 	private ResultActions activate(String fault) throws Exception {
 		return mvc.perform(post("/faults").contentType(MediaType.APPLICATION_JSON).content("{\"fault\": \"" + fault + "\"}"));
+	}
+
+	private ResultActions activate(String fault, String parameters) throws Exception {
+		return mvc.perform(post("/faults").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"fault\": \"" + fault + "\", \"parameters\": " + parameters + "}"));
 	}
 
 	private static UUID idOf(ResultActions created) throws Exception {

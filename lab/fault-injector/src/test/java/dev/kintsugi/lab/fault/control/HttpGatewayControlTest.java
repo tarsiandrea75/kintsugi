@@ -14,11 +14,14 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -77,6 +80,24 @@ class HttpGatewayControlTest {
 
 		JsonNode body = JSON.readTree(received.get(0).body());
 		assertThat(body).isEqualTo(JSON.readTree("{\"latencyMs\":0,\"errorStatus\":429}"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 2_000, 5_000, 10_000, 20_000 })
+	void f1PutsEachDeclaredLatencyItIsGiven(int latencyMs) {
+		control.activate(Fault.F1, Fault.F1.applied(Map.of("gatewayLatencyMs", latencyMs)));
+
+		assertThat(JSON.readTree(received.get(0).body()))
+			.isEqualTo(JSON.readTree("{\"latencyMs\":" + latencyMs + "}"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = { 429, 500, 503 })
+	void f2PutsEachDeclaredErrorStatusItIsGiven(int status) {
+		control.activate(Fault.F2, Fault.F2.applied(Map.of("gatewayErrorStatus", status)));
+
+		assertThat(JSON.readTree(received.get(0).body()))
+			.isEqualTo(JSON.readTree("{\"latencyMs\":0,\"errorStatus\":" + status + "}"));
 	}
 
 	@Test

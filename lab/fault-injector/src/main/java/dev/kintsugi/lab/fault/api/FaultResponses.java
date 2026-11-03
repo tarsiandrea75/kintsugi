@@ -1,6 +1,7 @@
 package dev.kintsugi.lab.fault.api;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -20,8 +21,17 @@ final class FaultResponses {
 	record CatalogEntry(String fault) {
 	}
 
-	/** Body of {@code POST /faults}. */
-	record ActivateRequest(String fault) {
+	/**
+	 * Body of {@code POST /faults}: a catalog id and, optionally, declared parameters by name, for example
+	 * {@code {"fault": "F1", "parameters": {"gatewayLatencyMs": 5000}}}.
+	 */
+	record ActivateRequest(String fault, Map<String, Object> parameters) {
+
+		/** The requested parameters; none when the field is absent or {@code null}. */
+		Map<String, Object> requestedParameters() {
+			return parameters == null ? Map.of() : parameters;
+		}
+
 	}
 
 	/** 201 of {@code POST /faults}. */

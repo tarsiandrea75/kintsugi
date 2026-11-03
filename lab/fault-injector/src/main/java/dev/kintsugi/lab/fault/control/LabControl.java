@@ -1,5 +1,7 @@
 package dev.kintsugi.lab.fault.control;
 
+import java.util.Map;
+
 import dev.kintsugi.lab.fault.catalog.Fault;
 
 /**
@@ -10,8 +12,16 @@ import dev.kintsugi.lab.fault.catalog.Fault;
  */
 public interface LabControl {
 
-	/** Applies the activation steps of {@code fault}. */
-	void activate(Fault fault);
+	/**
+	 * Applies the activation steps of {@code fault} with {@code parameters}, which {@link Fault#applied} returned: the
+	 * catalog parameters with any declared value the caller chose.
+	 */
+	void activate(Fault fault, Map<String, Object> parameters);
+
+	/** Applies the activation steps of {@code fault} with its catalog parameters. */
+	default void activate(Fault fault) {
+		activate(fault, fault.parameters());
+	}
 
 	/** Applies the restore steps of {@code fault}. Must be safe to repeat. */
 	void restore(Fault fault);

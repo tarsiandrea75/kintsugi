@@ -93,8 +93,8 @@ public class ComposeRecreateControl implements LabControl {
 	}
 
 	@Override
-	public void activate(Fault fault) {
-		run(fault, "activate", composeVariables(fault));
+	public void activate(Fault fault, Map<String, Object> parameters) {
+		run(fault, "activate", composeVariables(parameters));
 	}
 
 	@Override
@@ -150,10 +150,10 @@ public class ComposeRecreateControl implements LabControl {
 				"--no-build", "--wait", "--wait-timeout", Long.toString(waitTimeout.toSeconds()), service);
 	}
 
-	/** The fault's catalog parameters, which for a recreate are compose variables (ADR-009, naming table). */
-	private static Map<String, String> composeVariables(Fault fault) {
+	/** The applied parameters, which for a recreate are compose variables (ADR-009, naming table). */
+	private static Map<String, String> composeVariables(Map<String, Object> parameters) {
 		Map<String, String> variables = new LinkedHashMap<>();
-		fault.parameters().forEach((name, value) -> variables.put(name, String.valueOf(value)));
+		parameters.forEach((name, value) -> variables.put(name, String.valueOf(value)));
 		return variables;
 	}
 
