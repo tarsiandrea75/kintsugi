@@ -59,6 +59,10 @@ Forecast: about 300 authored lines. Branch `feat/policy-gate`. Nothing is pushed
   - Found on the way: five older results (before `candidate_recall`) do not regenerate `scores.tsv` byte for byte, which was already so; their `report.txt` and `paired.tsv` do.
 - 2026-11-03: T4 done on `bd334e1`: rules v1 and v2 on RE2-OB dev (`replay-20261103T232445Z-rules`, `-232449Z-`), lab dev (`-232453Z-`, `-232457Z-`) and lab holdout (`-232501Z-`, `-232506Z-`) equal the earlier runs in every column but `seconds`, `ranked` and the two new ones; all 120 samples record `riskyExecuted` 0 and `policyRefused` 0.
 
+- 2026-11-03: native review of `319f860..cb48362`: one reliability lens, **approved** and acknowledged (lineage `review-d5fddf11cf291922`). WARNINGs: the counts read a live tally while an abandoned gathering may still run, so they depended on when the run ended; the timeout path untested. SUGGESTIONs: possibly vacuous `lab.calls()` assertions; a malformed `policy.tsv` or count ended in a traceback.
+- 2026-11-03: fixed by a delegated writer. `f477400`: the loop counts from a snapshot of the tally taken when it stops waiting for the gathering, however the wait ends; a latch-driven test shows an abandoned gathering's late calls and refusal are not counted; RED `[0, 1]` where `[0, 0]` was expected. The `lab.calls()` premise was false (that fake stores bare names); the assertions were shown to fail with the gate off. `9e440fa`: a malformed count or `policy.tsv` exits with one line; `parse_count` checks ASCII digits, so an empty value is now malformed, not unknown. GREEN 729 and 381.
+  - Caveat: the timeout test detects the gathering's end by the pool thread's stack (`getTask`), a JDK method name.
+
 ## Next step
 
 The feature is complete. `docs/benchmark-limits.md`: the zero is now the gate's, not structural.
