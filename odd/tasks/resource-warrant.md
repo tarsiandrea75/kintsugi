@@ -74,6 +74,8 @@ Forecast: about 60 authored lines for T3, about 150 for the plan and results. Br
   - DW − 0: +70 points, p = 9.5e-07, not a criterion.
   - **Limits:** one run, and the sentence was written after a diagnosis of these same 30 cases, so dev cannot say how much is fitted. The holdout read in M4 can.
 
+- 2026-11-03: **the human kept the sentence**, not as a measured gain: the plan's rule is half met. The caveat travels with it: 13 of DW's 16 right resource answers are cases 0R also solves, so part of D's gain over 0R on the holdout may be R-RES read aloud; the benchmark must say so when it reports H1. The sentence also reaches A and the hybrid, which have no run with it yet.
+
 ## Next step
 
-The plan leaves the decision to the human: keep the sentence, revert it, or neither yet. No further change to D on these 30 cases without its own plan.
+The feature is complete. Decided: the sentence stays. The plan had left the decision to the human: keep the sentence, revert it, or neither yet. No further change to D on these 30 cases without its own plan.
