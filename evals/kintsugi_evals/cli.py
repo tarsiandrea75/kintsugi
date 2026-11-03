@@ -2,7 +2,8 @@
 
 Prints the report and, with --out, writes report.txt, scores.tsv, paired.tsv, inputs.tsv and a
 copy of every input summary.tsv, so the result regenerates from committed files alone. With --topology it adds
-AC@3, AC@5, Avg@5 and their chance levels to the report, and writes ranked.tsv.
+AC@3, AC@5, Avg@5 and their chance levels to the report, and writes ranked.tsv. When an input records the policy's
+counts (ADR-027), it adds one policy line per config and writes policy.tsv; without them the output is unchanged.
 
 `python -m kintsugi_evals convert-rcaeval` turns RCAEval RE2 cases into replay recordings (ADR-020).
 
@@ -27,6 +28,7 @@ from .scoring import (
     read_service_count,
     read_summary,
     summarize,
+    summarize_policy,
     summarize_ranked,
     summary_path,
 )
@@ -124,8 +126,16 @@ def _chance_line(topology, services):
     return f"chance with {services} services ({topology}): {cuts}  Avg@5 {_pct2(chance_avg5(services))}"
 
 
+def _policy_line(totals):
+    def shown(value):
+        return "-" if value is None else value
+
+    return (f"{totals.config}  {'policy':<7}  riskyExecuted {shown(totals.risky_executed)}  "
+            f"policyRefused {shown(totals.policy_refused)}  known for {totals.known}/{totals.rows} rows")
+
+
 def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False, ranked=None, topology=None,
-            services=None):
+            services=None, policy=None):
     lines = []
     for i, ((label, source, rows), score) in enumerate(zip(inputs, scores)):
         first = rows[0]
@@ -149,6 +159,8 @@ def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False,
             low, high = h.ci
             lines.append(f"{score.config}  healthy {h.false_alarms:>2}/{h.n:<2}  false alarms {_pct(h.false_alarm_rate)}"
                          f"  [{_pct(low)}, {_pct(high)}]")
+        if policy:
+            lines.append(_policy_line(policy[i]))
         if ranked:
             mine = ranked[i]
             lines += [_ranked_line(mine.config, r) for r in mine.faults + ([mine.pooled] if mine.pooled else [])]
@@ -212,6 +224,13 @@ def _write(out, inputs, scores, pairs, holm_p, report):
     _write_tsv(out / "inputs.tsv", ["label", "source", "sha256", "rows"], provenance)
 
 
+def _write_policy(out, policy):
+    """policy.tsv: each config's policy totals (ADR-027), apart from scores.tsv so that its bytes stay as they were."""
+    _write_tsv(out / "policy.tsv", ["config", "rows", "known", "risky_executed", "policy_refused", "holdout_rows"],
+               [[t.config, t.rows, t.known, "" if t.risky_executed is None else t.risky_executed,
+                 "" if t.policy_refused is None else t.policy_refused, t.holdout] for t in policy])
+
+
 def _write_ranked(out, ranked, services):
     """ranked.tsv: every count behind the report's ranked lines, and chance on each row so the file reads alone."""
     chance = [services, *(f"{chance_ac(k, services):.4f}" for k in RANKED_CUTS), f"{chance_avg5(services):.4f}"]
@@ -270,18 +289,23 @@ def _score(args):
     for i, adjusted in zip(tested, holm([pairs[i].mcnemar_p for i in tested])):
         holm_p[i] = adjusted
     ranked = [summarize_ranked(rows)[0] for _, _, rows in inputs] if args.topology is not None else None
+    # The policy's totals only when some input records them, so a result from before the columns is unchanged.
+    policy = [summarize_policy(rows)[0] for _, _, rows in inputs]
+    policy = policy if any(t.known for t in policy) else None
     report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations, args.service_only, ranked,
-                     args.topology, services)
+                     args.topology, services, policy)
     sys.stdout.write(report)
     if args.out:
         _write(Path(args.out), inputs, scores, pairs, holm_p, report)
         if ranked:
             _write_ranked(Path(args.out), ranked, services)
+        if policy:
+            _write_policy(Path(args.out), policy)
     return 0
 
 
 def benchmark(args):
-    from .benchmark import FILES, render
+    from .benchmark import FILES, OPTIONAL, BenchmarkError, render
 
     results = []
     for directory in args.dirs:
@@ -292,9 +316,18 @@ def benchmark(args):
                 print(f"benchmark: {path} not found", file=sys.stderr)
                 return 2
             files[name] = path.read_text(encoding="utf-8")
+        for name in OPTIONAL:
+            path = Path(directory) / name
+            if path.is_file():
+                files[name] = path.read_text(encoding="utf-8")
         results.append((directory, files))
+    try:
+        text = render(args.out, results)
+    except BenchmarkError as error:
+        print(f"benchmark: {error}", file=sys.stderr)
+        return 2
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.out).write_text(render(args.out, results), encoding="utf-8", newline="\n")
+    Path(args.out).write_text(text, encoding="utf-8", newline="\n")
     return 0
 
 

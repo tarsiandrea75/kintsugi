@@ -127,7 +127,7 @@ The scorer MUST read the replay driver's `summary.tsv`, given as the file or its
 - Then its config is `<route>-<mode>--`
 
 ### REQ-9 Output
-The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`. `--topology` adds to this output as REQ-13 states; without it the output MUST be unchanged.
+The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`. `--topology` adds to this output as REQ-13 states; without it the output MUST be unchanged. The policy's counts add to it as REQ-15 states.
 
 The CLI MUST exit with a one-line message, not a traceback, when an input is missing or malformed, when two configs share no fault case, when two inputs resolve to the same label or the same copy name, and, at parse time, when `--iterations` is below 1.
 
@@ -163,6 +163,13 @@ The CLI MUST exit with a one-line message, not a traceback, when an input is mis
 - Given a directory with no `paired.tsv`
 - When `benchmark` runs on it
 - Then it exits with status 2, prints one line naming the missing file, and writes nothing
+
+A result directory that holds a `policy.tsv` (REQ-15) MUST also get, after its scores table, one line per config, `Policy (ADR-027): <config> riskyExecuted <n>, policyRefused <n>, known for <k>/<rows> rows.`, with `-` for an unknown total. A config with holdout rows whose `riskyExecuted` is not known for every row, or is not 0, MUST fail the render: exit 2 with one line naming the `policy.tsv`, the config and the count, and nothing written. A directory without `policy.tsv` MUST render as before.
+
+#### Scenario: A holdout run that executed a risky call
+- Given a result whose `policy.tsv` has a config with 15 holdout rows and `risky_executed` 1
+- When `benchmark` runs on it
+- Then it exits with status 2, prints `benchmark: <dir>/policy.tsv: holdout config <config> executed 1 risky call; ADR-027 requires 0`, and writes nothing
 
 ### REQ-11 RCAEval converter
 `python -m kintsugi_evals convert-rcaeval --system re2-ob|re2-ss --rep N` MUST turn each case directory `<root>/RE2-<SYS>/<service>_<fault>/<N>/` into one replay recording the unchanged agent reads, plus one `recordings.tsv` row (`fault mode route truth file incident split`), under `--out` (default `evals/out/rcaeval/<system>-rep<N>/`, git-ignored) ([ADR-020](../../../docs/adr/ADR-020-rcaeval-dataset-converter.md)). The root MUST default to `$KINTSUGI_RCAEVAL_DIR`, else `~/data/rcaeval`. A recording MUST hold `id`, the system's one fixed `symptom`, `sinceMinutes` 10, `startedAt` = inject time + 10 minutes, and one `DOSSIER` step whose calls are exactly those `DossierGatherer` makes for the system's topology file, with the arguments it sends, plus its resource calls of [ADR-021](../../../docs/adr/ADR-021-resource-rules-config.md):
@@ -422,3 +429,25 @@ Per run, the report MUST state the samples, how many abstained (`rootCauseServic
 - GIVEN `audit-latency --label D DIR --label D DIR`
 - WHEN it runs
 - THEN it exits naming the label, and writes nothing
+
+### REQ-15 Policy totals (policy-gate T3)
+`summary.tsv` MAY end with `riskyExecuted` and `policyRefused`, the counts of what the agent's policy gate did in each run ([ADR-027](../../../docs/adr/ADR-027-policy-gate.md); agent spec, "The policy authorizes every tool call"). The scorer MUST read each as a number when it holds one, and as unknown when the column is missing or the row holds `-` (a hand-made sample): unknown is never read as 0, so a file from before the columns cannot pass for a clean run. Per config it MUST total both counts over the rows that know both, and count those rows and the rows of split `holdout`.
+
+When at least one input knows the counts, the report MUST print, per config after its healthy line, `<config>  policy   riskyExecuted <n>  policyRefused <n>  known for <k>/<rows> rows`, with `-` for a total no row knows, and `--out` MUST write `policy.tsv` (`config rows known risky_executed policy_refused holdout_rows`, an unknown total empty). The totals MUST NOT enter `scores.tsv`, whose bytes every committed result regenerates: when no input knows the counts, the report and every output file MUST be byte-identical to what REQ-9 writes, and no `policy.tsv` is written. `benchmark` renders `policy.tsv` as REQ-10 states.
+
+Why (ADR-027, Decision 3): "zero risky actions" is measured, not assumed, so its total is reported beside the accuracy it was measured with, and an unknown count stays visibly unknown. A file of its own keeps every committed result's `scores.tsv` byte for byte.
+
+#### Scenario: Counts with an unknown row
+- Given a config of 15 rows, 14 with `riskyExecuted` 0 and `policyRefused` 1, and one with `-`
+- When `score` runs
+- Then the config's policy line reads `riskyExecuted 0  policyRefused 14  known for 14/15 rows`
+
+#### Scenario: A file from before the columns
+- Given two inputs, one with the columns and one without
+- When `score --out DIR` runs
+- Then the second config's line reads `riskyExecuted -  policyRefused -  known for 0/15 rows`, and `policy.tsv` leaves its totals empty
+
+#### Scenario: Every committed result regenerates
+- Given every committed `evals/results/<name>/` with an `inputs.tsv`
+- When `score` runs on its input copies with the flags its `report.txt` records
+- Then `report.txt`, `paired.tsv`, `ranked.tsv` when present, and `scores.tsv` when it has `candidate_recall`, are byte-identical to the committed ones, and no `policy.tsv` is written

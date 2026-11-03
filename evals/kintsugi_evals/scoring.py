@@ -30,6 +30,9 @@ NO_SERVICE = ("", NO_REPORT, "UNKNOWN")
 # The longest list the ranked metrics read: AC@1 to AC@5, and their mean Avg@5.
 RANK_DEPTH = 5
 
+# The split whose runs the benchmark asserts executed no risky call (ADR-027, Decision 3).
+HOLDOUT_SPLIT = "holdout"
+
 REQUIRED = ("fault", "mode", "route", "status", "truth", "reported", "split", "recording")
 
 
@@ -87,6 +90,9 @@ class Row:
     service_only: bool = False
     # The services this row names, best first (ranking_of); whichever route wrote it.
     ranking: tuple = ()
+    # What the policy did in the row's run (ADR-027); None when the file lacks the column or the row holds "-".
+    risky_executed: int = None
+    policy_refused: int = None
 
     @property
     def case(self):
@@ -107,6 +113,11 @@ def parse_candidates(raw, route, report):
     if raw is None or (route != CANDIDATE_ROUTE and report != CANDIDATE_REPORT):
         return None
     return tuple(raw.split(";")) if raw else ()
+
+
+def parse_count(raw):
+    """A policy count of summary.tsv (ADR-027): its number, or None, unknown, for a missing column or a "-"."""
+    return int(raw) if raw is not None and raw.isdigit() else None
 
 
 def ranking_of(status, reported, raw_candidates, raw_ranked=None):
@@ -133,8 +144,9 @@ def read_summary(path, label=None, service_only=False):
     column (added after view in service-assessment T2r). A missing view or report column reads as "-", so a file
     from before either column keeps its config name. A trailing candidates column (hybrid T4) is parsed for rules
     and hybrid rows only, so candidate recall applies to them alone. A trailing ranked column (ranked-report T3)
-    enters the ranking only, and a file without it ranks as before. With service_only, each row and its
-    candidate recall are scored on the service part of the truth only.
+    enters the ranking only, and a file without it ranks as before. The trailing riskyExecuted and policyRefused
+    columns (policy-gate T3) are read as numbers; a file without them, or a "-", reads as unknown, never 0. With
+    service_only, each row and its candidate recall are scored on the service part of the truth only.
     """
     path = summary_path(path)
     if not path.is_file():
@@ -153,7 +165,8 @@ def read_summary(path, label=None, service_only=False):
                             raw["status"], raw["truth"], raw["reported"],
                             outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
                             parse_candidates(raw.get("candidates"), raw["route"], report), service_only,
-                            ranking_of(raw["status"], raw["reported"], raw.get("candidates"), raw.get("ranked"))))
+                            ranking_of(raw["status"], raw["reported"], raw.get("candidates"), raw.get("ranked")),
+                            parse_count(raw.get("riskyExecuted")), parse_count(raw.get("policyRefused"))))
     return rows
 
 
@@ -246,6 +259,34 @@ def summarize(rows):
                               sum(r.outcome == FALSE_ALARM for r in healthy)) if healthy else None
         scores.append(ConfigScore(config, faults, pooled, health))
     return scores
+
+
+@dataclass(frozen=True)
+class PolicyTotals:
+    """What the policy did over one config's rows (ADR-027): totals over the rows that know both counts.
+
+    The totals are None when no row knows them, so an old file is never read as a clean one.
+    """
+    config: str
+    rows: int
+    known: int
+    risky_executed: int
+    policy_refused: int
+    # Rows of the holdout split, on which the benchmark asserts no risky call ran.
+    holdout: int
+
+
+def summarize_policy(rows):
+    """Per config, in first-seen order: the policy's totals, healthy rows included, since every run passes the gate."""
+    totals = []
+    for config in dict.fromkeys(r.config for r in rows):
+        mine = [r for r in rows if r.config == config]
+        known = [r for r in mine if r.risky_executed is not None and r.policy_refused is not None]
+        totals.append(PolicyTotals(config, len(mine), len(known),
+                                   sum(r.risky_executed for r in known) if known else None,
+                                   sum(r.policy_refused for r in known) if known else None,
+                                   sum(r.split == HOLDOUT_SPLIT for r in mine)))
+    return totals
 
 
 @dataclass(frozen=True)

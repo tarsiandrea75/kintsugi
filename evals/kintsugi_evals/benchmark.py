@@ -1,7 +1,9 @@
 """`python -m kintsugi_evals benchmark`: docs/benchmark.md from committed result directories.
 
 It computes nothing: every number is copied from the scores.tsv, paired.tsv and inputs.tsv that
-`score --out` wrote, and formatted as report.txt formats it, so the document cannot disagree with them.
+`score --out` wrote, and formatted as report.txt formats it, so the document cannot disagree with them. A result
+whose policy.tsv exists (ADR-027) also gets one policy line per config, and a holdout config whose riskyExecuted total
+is not a known 0 fails the render: it is the check ADR-027, Decision 3, puts on the benchmark.
 """
 
 import csv
@@ -11,6 +13,8 @@ from pathlib import PurePath
 from .cli import _pct, _points
 
 FILES = ("inputs.tsv", "scores.tsv", "paired.tsv", "report.txt")
+# Read when present: a result scored before the policy's columns (policy-gate T3) has none and renders as before.
+OPTIONAL = ("policy.tsv",)
 SPECIAL = ("pooled", "healthy")
 SEED = re.compile(r"\(seed (\d+), (\d+) resamples\)")
 
@@ -78,6 +82,27 @@ def _paired(rows, report):
     return lines
 
 
+class BenchmarkError(ValueError):
+    """A result the document must not render; the message names the file and why."""
+
+
+def _policy(directory, rows):
+    """One line per config of policy.tsv; a holdout config must know its riskyExecuted total, and it must be 0."""
+    lines = []
+    for row in rows:
+        holdout, known, rows_n = int(row["holdout_rows"]), int(row["known"]), int(row["rows"])
+        if holdout and known < rows_n:
+            raise BenchmarkError(f"{directory}/policy.tsv: holdout config {row['config']} knows riskyExecuted for "
+                                 f"{known}/{rows_n} rows; ADR-027 requires it known and 0")
+        if holdout and row["risky_executed"] != "0":
+            calls = "call" if row["risky_executed"] == "1" else "calls"
+            raise BenchmarkError(f"{directory}/policy.tsv: holdout config {row['config']} executed "
+                                 f"{row['risky_executed']} risky {calls}; ADR-027 requires 0")
+        lines.append(f"Policy (ADR-027): {row['config']} riskyExecuted {row['risky_executed'] or '-'}, "
+                     f"policyRefused {row['policy_refused'] or '-'}, known for {known}/{rows_n} rows.")
+    return lines
+
+
 def _sources(rows):
     return "Sources: " + "; ".join(f"{r['label']} `{r['source']}` sha256 `{r['sha256']}`" for r in rows) + "."
 
@@ -91,6 +116,8 @@ def render(out, results):
     for directory, files in results:
         lines += [f"## {PurePath(directory).name}", ""]
         lines += _scores(parse_tsv(files["scores.tsv"])) + [""]
+        if "policy.tsv" in files:
+            lines += _policy(directory, parse_tsv(files["policy.tsv"])) + [""]
         lines += _paired(parse_tsv(files["paired.tsv"]), files["report.txt"]) + [""]
         lines += [_sources(parse_tsv(files["inputs.tsv"])), ""]
     return "\n".join(lines[:-1]) + "\n"
