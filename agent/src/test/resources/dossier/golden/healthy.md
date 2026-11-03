@@ -66,18 +66,18 @@ D20 | no rows | - | - | - | - | - | - | - | 0 | 0 |
 
 ## Latency (server side)
 
-D21 Seconds per request by service and uri, from query_metric latency_avg: one call per service over both windows, its points split at the incident window's start. "mean" and "max" are of the points with a value; "points" counts those with a value and all points in the window. A point has no value when no request ended in its rate window.
+D21 Seconds per request by service and uri, from query_metric latency_avg: one call per service over both windows, its points split at the incident window's start. "mean" and "max" are of the points with a value; "points" counts those with a value and all points in the window. A point has no value when no request ended in its rate window. In each cell the arrow goes from the previous window to the incident window.
 
-| service | uri | previous mean | incident mean | previous max | incident max | previous points | incident points |
-|---|---|---|---|---|---|---|---|
-D22 | order-service | /orders | 0.080 | 0.080 | 0.083 | 0.083 | 10/10 | 11/11 |
-D23 | order-service | /actuator/prometheus | 0.004 | 0.004 | 0.004 | 0.004 | 10/10 | 11/11 |
-D24 | payment-service | /payments | 0.046 | 0.045 | 0.047 | 0.046 | 10/10 | 11/11 |
-D25 | payment-service | /actuator/prometheus | 0.003 | 0.003 | 0.003 | 0.003 | 10/10 | 11/11 |
-D26 | inventory-service | /reservations | 0.021 | 0.021 | 0.021 | 0.022 | 10/10 | 11/11 |
-D27 | inventory-service | /actuator/prometheus | 0.003 | 0.003 | 0.004 | 0.004 | 10/10 | 11/11 |
-D28 | gateway-mock | /authorize | 0.011 | 0.012 | 0.012 | 0.013 | 10/10 | 11/11 |
-D29 | gateway-mock | /actuator/prometheus | 0.002 | 0.002 | 0.002 | 0.002 | 10/10 | 11/11 |
+| service | uri | mean, previous → incident | max, previous → incident | points, previous → incident |
+|---|---|---|---|---|
+D22 | order-service | /orders | 0.080 → 0.080 | 0.083 → 0.083 | 10/10 → 11/11 |
+D23 | order-service | /actuator/prometheus | 0.004 → 0.004 | 0.004 → 0.004 | 10/10 → 11/11 |
+D24 | payment-service | /payments | 0.046 → 0.045 | 0.047 → 0.046 | 10/10 → 11/11 |
+D25 | payment-service | /actuator/prometheus | 0.003 → 0.003 | 0.003 → 0.003 | 10/10 → 11/11 |
+D26 | inventory-service | /reservations | 0.021 → 0.021 | 0.021 → 0.022 | 10/10 → 11/11 |
+D27 | inventory-service | /actuator/prometheus | 0.003 → 0.003 | 0.004 → 0.004 | 10/10 → 11/11 |
+D28 | gateway-mock | /authorize | 0.011 → 0.012 | 0.012 → 0.013 | 10/10 → 11/11 |
+D29 | gateway-mock | /actuator/prometheus | 0.002 → 0.002 | 0.002 → 0.002 | 10/10 → 11/11 |
 
 ## Resources
 

@@ -100,6 +100,9 @@ public final class DossierRenderer {
 
 	static final String NO_VALUE = "-";
 
+	/** Between a latency cell's two values, from the previous window to the incident window. */
+	static final String ARROW = "→";
+
 	/** The header's line on the text copied from the lab, the same in the tables and the sheets. */
 	static final String UNTRUSTED_TEXT_LINE = "- Text copied from the lab is quoted as untrustedText=\"...\".";
 
@@ -293,8 +296,9 @@ public final class DossierRenderer {
 
 	/**
 	 * One row per service and uri, a service's rows sorted by incident mean, then previous mean, largest first, then
-	 * by uri; every service keeps at least one row, {@code -} when its call failed and {@code no rows} when the tool
-	 * returned no series.
+	 * by uri; each cell pairs one quantity over both windows, previous first, so that a value is read next to its pair;
+	 * every service keeps at least one row, {@code -} when its call failed and {@code no rows} when the tool returned
+	 * no series.
 	 */
 	private static void latency(Out out, List<ServiceLatency> latency) {
 		out.section("## Latency (server side)");
@@ -307,7 +311,8 @@ public final class DossierRenderer {
 		out.line("Seconds per request by service and uri, from query_metric " + DossierGatherer.LATENCY_METRIC
 				+ ": one call per service over both windows, its points split at the incident window's start. \"mean\""
 				+ " and \"max\" are of the points with a value; \"points\" counts those with a value and all points in"
-				+ " the window. A point has no value when no request ended in its rate window.");
+				+ " the window. A point has no value when no request ended in its rate window. In each cell the arrow"
+				+ " goes from the previous window to the incident window.");
 		out.blank();
 		List<List<String>> rows = new ArrayList<>();
 		List<String> notes = new ArrayList<>();
@@ -315,16 +320,17 @@ public final class DossierRenderer {
 			String name = cell(service.service());
 			switch (service.latency()) {
 				case Gathered.Failed<LatencySeries> failed -> rows.add(List.of(name, NO_VALUE, NO_VALUE, NO_VALUE,
-						NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE));
+						NO_VALUE));
 				case Gathered.Ok<LatencySeries> ok -> {
 					List<UriLatency> uris = ok.value().uris().stream().sorted(URI_ORDER).toList();
 					if (uris.isEmpty()) {
-						rows.add(List.of(name, NO_ROWS, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE));
+						rows.add(List.of(name, NO_ROWS, NO_VALUE, NO_VALUE, NO_VALUE));
 					}
 					for (UriLatency uri : uris.subList(0, Math.min(LATENCY_ROWS, uris.size()))) {
-						rows.add(List.of(name, cell(uri.uri()), seconds(uri.previous().mean()),
-								seconds(uri.incident().mean()), seconds(uri.previous().max()),
-								seconds(uri.incident().max()), points(uri.previous()), points(uri.incident())));
+						rows.add(List.of(name, cell(uri.uri()),
+								pair(seconds(uri.previous().mean()), seconds(uri.incident().mean())),
+								pair(seconds(uri.previous().max()), seconds(uri.incident().max())),
+								pair(points(uri.previous()), points(uri.incident()))));
 					}
 					if (uris.size() > LATENCY_ROWS) {
 						notes.add("not shown for " + name + ": rows=" + (uris.size() - LATENCY_ROWS));
@@ -335,8 +341,8 @@ public final class DossierRenderer {
 				}
 			}
 		}
-		out.table(List.of("service", "uri", "previous mean", "incident mean", "previous max", "incident max",
-				"previous points", "incident points"), rows);
+		out.table(List.of("service", "uri", "mean, previous " + ARROW + " incident",
+				"max, previous " + ARROW + " incident", "points, previous " + ARROW + " incident"), rows);
 		if (!notes.isEmpty()) {
 			out.blank();
 			notes.forEach(out::line);
@@ -353,6 +359,11 @@ public final class DossierRenderer {
 	static String seconds(Double seconds) {
 		return seconds == null ? NO_VALUE
 				: BigDecimal.valueOf(seconds).setScale(LATENCY_DECIMALS, RoundingMode.HALF_UP).toPlainString();
+	}
+
+	/** One quantity over both windows, previous first: {@code 0.054 → 1.325}. */
+	static String pair(String previous, String incident) {
+		return previous + " " + ARROW + " " + incident;
 	}
 
 	static String points(LatencyPoints points) {

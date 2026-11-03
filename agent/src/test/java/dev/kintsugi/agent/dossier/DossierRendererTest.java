@@ -131,8 +131,8 @@ class DossierRendererTest {
 				"### order-service -> payment-service POST /payments",
 				"### payment-service -> gateway-mock POST /authorize", "### Other rows", "## Latency (server side)",
 				"## Resources", "### order-service", "### gateway-mock",
-				"| service | uri | previous mean | incident mean | previous max | incident max | previous points "
-						+ "| incident points |",
+				"| service | uri | mean, previous → incident | max, previous → incident "
+						+ "| points, previous → incident |",
 				"| order-service |",
 				"| payment-service |", "| inventory-service |", "| gateway-mock |", "- WARN:", "- ERROR:");
 	}
@@ -188,11 +188,34 @@ class DossierRendererTest {
 		String text = unnumbered(markdown);
 		String latency = text.substring(text.indexOf("## Latency (server side)"), text.indexOf("## Log signatures"));
 		assertThat(latency).contains(
-				"| payment-service | /payments | 0.045 | 8.917 | 0.045 | 10.033 | 10/10 | 9/11 |\n"
-						+ "| payment-service | /actuator/prometheus | 0.003 | 0.003 | 0.003 | 0.003 | 10/10 | 11/11 |\n",
-				"| gateway-mock | /authorize | 0.012 | 8.898 | 0.012 | 10.015 | 10/10 | 9/11 |\n",
-				"| order-service | /orders | 0.080 | 0.080 | 0.083 | 0.083 | 10/10 | 11/11 |\n");
+				"| payment-service | /payments | 0.045 → 8.917 | 0.045 → 10.033 | 10/10 → 9/11 |\n"
+						+ "| payment-service | /actuator/prometheus | 0.003 → 0.003 | 0.003 → 0.003 | 10/10 → 11/11 |\n",
+				"| gateway-mock | /authorize | 0.012 → 8.898 | 0.012 → 10.015 | 10/10 → 9/11 |\n",
+				"| order-service | /orders | 0.080 → 0.080 | 0.083 → 0.083 | 10/10 → 11/11 |\n");
 		assertThat(markdown.indexOf("## Latency")).isGreaterThan(markdown.indexOf("### Other rows"));
+	}
+
+	@Test
+	void aLatencyRowPairsEachQuantityPreviousThenIncident() {
+		// The row the model misread (odd/tasks/latency-pairs.md): each cell holds one quantity over both windows.
+		String markdown = DossierRenderer.render(withLatency(gather("healthy"), new UriLatency("/",
+				new LatencyPoints(29, 29, 0.054, 0.061), new LatencyPoints(29, 29, 1.325, 1.477))), LAB);
+
+		assertThat(markdown).contains("| service | uri | mean, previous → incident | max, previous → incident "
+				+ "| points, previous → incident |\n|---|---|---|---|---|\n");
+		assertThat(unnumbered(markdown)).contains("| frontend | / | 0.054 → 1.325 | 0.061 → 1.477 | 29/29 → 29/29 |\n");
+		assertThat(markdown).contains("the arrow goes from the previous window to the incident window");
+	}
+
+	@Test
+	void aMissingLatencyValueRendersAsADashOnItsSideOfTheArrow() {
+		String markdown = unnumbered(DossierRenderer.render(withLatency(gather("healthy"),
+				new UriLatency("/a", new LatencyPoints(11, 0, null, null), new LatencyPoints(11, 9, 0.231, 0.400)),
+				new UriLatency("/b", new LatencyPoints(10, 10, 0.012, 0.013), new LatencyPoints(11, 0, null, null))),
+				LAB));
+
+		assertThat(markdown).contains("| frontend | /a | - → 0.231 | - → 0.400 | 0/11 → 9/11 |\n",
+				"| frontend | /b | 0.012 → - | 0.013 → - | 10/10 → 0/11 |\n");
 	}
 
 	@Test
@@ -208,7 +231,7 @@ class DossierRendererTest {
 		assertThat(markdown).contains(
 				"query_metric failed for payment-service: outcome=INVALID_PARAMETER "
 						+ "reason=\"sinceMinutes must be 1 to 360\"\n",
-				"| payment-service | - | - | - | - | - | - | - |\n", "| gateway-mock | no rows | - | - | - | - | - | - |\n",
+				"| payment-service | - | - | - | - |\n", "| gateway-mock | no rows | - | - | - |\n",
 				"query_metric for gateway-mock: truncated=true\n");
 		assertThat(shape(markdown)).isEqualTo(shape(DossierRenderer.render(gather("f3"), LAB)));
 	}
@@ -353,6 +376,14 @@ class DossierRendererTest {
 	/** The rendered dossier with every line's {@code D<n> } number removed. */
 	static String unnumbered(String markdown) {
 		return NUMBER.matcher(markdown).replaceAll("");
+	}
+
+	/** {@code d} with its latency replaced by one service, {@code frontend}, answering on {@code uris}. */
+	static Dossier withLatency(Dossier d, UriLatency... uris) {
+		List<ServiceLatency> latency = List
+			.of(new ServiceLatency("frontend", new Gathered.Ok<>(new LatencySeries(false, List.of(uris)))));
+		return new Dossier(d.gatheredAt(), d.incidentWindow(), d.previousWindow(), d.services(), d.states(),
+				d.traffic(), latency, d.resources(), d.logs(), d.events(), d.calls());
 	}
 
 	static Dossier gather(String set) {
