@@ -16,7 +16,9 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-Latest (journal `docs/journal/2026-11-02-02.md`): `rcaeval-dev-baselines`, T1–T10 complete (`odd/tasks/rcaeval-dev-baselines.md`, ADR-022, ADR-023, ADR-024), chain `feat/rcaeval-dev-baselines` → `-01-baro`. RE2-OB dev, service-only, 30 cases (`evals/results/2026-11-02-baselines-re2ob-dev/`, `evals/results/2026-11-02-a-deadline-re2ob-dev/`, `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`):
+Latest (journal `docs/journal/2026-11-03-01.md`): BARO reproduced on RE2-TT, and AC@3 and Avg@5 in the scorer (Next action, items 9 and 10).
+
+Before that (journal `docs/journal/2026-11-02-02.md`): `rcaeval-dev-baselines`, T1–T10 complete (`odd/tasks/rcaeval-dev-baselines.md`, ADR-022, ADR-023, ADR-024), chain `feat/rcaeval-dev-baselines` → `-01-baro`. RE2-OB dev, service-only, 30 cases (`evals/results/2026-11-02-baselines-re2ob-dev/`, `evals/results/2026-11-02-a-deadline-re2ob-dev/`, `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`):
 - 0 4/30, 13% [5%, 30%]; 0R 20/30, 67% [49%, 81%]; D 11/30, 37% [22%, 54%]; A at a 2100 s deadline 19/30, 63% [46%, 78%]; BARO with the published pipeline 4/30, 13% [5%, 30%].
 - D − 0R −30 points (p = 0.049, Holm 0.12); A2100 − 0R −3 points (p = 1); BARO − 0R −53 points (Holm 0.01). All 26 of BARO's misses name `redis`, and the truth is second in 22 of them.
 - T9 and T10 have no native review: it refused both candidates with `lens_context_budget_exceeded` (the regenerated fixtures). The writer's checks, the parent's spot check and T10's conformance on 30 cases stand in for it.

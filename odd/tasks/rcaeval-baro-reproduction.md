@@ -98,7 +98,7 @@ Forecast: about 300 authored lines for T1, about 100 for T2–T3, so about budge
 
   - Chance with 68 services, the union ranked (the paper counts 64 services; the headers also hold names such as `rabbitmq` and `kube-proxy`): AC@1 1.47%, AC@3 4.41%, Avg@5 4.41%.
   - **What this proves:** the port, the published pipeline, the scorer's AC@k and Avg@k and its per-fault pooling together give the published table. **What it does not:** that RE2-OB behaves as RE2-TT does. BARO's `redis` first on RE2-OB is the same code on another system, with no published number to check it against.
-  - The first two runs of the plan's checks are by hand: `baro-rcaeval` still skips a misnamed directory silently (R3-silent-partial-re2-tt), and `compare_dev.py` still cannot see a `data.csv` (R3-data-csv-not-conformance-checked). Both matter only for a future read of new data.
+  - Two of the plan's checks stay manual: `baro-rcaeval` still skips a misnamed directory silently (R3-silent-partial-re2-tt), and `compare_dev.py` still cannot see a `data.csv` (R3-data-csv-not-conformance-checked). Both matter only for a future read of new data.
   - Config 0 did not run alongside, by the plan's stated exception.
 
 ## Next step
