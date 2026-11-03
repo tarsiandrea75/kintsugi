@@ -102,6 +102,24 @@ def test_a_pair_shaped_resource_or_failed_row_is_ignored():
     assert latency_row("| a | / | 0.054 | 1.325 | 29/29 → 29/29 |") is None
 
 
+@pytest.mark.parametrize("spaced", [
+    "| frontend | / | 0.054→1.325 | 0.061→1.477 | 29/29→29/29 |",
+    "| frontend | / | 0.054  →  1.325 | 0.061 →1.477 | 29/29→ 29/29 |",
+    "| frontend | / | 0.054\t→\t1.325 | 0.061 → 1.477 | 29/29 → 29/29 |",
+])
+def test_a_pair_is_read_whatever_the_arrow_spacing(spaced):
+    # A model may retype the row with its own spacing; the values, not the spaces, make it a latency row.
+    assert latency_row(spaced) == latency_row(ROW)
+    assert classify(spaced, "mean 0.054s incident vs 0.061s before") == "previous_only"
+
+
+def test_a_cell_with_two_arrows_or_no_number_is_not_a_pair():
+    assert latency_row("| a | / | 0.054 → 1.325 → 2.0 | 0.061 → 1.477 | 29/29 → 29/29 |") is None
+    assert latency_row("| a | / | 0.054→→1.325 | 0.061 → 1.477 | 29/29 → 29/29 |") is None
+    assert latency_row("| a | / | → | → | → |") is None
+    assert latency_row("| a | / | fast → slow | 0.061 → 1.477 | 29/29 → 29/29 |") is None
+
+
 def test_numbers_inside_words_and_other_units_are_not_read():
     assert why_numbers("D35 shows 45.08MB, about 0.061.") == [Decimal("0.061")]
     assert why_numbers("0.002-0.008s") == [Decimal("0.002"), Decimal("0.008")]

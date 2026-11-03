@@ -26,8 +26,9 @@ LINE_LABEL = re.compile(r"^D\d+ ")
 SEPARATOR = re.compile(r"(?<!\\)\|")
 VALUE = re.compile(r"^\d+(?:\.\d+)?$")
 NO_VALUE = "-"
-# Between a pair cell's previous and incident values (DossierRenderer.ARROW).
-ARROW = " → "
+# Between a pair cell's previous and incident values: DossierRenderer.ARROW without its spaces, since a model that
+# retypes the row may space the arrow its own way, or not at all.
+ARROW = "→"
 # A number not inside a word or another number, with an optional unit; MB or any other unit is not a time.
 WHY_NUMBER = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?:\s*(ms|s))?(?!\w)(?!\.\d)")
 SUMMARY_COLUMNS = ("fault", "mode", "sample", "recording")
@@ -38,8 +39,8 @@ def latency_row(quote):
     """The eight cells of a latency-table row, or None for any other quote.
 
     The shape decides: eight cells whose middle four are each a number or `-` (a window without values), with at
-    least one number. A five-cell row whose last three cells are each `previous → incident` is split into the same
-    eight cells, in the same order. A resource row has seven cells, so it never matches.
+    least one number. A five-cell row whose last three cells are each `previous → incident`, with any whitespace or
+    none around the one arrow, is split into the same eight cells, in the same order. A resource row has seven cells, so it never matches.
     """
     text = LINE_LABEL.sub("", quote.strip())
     if not (text.startswith("|") and text.endswith("|")) or len(text) < 2:
