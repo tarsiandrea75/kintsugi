@@ -94,9 +94,10 @@ v2 is Config 0R, Config 0's rules unchanged plus R-RES, which names a service RE
 facts only where Config 0 abstains, and whose candidates are Config 0's followed by the resource-abnormal services. It
 applies to the rules route, whose model column then reads rules-v1 or rules-v2, and to the hybrid report, which lists
 that version's candidates (HR is --report hybrid --rules v2; its incidents name the version under rules). Any other
-run refuses it, since it would change nothing. The last column of summary.tsv, candidates, holds the rules' candidates as service|category pairs in order,
+run refuses it, since it would change nothing. The summary.tsv column candidates holds the rules' candidates as service|category pairs in order,
 joined by ';': on rules lines those of the dossier the rules diagnosed, on hybrid lines the list the report task gave
-the model (empty when it had none); it is empty on every other line.
+the model (empty when it had none); it is empty on every other line. The last column, level, is the stored report's
+verification level, L0 to L3 (ADR-028), or - on rules lines and runs with no report.
 
 --model, --think, --report-cap and --report-timeout override the local route for this run only (agent spec, "Routes",
 "Answer caps" and "Budgets"; ADR-017; odd/tasks/qwen-dev.md), and are refused on any other route. They reach the agent
