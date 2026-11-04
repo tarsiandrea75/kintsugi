@@ -90,7 +90,7 @@ Strategy: `feature-branch-chain` (the human's standing choice for over-budget fe
 
 | Slice branch | Tasks | Forecast | Base |
 |---|---|---|---|
-| `feat/verification-levels` | T1 | about 240 | `main` |
+| `feat/verification-levels` | T1 | about 240 | `feat/lab-realism-min-03-healthy-replay` (`148d94f`) |
 | `feat/verification-levels-01-line-facts` | T2 | about 450 | the previous slice |
 | `feat/verification-levels-02-level-checks` | T3 | about 450 | the previous slice |
 | `feat/verification-levels-03-stored-level` | T4, T5 | about 500 | the previous slice |
@@ -100,7 +100,7 @@ T2-T4 close before 2026-12-01. Nothing is pushed; push and pull requests are the
 
 ## Progress
 
-- [x] T0 2026-11-04: the human's decisions recorded in ADR-028; this document written (T1). Commit recorded after it lands.
+- [x] T0 2026-11-04: the human's decisions recorded in ADR-028; this document written (T1), commit `3c3e335`. Review: passive documentation, structural readback only.
 - [ ] T2
 - [ ] T3
 - [ ] T4
