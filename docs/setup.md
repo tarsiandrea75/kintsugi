@@ -633,12 +633,14 @@ On replay, `replay-agent.sh --rules v1|v2` (default `v1`) passes it as `-Dkintsu
 
 ```bash
 # Config 0R on the RE2-OB dev cases; summary.tsv's model column reads rules-v2.
-REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision \
+REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1-resources infra/scripts/replay-agent.sh --dataset re2-ob --route rules --mode decision \
   --rules v2
 # HR: the hybrid over Config 0R's candidates; each incident names the version under "rules".
-REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route local --mode decision \
+REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1-resources infra/scripts/replay-agent.sh --dataset re2-ob --route local --mode decision \
   --report hybrid --rules v2
 ```
+
+- `v2` needs a conversion with resource series: `evals/out/rcaeval/re2-ob-rep1-resources` (plan `evals/plans/2026-11-01-config0r-re2ob-dev.md`). The older `re2-ob-rep1` holds none, so R-RES has no data there and 0R gives other verdicts than its committed results (observed 2026-11-04: 15 of 30 differ). Every RE2-OB result since 2026-11-01 replays `re2-ob-rep1-resources`.
 
 - `--rules` applies to decision mode on the `rules` route or with `--report hybrid`. Any other run exits 2 before Maven, since the version would change nothing there.
 - The lab recordings predate the resource calls, so their resource facts are failed and `v2` equals `v1` on them.
