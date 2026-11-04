@@ -55,6 +55,7 @@ A discrete set, drawn uniformly, so each value has about 5 cases and a per-value
 - [x] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
 - [x] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
 - [ ] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
+- [ ] T7 Before holdout-2 is recorded: a healthy row can be replayed (`replay-agent.sh` accepts the `healthy` class, and `ReplayDriver` scores it against `NONE|NONE`, so a `COMPLETED` `UNKNOWN|UNKNOWN` matches), and `expect_no_injection` retries an injector that does not answer instead of ending the session, while a 200 still fails. Tests first. Route: delegated writer in its own worktree, during T6's run (the run reads `infra/scripts/` from the main worktree, so nothing there changes while it runs); branch `feat/lab-realism-min-03-healthy-replay`.
 
 ## Acceptance criteria
 
