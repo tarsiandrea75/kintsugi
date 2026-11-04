@@ -4,6 +4,8 @@ Prints the report and, with --out, writes report.txt, scores.tsv, paired.tsv, in
 copy of every input summary.tsv, so the result regenerates from committed files alone. With --topology it adds
 AC@3, AC@5, Avg@5 and their chance levels to the report, and writes ranked.tsv. When an input records the policy's
 counts (ADR-027), it adds one policy line per config and writes policy.tsv; without them the output is unchanged.
+When an input has the level column (ADR-028), it adds a verified-correct and an L1-rate line for that config; without
+it the output is unchanged.
 
 `python -m kintsugi_evals convert-rcaeval` turns RCAEval RE2 cases into replay recordings (ADR-020).
 
@@ -28,6 +30,7 @@ from .scoring import (
     read_service_count,
     read_summary,
     summarize,
+    summarize_levels,
     summarize_policy,
     summarize_ranked,
     summary_path,
@@ -134,8 +137,21 @@ def _policy_line(totals):
             f"policyRefused {shown(totals.policy_refused)}  known for {totals.known}/{totals.rows} rows")
 
 
+def _rate_line(config, name, metric, k, n, rate, ci, without, rows):
+    """One level rate as the other rates are printed: k/n, percentage and Wilson 95% CI, then the rows left out."""
+    shown = f"{_pct(rate):>4}  [{_pct(ci[0])}, {_pct(ci[1])}]" if n else "n/a"
+    return f"{config}  {name:<8} {k:>2}/{n:<2}  {metric} {shown}  without a level: {without} {rows}"
+
+
+def _level_lines(score):
+    return [_rate_line(score.config, "verified", "verified-correct", score.verified, score.fault_rows,
+                       score.verified_rate, score.verified_ci, score.fault_without, "fault rows"),
+            _rate_line(score.config, "L1", "L1 rate", score.l1, score.rows, score.l1_rate, score.l1_ci, score.without,
+                       "rows")]
+
+
 def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False, ranked=None, topology=None,
-            services=None, policy=None):
+            services=None, policy=None, levels=None):
     lines = []
     for i, ((label, source, rows), score) in enumerate(zip(inputs, scores)):
         first = rows[0]
@@ -161,6 +177,8 @@ def _report(inputs, scores, pairs, holm_p, seed, iterations, service_only=False,
                          f"  [{_pct(low)}, {_pct(high)}]")
         if policy:
             lines.append(_policy_line(policy[i]))
+        if levels and levels[i]:
+            lines += _level_lines(levels[i])
         if ranked:
             mine = ranked[i]
             lines += [_ranked_line(mine.config, r) for r in mine.faults + ([mine.pooled] if mine.pooled else [])]
@@ -292,8 +310,10 @@ def _score(args):
     # The policy's totals only when some input records them, so a result from before the columns is unchanged.
     policy = [summarize_policy(rows)[0] for _, _, rows in inputs]
     policy = policy if any(t.known for t in policy) else None
+    # The level rates only for an input with the level column, so a result from before it is unchanged.
+    levels = [summarize_levels(rows)[0] for _, _, rows in inputs]
     report = _report(inputs, scores, pairs, holm_p, args.seed, args.iterations, args.service_only, ranked,
-                     args.topology, services, policy)
+                     args.topology, services, policy, levels)
     sys.stdout.write(report)
     if args.out:
         _write(Path(args.out), inputs, scores, pairs, holm_p, report)

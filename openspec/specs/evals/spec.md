@@ -127,7 +127,7 @@ The scorer MUST read the replay driver's `summary.tsv`, given as the file or its
 - Then its config is `<route>-<mode>--`
 
 ### REQ-9 Output
-The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`. `--topology` adds to this output as REQ-13 states; without it the output MUST be unchanged. The policy's counts add to it as REQ-15 states.
+The CLI MUST print, per config, AC@1 per fault and pooled with Wilson intervals, coverage and selective accuracy on the pooled line, healthy false alarms when there are healthy rows, and one line per pair of configs (later minus earlier) with the discordant counts, the McNemar p-value and the bootstrap interval. With `--out DIR` it MUST write `report.txt` (identical to the printed report), `scores.tsv`, `paired.tsv`, `inputs.tsv` (label, source, sha256, rows) and a copy of each input as `inputs/<label>-summary.tsv`. `--topology` adds to this output as REQ-13 states; without it the output MUST be unchanged. The policy's counts add to it as REQ-15 states, and the verification levels as REQ-16 states.
 
 The CLI MUST exit with a one-line message, not a traceback, when an input is missing or malformed, when two configs share no fault case, when two inputs resolve to the same label or the same copy name, and, at parse time, when `--iterations` is below 1.
 
@@ -456,3 +456,35 @@ Why (ADR-027, Decision 3): "zero risky actions" is measured, not assumed, so its
 - Given every committed `evals/results/<name>/` with an `inputs.tsv`
 - When `score` runs on its input copies with the flags its `report.txt` records
 - Then `report.txt`, `paired.tsv`, `ranked.tsv` when present, and `scores.tsv` when it has `candidate_recall`, are byte-identical to the committed ones, and no `policy.tsv` is written
+
+### REQ-16 Verified-correct and the L1 rate (verification-levels T5)
+`summary.tsv` MAY end with `level`, the stored report's verification level ([ADR-028](../../../docs/adr/ADR-028-verification-levels.md); agent spec, "Replay of recorded tool outputs"): `L0` to `L3`, or `-` for a run that stored no report and for a `rules` line, since Config 0 writes no cited evidence. `REQUIRED` is unchanged: the column is optional. The scorer MUST read `L0` to `L3` and `-` as they are, and a file without the column as having no level. Any other value (empty, `L4`, `l1`, spaced) MUST be refused as a malformed count is (REQ-15): `score` exits with one line naming the file, the line, the column and the value. Why: read as `-`, a typo would drop a row from both denominators unseen.
+
+Per config whose input has the column, the scorer MUST compute, over the rows that state a level (`-` rows enter neither denominator):
+
+- **Verified-correct** (vision §6, "correct at L3 or above"): fault rows correct by REQ-7 (or REQ-7b with `--service-only`) and at `L3`, over fault rows with a level. Healthy rows MUST stay out: a healthy row is scored by the false-alarm rule (ADR-015) alone. An abstention is not correct, so it is never verified, whatever its level.
+- **L1 rate** (vision §6, "every cited line exists"): rows at `L1` or above, over every row with a level, healthy ones included.
+
+The report MUST print, per config after its fault, healthy and policy lines and before its ranked lines, `<config>  verified <k>/<n>  verified-correct <pct>  [<low>, <high>]  without a level: <m> fault rows` and `<config>  L1       <k>/<n>  L1 rate <pct>  [<low>, <high>]  without a level: <m> rows`, each with its Wilson 95% interval (REQ-2), and `n/a` in place of the rate and interval when no row states a level. The rates MUST NOT enter `scores.tsv`, `paired.tsv` or any other file: when no input has the column, the report and every output file MUST be byte-identical to what REQ-9 and REQ-15 write, so every committed result regenerates (REQ-15, "Every committed result regenerates"). Results scored before this requirement have no `level` column, so none of them reports these rates.
+
+Why: a correct answer that its own citations do not support is a lucky guess, not a diagnosis; the level separates the two with a deterministic check (ADR-028), and the rate says how often the model's citations exist at all. Excluding `-` rows keeps a run that stored no report, or Config 0, from reading as unverified evidence; the count of rows left out keeps the exclusion visible.
+
+#### Scenario: Verified-correct over fault rows
+- Given a config whose fault rows are a right answer at `L3`, a right answer at `L2`, a miss at `L0`, an abstention at `L1` and a failed run with `-`, and whose healthy rows are a right `UNKNOWN|UNKNOWN` at `L3`, a false alarm at `L1` and a failed run with `-`
+- When `score` runs
+- Then it prints `verified  1/4   verified-correct  25%  [5%, 70%]  without a level: 1 fault rows`: the right answer at `L2` and the abstention are not verified, and the healthy rows do not enter
+
+#### Scenario: The L1 rate over rows with a report
+- Given the same config
+- When `score` runs
+- Then it prints `L1        5/6   L1 rate  83%  [44%, 97%]  without a level: 2 rows`: every row with a level but the miss at `L0`
+
+#### Scenario: A config with no level
+- Given the same 5 fault and 3 healthy rows, every one holding `-`, as a `rules` config's do
+- When `score` runs
+- Then it prints `verified  0/0   verified-correct n/a  without a level: 5 fault rows` and `L1        0/0   L1 rate n/a  without a level: 8 rows`
+
+#### Scenario: A file without the column
+- Given two inputs without `level`, and the same two with it
+- When `score --out DIR` runs on each pair
+- Then the second report is the first plus the four level lines, and `scores.tsv`, `paired.tsv` and the file list are byte-identical

@@ -23,7 +23,7 @@ The limits `docs/benchmark.md` must state next to H1–H3 (vision §7, M4). `ben
 - **RCAEval is scored on the service only.** With the category, D's 11 of 13 answered cases on dev were 7 of 13 (`odd/tasks/d-abstention.md`).
 - **The chance level uses the topology's 11 services.** BARO ranks over 16 to 20 header names, so its own chance is lower (`odd/tasks/rcaeval-ranked-metrics.md`); RE2-TT's 68 ranked services against the paper's 64 are not reconciled (`odd/tasks/rcaeval-baro-reproduction.md`).
 - **BARO is checked against a published table on RE2-TT only.** No published RE2-OB number was found (`odd/tasks/rcaeval-baro-reproduction.md`).
-- **Only L0 and L1 of the verification levels exist.** No report states a level, so "verified-correct at L3" (vision §6) cannot be reported until the verification-levels feature lands.
+- **No committed result reports verified-correct or the L1 rate yet.** Every stored report now states its level, L0 to L3 (ADR-028), and the replay's `summary.tsv` ends with a `level` column the scorer reads for both rates (evals spec, REQ-16). Every result committed before the verification-levels feature has no `level` column, so none of them reports these rates; a new run is needed to measure them.
 
 ## Safety
 

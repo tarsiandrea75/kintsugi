@@ -103,7 +103,7 @@ final class ReplayDriver {
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
 			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
-			"reportTimeout", "candidates", "ranked", "riskyExecuted", "policyRefused");
+			"reportTimeout", "candidates", "ranked", "riskyExecuted", "policyRefused", "level");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
@@ -819,7 +819,20 @@ final class ReplayDriver {
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
 					this.recording, viewColumn(), reportColumn(), this.settings.columns(), candidatesColumn(),
-					rankedColumn(), policyColumn("riskyExecuted"), policyColumn("policyRefused"));
+					rankedColumn(), policyColumn("riskyExecuted"), policyColumn("policyRefused"), levelColumn());
+		}
+
+		/**
+		 * The verification level as {@code summary.tsv} writes it, its last column (verification-levels T5; ADR-028): the
+		 * stored report's {@code verification.level}, {@code L0} to {@code L3}, or {@code -} for a run that stored no
+		 * report and for a rules line, since Config 0 writes no cited evidence to check.
+		 */
+		String levelColumn() {
+			if (RULES_ROUTE.equals(this.route)) {
+				return NONE;
+			}
+			JsonNode level = this.incident.path("report").path("verification").path("level");
+			return level.isString() ? level.asString() : NONE;
 		}
 
 		/**

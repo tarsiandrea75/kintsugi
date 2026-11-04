@@ -36,6 +36,14 @@ HOLDOUT_SPLIT = "holdout"
 
 REQUIRED = ("fault", "mode", "route", "status", "truth", "reported", "split", "recording")
 
+# The verification levels a stored report states (ADR-028), lowest first, and "-" for a row with none: no stored
+# report, or a rules row, since Config 0 writes no cited evidence.
+LEVELS = ("L0", "L1", "L2", "L3")
+NO_LEVEL = "-"
+# Verified-correct is correct at L3 or above (vision §6); the L1 rate counts the rows at L1 or above.
+VERIFIED_LEVEL = "L3"
+L1_LEVEL = "L1"
+
 
 def is_healthy(truth):
     return truth == HEALTHY_TRUTH
@@ -94,6 +102,8 @@ class Row:
     # What the policy did in the row's run (ADR-027); None when the file lacks the column or the row holds "-".
     risky_executed: int = None
     policy_refused: int = None
+    # The stored report's verification level, L0 to L3 (ADR-028); "-" for none; None when the file lacks the column.
+    level: str = None
 
     @property
     def case(self):
@@ -134,6 +144,22 @@ def parse_count(raw):
     return int(raw)
 
 
+def parse_level(raw):
+    """A level of summary.tsv (ADR-028): L0 to L3, "-" for none, or None for a file without the column.
+
+    Any other value is malformed and raises ValueError, as a malformed count does: read as "-", a typo would drop the
+    row from both denominators unseen.
+    """
+    if raw is None or raw == NO_LEVEL or raw in LEVELS:
+        return raw
+    raise ValueError(f"{raw!r} is not a level: expected L0 to L3 or -")
+
+
+def at_least(level, floor):
+    """Whether a row's level is a level at `floor` or above; "-" and None are no level."""
+    return level in LEVELS and LEVELS.index(level) >= LEVELS.index(floor)
+
+
 def ranking_of(status, reported, raw_candidates, raw_ranked=None):
     """The services a row names, best first: reported, ranked, then candidates, each once, and none unless it answered.
 
@@ -160,7 +186,8 @@ def read_summary(path, label=None, service_only=False):
     and hybrid rows only, so candidate recall applies to them alone. A trailing ranked column (ranked-report T3)
     enters the ranking only, and a file without it ranks as before. The trailing riskyExecuted and policyRefused
     columns (policy-gate T3) are read as numbers; a file without them, or a "-", reads as unknown, never 0, and any
-    other value that is not an ASCII decimal integer is refused. With
+    other value that is not an ASCII decimal integer is refused. The trailing level column (verification-levels T5)
+    is L0 to L3 or "-"; a file without it reads as None, and any other value is refused. With
     service_only, each row and its candidate recall are scored on the service part of the truth only.
     """
     path = summary_path(path)
@@ -179,6 +206,10 @@ def read_summary(path, label=None, service_only=False):
                     counts.append(parse_count(raw.get(column)))
                 except ValueError as error:
                     raise ValueError(f"{path}: line {reader.line_num}: {column} {error}") from None
+            try:
+                level = parse_level(raw.get("level"))
+            except ValueError as error:
+                raise ValueError(f"{path}: line {reader.line_num}: level {error}") from None
             view = raw.get("view") or "-"
             report = raw.get("report") or "-"
             config = label or f"{raw['route']}-{raw['mode']}-{view}" + (f"-{report}" if "report" in raw else "")
@@ -187,7 +218,7 @@ def read_summary(path, label=None, service_only=False):
                             outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
                             parse_candidates(raw.get("candidates"), raw["route"], report), service_only,
                             ranking_of(raw["status"], raw["reported"], raw.get("candidates"), raw.get("ranked")),
-                            *counts))
+                            *counts, level))
     return rows
 
 
@@ -308,6 +339,58 @@ def summarize_policy(rows):
                                    sum(r.policy_refused for r in known) if known else None,
                                    sum(r.split == HOLDOUT_SPLIT for r in mine)))
     return totals
+
+
+@dataclass(frozen=True)
+class LevelScore:
+    """Verified-correct and the L1 rate of one config (ADR-028; vision §6), over the rows that state a level.
+
+    Verified-correct is over fault rows: correct at L3 or above. A healthy row stays under the false-alarm rule, and an
+    abstention is not correct, so it is never verified. The L1 rate is over every row with a stored report, healthy
+    ones included. A row with "-" (no stored report, or a rules row) enters neither denominator; the counts of those
+    rows are kept so the report can say how many were left out.
+    """
+    config: str
+    verified: int
+    fault_rows: int
+    fault_without: int
+    l1: int
+    rows: int
+    without: int
+
+    @property
+    def verified_rate(self):
+        return self.verified / self.fault_rows if self.fault_rows else None
+
+    @property
+    def verified_ci(self):
+        return wilson(self.verified, self.fault_rows) if self.fault_rows else None
+
+    @property
+    def l1_rate(self):
+        return self.l1 / self.rows if self.rows else None
+
+    @property
+    def l1_ci(self):
+        return wilson(self.l1, self.rows) if self.rows else None
+
+
+def summarize_levels(rows):
+    """Per config, in first-seen order: its LevelScore, or None when its rows come from a file without the column."""
+    scores = []
+    for config in dict.fromkeys(r.config for r in rows):
+        mine = [r for r in rows if r.config == config]
+        if all(r.level is None for r in mine):
+            scores.append(None)
+            continue
+        levelled = [r for r in mine if r.level in LEVELS]
+        faulty = [r for r in levelled if not r.healthy]
+        scores.append(LevelScore(config,
+                                 sum(r.outcome == CORRECT and at_least(r.level, VERIFIED_LEVEL) for r in faulty),
+                                 len(faulty), sum(not r.healthy for r in mine) - len(faulty),
+                                 sum(at_least(r.level, L1_LEVEL) for r in levelled), len(levelled),
+                                 len(mine) - len(levelled)))
+    return scores
 
 
 @dataclass(frozen=True)
