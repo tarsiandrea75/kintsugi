@@ -7,18 +7,19 @@ import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 /**
  * Whether one fact changed between the previous and the incident window, per section (ADR-028, Decision 5). Where
  * Config 0 already decides change, its test is reused with the same constants: latency is R-DOWN's slow test,
- * resources R-RES, status a restart in the incident window. Traffic, states and events use a new count rule. The
+ * resources R-RES, status a restart in the incident window. Latency takes R-DOWN's ratio but not its seconds floor. Traffic, states and events use a new count rule. The
  * constants are copies, not references, since the dossier package must not depend on the rules, which read it; a test
  * in the rules package pins each copy to its rule's constant. Logs and header lines have no rule here: their lines are
  * {@link Change#NOT_COMPARED}.
  */
 public final class WindowChange {
 
-	/** Latency, R-DOWN's {@code SLOW_RATIO}: an incident mean at least this many times the previous mean... */
+	/**
+	 * Latency, R-DOWN's {@code SLOW_RATIO}: an incident mean at least this many times the previous mean. R-DOWN's
+	 * {@code SLOW_SECONDS} floor is not copied (ADR-028, Decision 5, amended 2026-11-04): a diagnostic threshold of
+	 * another rule does not decide whether a fact changed.
+	 */
 	public static final double SLOW_RATIO = 2.0;
-
-	/** ...and at least this many seconds, R-DOWN's {@code SLOW_SECONDS}. */
-	public static final double SLOW_SECONDS = 0.5;
 
 	/** Resources, R-RES's {@code RATIO}: an incident mean at least this many times the previous mean, above its max. */
 	public static final double RESOURCE_RATIO = 2.0;
@@ -42,9 +43,9 @@ public final class WindowChange {
 	}
 
 	/**
-	 * A latency row: {@link Change#YES} when the incident mean is at least {@link #SLOW_RATIO} times the previous mean
-	 * and at least {@link #SLOW_SECONDS}; {@link Change#NOT_COMPARED} when either mean is missing or the previous mean
-	 * is not above 0, since R-DOWN computes no ratio then.
+	 * A latency row: {@link Change#YES} when the incident mean is at least {@link #SLOW_RATIO} times the previous mean,
+	 * whatever its seconds; {@link Change#NOT_COMPARED} when either mean is missing or the previous mean is not above
+	 * 0, since R-DOWN computes no ratio then.
 	 */
 	public static Change latency(LatencyPoints previous, LatencyPoints incident) {
 		Double before = previous == null ? null : previous.mean();
@@ -52,7 +53,7 @@ public final class WindowChange {
 		if (before == null || before <= 0 || now == null) {
 			return Change.NOT_COMPARED;
 		}
-		return now >= SLOW_RATIO * before && now >= SLOW_SECONDS ? Change.YES : Change.NO;
+		return now >= SLOW_RATIO * before ? Change.YES : Change.NO;
 	}
 
 	/**

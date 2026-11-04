@@ -1058,13 +1058,13 @@ The sheets MUST state facts only, as the tables do: the banned-words test runs o
 
 | Section | `YES` when | `NOT_COMPARED` when |
 |---|---|---|
-| `latency` (one row: service, uri) | incident mean ≥ 2 × previous mean and ≥ 0.5 s (R-DOWN's slow test) | either mean is missing or the previous mean is not above 0 |
+| `latency` (one row: service, uri) | incident mean ≥ 2 × previous mean, whatever its seconds (R-DOWN's slow ratio, without its 0.5 s floor; **T7**) | either mean is missing or the previous mean is not above 0 |
 | `resources` (one row: service, metric) | incident mean ≥ 2 × previous mean and > previous max (R-RES) | a window is not usable (fewer than 2 values, or fewer than half the fuller window's points) or the previous mean is not above 0 |
 | `traffic`, `states`, `events` (one row, or a source's total) | the larger count is ≥ 3 and ≥ 2 × the smaller, so a row seen only in the previous window counts | a window was not read |
 | `status` | the service restarted inside the incident window | `service_restarts` failed |
 | `logs`, `header` | never | always: logs are gathered for the incident window only |
 
-Any other line is `NOT_COMPARED` too: a failed call's line, a sheet block's `no rows ...` line, a latency `no rows` row, a `not shown` line (a sum of rows), and a `truncated=true` note. Elsewhere `NO`; a tables' count row `no rows` holds 0 in both windows read, so it is `NO`. The thresholds are copies of `RulesDiagnosis`' and `ResourceRule`'s constants, not references, so Config 0's code does not change and the dossier package does not depend on the rules; a test in the rules package pins each copy to its rule's constant. Why: L2 and L3 ("Evidence is checked") read a cited line's owner and whether its fact changed, and the tables had no owner per line and neither view a change; a fact that was never compared is not called changed, so the verifier never claims more than it checked.
+Any other line is `NOT_COMPARED` too: a failed call's line, a sheet block's `no rows ...` line, a latency `no rows` row, a `not shown` line (a sum of rows), and a `truncated=true` note. Elsewhere `NO`; a tables' count row `no rows` holds 0 in both windows read, so it is `NO`. The thresholds are copies of `RulesDiagnosis`' and `ResourceRule`'s constants, not references, so Config 0's code does not change and the dossier package does not depend on the rules; a test in the rules package pins each copy to its rule's constant. Why: L2 and L3 ("Evidence is checked") read a cited line's owner and whether its fact changed, and the tables had no owner per line and neither view a change; a fact that was never compared is not called changed, so the verifier never claims more than it checked. Why no seconds floor on latency (verification-levels T7; ADR-028, Decision 5, amended 2026-11-04): R-DOWN's 0.5 s floor is a diagnostic threshold of another rule, and it kept 4 of DS's 5 correct RE2-OB dev `delay` answers at L2 although the cause's latency rose 10 to 25 times (for example 0.004 to 0.087 s); whether a fact changed is its ratio's question. R-DOWN itself keeps its floor, so Config 0 is unchanged.
 
 #### Scenario: Citable lines numbered (evidence-by-reference)
 - WHEN the F3 dossier is rendered
@@ -1183,12 +1183,19 @@ Any other line is `NOT_COMPARED` too: a failed call's line, a sheet block's `no 
 - AND in F3's tables `D1` to `D5` are `header`'s, `D6` (order-service restarted at 09:53:12) is `order-service`, `status`, `YES`, `D15` (the client row of order-service -> inventory-service) is order-service's and `D16` (its server row) inventory-service's, `D17` (`ConnectException`, 0 -> 6) is order-service's `traffic` `YES`, and `D37` (order-service's `WARN` line) is `logs`, `NOT_COMPARED`
 
 #### Scenario: Each section's change rule at its boundaries (verification-levels T2)
-- GIVEN latency rows of 0.25 -> 0.5 s, 0.3 -> 0.59 s and 0.2 -> 0.49 s, and rows with no previous mean or a previous mean of 0
+- GIVEN latency rows of 0.25 -> 0.5 s, 0.3 -> 0.59 s and 0.004 -> 0.087 s, and rows with no previous mean or a previous mean of 0
 - AND resource series doubling to above the previous max, doubling to exactly the previous max, rising 1.9×, and with an incident window of 1 value
 - AND event counts 0 -> 3, 0 -> 2, 2 -> 4, 2 -> 3 and 3 -> 0
 - WHEN the dossier is rendered as tables and as sheets
-- THEN in both views the latency rows are `YES`, `NO`, `NO`, `NOT_COMPARED` and `NOT_COMPARED`; the resource rows `YES`, `NO`, `NO` and `NOT_COMPARED`; the counts `YES`, `NO`, `YES`, `NO` and `YES`, the last in the sheets' "Seen only in the previous window", owned by order-service
+- THEN in both views the latency rows are `YES`, `NO`, `YES`, `NOT_COMPARED` and `NOT_COMPARED`; the resource rows `YES`, `NO`, `NO` and `NOT_COMPARED`; the counts `YES`, `NO`, `YES`, `NO` and `YES`, the last in the sheets' "Seen only in the previous window", owned by order-service
 - AND a restart in the incident window is `YES`, and a log line is `NOT_COMPARED`
+
+#### Scenario: A latency change is judged by its ratio alone (verification-levels T7)
+- GIVEN latency rows of 0.004 -> 0.087 s, 0.4 -> 0.8 s and 0.4 -> 0.79 s, each with a previous mean above 0
+- WHEN `WindowChange.latency` judges each row
+- THEN the first two are `YES`, the first although its incident mean is below R-DOWN's 0.5 s, and the third is `NO`
+- AND a row with a missing mean or a previous mean of 0 is still `NOT_COMPARED`
+- AND R-DOWN's slow test, and so Config 0's verdict, still needs at least 0.5 s
 
 #### Scenario: A traffic row on no edge in the tables (verification-levels T2)
 - GIVEN order-service's client row to gateway-mock's `POST /authorize`, on no edge, and a server row of `postgres-exporter`, a service outside the topology

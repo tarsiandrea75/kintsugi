@@ -491,8 +491,8 @@ class ServiceSheetsTest {
 				Change.YES));
 		assertThat(sheets.fact(numberOf(text, "latency /below-ratio:"))).hasValue(fact("gateway-mock",
 				Section.LATENCY, Change.NO));
-		assertThat(sheets.fact(numberOf(text, "latency /below-floor:"))).hasValue(fact("gateway-mock",
-				Section.LATENCY, Change.NO));
+		assertThat(sheets.fact(numberOf(text, "latency /small-rise:"))).hasValue(fact("gateway-mock",
+				Section.LATENCY, Change.YES));
 		assertThat(sheets.fact(numberOf(text, "latency /no-previous:"))).hasValue(fact("payment-service",
 				Section.LATENCY, Change.NOT_COMPARED));
 		assertThat(sheets.fact(numberOf(text, "latency /zero-previous:"))).hasValue(fact("payment-service",

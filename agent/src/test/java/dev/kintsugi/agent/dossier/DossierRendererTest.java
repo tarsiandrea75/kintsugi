@@ -413,13 +413,14 @@ class DossierRendererTest {
 		DossierRenderer.Indexed tables = DossierRenderer.indexed(boundaries(), LAB);
 		String text = tables.text();
 
-		// Latency, R-DOWN's slow test: at least 2x the previous mean and at least 0.5 s, the previous mean above 0.
+		// Latency, R-DOWN's slow ratio alone: at least 2x the previous mean, the previous mean above 0, with no
+		// seconds floor (T7), so 0.004 -> 0.087 s counts.
 		assertThat(tables.fact(numberOf(text, "| /doubled |"))).hasValue(fact("gateway-mock", Section.LATENCY,
 				Change.YES));
 		assertThat(tables.fact(numberOf(text, "| /below-ratio |"))).hasValue(fact("gateway-mock", Section.LATENCY,
 				Change.NO));
-		assertThat(tables.fact(numberOf(text, "| /below-floor |"))).hasValue(fact("gateway-mock", Section.LATENCY,
-				Change.NO));
+		assertThat(tables.fact(numberOf(text, "| /small-rise |"))).hasValue(fact("gateway-mock", Section.LATENCY,
+				Change.YES));
 		assertThat(tables.fact(numberOf(text, "| /no-previous |"))).hasValue(fact("payment-service", Section.LATENCY,
 				Change.NOT_COMPARED));
 		assertThat(tables.fact(numberOf(text, "| /zero-previous |"))).hasValue(fact("payment-service",
@@ -562,7 +563,7 @@ class DossierRendererTest {
 				new ServiceLatency("gateway-mock", new Gathered.Ok<>(new LatencySeries(false, List.of(
 						new UriLatency("/doubled", seconds(0.25), seconds(0.5)),
 						new UriLatency("/below-ratio", seconds(0.3), seconds(0.59)),
-						new UriLatency("/below-floor", seconds(0.2), seconds(0.49)))))),
+						new UriLatency("/small-rise", seconds(0.004), seconds(0.087)))))),
 				new ServiceLatency("payment-service", new Gathered.Ok<>(new LatencySeries(false, List.of(
 						new UriLatency("/no-previous", new LatencyPoints(10, 0, null, null), seconds(1.0)),
 						new UriLatency("/zero-previous", seconds(0.0), seconds(1.0)))))));

@@ -2,6 +2,9 @@ package dev.kintsugi.agent.rules;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.lang.reflect.Field;
+import java.util.Arrays;
+
 import org.junit.jupiter.api.Test;
 
 import dev.kintsugi.agent.dossier.WindowChange;
@@ -14,9 +17,11 @@ import dev.kintsugi.agent.dossier.WindowChange;
 class WindowChangeConstantsTest {
 
 	@Test
-	void theLatencyRuleIsRDownsSlowTest() {
+	void theLatencyRuleIsRDownsSlowRatioWithoutItsSecondsFloor() {
 		assertThat(WindowChange.SLOW_RATIO).isEqualTo(RulesDiagnosis.SLOW_RATIO);
-		assertThat(WindowChange.SLOW_SECONDS).isEqualTo(RulesDiagnosis.SLOW_SECONDS);
+		// ADR-028, Decision 5, amended 2026-11-04 (T7): a line fact's change is its ratio alone; R-DOWN keeps its floor.
+		assertThat(Arrays.stream(WindowChange.class.getDeclaredFields()).map(Field::getName))
+			.doesNotContain("SLOW_SECONDS");
 	}
 
 	@Test

@@ -16,10 +16,15 @@ import dev.kintsugi.agent.dossier.Dossier.ServiceStatus;
 class WindowChangeTest {
 
 	@Test
-	void latencyChangedAtTwiceThePreviousMeanAndHalfASecond() {
+	void latencyChangedAtTwiceThePreviousMeanWhateverItsSeconds() {
 		assertThat(WindowChange.latency(seconds(0.25), seconds(0.5))).isEqualTo(Change.YES);
 		assertThat(WindowChange.latency(seconds(0.3), seconds(0.59))).isEqualTo(Change.NO);
-		assertThat(WindowChange.latency(seconds(0.2), seconds(0.49))).isEqualTo(Change.NO);
+		assertThat(WindowChange.latency(seconds(0.4), seconds(0.8))).isEqualTo(Change.YES);
+		assertThat(WindowChange.latency(seconds(0.4), seconds(0.79))).isEqualTo(Change.NO);
+		// No absolute floor (T7): a rise of 20 times counts below R-DOWN's 0.5 s, and so does exactly twice.
+		assertThat(WindowChange.latency(seconds(0.004), seconds(0.087))).isEqualTo(Change.YES);
+		assertThat(WindowChange.latency(seconds(0.2), seconds(0.49))).isEqualTo(Change.YES);
+		assertThat(WindowChange.latency(seconds(0.002), seconds(0.004))).isEqualTo(Change.YES);
 		// A drop is no slowdown: R-DOWN's test is one-sided.
 		assertThat(WindowChange.latency(seconds(2.0), seconds(0.5))).isEqualTo(Change.NO);
 		// No ratio without a previous mean above 0, nor without an incident mean.
