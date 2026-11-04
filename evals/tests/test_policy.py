@@ -133,9 +133,14 @@ def test_every_committed_result_regenerates_byte_for_byte(result, tmp_path, caps
     # A scores.tsv from before candidate_recall (hybrid T5) has fewer columns than today's.
     if (result / "scores.tsv").read_text().splitlines()[0].endswith("\tcandidate_recall"):
         names.append("scores.tsv")
+    # policy.tsv exists only for inputs that carry the policy columns (ADR-027): a result
+    # recorded with them must regenerate it, and one recorded before them must not gain it.
+    if (result / "policy.tsv").is_file():
+        names.append("policy.tsv")
+    else:
+        assert not (out_dir / "policy.tsv").exists()
     for name in names:
         assert (out_dir / name).read_bytes() == (result / name).read_bytes(), name
-    assert not (out_dir / "policy.tsv").exists()
 
 
 POLICY = """config	rows	known	risky_executed	policy_refused	holdout_rows
