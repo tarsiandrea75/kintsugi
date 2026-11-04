@@ -398,6 +398,7 @@ infra/scripts/verify-agent.sh --mode dossier  # the agent in dossier mode (ADR-0
 infra/scripts/verify-agent.sh --mode decision # the dossier, then one report call; a baseline phase before each fault
 infra/scripts/verify-agent.sh --route cloud   # the agent on the cloud route (ADR-012); the default is local
 infra/scripts/verify-agent.sh --rounds 5      # the fault list 5 times (1 to 20); each file names its round
+infra/scripts/verify-agent.sh --mode decision --schedule infra/holdout2/schedule.tsv --cases 1-5  # schedule cases
 infra/scripts/check-recordings.sh infra/scripts/out/verify-agent-<UTC time>  # are the recorded windows clean?
 infra/scripts/compare-agent-modes.sh          # 3 runs per mode, alternating explorer and dossier
 infra/scripts/compare-agent-modes.sh --route cloud  # the same on the cloud route
@@ -415,17 +416,22 @@ Decision mode (`--mode decision`; agent spec, "Decision mode") is the mode for r
 - A fault whose window is larger than N_max anyway (when `open_incident` first waited for another running incident) fails with that reason and is scored a miss; its run is still waited for and recorded.
 - The cost is the phase: 19 minutes per fault, and up to 3 times that when the phase starts over twice. On the cloud route a decision-mode fault takes about 21 minutes (the phase, 1 to 2 minutes of fault traffic and settle, about 30 s for the incident, and the restore), so about 65 minutes per round of F1-F3.
 
+`--schedule FILE` runs the cases of a schedule that `holdout2-schedule.py` wrote (below, "Holdout-2 schedule"), in the schedule's order; `--cases LIST` (`1-5,9`) runs only those cases, still in the schedule's order. It takes neither `--only` nor `--rounds`, and a schedule it cannot run (no file, another header, an unknown class or parameter, a case listed twice) or a `--cases` case the schedule does not hold exits 2 before the lab is touched (`read_schedule` in `lib.sh`).
+- A fault case is injected with its drawn parameter nested under `parameters` in `POST /faults` (`fault_request`): `{"fault":"F1","parameters":{"gatewayLatencyMs":5000}}`, or F2's `gatewayErrorStatus`. The injector ignores a parameter at the top level and applies its default, so the nesting matters. F3's `wrong_port` 9999 is the injector's own and is not sent. The truth is the injection's truth row, as for a round.
+- A healthy control injects nothing. Where a fault case injects, it checks that `GET /faults/active` answers 204 (`expect_no_injection`), and fails the run otherwise. Everything else is a fault case's: the same baseline phase (or `space_out` wait), the same 3 + 6 orders 2 s apart, the same 30 s settle, the same symptom and window. The agent therefore cannot tell it from a fault case by its symptom, its window or the harness's timing, only by what the lab's evidence shows. Its truth is `NONE|NONE` ([ADR-015](adr/ADR-015-evaluation-protocol.md)): only a `COMPLETED` report naming `UNKNOWN|UNKNOWN` matches, and a named cause is scored a miss and called a false alarm.
+- Each case's files carry its class and case number (`F1-c7-incident.json`, `healthy-c3-score.txt`). The score file adds `case:` and `parameters:` lines, and `summary.tsv` adds two last columns, `case` and `parameters` (`<name>=<value>`, or `-`). Without `--schedule` the files and columns are as before.
+
 F4 is not in the list: its pool of 2 is exhausted only by concurrent orders (`verify-f4.sh` places 6 at once), and these orders come one at a time, so they would show slow reservations, not an exhausted pool.
 
 Every run, pass or fail, is logged under `infra/scripts/out/verify-agent-<UTC time>/` (ignored by git): `run.log` (the whole output), and per fault `<fault>-incident.json` (the incident with every step, full tool outputs and model answers) and `<fault>-score.txt`; `summary.tsv` has one line per fault, with the mode and the route (`VERIFY_AGENT_RUN_DIR`, when set, names the directory instead; `compare-agent-modes.sh` uses `verify-agent-<UTC time>-<mode>`, and `verify-agent-<UTC time>-<mode>-cloud` on the cloud route). `--rounds K` (1 to 20) runs the fault list K times: each fault's files then carry the round (`<fault>-r<k>-incident.json`, `<fault>-r<k>-score.txt`), and each `summary.tsv` line ends with its round (1 without `--rounds`). Each `<fault>-score.txt` records the mode and the route (requested, recorded), the incident's `model`, and its tokens (prompt, completion): the totals of the steps' `promptTokens` and `completionTokens`, each `none` when no step reported it. `--mode` sets `KINTSUGI_AGENT_MODE` and `--route` sets `KINTSUGI_AGENT_ROUTE` for the agent container (`start_agent` runs `up -d --build`, so the image is rebuilt from the current code and compose recreates the container when either value changes); an incident whose recorded `mode` or `route` is not the requested one is scored as a miss that keeps the outcome in its message. An incident that is still `RUNNING` after the 52 minutes is ended by restarting the agent (`end_running_incident`), scored as a miss, and the run goes on with the next fault. When the run stops early (Ctrl-C, or a failed step), the fault being diagnosed gets a `not scored` line and fails the run, and an incident it left `RUNNING` is ended the same way; a `RUNNING` incident from elsewhere is waited for before the next `POST`. The restore on exit works as in the F1 check. It needs `docker`, `curl`, `python3` and Ollama with `granite4.1:8b`, and in explorer or dossier mode takes 10 to 55 minutes per fault on a laptop CPU, so up to about 3 hours for all three.
 
 The cloud route needs `ANTHROPIC_API_KEY`. The human adds it to `infra/.env` (git-ignored); it is never committed, and no placeholder is either. Compose passes it to the agent (empty by default); a value set in the shell wins over the file, and `verify-agent.sh` drops an empty shell value so it cannot hide the file's. With `--route cloud` and no key in either place, the script stops with exit status 2 before it touches the lab, naming `ANTHROPIC_API_KEY` and `infra/.env`; it never prints the key. On the cloud route it skips the local model's checks (Ollama serving `granite4.1:8b`, `ollama-proxy` healthy) with an info line; `search_runbooks` still embeds through Ollama, so `start_lab` warns as usual when `ollama-proxy` or the indexer is down. Every cloud call costs money: each cloud batch (a `verify-agent.sh --route cloud` run or a `compare-agent-modes.sh --route cloud` comparison) needs the human's go-ahead, and its cost is recorded (ADR-012).
 
-`check-recordings.sh` checks the recorded windows before `record-replay.sh` imports them; it never contacts the lab. For every `<fault>-incident.json` and `<fault>-r<k>-incident.json` of the run directories it reads the dossier's tool calls, which the incident's `DOSSIER` step records with their arguments and outputs, and checks:
+`check-recordings.sh` checks the recorded windows before `record-replay.sh` imports them; it never contacts the lab. For every `<fault>-incident.json`, `<fault>-r<k>-incident.json` and schedule case `<class>-c<case>-incident.json` of the run directories it reads the dossier's tool calls, which the incident's `DOSSIER` step records with their arguments and outputs, and checks:
 - the previous window: the orders table shows at least 3 `PAID` orders and no order in any other status, and no traffic row, on any edge, has an outcome other than `SUCCESS`;
-- the incident window: no service restarted, except once for the fault's own recreate (`order-service` for F3, `inventory-service` for F4; F1 and F2 restart nothing).
+- the incident window: no service restarted, except once for the fault's own recreate (`order-service` for F3, `inventory-service` for F4; F1, F2 and a healthy control restart nothing).
 
-It prints one `PASS` or `FAIL` line per incident, with the facts that fail it, then a `RESULT` line, and exits 1 when an incident fails (2 on a wrong argument: no run directory, a missing one, or one with no incident). The recordings of 2026-10-19 (`verify-agent-20261019T214629Z`) fail it, each on what came before it: F1's previous window is empty and its incident window holds the lab's restarts, F2's previous window holds F1's pending orders and timeouts, and F3's holds F2's failed payments and 429s. `test-lib.sh` runs it on those recordings (their committed replay copies) and on a clean fixture, `infra/scripts/testdata/check-recordings/clean/`.
+It prints one `PASS` or `FAIL` line per incident, with the facts that fail it, then a `RESULT` line, and exits 1 when an incident fails (2 on a wrong argument: no run directory, a missing one, or one with no incident). The recordings of 2026-10-19 (`verify-agent-20261019T214629Z`) fail it, each on what came before it: F1's previous window is empty and its incident window holds the lab's restarts, F2's previous window holds F1's pending orders and timeouts, and F3's holds F2's failed payments and 429s. `test-lib.sh` runs it on those recordings (their committed replay copies), on a clean fixture, `infra/scripts/testdata/check-recordings/clean/`, and on a healthy control's, `infra/scripts/testdata/check-recordings/healthy/`. A healthy control passes the same checks unchanged: its previous window holds the baseline's healthy orders, and its incident window no restart.
 
 ### Record a run for replay
 
@@ -440,14 +446,15 @@ Every recording belongs to one split, the manifest's last column (`odd/tasks/dec
 - `dev`: the recordings a change is tuned and measured on;
 - `holdout`: read once, to confirm a result reached on `dev`;
 - `stress`: the six recordings of 2026-10-19, whose previous windows hold other faults (`check-recordings.sh` fails them), kept for a later robustness case, and the only recordings explorer and dossier replays pool;
-- `probe`: faults the prompt was never tuned on (none yet).
+- `probe`: faults the prompt was never tuned on (none yet);
+- `holdout-2`: holdout-2's schedule cases, recorded after the freeze ([ADR-026](adr/ADR-026-holdout2-seed.md)); see "Record holdout-2" below.
 
-`--split` is required. For each `<fault>-incident.json` or `<fault>-r<k>-incident.json` it reads the score file of the same name. It copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json`, or `<run dir name>-r<k>-<fault>.json` (committed: recordings are lab output, not secrets). It then adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault, the recorded mode and route, the truth (`service|category`), the file, the incident id and the split. `--rounds` takes only some rounds of a `--rounds` run (`1-5`, or `1,3,5,7,9`), so one run directory can feed both `dev` and `holdout`.
+`--split` is required. For each `<fault>-incident.json`, `<fault>-r<k>-incident.json` or schedule case `<class>-c<case>-incident.json` it reads the score file of the same name. It copies the incident to `agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json`, `<run dir name>-r<k>-<fault>.json` or `<run dir name>-c<case>-<class>.json` (committed: recordings are lab output, not secrets). It then adds a line to `agent/src/test/resources/replay/recordings.tsv` with the fault (`healthy` for a healthy control), the recorded mode and route, the truth (`service|category`, `NONE|NONE` for a healthy control), the file, the incident id, the split and the case. The `case` column holds the schedule case of a `holdout-2` row, taken from the file name, and is empty in every other split; a `holdout-2` recording that names no case is refused. `--rounds` takes only some rounds of a `--rounds` run (`1-5`, or `1,3,5,7,9`), so one run directory can feed both `dev` and `holdout`.
 - Except in `stress`, an incident must first pass `check-recordings.sh`, run on that incident alone.
 - Re-running it on the same run with the same split replaces the copy and replaces that file's manifest line with the new values (`manifest_upsert` in `lib.sh`; unchanged when they are the same), never adding a second one.
 - A fault with no score file or no truth is skipped with a warning.
 - An incident is refused when it holds a key-like string (`sk-ant-`, `ANTHROPIC_API_KEY=` with a value, or `x-api-key`, checked by `holds_key_like_string` in `lib.sh`), is not a JSON object, fails `check-recordings.sh`, or is already recorded in another split. A recording stays in one split, so a second import never moves a `holdout` recording into `dev`; to move one, edit the manifest. Nothing is written for a refused incident, and the script exits 1 after the others.
-- A manifest whose first line is not the header with the `split` column stops it with exit 2.
+- A manifest whose first line is not the header with the `split` and `case` columns stops it with exit 2.
 - `REPLAY_DIR` names another destination, for a dry run in a temporary directory.
 
 To import a recording round (`verify-agent.sh --mode decision --route cloud --rounds K`), check it, then import half of its rounds into each split. Alternating rounds spread the session's hours over both splits, so a slow drift of the lab does not separate `dev` from `holdout`:
@@ -681,6 +688,22 @@ infra/scripts/test-holdout2-schedule.sh                           # the generato
 ```
 
 The schedule is a TSV with the columns `case`, `class`, `parameter` and `value`: F1 rows draw `gateway_latency_ms` from 2000, 5000, 10000, 20000; F2 rows draw `gateway_error_status` from 429, 500, 503; F3 rows have `wrong_port` 9999; healthy rows have `-`. Never edit the seed after its commit: condition 3 fails on a seed changed since. Commit the schedule before the first recording, and record each case once: a failed recording is not imported, and its redo takes the same case. A malformed seed or a missing file exits 2.
+
+### Record holdout-2
+
+After the seed and the schedule are committed (above), record the schedule in decision mode, in as many sessions as it takes, check each run, and import it into `holdout-2`:
+
+```bash
+# 3. Record: all 75 cases, or a session's share of them, in the schedule's order.
+infra/scripts/verify-agent.sh --mode decision --schedule infra/holdout2/schedule.tsv --cases 1-15
+# 4. Check the windows, then import: each row names its schedule case in the manifest's case column.
+infra/scripts/check-recordings.sh infra/scripts/out/verify-agent-<UTC time>
+infra/scripts/record-replay.sh --split holdout-2 infra/scripts/out/verify-agent-<UTC time>
+# 5. Once every case is imported and committed:
+infra/scripts/check-freeze.sh
+```
+
+A case whose recording fails (a refused import, a `not scored` or `baseline failed` line) is recorded again with `--cases <its case>` in a later run, and only the redo is imported: condition 3 fails on a case with no row or with two. Each decision-mode case costs about 21 minutes on the cloud route (the baseline phase dominates), so the 75 cases take about 26 hours of lab time.
 
 ### Reset a volume
 

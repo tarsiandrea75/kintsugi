@@ -5,6 +5,7 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.call;
 import static dev.kintsugi.agent.loop.ScriptedChatModel.unknownReport;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -419,7 +420,7 @@ class ReplayDriverTest {
 		assertThatThrownBy(() -> driver.decisionCases("hold-out", List.of("F1")))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessageContaining("'hold-out'")
-			.hasMessageContaining("dev, holdout, stress or probe");
+			.hasMessageContaining("dev, holdout, stress, probe or holdout-2");
 		assertThatThrownBy(() -> driver.decisionCases("holdout", List.of("F1", "F2")))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessageContaining("of F1 in split holdout");
@@ -443,6 +444,38 @@ class ReplayDriverTest {
 			.hasMessageContaining("F1/broken.json");
 		assertThat(samples).isEmpty();
 		assertThat(this.model.calls()).as("model calls").isZero();
+	}
+
+	@Test
+	void theEighthColumnIsTheScheduleCaseOfAHoldout2Recording() throws IOException {
+		// holdout-2 (ADR-026): every row names its schedule case in the eighth column, a healthy control's class is
+		// "healthy" and its truth NONE|NONE (ADR-015). A row of seven columns, as the RCAEval converter writes, has none.
+		Path replay = recordingsDir(List.of(line("F1", "decision", "F1/a.json", "dev") + "\t",
+				"healthy\tdecision\tlocal\tNONE|NONE\thealthy/b.json\tid-b\tholdout-2\t12",
+				"F2\tdecision\tlocal\t" + TRUTHS.get("F2") + "\tF2/c.json\tid-c\tholdout-2\t3",
+				line("F3", "decision", "F3/d.json", "dev")), List.of(), List.of());
+		ReplayCases cases = ReplayCases.read(replay);
+
+		assertThat(cases.decisionCases("holdout-2", List.of("healthy", "F2")))
+			.extracting(ReplayCases.Recording::file, ReplayCases.Recording::truth, ReplayCases.Recording::scheduleCase)
+			.containsExactly(tuple("healthy/b.json", "NONE|NONE", "12"), tuple("F2/c.json", TRUTHS.get("F2"), "3"));
+		assertThat(cases.decisionCases("dev", List.of("F1", "F3"))).extracting(ReplayCases.Recording::scheduleCase)
+			.containsExactly("", "");
+	}
+
+	@Test
+	void theCommittedManifestHasTheCaseColumnEmptyOnEveryRowBeforeHoldout2() throws IOException {
+		List<String> lines = Files.readAllLines(ReplayDriver.DEFAULT_RECORDINGS.resolve("recordings.tsv"));
+
+		assertThat(lines.get(0)).isEqualTo("fault\tmode\troute\ttruth\tfile\tincident\tsplit\tcase");
+		assertThat(lines.subList(1, lines.size())).allSatisfy(row -> assertThat(row.split("\t", -1)).hasSize(8));
+		ReplayCases cases = ReplayCases.read(ReplayDriver.DEFAULT_RECORDINGS);
+		for (String split : List.of("dev", "holdout")) {
+			assertThat(cases.decisionCases(split, List.of("F1", "F2", "F3"))).as(split)
+				.hasSize(15)
+				.extracting(ReplayCases.Recording::scheduleCase)
+				.containsOnly("");
+		}
 	}
 
 	@Test
@@ -474,12 +507,12 @@ class ReplayDriverTest {
 
 		// 2 is replay-agent.sh's status for a bad option; the reason is the driver's.
 		assertThat(listing(replay.toString(), "hold-out", "F1"))
-			.isEqualTo(new Listing(2, List.of(), "unknown split 'hold-out': choose dev, holdout, stress or probe"));
+			.isEqualTo(new Listing(2, List.of(), "unknown split 'hold-out': choose dev, holdout, stress, probe or holdout-2"));
 		assertThat(listing(replay.toString(), "dev", "F1,F3")).isEqualTo(new Listing(2, List.of(),
 				"no decision or dossier recording of F3 in split dev of " + replay.resolve("recordings.tsv")));
 		Listing refused = listing(unknownSplit.toString(), "dev", "F1");
 		assertThat(refused.status()).isEqualTo(2);
-		assertThat(refused.error()).startsWith("a manifest line has the split 'test', not dev, holdout, stress or probe");
+		assertThat(refused.error()).startsWith("a manifest line has the split 'test', not dev, holdout, stress, probe or holdout-2");
 		assertThat(listing(replay.toString(), "dev").status()).isEqualTo(2);
 	}
 

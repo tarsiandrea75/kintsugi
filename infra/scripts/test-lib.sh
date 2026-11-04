@@ -308,6 +308,79 @@ expect "a score file with no truth and no route" "$(score_fields $'fault: F2\nmo
   "F2${tab}dossier${tab}none${tab}none${tab}none"
 expect "an empty score file" "$(score_fields '')" "none${tab}none${tab}none${tab}none${tab}none"
 
+# read_schedule: holdout2-schedule.py's schedule.tsv as verify-agent.sh --schedule runs it, one line per selected case:
+# case, class, the parameters POST /faults takes (- for none) and the schedule's parameter as a note (- for none).
+SCHEDULE_FILE="$KEY_DIR/schedule.tsv"
+printf 'case\tclass\tparameter\tvalue\n1\tF2\tgateway_error_status\t503\n2\thealthy\t-\t-
+3\tF1\tgateway_latency_ms\t5000\n4\tF3\twrong_port\t9999\n5\thealthy\t-\t-\n' >"$SCHEDULE_FILE"
+expect "every case of a schedule, in its order, F1 and F2 with their nested parameter, F3 and healthy with none" \
+  "$(read_schedule "$SCHEDULE_FILE")" \
+  "1${tab}F2${tab}{\"gatewayErrorStatus\":503}${tab}gateway_error_status=503
+2${tab}healthy${tab}-${tab}-
+3${tab}F1${tab}{\"gatewayLatencyMs\":5000}${tab}gateway_latency_ms=5000
+4${tab}F3${tab}-${tab}wrong_port=9999
+5${tab}healthy${tab}-${tab}-"
+expect "--cases picks cases and ranges, in the schedule's order whatever the list's" \
+  "$(read_schedule "$SCHEDULE_FILE" 5,2-3 | cut -f 1,2)" "2${tab}healthy"$'\n'"3${tab}F1"$'\n'"5${tab}healthy"
+# Prints what read_schedule printed on stderr and its status, for schedule $1 and cases $2.
+schedule_refusal() { read_schedule "$1" "${2:-}" 2>&1 >/dev/null; echo "exit $?"; }
+expect "a case the schedule does not hold is refused" "$(schedule_refusal "$SCHEDULE_FILE" 2,9)" \
+  "--cases: case 9 is not in $SCHEDULE_FILE"$'\n'"exit 1"
+expect "a range that ends before it starts is refused" "$(schedule_refusal "$SCHEDULE_FILE" 4-2)" \
+  "--cases: the range 4-2 ends before it starts"$'\n'"exit 1"
+expect "a list that is not cases is refused" "$(schedule_refusal "$SCHEDULE_FILE" 'one')" \
+  "--cases needs cases or ranges, such as 1-5,9, not 'one'"$'\n'"exit 1"
+expect "a missing schedule is refused" "$(schedule_refusal "$KEY_DIR/none.tsv")" \
+  "--schedule: no file $KEY_DIR/none.tsv"$'\n'"exit 1"
+# Writes schedule $1 with the header and row $2, and prints its refusal.
+bad_schedule() { printf '%s\n' "${3:-case${tab}class${tab}parameter${tab}value}" "$2" >"$KEY_DIR/$1.tsv"; schedule_refusal "$KEY_DIR/$1.tsv"; }
+expect "a file without the generator's header is refused" "$(bad_schedule header "1${tab}F1" "case${tab}class")" \
+  "--schedule: $KEY_DIR/header.tsv does not start with the header case, class, parameter, value"$'\n'"exit 1"
+expect "an unknown class is refused" "$(bad_schedule class "1${tab}F4${tab}-${tab}-")" \
+  "--schedule: $KEY_DIR/class.tsv line 2: class F4 with parameter - and value -, which the harness cannot run"\
+$'\n'"exit 1"
+expect "an F1 latency that is not a number is refused" "$(bad_schedule latency "1${tab}F1${tab}gateway_latency_ms${tab}5s")" \
+  "--schedule: $KEY_DIR/latency.tsv line 2: class F1 with parameter gateway_latency_ms and value 5s, which the harness\
+ cannot run"$'\n'"exit 1"
+expect "an F3 port the injector does not apply is refused" "$(bad_schedule port "1${tab}F3${tab}wrong_port${tab}8080")" \
+  "--schedule: $KEY_DIR/port.tsv line 2: class F3 with parameter wrong_port and value 8080, which the harness cannot run"\
+$'\n'"exit 1"
+expect "a parameter on a healthy case is refused" "$(bad_schedule healthy "1${tab}healthy${tab}wrong_port${tab}9999")" \
+  "--schedule: $KEY_DIR/healthy.tsv line 2: class healthy with parameter wrong_port and value 9999, which the harness\
+ cannot run"$'\n'"exit 1"
+expect "a case number twice is refused" "$(bad_schedule twice "1${tab}F3${tab}wrong_port${tab}9999"$'\n'"1${tab}healthy${tab}-${tab}-")" \
+  "--schedule: $KEY_DIR/twice.tsv line 3: case 1 is listed twice"$'\n'"exit 1"
+expect "a schedule with no case is refused" "$(bad_schedule empty "")" \
+  "--schedule: $KEY_DIR/empty.tsv holds no case"$'\n'"exit 1"
+
+# fault_request: the body of POST /faults, with the parameters nested under "parameters" (the injector ignores a
+# parameter at the top level, odd/tasks/lab-realism-min.md T4), or none.
+expect "an F1 request nests its latency" "$(fault_request F1 '{"gatewayLatencyMs":5000}')" \
+  '{"fault":"F1","parameters":{"gatewayLatencyMs":5000}}'
+expect "an F3 request has no parameters" "$(fault_request F3 -)" '{"fault":"F3"}'
+expect "a request without parameters is today's" "$(fault_request F2)" '{"fault":"F2"}'
+# inject_fault sends that body to the injector (stubbed: it records the request and answers 201).
+injected=$(
+  injector_call() { echo "$1 $2 ${3:-}" >"$KEY_DIR/injector-request"; echo '201 {"id":"6f1c2a4e-0d7b-4c3e-9a51-2b8e7d9c4f10"}'; }
+  inject_fault F2 '{"gatewayErrorStatus":429}' >/dev/null
+  cat "$KEY_DIR/injector-request"
+)
+expect "inject_fault posts the nested parameter" "$injected" \
+  'POST /faults {"fault":"F2","parameters":{"gatewayErrorStatus":429}}'
+
+# agent_verdict on a healthy control (truth NONE|NONE, ADR-015): UNKNOWN|UNKNOWN is right, a cause is a false alarm.
+expect "a healthy control answered UNKNOWN|UNKNOWN is a match" \
+  "$(agent_verdict decision decision cloud cloud COMPLETED - 'UNKNOWN|UNKNOWN' 'NONE|NONE')" \
+  "MATCH${tab}the report names no cause (UNKNOWN|UNKNOWN), right on a healthy control"
+expect "a healthy control answered with a cause is a false alarm" \
+  "$(agent_verdict decision decision cloud cloud COMPLETED - "$truth" 'NONE|NONE')" \
+  "MISS${tab}a false alarm on a healthy control: status COMPLETED, reported '$truth', truth 'NONE|NONE'"
+expect "a healthy control with no report is a miss" \
+  "$(agent_verdict decision decision cloud cloud FAILED 'no report' none 'NONE|NONE')" \
+  "MISS${tab}status FAILED (no report), reported 'none', truth 'NONE|NONE'"
+expect "the healthy truth is the scorer's" "$HEALTHY_TRUTH" \
+  "$(grep -oE '^HEALTHY_TRUTH = "[^"]*"' "$REPO_DIR/evals/kintsugi_evals/scoring.py" | cut -d'"' -f2)"
+
 # env_file_read writes the caller's variable even when it has the name of one of the function's own locals.
 ENV_FILE="$KEY_DIR/env"
 printf 'ANTHROPIC_API_KEY=dummy-for-test\n' >"$ENV_FILE"
@@ -378,6 +451,25 @@ expect "summary.tsv's last column is the round" "$(head -n 1 "$KEY_DIR/decision/
 ${tab}seconds${tab}verdict${tab}round"
 expect "explorer mode logs as before: no rounds, no baseline" "$(verify_agent explorer | grep -F '....  ')" \
   "....  logging to $KEY_DIR/explorer; faults: F1 F2 F3; mode: explorer; route: local"
+expect "without --schedule, summary.tsv has today's columns" "$(head -n 1 "$KEY_DIR/explorer/summary.tsv")" \
+  "$(head -n 1 "$KEY_DIR/decision/summary.tsv")"
+# --schedule runs holdout2-schedule.py's cases, --cases some of them; both are checked before the lab.
+option_refusal() { local out; out=$(verify_agent "$@"); echo "$? $out"; }
+expect "--schedule with a missing file exits 2" "$(option_refusal refused --schedule "$KEY_DIR/none.tsv")" \
+  "2 --schedule: no file $KEY_DIR/none.tsv"
+expect "--schedule refuses --only" "$(option_refusal refused --schedule "$SCHEDULE_FILE" --only F1)" \
+  "2 --schedule runs the schedule's cases: it takes neither --only nor --rounds"
+expect "--schedule refuses --rounds" "$(option_refusal refused --schedule "$SCHEDULE_FILE" --rounds 2)" \
+  "2 --schedule runs the schedule's cases: it takes neither --only nor --rounds"
+expect "--cases needs --schedule" "$(option_refusal refused --cases 1-3)" "2 --cases needs --schedule"
+expect "--cases naming no case of the schedule exits 2" \
+  "$(option_refusal refused --schedule "$SCHEDULE_FILE" --cases 7)" "2 --cases: case 7 is not in $SCHEDULE_FILE"
+scheduled=$(verify_agent scheduled --mode decision --schedule "$SCHEDULE_FILE" --cases 2-3)
+expect "a schedule's options pass, and the run stops at the Ollama check" "$?" 1
+expect "the run names its schedule and cases" "$(grep -F '....  logging to' <<<"$scheduled")" \
+  "....  logging to $KEY_DIR/scheduled; schedule: $SCHEDULE_FILE, cases 2 3; mode: decision; route: local"
+expect "a schedule run's summary.tsv adds the case and its parameters" \
+  "$(head -n 1 "$KEY_DIR/scheduled/summary.tsv")" "$(head -n 1 "$KEY_DIR/decision/summary.tsv")${tab}case${tab}parameters"
 
 # verify-agent.sh's flow for one fault in decision mode: its own diagnose(), the place_orders() it calls and its exit
 # trap, cleanup(). They are read from the script, each from its "<name>() {" line to the first "}" alone on a line, and
@@ -413,7 +505,13 @@ decision_fault() {
     # The stubs read stub_* variables of their own: bash's scoping is dynamic, so a stub called from diagnose would see
     # diagnose's locals (window, truth, body...) under those names.
     stub_answer=$4 stub_window=${5:-}
+    # A schedule case, when the caller sets DF_CASE (with DF_PARAMS and DF_NOTE), as verify-agent.sh --schedule runs
+    # it; DF_REPORT is the report's cause (default the F1 truth) and DF_ACTIVE the answer to GET /faults/active.
+    stub_reported=${DF_REPORT:-gateway-mock|DEPENDENCY_LATENCY} stub_active=${DF_ACTIVE:-204 }
+    # Every injector request, order and symptom is logged in the run directory, to compare a healthy case's run with
+    # a fault case's.
     place_order() {
+      echo order >>"$RUN_DIR/orders.log"
       if [[ "$stub_answer" == PAID ]]; then
         echo "201 at-$((clock - 1700000000)) PAID 0.1"
       else
@@ -421,16 +519,18 @@ decision_fault() {
       fi
     }
     injector_call() {
+      echo "$1 $2${3:+ $3}" >>"$RUN_DIR/injector.log"
       case "$1 $2" in
         "POST /faults") echo "201 {\"id\":\"$diagnose_injection\",\"status\":\"ACTIVE\"}" ;;
         "POST /faults/$diagnose_injection/restore") echo '200 {"status":"RESTORED"}' ;;
+        "GET /faults/active") echo "$stub_active" ;;
         *) echo "000 " ;;
       esac
     }
-    open_incident() { echo "$diagnose_incident $stub_window"; }
+    open_incident() { echo "$1 | $3" >>"$RUN_DIR/symptoms.log"; echo "$diagnose_incident $stub_window"; }
     stub_body='{"status":"COMPLETED","mode":"decision","route":"cloud","model":"claude-haiku-5-5",'
     stub_body+='"steps":[{"kind":"DOSSIER"},{"kind":"REPORT","promptTokens":5300,"completionTokens":550}],'
-    stub_body+='"report":{"rootCauseService":"gateway-mock","rootCauseCategory":"DEPENDENCY_LATENCY"}}'
+    stub_body+="\"report\":{\"rootCauseService\":\"${stub_reported%|*}\",\"rootCauseCategory\":\"${stub_reported#*|}\"}}"
     agent_call() { echo "200 $stub_body"; }
     # curl, which saves the incident's full record, fails: diagnose warns and goes on.
     curl() { return 7; }
@@ -438,7 +538,7 @@ decision_fault() {
     psql_faults() { echo 'gateway-mock|DEPENDENCY_LATENCY'; }
     : >"$RUN_DIR/summary.tsv"
     trap cleanup EXIT
-    diagnose "$1" "$2"
+    diagnose "$1" "$2" ${DF_CASE:+"$DF_CASE" "$DF_PARAMS" "$DF_NOTE"}
     # The script's last line.
     (( failures == 0 ))
   ) 2>&1
@@ -475,6 +575,62 @@ ${tab}gateway-mock|DEPENDENCY_LATENCY${tab}gateway-mock|DEPENDENCY_LATENCY${tab}
 expect "its score file records the window and the miss" \
   "$(grep -e '^window' -e '^verdict' "$diagnose_dir/window-too-large/F2-r1-score.txt")" \
   "window (minutes): 10"$'\n'"verdict: MISS"
+# A schedule's fault case and healthy case (verify-agent.sh --schedule): the fault case injects its fault with its
+# nested parameter; the healthy case injects nothing, only checks that no injection is active where the fault case
+# injects, and runs the same baseline, orders and symptom. Its truth is NONE|NONE, and UNKNOWN|UNKNOWN is its match.
+mkdir -p "$diagnose_dir/case-fault" "$diagnose_dir/case-healthy" "$diagnose_dir/case-false-alarm" \
+  "$diagnose_dir/case-active"
+fault_run=$(DF_CASE=3 DF_PARAMS='{"gatewayLatencyMs":5000}' DF_NOTE=gateway_latency_ms=5000 \
+  decision_fault F1 1 "$diagnose_dir/case-fault" PAID 5)
+expect "a scheduled fault case is labelled by its case and matches" "$(grep -e '^PASS  F1-c3' -e '^RESULT' <<<"$fault_run")" \
+  "PASS  F1-c3: incident $diagnose_incident opened, window 5 min
+PASS  F1-c3: the report names gateway-mock|DEPENDENCY_LATENCY, the truth
+RESULT: PASS"
+expect "a scheduled fault case posts its nested parameter, then restores" "$(<"$diagnose_dir/case-fault/injector.log")" \
+  "POST /faults {\"fault\":\"F1\",\"parameters\":{\"gatewayLatencyMs\":5000}}
+POST /faults/$diagnose_injection/restore"
+expect "its summary.tsv line ends with its case and parameters" "$(<"$diagnose_dir/case-fault/summary.tsv")" \
+  "F1${tab}decision${tab}cloud${tab}$diagnose_injection${tab}$diagnose_incident${tab}COMPLETED\
+${tab}gateway-mock|DEPENDENCY_LATENCY${tab}gateway-mock|DEPENDENCY_LATENCY${tab}2${tab}5${tab}0${tab}MATCH${tab}1\
+${tab}3${tab}gateway_latency_ms=5000"
+expect "its score file records its case and parameters" \
+  "$(grep -e '^case' -e '^parameters' "$diagnose_dir/case-fault/F1-c3-score.txt")" \
+  "case: 3"$'\n'"parameters: gateway_latency_ms=5000"
+healthy_run=$(DF_CASE=2 DF_PARAMS=- DF_NOTE=- DF_REPORT='UNKNOWN|UNKNOWN' \
+  decision_fault healthy 1 "$diagnose_dir/case-healthy" PAID 5)
+expect "a healthy case answered UNKNOWN|UNKNOWN is a match" \
+  "$(grep -e '^PASS  healthy' -e '^RESULT' <<<"$healthy_run")" \
+  "PASS  healthy-c2: no injection is active, so none is in its windows
+PASS  healthy-c2: incident $diagnose_incident opened, window 5 min
+PASS  healthy-c2: the report names no cause (UNKNOWN|UNKNOWN), right on a healthy control
+RESULT: PASS"
+expect "a healthy case posts nothing to the injector: it only reads the active injection" \
+  "$(<"$diagnose_dir/case-healthy/injector.log")" "GET /faults/active"
+expect "a healthy case places as many orders as a fault case" "$(wc -l <"$diagnose_dir/case-healthy/orders.log")" \
+  "$(wc -l <"$diagnose_dir/case-fault/orders.log")"
+expect "a healthy case opens its incident with a fault case's symptom and margin" \
+  "$(<"$diagnose_dir/case-healthy/symptoms.log")" "$(<"$diagnose_dir/case-fault/symptoms.log")"
+expect "a healthy case's summary.tsv line: no injection, truth NONE|NONE, its case" \
+  "$(<"$diagnose_dir/case-healthy/summary.tsv")" \
+  "healthy${tab}decision${tab}cloud${tab}-${tab}$diagnose_incident${tab}COMPLETED${tab}NONE|NONE${tab}UNKNOWN|UNKNOWN\
+${tab}2${tab}5${tab}0${tab}MATCH${tab}1${tab}2${tab}-"
+expect "a healthy case's score file: no injection, truth NONE|NONE" \
+  "$(grep -e '^injection' -e '^truth' -e '^case' "$diagnose_dir/case-healthy/healthy-c2-score.txt")" \
+  "injection: -"$'\n'"truth (service|category): NONE|NONE"$'\n'"case: 2"
+DF_CASE=5 DF_PARAMS=- DF_NOTE=- decision_fault healthy 1 "$diagnose_dir/case-false-alarm" PAID 5 >/dev/null
+expect "a healthy case answered with a cause is a false alarm, a miss" \
+  "$(cut -f 7,8,12 "$diagnose_dir/case-false-alarm/summary.tsv")" \
+  "NONE|NONE${tab}gateway-mock|DEPENDENCY_LATENCY${tab}MISS"
+active_run=$(DF_CASE=2 DF_PARAMS=- DF_NOTE=- DF_ACTIVE='200 {"id":"6f1c2a4e-0d7b-4c3e-9a51-2b8e7d9c4f10"}' \
+  decision_fault healthy 1 "$diagnose_dir/case-active" PAID 5; echo "exit $?")
+expect "a healthy case with an active injection stops the run before its incident" \
+  "$(grep -e '^FAIL' -e '^exit' <<<"$active_run")" \
+  "FAIL  healthy-c2: GET /faults/active answered 200, not 204: an injection is active, so the healthy control is not\
+ healthy; nothing opened
+FAIL  healthy-c2: not scored, the run stopped before its score
+exit 1"
+expect "its not-scored summary.tsv line carries its case" "$(<"$diagnose_dir/case-active/summary.tsv")" \
+  "healthy${tab}decision${tab}cloud${tab}-${tab}-${tab}not scored${tab}-${tab}-${tab}-${tab}-${tab}-${tab}MISS${tab}1${tab}2${tab}-"
 
 # check-recordings.sh: a clean decision-mode recording passes; the 2026-10-19 recordings (the committed replay copies,
 # under the names verify-agent.sh gave them) fail, each on what an earlier fault or the lab's start left in its windows.
@@ -509,7 +665,24 @@ expect "an incident with no DOSSIER step fails" "$("$check_recordings" "$KEY_DIR
   "FAIL  $KEY_DIR/explorer-run/F1-incident.json: no DOSSIER step"
 expect "a run directory with no recording is a wrong argument" \
   "$("$check_recordings" "$KEY_DIR/empty-run" 2>&1; echo "exit $?")" \
-  "No F<n>-incident.json or F<n>-r<k>-incident.json in $KEY_DIR/empty-run"$'\n'"exit 2"
+  "No F<n>-incident.json, F<n>-r<k>-incident.json or <class>-c<case>-incident.json in $KEY_DIR/empty-run"$'\n'"exit 2"
+# A schedule run's recordings (verify-agent.sh --schedule) are named by their case. A healthy control's (AC4): healthy
+# orders and traffic in both windows, no restart at all, since nothing was injected.
+healthy_run="$(dirname "${BASH_SOURCE[0]}")/testdata/check-recordings/healthy"
+expect "a healthy control's recording passes, with no restart allowed" \
+  "$("$check_recordings" "$healthy_run" 2>&1; echo "exit $?")" \
+  "PASS  $healthy_run/healthy-c2-incident.json: previous window: 5 PAID orders, no other state, all traffic SUCCESS;\
+ incident window: no restart"$'\n'"RESULT: PASS (1 recording(s) clean)"$'\n'"exit 0"
+mkdir -p "$KEY_DIR/case-run"
+cp "$clean_run/F3-r1-incident.json" "$KEY_DIR/case-run/F3-c4-incident.json"
+cp "$clean_run/F3-r1-incident.json" "$KEY_DIR/case-run/healthy-c5-incident.json"
+expect "a scheduled F3 case keeps F3's recreate; a healthy case restarts nothing" \
+  "$("$check_recordings" "$KEY_DIR/case-run" 2>&1)" \
+  "PASS  $KEY_DIR/case-run/F3-c4-incident.json: previous window: 5 PAID orders, no other state, all traffic SUCCESS;\
+ incident window: order-service restarted once, F3's own recreate
+FAIL  $KEY_DIR/case-run/healthy-c5-incident.json: incident window: restarts besides the fault's own (healthy restarts\
+ nothing): order-service 1
+RESULT: FAIL (1 of 2 recording(s) failed)"
 
 # replay-agent.sh's decision-mode options and cases, checked before Maven, over a temporary manifest (REPLAY_DIR). Run
 # on the local route with the failing curl stub, so a run that passes them stops at the Ollama check. The cases come
@@ -567,7 +740,7 @@ expect "the assessed report with the tables, the default view, stops the run bef
 # Kept for record-replay.sh's refusal of the same split, below.
 driver_refusal=$(replay_agent --mode decision --split train; echo "exit $?")
 expect "an unknown split exits 2 with the driver's reason, before Maven" "$driver_refusal" \
-  "unknown split 'train': choose dev, holdout, stress or probe"$'\n'"exit 2"
+  "unknown split 'train': choose dev, holdout, stress, probe or holdout-2"$'\n'"exit 2"
 # Config 0 (ADR-016) replays decision mode only, and the route is refused on the option itself before the manifest.
 expect "the rules route refuses explorer and dossier mode before Maven" \
   "$(replay_agent --route rules --mode dossier; echo "exit $?")" \
@@ -644,7 +817,7 @@ bad_line="F2${tab}decision${tab}cloud${tab}c|D${tab}F2/r1-F2.json${tab}id-6${tab
 printf '%s\n' "$(<"$manifest_dir/recordings.tsv")" "$bad_line" >"$bad_dir/recordings.tsv"
 expect "a manifest line the driver refuses stops the run before Maven" \
   "$(replay_agent_over "$bad_dir" --mode decision --faults F1; echo "exit $?")" \
-  "a manifest line has the split 'test', not dev, holdout, stress or probe: $bad_line"$'\n'"exit 2"
+  "a manifest line has the split 'test', not dev, holdout, stress, probe or holdout-2: $bad_line"$'\n'"exit 2"
 
 # --dataset (odd/tasks/rcaeval-converter.md T5): re2-ob replays the RCAEval converter's recordings, whose faults are
 # RCAEval's, from a recordings directory that must be named, in decision mode only. The committed converter output
@@ -704,17 +877,17 @@ score_text F2 dossier id-f2 'gateway-mock|DEPENDENCY_REJECTING' >"$stress_run/F2
 printf '{"steps":[{"toolOutput":"token sk-ant-api03-abc"}]}' >"$key_run/F1-incident.json"
 score_text F1 dossier id-f1 'gateway-mock|DEPENDENCY_LATENCY' >"$key_run/F1-score.txt"
 record() { REPLAY_DIR="$replay_dir" "$record_replay" "$@" 2>&1; }
-manifest_header="fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split"
+manifest_header="fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split${tab}case"
 f3_r1="F3${tab}decision${tab}cloud${tab}order-service|CONFIGURATION${tab}F3/verify-agent-20261024T162600Z-r1-F3.json\
-${tab}id-f3-r1${tab}dev"
+${tab}id-f3-r1${tab}dev${tab}"
 expect "--split is required" "$(record "$new_run"; echo "exit $?")" \
-  "--split is required: dev, holdout, stress or probe; see --help"$'\n'"exit 2"
+  "--split is required: dev, holdout, stress, probe or holdout-2; see --help"$'\n'"exit 2"
 # record-replay.sh keeps its own list of the splits, so that the import needs no JDK. It refuses an unknown split in
 # the words replay-agent.sh printed above, which are ReplayCases' own, list included: the two lists cannot drift apart.
 expect "an unknown split exits 2 with the driver's reason" "$(record --split train "$new_run"; echo "exit $?")" \
   "$driver_refusal"
 expect "two splits in one --split are no split" "$(record --split 'dev holdout' "$new_run"; echo "exit $?")" \
-  "unknown split 'dev holdout': choose dev, holdout, stress or probe"$'\n'"exit 2"
+  "unknown split 'dev holdout': choose dev, holdout, stress, probe or holdout-2"$'\n'"exit 2"
 expect "a range of rounds that ends before it starts exits 2" \
   "$(record --split dev --rounds 5-3 "$new_run"; echo "exit $?")" \
   "--rounds: the range 5-3 ends before it starts"$'\n'"exit 2"
@@ -761,11 +934,50 @@ expect "the manifest holds one line per recording, each with its split" \
   "F3/verify-agent-20261024T162600Z-r1-F3.json${tab}dev
 F3/verify-agent-20261024T162600Z-r2-F3.json${tab}holdout
 F2/verify-agent-20261019T214629Z-F2.json${tab}stress"
+# A schedule run (verify-agent.sh --schedule): its files are named by case, a healthy control's class is "healthy" and
+# its truth NONE|NONE. Into holdout-2 each row names its schedule case, in the case column; a recording without one is
+# refused there (ADR-026, Decision 3). In any other split the case column stays empty.
+schedule_run="$KEY_DIR/runs/verify-agent-20261202T090000Z"
+mkdir -p "$schedule_run"
+cp "$healthy_run/healthy-c2-incident.json" "$schedule_run/healthy-c2-incident.json"
+score_text healthy decision id-h-c2 'NONE|NONE' >"$schedule_run/healthy-c2-score.txt"
+cp "$clean_run/F3-r1-incident.json" "$schedule_run/F3-c4-incident.json"
+score_text F3 decision id-f3-c4 'order-service|CONFIGURATION' >"$schedule_run/F3-c4-score.txt"
+expect "a schedule run into holdout-2: a healthy case and a fault case, each with its case" \
+  "$(record --split holdout-2 "$schedule_run"; echo "exit $?")" \
+  "PASS  verify-agent-20261202T090000Z F3-c4: F3/verify-agent-20261202T090000Z-c4-F3.json recorded in holdout-2\
+ (decision, cloud, truth order-service|CONFIGURATION)
+PASS  verify-agent-20261202T090000Z healthy-c2: healthy/verify-agent-20261202T090000Z-c2-healthy.json recorded in\
+ holdout-2 (decision, cloud, truth NONE|NONE)
+2 recorded, 0 refused, manifest $replay_dir/recordings.tsv
+exit 0"
+expect "the holdout-2 rows carry their schedule case" "$(grep -F "${tab}holdout-2${tab}" "$replay_dir/recordings.tsv")" \
+  "F3${tab}decision${tab}cloud${tab}order-service|CONFIGURATION${tab}F3/verify-agent-20261202T090000Z-c4-F3.json\
+${tab}id-f3-c4${tab}holdout-2${tab}4
+healthy${tab}decision${tab}cloud${tab}NONE|NONE${tab}healthy/verify-agent-20261202T090000Z-c2-healthy.json\
+${tab}id-h-c2${tab}holdout-2${tab}2"
+expect "the healthy recording is the incident, under its class" \
+  "$(cmp -s "$schedule_run/healthy-c2-incident.json" \
+    "$replay_dir/healthy/verify-agent-20261202T090000Z-c2-healthy.json" && echo same)" same
+dev_schedule_run="$KEY_DIR/runs/verify-agent-20261103T220000Z"
+mkdir -p "$dev_schedule_run"
+cp "$schedule_run"/healthy-c2-* "$dev_schedule_run/"
+expect "a schedule run into dev leaves the case column empty" \
+  "$(record --split dev "$dev_schedule_run" >/dev/null; grep -F 'verify-agent-20261103T220000Z' "$replay_dir/recordings.tsv" | cut -f 7-)" \
+  "dev${tab}"
+expect "holdout-2 refuses a recording that names no schedule case" \
+  "$(record --split holdout-2 --rounds 1 "$new_run" | grep -F 'F3-r1')" \
+  "FAIL  verify-agent-20261024T162600Z F3-r1: refused, a holdout-2 recording must name its schedule case\
+ (<class>-c<case>-incident.json, from verify-agent.sh --schedule); nothing written"
+expect "the committed manifest starts with record-replay.sh's header" \
+  "$(head -n 1 "$REPO_DIR/agent/src/test/resources/replay/recordings.tsv")" "$manifest_header"
+expect "every committed manifest row has the case column, empty before holdout-2" \
+  "$(tail -n +2 "$REPO_DIR/agent/src/test/resources/replay/recordings.tsv" | awk -F'\t' 'NF != 8 || $8 != ""' | wc -l)" 0
 mkdir -p "$KEY_DIR/replay-6-columns"
 printf 'fault\tmode\troute\ttruth\tfile\tincident\n' >"$KEY_DIR/replay-6-columns/recordings.tsv"
 expect "a manifest without the split column is refused" \
   "$(REPLAY_DIR="$KEY_DIR/replay-6-columns" "$record_replay" --split stress "$stress_run" 2>&1; echo "exit $?")" \
   "$KEY_DIR/replay-6-columns/recordings.tsv does not start with the header fault, mode, route, truth, file,\
- incident, split; nothing written"$'\n'"exit 2"
+ incident, split, case; nothing written"$'\n'"exit 2"
 
 echo "PASS  $cases cases"

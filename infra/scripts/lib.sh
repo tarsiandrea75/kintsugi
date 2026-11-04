@@ -34,6 +34,11 @@ INJECTOR_MAX_SECONDS=180
 down=false
 failures=0
 started=$SECONDS
+# A healthy control of holdout-2's schedule (holdout2-schedule.py's class), its truth (ADR-015; the scorer's
+# HEALTHY_TRUTH in evals/kintsugi_evals/scoring.py) and the report that names no cause, its right answer.
+HEALTHY_CLASS=healthy
+HEALTHY_TRUTH='NONE|NONE'
+UNKNOWN_CAUSE='UNKNOWN|UNKNOWN'
 # The injection this script activated; the exit trap restores it through the injector.
 injection_id=""
 # When the last fault was restored (epoch second), kept on disk so space_out holds across runs (git-ignored with out/).
@@ -292,13 +297,24 @@ injector_call() {
   echo
 }
 
-# POST /faults for fault $1. On 201 stores the injection id for the exit trap and passes; otherwise fails and exits.
+# The body of POST /faults for fault $1, with the parameters object $2 nested under "parameters" (the injector ignores
+# a parameter at the top level); none when $2 is empty or "-". Tested by test-lib.sh.
+fault_request() {
+  if [[ -z "${2:-}" || "$2" == - ]]; then
+    printf '{"fault":"%s"}\n' "$1"
+  else
+    printf '{"fault":"%s","parameters":%s}\n' "$1" "$2"
+  fi
+}
+
+# POST /faults for fault $1, with the optional parameters object $2 (fault_request). On 201 stores the injection id for
+# the exit trap and passes; otherwise fails and exits.
 # A failed activation (500) still carries an id: it is stored too, so the trap retries the restore. A transport failure
 # (000) or a body without an id says nothing about the injector's side: the activation may have gone through after curl
 # gave up. So the active injection is read back, and when there is one its id is stored for the trap too.
 inject_fault() {
   local code body id=""
-  read -r code body <<<"$(injector_call POST /faults "{\"fault\":\"$1\"}")" || true
+  read -r code body <<<"$(injector_call POST /faults "$(fault_request "$1" "${2:-}")")" || true
   id=$(json_field id "$body") || true
   if is_uuid "$id"; then
     injection_id=$id
@@ -309,6 +325,84 @@ inject_fault() {
     pass "$1 injected through the fault injector (injection $injection_id)"
   else
     fail "POST /faults $1: expected 201 with an injection id, got $code ${body:-no body}"
+    exit 1
+  fi
+}
+
+# Prints the cases of holdout-2's schedule file $1 (holdout2-schedule.py's schedule.tsv) that verify-agent.sh
+# --schedule runs: all of them, or those of list $2 (cases or ranges, such as 1-5,9), always in the schedule's order. One
+# tab-separated line per case: the case, its class, the parameters object POST /faults takes (- for none) and the
+# schedule's parameter as <name>=<value> (- for none). F1 and F2 carry their drawn parameter; F3's wrong port is the
+# injector's own 9999, so F3 sends none; a healthy control has none. The injector checks the values against its
+# declared ranges. On a file, a row or a list it cannot run, prints why on stderr and fails, before any case is run.
+# Tested by test-lib.sh.
+read_schedule() {
+  local file=$1 list=${2:-} header line=1 number class parameter value rest params note item first last k
+  local -a rows=() items=()
+  local -A seen=() wanted=()
+  [[ -f "$file" && -r "$file" ]] || { echo "--schedule: no file $file" >&2; return 1; }
+  {
+    IFS= read -r header || header=""
+    if [[ "$header" != $'case\tclass\tparameter\tvalue' ]]; then
+      echo "--schedule: $file does not start with the header case, class, parameter, value" >&2
+      return 1
+    fi
+    while IFS=$'\t' read -r number class parameter value rest || [[ -n "$number" ]]; do
+      line=$((line + 1))
+      [[ -n "$number$class$parameter$value$rest" ]] || continue
+      if [[ ! "$number" =~ ^[1-9][0-9]{0,3}$ ]]; then
+        echo "--schedule: $file line $line: '$number' is not a case number" >&2
+        return 1
+      fi
+      [[ -z "${seen[$number]:-}" ]] || { echo "--schedule: $file line $line: case $number is listed twice" >&2; return 1; }
+      params="" note="$parameter=$value"
+      case "$class|$parameter|$value" in
+        F1\|gateway_latency_ms\|*) [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]] && params="{\"gatewayLatencyMs\":$value}" ;;
+        F2\|gateway_error_status\|*) [[ "$value" =~ ^[1-9][0-9]{2}$ ]] && params="{\"gatewayErrorStatus\":$value}" ;;
+        "F3|wrong_port|9999") params=- ;;
+        "$HEALTHY_CLASS|-|-") params=- note=- ;;
+      esac
+      if [[ -z "$params" || -n "$rest" ]]; then
+        echo "--schedule: $file line $line: class $class with parameter $parameter and value $value, which the" \
+          "harness cannot run" >&2
+        return 1
+      fi
+      seen[$number]=1
+      rows+=("$number"$'\t'"$class"$'\t'"$params"$'\t'"$note")
+    done
+  } <"$file"
+  (( ${#rows[@]} )) || { echo "--schedule: $file holds no case" >&2; return 1; }
+  if [[ -n "$list" ]]; then
+    IFS=, read -r -a items <<<"$list"
+    for item in "${items[@]}"; do
+      if [[ ! "$item" =~ ^([1-9][0-9]{0,3})(-([1-9][0-9]{0,3}))?$ ]]; then
+        echo "--cases needs cases or ranges, such as 1-5,9, not '$list'" >&2
+        return 1
+      fi
+      first=${BASH_REMATCH[1]} last=${BASH_REMATCH[3]:-${BASH_REMATCH[1]}}
+      (( first <= last )) || { echo "--cases: the range $item ends before it starts" >&2; return 1; }
+      for ((k = first; k <= last; k++)); do
+        [[ -n "${seen[$k]:-}" ]] || { echo "--cases: case $k is not in $file" >&2; return 1; }
+        wanted[$k]=1
+      done
+    done
+  fi
+  for item in "${rows[@]}"; do
+    [[ -z "$list" || -n "${wanted[${item%%$'\t'*}]:-}" ]] && printf '%s\n' "$item"
+  done
+  return 0
+}
+
+# A healthy control's check where a fault case injects ($1 names the case): GET /faults/active must answer 204, so no
+# injection is in its windows. Passes, or fails and exits; it never restores another injection, which would be one.
+expect_no_injection() {
+  local code body
+  read -r code body <<<"$(injector_call GET /faults/active)" || true
+  if [[ "$code" == 204 ]]; then
+    pass "$1: no injection is active, so none is in its windows"
+  else
+    fail "$1: GET /faults/active answered $code, not 204: an injection is active, so the healthy control is not" \
+      "healthy; nothing opened"
     exit 1
   fi
 }
@@ -820,7 +914,8 @@ print("\t".join([clean(incident.get("status") or "unreadable"), clean(incident.g
 # incident's mode as incident_fields prints it (- when the incident was unreadable), $3 the requested route, $4 the
 # incident's route (- when unreadable), $5 the status, $6 the failure reason (- when none), $7 the reported cause, $8
 # the truth (empty when unreadable). A readable incident must have run in the requested mode and on the requested
-# route; a mismatch is a miss that still shows the outcome. An unreadable one fails on its status. Tested by
+# route; a mismatch is a miss that still shows the outcome. An unreadable one fails on its status. On a healthy control
+# (truth HEALTHY_TRUTH) only a COMPLETED UNKNOWN|UNKNOWN matches, and a cause is named a false alarm. Tested by
 # test-lib.sh.
 agent_verdict() {
   local requested_mode=$1 recorded_mode=$2 requested_route=$3 recorded_route=$4 status=$5 reason=$6 reported=$7
@@ -835,6 +930,15 @@ agent_verdict() {
   fi
   if [[ -n "$mismatch" ]]; then
     printf 'MISS\t%s%s\n' "$mismatch" "$outcome"
+  elif [[ "$truth" == "$HEALTHY_TRUTH" ]]; then
+    # A healthy control (ADR-015): no cause is right, any cause a false alarm, no report a miss.
+    if [[ "$status" == COMPLETED && "$reported" == "$UNKNOWN_CAUSE" ]]; then
+      printf 'MATCH\tthe report names no cause (%s), right on a healthy control\n' "$reported"
+    elif [[ "$status" == COMPLETED && "$reported" != none ]]; then
+      printf 'MISS\ta false alarm on a healthy control: %s\n' "$outcome"
+    else
+      printf 'MISS\t%s\n' "$outcome"
+    fi
   elif [[ "$status" == COMPLETED && -n "$truth" && "$reported" == "$truth" ]]; then
     printf 'MATCH\tthe report names %s, the truth\n' "$reported"
   else

@@ -28,10 +28,10 @@ final class ReplayCases {
 
 	/**
 	 * The splits of {@code recordings.tsv} (odd/tasks/decision-instrument.md): {@code dev} to tune on, {@code holdout}
-	 * read once, {@code stress} for recordings whose windows hold other faults, and {@code probe} for faults never
-	 * tuned on.
+	 * read once, {@code stress} for recordings whose windows hold other faults, {@code probe} for faults never tuned
+	 * on, and {@code holdout-2} for the cases of holdout-2's schedule, recorded after the freeze (ADR-026).
 	 */
-	static final List<String> SPLITS = List.of("dev", "holdout", "stress", "probe");
+	static final List<String> SPLITS = List.of("dev", "holdout", "stress", "probe", "holdout-2");
 
 	/**
 	 * The split explorer and dossier samples pool: the 2026-10-19 recordings they were measured on. An import into
@@ -53,7 +53,8 @@ final class ReplayCases {
 
 	/**
 	 * Reads {@code recordings.tsv} in the replay directory {@code recordings}, one row per line: fault, mode, route,
-	 * truth, file, incident, split; the header is skipped.
+	 * truth, file, incident, split and case; the header is skipped. The case, holdout-2's schedule case (ADR-026), is
+	 * empty on every other row, and a row of seven columns, as the RCAEval converter writes, has none.
 	 * @throws IllegalArgumentException for a row with fewer columns, or a split not in {@link #SPLITS}
 	 * @throws UncheckedIOException when the manifest cannot be read
 	 */
@@ -80,7 +81,7 @@ final class ReplayCases {
 						"a manifest line has the split '" + columns[6] + "', not " + splitChoices() + ": " + line);
 			}
 			rows.add(new Recording(columns[0], columns[1], columns[2], columns[3], columns[4], columns[5],
-					columns[6]));
+					columns[6], columns.length > 7 ? columns[7] : ""));
 		}
 		return new ReplayCases(manifest, List.copyOf(rows));
 	}
@@ -134,7 +135,7 @@ final class ReplayCases {
 		return Arrays.stream(list.split(",")).map(String::strip).filter(fault -> !fault.isEmpty()).toList();
 	}
 
-	/** {@link #SPLITS} as the messages name them: {@code dev, holdout, stress or probe}. */
+	/** {@link #SPLITS} as the messages name them: {@code dev, holdout, stress, probe or holdout-2}. */
 	static String splitChoices() {
 		return String.join(", ", SPLITS.subList(0, SPLITS.size() - 1)) + " or " + SPLITS.get(SPLITS.size() - 1);
 	}
@@ -166,9 +167,12 @@ final class ReplayCases {
 		System.exit(list(List.of(args), System.out, System.err));
 	}
 
-	/** One row of {@code recordings.tsv}; {@code file} is relative to the replay directory. */
-	record Recording(String fault, String mode, String route, String truth, String file, String incident,
-			String split) {
+	/**
+	 * One row of {@code recordings.tsv}; {@code file} is relative to the replay directory, and {@code scheduleCase} is
+	 * the holdout-2 schedule case it records, empty when it records none.
+	 */
+	record Recording(String fault, String mode, String route, String truth, String file, String incident, String split,
+			String scheduleCase) {
 
 		/** The file's name without its directory and {@code .json}: what names the recording in a sample's outputs. */
 		String stem() {

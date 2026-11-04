@@ -485,7 +485,7 @@ class ServiceSheetsTest {
 	private static String split(String file) {
 		return resource("/replay/recordings.tsv").lines()
 			.map(line -> line.split("\t", -1))
-			.filter(columns -> columns.length == 7 && columns[4].equals(file))
+			.filter(columns -> columns.length >= 7 && columns[4].equals(file))
 			.map(columns -> columns[6])
 			.findFirst()
 			.orElseThrow(() -> new AssertionError(file + " is not in recordings.tsv"));

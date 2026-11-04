@@ -10,13 +10,14 @@ imports them.
 
   infra/scripts/check-recordings.sh infra/scripts/out/verify-agent-<UTC time> [<run dir>...]
 
-For every <fault>-incident.json and <fault>-r<round>-incident.json in each run directory, it reads the dossier's tool
-calls, recorded with their arguments and outputs in the incident's DOSSIER step. The incident window is the last N
+For every <fault>-incident.json and <fault>-r<round>-incident.json in each run directory, and every
+<class>-c<case>-incident.json of a verify-agent.sh --schedule run (class F1, F2, F3 or healthy), it reads the dossier's
+tool calls, recorded with their arguments and outputs in the incident's DOSSIER step. The incident window is the last N
 minutes (N is the incident's sinceMinutes), the previous window the N minutes before it. It checks:
 - the previous window: the orders table shows at least 3 PAID orders and no order in any other status, and no traffic
   row, on any edge and either side, has an outcome other than SUCCESS;
 - the incident window: no service restarted, except once for the fault's own recreate: order-service for F3,
-  inventory-service for F4. F1 and F2 restart nothing.
+  inventory-service for F4. F1, F2 and a healthy control restart nothing.
 It prints one PASS or FAIL line per incident, with the facts that fail it, then a RESULT line. An incident that is not
 JSON, has no DOSSIER step or lacks one of those calls fails. Exits 0 when every incident passes, 1 when one fails, and
 2 on a wrong argument: no run directory, a missing one, or one with no incident. Needs python3; it never contacts the
@@ -33,19 +34,22 @@ for arg in "$@"; do
 done
 command -v python3 >/dev/null || { echo "python3 is required to read the incidents" >&2; exit 2; }
 
+# The recordings' names: a fault's, in a round, or a schedule case's, whose class may be a healthy control (no fault).
+INCIDENT_NAME='^(F[0-9]+|healthy)(-r[0-9]+|-c[0-9]+)?-incident\.json$'
 # Every run directory is checked for incidents before any is read.
 incidents=()
 for run_dir in "$@"; do
   [[ -d "$run_dir" ]] || { echo "Not a directory: $run_dir" >&2; exit 2; }
   found=0
   shopt -s nullglob
-  for file in "${run_dir%/}"/F*-incident.json; do
-    [[ "$(basename "$file")" =~ ^F[0-9]+(-r[0-9]+)?-incident\.json$ ]] || continue
+  for file in "${run_dir%/}"/*-incident.json; do
+    [[ "$(basename "$file")" =~ $INCIDENT_NAME ]] || continue
     incidents+=("$file")
     found=$((found + 1))
   done
   shopt -u nullglob
-  (( found )) || { echo "No F<n>-incident.json or F<n>-r<k>-incident.json in $run_dir" >&2; exit 2; }
+  (( found )) ||
+    { echo "No F<n>-incident.json, F<n>-r<k>-incident.json or <class>-c<case>-incident.json in $run_dir" >&2; exit 2; }
 done
 
 # Checks incident file $1 of fault $2 and prints its PASS or FAIL line; fails when the incident fails.
@@ -56,7 +60,7 @@ import sys
 
 path, fault = sys.argv[1], sys.argv[2]
 # The service a fault recreates as it is injected (Fault.java, COMPOSE_RECREATE): one restart of it in the incident
-# window is the fault's own. F1 and F2 change gateway-mock's behavior and restart nothing.
+# window is the fault's own. F1 and F2 change gateway-mock's behavior and restart nothing, nor does a healthy control.
 RECREATES = {"F3": "order-service", "F4": "inventory-service"}
 MIN_PAID = 3
 

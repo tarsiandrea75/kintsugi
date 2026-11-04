@@ -18,6 +18,8 @@ root-cause service and category of F1, F2 and F3. The M2 check is the local rout
   infra/scripts/verify-agent.sh --mode decision # the dossier, then one report call; a baseline before each fault
   infra/scripts/verify-agent.sh --route cloud   # the agent on the cloud route (ADR-012); the default is local
   infra/scripts/verify-agent.sh --rounds 5      # the fault list 5 times (1 to 20)
+  infra/scripts/verify-agent.sh --mode decision --schedule infra/holdout2/schedule.tsv            # holdout-2's cases
+  infra/scripts/verify-agent.sh --mode decision --schedule infra/holdout2/schedule.tsv --cases 1-5,9  # some of them
 
 For each fault it injects it through the fault injector, places a few orders as neutral customers, waits for the
 metrics and logs to land, then opens an incident (POST /incidents on 127.0.0.1:18086) with the same neutral symptom
@@ -50,6 +52,18 @@ Needs docker (with compose), curl and python3 on the host. The local route needs
 with granite4.1:8b, reached through ollama-proxy; expect up to about 55 minutes per fault on a CPU. The cloud route
 needs ANTHROPIC_API_KEY, in infra/.env (git-ignored) or in the shell, and costs money: run a cloud batch only with the
 human's go-ahead (ADR-012).
+
+--schedule FILE runs the cases of a schedule written by infra/scripts/holdout2-schedule.py (ADR-026), in its order, or
+with --cases LIST only those cases (cases or ranges, such as 1-5,9), still in the schedule's order; it takes neither
+--only nor --rounds. A fault case is injected with its drawn parameter, nested under "parameters" in POST /faults (F1's
+gatewayLatencyMs, F2's gatewayErrorStatus; F3 takes none, its wrong port is the injector's own), and is scored against
+the injector's truth. A healthy case (class healthy) injects nothing: where a fault case injects it checks that GET
+/faults/active answers 204, and otherwise it runs exactly as a fault case does, with the same baseline phase or wait,
+the same orders, settle time and symptom; its truth is NONE|NONE (ADR-015), and only a COMPLETED report naming
+UNKNOWN|UNKNOWN matches it. Each case's files carry its class and case (F1-c7-incident.json, healthy-c3-score.txt);
+its score file records the case and its parameters, and summary.tsv gains two last columns, case and parameters
+(<name>=<value>, or -). A schedule the harness cannot run (no file, another header, a class or parameter it does not
+know, a case listed twice) and a --cases case the schedule does not hold exit 2 before the lab is touched.
 EOF
 }
 
@@ -80,6 +94,8 @@ DECISION_WINDOW_MAX_MINUTES=$(((FAULT_PHASE_MAX_SECONDS + 59) / 60 + DECISION_WI
 BASELINE_MINUTES=$((2 * DECISION_WINDOW_MAX_MINUTES + 1))
 
 selected=()
+schedule=""
+cases_list=""
 mode=explorer
 route=local
 rounds=1
@@ -99,10 +115,27 @@ while (( $# )); do
     --rounds) [[ $# -ge 2 ]] || { echo "--rounds needs a number from 1 to 20" >&2; exit 2; }
       rounds=$2 rounds_given=true; shift 2 ;;
     --rounds=*) rounds=${1#--rounds=} rounds_given=true; shift ;;
+    --schedule) [[ $# -ge 2 ]] || { echo "--schedule needs a schedule file" >&2; exit 2; }
+      schedule=$2; shift 2 ;;
+    --schedule=*) schedule=${1#--schedule=}; shift ;;
+    --cases) [[ $# -ge 2 ]] || { echo "--cases needs cases or ranges, such as 1-5,9" >&2; exit 2; }
+      cases_list=$2; shift 2 ;;
+    --cases=*) cases_list=${1#--cases=}; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
 parse_args "${args[@]+"${args[@]}"}"
+# The schedule's cases, one "<case> TAB <class> TAB <parameters> TAB <note>" line each (read_schedule), or none.
+scheduled_cases=()
+if [[ -n "$schedule" ]]; then
+  (( ${#selected[@]} == 0 )) && [[ "$rounds_given" == false ]] ||
+    { echo "--schedule runs the schedule's cases: it takes neither --only nor --rounds" >&2; exit 2; }
+  schedule_text=$(read_schedule "$schedule" "$cases_list") || exit 2
+  mapfile -t scheduled_cases <<<"$schedule_text"
+elif [[ -n "$cases_list" ]]; then
+  echo "--cases needs --schedule" >&2
+  exit 2
+fi
 (( ${#selected[@]} )) || selected=("${ALL_FAULTS[@]}")
 for fault in "${selected[@]}"; do
   [[ " ${ALL_FAULTS[*]} " == *" $fault "* ]] || { echo "Unknown fault '$fault'; choose from ${ALL_FAULTS[*]}" >&2; exit 2; }
@@ -126,13 +159,16 @@ window_margin_minutes=$(window_margin "$mode")
 RUN_DIR="${VERIFY_AGENT_RUN_DIR:-$REPO_DIR/infra/scripts/out/verify-agent-$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$RUN_DIR"
 exec > >(trap '' INT TERM; exec tee -a "$RUN_DIR/run.log") 2>&1
-printf 'fault\tmode\troute\tinjection\tincident\tstatus\ttruth\treported\tsteps\twindow\tseconds\tverdict\tround\n' \
-  >"$RUN_DIR/summary.tsv"
+# A schedule run adds the case and its parameters as the last two columns; without --schedule the columns are as before.
+summary_columns='fault\tmode\troute\tinjection\tincident\tstatus\ttruth\treported\tsteps\twindow\tseconds\tverdict\tround'
+[[ -z "$schedule" ]] || summary_columns+='\tcase\tparameters'
+printf "%b\n" "$summary_columns" >"$RUN_DIR/summary.tsv"
 
-# The fault being diagnosed, its round, the name prefix of its files and its incident, until its score is written; the
-# exit trap records an interrupted one.
+# The fault being diagnosed, its round, the name prefix of its files, its incident and, in a schedule run, the
+# summary.tsv columns of its case, until its score is written; the exit trap records an interrupted one.
 current_fault=""
 current_round=""
+current_case_columns=""
 current_label=""
 current_incident=""
 # When the previous fault of this run was restored (epoch seconds); space_out waits from it. Until the first restore,
@@ -146,9 +182,9 @@ cleanup() {
   set +e
   if [[ -n "$current_fault" ]]; then
     fail "$current_label: not scored, the run stopped before its score"
-    printf '%s\t%s\t%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\t%s\n' "$current_fault" "$mode" "$route" \
+    printf '%s\t%s\t%s\t%s\t%s\tnot scored\t-\t-\t-\t-\t-\tMISS\t%s%s\n' "$current_fault" "$mode" "$route" \
       "${injection_id:--}" \
-      "${current_incident:--}" "$current_round" >>"$RUN_DIR/summary.tsv"
+      "${current_incident:--}" "$current_round" "$current_case_columns" >>"$RUN_DIR/summary.tsv"
   fi
   # The API has no cancel: an incident left RUNNING would make the next run wait up to 52 min for it.
   if [[ -n "$current_incident" ]]; then
@@ -160,7 +196,12 @@ cleanup() {
 trap cleanup EXIT
 rounds_note=""
 if [[ "$rounds_given" == true ]]; then rounds_note="; rounds: $rounds"; fi
-info "logging to $RUN_DIR; faults: ${selected[*]}; mode: $mode; route: $route$rounds_note"
+if [[ -n "$schedule" ]]; then
+  case_numbers=$(printf '%s\n' "${scheduled_cases[@]}" | cut -f 1 | paste -sd ' ')
+  info "logging to $RUN_DIR; schedule: $schedule, cases $case_numbers; mode: $mode; route: $route"
+else
+  info "logging to $RUN_DIR; faults: ${selected[*]}; mode: $mode; route: $route$rounds_note"
+fi
 if [[ "$mode" == decision ]]; then
   info "decision mode: window margin $window_margin_minutes min; N_max $DECISION_WINDOW_MAX_MINUTES min, so a" \
     "$BASELINE_MINUTES-min baseline phase of healthy orders before each fault"
@@ -210,22 +251,29 @@ place_orders() {
 }
 
 # Runs fault $1 in round $2: space out from the previous one (in decision mode, a baseline phase), traffic, inject,
-# traffic, incident, restore, score. test-lib.sh runs it in decision mode, with place_orders and cleanup, each read from
-# this file from its "<name>() {" line to the first "}" alone on a line.
+# traffic, incident, restore, score. In a schedule run, $3 is the case, $4 its parameters object (- for none) and $5 its
+# parameters as summary.tsv shows them; $1 is then the case's class, and a healthy one (HEALTHY_CLASS) runs the same
+# steps with no injection and no restore, scored against HEALTHY_TRUTH. test-lib.sh runs it in decision mode, with
+# place_orders and cleanup, each read from this file from its "<name>() {" line to the first "}" alone on a line.
 diagnose() {
-  local fault=$1 round=$2 label incident window opened traffic_start started_at seconds body status reason reported
+  local fault=$1 round=$2 case_number=${3:-} parameters=${4:--} parameter_note=${5:--} label incident window opened
+  local traffic_start started_at seconds body status reason reported case_columns=""
   local truth steps verdict injection incident_mode incident_route prompt_tokens completion_tokens incident_model
   local message baseline_clean=true
-  label=$(record_prefix "$fault" "$round" "$rounds_given")
+  if [[ -n "$case_number" ]]; then
+    label="$fault-c$case_number" case_columns=$'\t'"$case_number"$'\t'"$parameter_note"
+  else
+    label=$(record_prefix "$fault" "$round" "$rounds_given")
+  fi
   info "--- $label"
-  current_fault=$fault current_round=$round current_label=$label current_incident=""
+  current_fault=$fault current_round=$round current_label=$label current_incident="" current_case_columns=$case_columns
   if [[ "$mode" == decision ]]; then
     # A failed baseline (baseline_phase has said why) costs this fault only: it is not injected, it is a miss, and the
     # next fault gets a baseline of its own.
     if ! baseline_phase "$BASELINE_MINUTES" "$label"; then
-      printf '%s\t%s\t%s\t-\t-\tbaseline failed\t-\t-\t-\t-\t-\tMISS\t%s\n' "$fault" "$mode" "$route" "$round" \
-        >>"$RUN_DIR/summary.tsv"
-      current_fault="" current_round="" current_label="" current_incident=""
+      printf '%s\t%s\t%s\t-\t-\tbaseline failed\t-\t-\t-\t-\t-\tMISS\t%s%s\n' "$fault" "$mode" "$route" "$round" \
+        "$case_columns" >>"$RUN_DIR/summary.tsv"
+      current_fault="" current_round="" current_label="" current_incident="" current_case_columns=""
       return 0
     fi
   else
@@ -233,8 +281,14 @@ diagnose() {
   fi
   traffic_start=$(date +%s)
   place_orders "$HEALTHY_ORDERS"
-  inject_fault "$fault"
-  injection=$injection_id
+  # A healthy control injects nothing; it checks, where a fault case injects, that no injection is active.
+  if [[ "$fault" == "$HEALTHY_CLASS" ]]; then
+    expect_no_injection "$label"
+    injection=-
+  else
+    inject_fault "$fault" "$parameters"
+    injection=$injection_id
+  fi
   place_orders "$FAULT_ORDERS"
   sleep "$SETTLE_SECONDS"
 
@@ -268,10 +322,15 @@ diagnose() {
   IFS=$'\t' read -r status reason reported steps incident_mode incident_route prompt_tokens completion_tokens incident_model \
     <<<"$(incident_fields "$body")"
 
-  expect_restored
-  injection_id=""
+  if [[ "$fault" == "$HEALTHY_CLASS" ]]; then
+    truth=$HEALTHY_TRUTH
+  else
+    expect_restored
+    injection_id=""
+    truth=$(truth_cause "$injection")
+  fi
+  # A healthy case spaces the next one out as a fault case does, so the next window holds neither case's traffic.
   previous_fault_end=$(date +%s)
-  truth=$(truth_cause "$injection")
 
   IFS=$'\t' read -r verdict message <<<"$(agent_verdict "$mode" "$incident_mode" "$route" "$incident_route" "$status" \
     "$reason" "$reported" "$truth")"
@@ -297,19 +356,30 @@ diagnose() {
     echo "window (minutes): $window"
     echo "seconds (incident opened to ended): $seconds"
     echo "verdict: $verdict"
+    if [[ -n "$case_number" ]]; then
+      echo "case: $case_number"
+      echo "parameters: $parameter_note"
+    fi
   } >"$RUN_DIR/$label-score.txt"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$fault" "$mode" "$route" "$injection" "$incident" \
-    "$status" "${truth:-unreadable}" "$reported" "$steps" "$window" "$seconds" "$verdict" "$round" \
-    >>"$RUN_DIR/summary.tsv"
-  current_fault="" current_round="" current_label="" current_incident=""
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n' "$fault" "$mode" "$route" "$injection" \
+    "$incident" "$status" "${truth:-unreadable}" "$reported" "$steps" "$window" "$seconds" "$verdict" "$round" \
+    "$case_columns" >>"$RUN_DIR/summary.tsv"
+  current_fault="" current_round="" current_label="" current_incident="" current_case_columns=""
 }
 
-# 3. Each fault in turn, the whole list once per round.
-for ((round = 1; round <= rounds; round++)); do
-  for fault in "${selected[@]}"; do
-    diagnose "$fault" "$round"
+# 3. Each fault in turn, the whole list once per round; or each case of the schedule, in its order.
+if [[ -n "$schedule" ]]; then
+  for scheduled in "${scheduled_cases[@]}"; do
+    IFS=$'\t' read -r case_number class parameters parameter_note <<<"$scheduled"
+    diagnose "$class" 1 "$case_number" "$parameters" "$parameter_note"
   done
-done
+else
+  for ((round = 1; round <= rounds; round++)); do
+    for fault in "${selected[@]}"; do
+      diagnose "$fault" "$round"
+    done
+  done
+fi
 
 info "summary ($RUN_DIR/summary.tsv):"
 column -t -s $'\t' "$RUN_DIR/summary.tsv" 2>/dev/null || command cat "$RUN_DIR/summary.tsv"
