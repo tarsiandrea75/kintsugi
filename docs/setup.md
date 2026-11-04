@@ -548,6 +548,15 @@ python3 -m kintsugi_evals score \
 - An input with the `level` column also gets a verified-correct line (fault rows correct at L3, over fault rows with a level) and an L1-rate line (rows at L1 or above, over rows with a level), each with its Wilson 95% CI and the count of `-` rows left out (evals spec, REQ-16); without the column the output is unchanged.
 - Commit the plan to `evals/plans/` before the run (template `evals/plans/TEMPLATE.md`) and the result to `evals/results/<date>-<name>/` after it.
 
+A replay run made before its answers stated a level can be re-checked, with no model call (verification-levels T6):
+
+```bash
+REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1-resources infra/scripts/recheck-levels.sh --dataset re2-ob \
+  infra/scripts/out/replay-<time>-cloud
+```
+
+It gathers each dev incident's dossier again from its recording, refuses the incident unless the re-rendered dossier equals the stored one byte for byte and today's `ReportCheck` verifies exactly the evidence the run stored, and writes `infra/scripts/out/recheck-<time>-<input>/`: `recheck.txt`, and, when no incident was refused, `summary.tsv` (the input's rows with today's `level`) and `levels-detail.tsv` (each evidence item's owner, section and change). Score that `summary.tsv` as any replay's. A holdout row refuses the run.
+
 ### Convert RCAEval cases
 
 The offline track reads the RCAEval RE2 dataset ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md)). The data stays outside the repository, about 11 GB extracted for RE2-OB and RE2-SS; `RE2-TT.zip`, 2.8 GB more, is read only by BARO's reproduction. Download Zenodo record [14590730](https://doi.org/10.5281/zenodo.14590730) and check the md5s before unzipping:
