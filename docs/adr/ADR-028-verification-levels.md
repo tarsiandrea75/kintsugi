@@ -85,7 +85,7 @@ Per section, `changed` is decided as follows. Where an existing Config 0 rule de
 | `logs` | never: logs are gathered for the incident window only, so there is nothing to compare; `NOT_COMPARED` | **new design choice** |
 | `header`, a failed fact (`Gathered` not ok), a line with no value | never; `NOT_COMPARED` | **new design choice** |
 
-`NOT_COMPARED` never satisfies L3. The constants are copied into the dossier package rather than shared, so Config 0's code does not change; a test pins each copy to its rule's constant.
+`NOT_COMPARED` never satisfies L3. The human kept the log rule on 2026-11-04: calling a fact that was never compared "changed" would make the verifier claim more than it checked. The cost is that a correct answer resting only on log lines (F3's `ConnectException`, part of F2) cannot reach L3, so the feature's descriptive level report runs before the freeze, while a previous log window can still be added to the agent if that cost proves real. The constants are copied into the dossier package rather than shared, so Config 0's code does not change; a test pins each copy to its rule's constant.
 
 **Alternative rejected: every item must pass.** Citing a caller is legitimate evidence: an F1 gateway latency is visible as payment-service's timeouts, and a report that cites both the cause's latency and the callers' timeouts is a better report, not a worse one. "Every item belongs to the cause" would score it below a report that cites one line. L2 already bounds the other items to the cause's call path.
 
