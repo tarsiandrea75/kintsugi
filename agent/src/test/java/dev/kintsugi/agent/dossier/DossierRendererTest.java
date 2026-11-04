@@ -14,7 +14,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TimeZone;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -342,6 +344,206 @@ class DossierRendererTest {
 						+ "2026-10-16T09:59:10Z, 27 earlier |");
 		assertThat(unnumbered(markdown).lines().filter(line -> line.startsWith("  - count="))).hasSize(8);
 		assertThat(markdown.lines().mapToInt(String::length).max().orElseThrow()).isLessThan(1_000);
+	}
+
+	@Test
+	void everyNumberedLineHasExactlyOneLineFactBesideTheUnchangedText() {
+		// ADR-028, Decision 3: the index is a second output; the text is the one render writes, the goldens unchanged.
+		assertThat(DossierRenderer.indexed(gather("f3"), LAB).text()).isEqualTo(golden("f3"));
+		assertThat(DossierRenderer.indexed(gather("healthy"), LAB).text()).isEqualTo(golden("healthy"));
+		for (Dossier dossier : List.of(gather("f3"), gather("healthy"), failing(), stress(), boundaries())) {
+			DossierRenderer.Indexed indexed = DossierRenderer.indexed(dossier, LAB);
+			assertThat(indexed.text()).isEqualTo(DossierRenderer.render(dossier, LAB));
+			assertThat(indexed.facts()).hasSize(numbered(indexed.text())).isNotEmpty();
+			assertThat(indexed.facts()).allSatisfy(fact -> assertThat(fact.owner()).isIn(owners()));
+			assertThat(indexed.fact(0)).isEmpty();
+			assertThat(indexed.fact(indexed.facts().size() + 1)).isEmpty();
+		}
+	}
+
+	@Test
+	void theF3TablesFactsNameEachLinesOwnerSectionAndChange() {
+		DossierRenderer.Indexed f3 = DossierRenderer.indexed(gather("f3"), LAB);
+
+		for (int n = 1; n <= 5; n++) {
+			assertThat(f3.fact(n)).as("D%d", n).hasValue(fact(LineFact.HEADER, Section.HEADER, Change.NOT_COMPARED));
+		}
+		Map<Integer, LineFact> expected = new TreeMap<>(Map.ofEntries(
+				// A restart inside the incident window is a change; none is not.
+				Map.entry(6, fact("order-service", Section.STATUS, Change.YES)),
+				Map.entry(7, fact("payment-service", Section.STATUS, Change.NO)),
+				Map.entry(9, fact("gateway-mock", Section.STATUS, Change.NO)),
+				// A table belongs to the service the topology names: 0 -> 6 and 4 -> 0 changed.
+				Map.entry(10, fact("order-service", Section.STATES, Change.YES)),
+				Map.entry(11, fact("order-service", Section.STATES, Change.YES)),
+				Map.entry(12, fact("payment-service", Section.STATES, Change.YES)),
+				Map.entry(13, fact(LineFact.HEADER, Section.TRAFFIC, Change.NOT_COMPARED)),
+				// A server row is the callee's, a client row the caller's: 4 -> 6 did not change, 0 -> 6 did.
+				Map.entry(14, fact("order-service", Section.TRAFFIC, Change.NO)),
+				Map.entry(15, fact("order-service", Section.TRAFFIC, Change.NO)),
+				Map.entry(16, fact("inventory-service", Section.TRAFFIC, Change.NO)),
+				Map.entry(17, fact("order-service", Section.TRAFFIC, Change.YES)),
+				Map.entry(19, fact("payment-service", Section.TRAFFIC, Change.YES)),
+				Map.entry(20, fact("payment-service", Section.TRAFFIC, Change.YES)),
+				Map.entry(21, fact("gateway-mock", Section.TRAFFIC, Change.YES)),
+				Map.entry(22, fact(LineFact.HEADER, Section.TRAFFIC, Change.NO)),
+				Map.entry(23, fact(LineFact.HEADER, Section.LATENCY, Change.NOT_COMPARED)),
+				Map.entry(24, fact("order-service", Section.LATENCY, Change.NO)),
+				Map.entry(26, fact("payment-service", Section.LATENCY, Change.NO)),
+				Map.entry(32, fact(LineFact.HEADER, Section.RESOURCES, Change.NOT_COMPARED)),
+				// A failed call is no fact to compare.
+				Map.entry(33, fact("order-service", Section.RESOURCES, Change.NOT_COMPARED)),
+				Map.entry(36, fact("gateway-mock", Section.RESOURCES, Change.NOT_COMPARED)),
+				// Logs are gathered for the incident window only: never compared.
+				Map.entry(37, fact("order-service", Section.LOGS, Change.NOT_COMPARED)),
+				Map.entry(38, fact("order-service", Section.LOGS, Change.NOT_COMPARED)),
+				Map.entry(45, fact("gateway-mock", Section.LOGS, Change.NOT_COMPARED)),
+				// An event source belongs to the service the topology names; a total is compared as a row is.
+				Map.entry(46, fact("order-service", Section.EVENTS, Change.NO)),
+				Map.entry(49, fact("order-service", Section.EVENTS, Change.YES)),
+				Map.entry(51, fact("payment-service", Section.EVENTS, Change.YES)),
+				Map.entry(53, fact("inventory-service", Section.EVENTS, Change.NO)),
+				Map.entry(54, fact("inventory-service", Section.EVENTS, Change.NO))));
+		expected.forEach((n, fact) -> assertThat(f3.fact(n)).as("D%d", n).hasValue(fact));
+		assertThat(f3.facts()).hasSize(54);
+	}
+
+	@Test
+	void eachSectionsChangeRuleHoldsAtItsBoundariesInTheTables() {
+		DossierRenderer.Indexed tables = DossierRenderer.indexed(boundaries(), LAB);
+		String text = tables.text();
+
+		// Latency, R-DOWN's slow test: at least 2x the previous mean and at least 0.5 s, the previous mean above 0.
+		assertThat(tables.fact(numberOf(text, "| /doubled |"))).hasValue(fact("gateway-mock", Section.LATENCY,
+				Change.YES));
+		assertThat(tables.fact(numberOf(text, "| /below-ratio |"))).hasValue(fact("gateway-mock", Section.LATENCY,
+				Change.NO));
+		assertThat(tables.fact(numberOf(text, "| /below-floor |"))).hasValue(fact("gateway-mock", Section.LATENCY,
+				Change.NO));
+		assertThat(tables.fact(numberOf(text, "| /no-previous |"))).hasValue(fact("payment-service", Section.LATENCY,
+				Change.NOT_COMPARED));
+		assertThat(tables.fact(numberOf(text, "| /zero-previous |"))).hasValue(fact("payment-service",
+				Section.LATENCY, Change.NOT_COMPARED));
+		// Resources, R-RES: both windows usable, at least 2x the previous mean and above the previous max.
+		assertThat(tables.fact(numberOf(text, "| doubled |"))).hasValue(fact("gateway-mock", Section.RESOURCES,
+				Change.YES));
+		assertThat(tables.fact(numberOf(text, "| at-previous-max |"))).hasValue(fact("gateway-mock",
+				Section.RESOURCES, Change.NO));
+		assertThat(tables.fact(numberOf(text, "| below-ratio |"))).hasValue(fact("gateway-mock", Section.RESOURCES,
+				Change.NO));
+		assertThat(tables.fact(numberOf(text, "| sparse |"))).hasValue(fact("gateway-mock", Section.RESOURCES,
+				Change.NOT_COMPARED));
+		// Counts: the larger at least 3 and at least 2x the smaller.
+		assertThat(tables.fact(numberOf(text, "| APPEARED_3 |"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.YES));
+		assertThat(tables.fact(numberOf(text, "| APPEARED_2 |"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.NO));
+		assertThat(tables.fact(numberOf(text, "| DOUBLED_TO_4 |"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.YES));
+		assertThat(tables.fact(numberOf(text, "| GREW_TO_3 |"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.NO));
+		assertThat(tables.fact(numberOf(text, "| GONE_3 |"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.YES));
+		assertThat(tables.fact(numberOf(text, "Total: previous 7, incident 12."))).hasValue(fact("order-service",
+				Section.EVENTS, Change.NO));
+		// Status, a restart in the incident window; a log line is never compared.
+		assertThat(tables.fact(numberOf(text, "| order-service | 1 |"))).hasValue(fact("order-service",
+				Section.STATUS, Change.YES));
+		assertThat(tables.fact(numberOf(text, "- WARN: count_logs=6"))).hasValue(fact("order-service", Section.LOGS,
+				Change.NOT_COMPARED));
+	}
+
+	@Test
+	void aTrafficRowOnNoEdgeIsItsLabServicesAndOneOfNoLabServiceIsTheHeaders() {
+		// As in the sheets: a lab service's client row on no edge is its caller's; a row of no lab service is the
+		// header's.
+		RecordedLab lab = new RecordedLab("f3")
+			.answer("traffic_counts-incident", "{\"outcome\":\"OK\",\"returned\":2,\"truncated\":false,\"items\":["
+					+ "{\"side\":\"client\",\"service\":\"order-service\",\"clientName\":\"gateway-mock\",\"method\":"
+					+ "\"POST\",\"uri\":\"/authorize\",\"status\":\"200\",\"outcome\":\"SUCCESS\",\"exception\":\"none\","
+					+ "\"count\":2},{\"side\":\"server\",\"service\":\"postgres-exporter\",\"method\":\"GET\",\"uri\":"
+					+ "\"/metrics\",\"status\":\"200\",\"outcome\":\"SUCCESS\",\"count\":3}]}");
+
+		DossierRenderer.Indexed tables = DossierRenderer.indexed(new DossierGatherer(lab, CLOCK, LAB).gather(10), LAB);
+
+		String text = tables.text();
+		assertThat(tables.fact(numberOf(text, "| client | order-service | gateway-mock |")))
+			.hasValue(fact("order-service", Section.TRAFFIC, Change.NO));
+		assertThat(tables.fact(numberOf(text, "| server | postgres-exporter |")))
+			.hasValue(fact(LineFact.HEADER, Section.TRAFFIC, Change.YES));
+	}
+
+	/** The number of the one numbered line holding {@code fragment}; fails when none or several do. */
+	static int numberOf(String text, String fragment) {
+		List<Integer> found = new ArrayList<>();
+		int n = 0;
+		for (String line : text.lines().toList()) {
+			if (NUMBER.matcher(line).lookingAt()) {
+				n++;
+				if (line.contains(fragment)) {
+					found.add(n);
+				}
+			}
+		}
+		assertThat(found).as("lines holding %s", fragment).hasSize(1);
+		return found.get(0);
+	}
+
+	/** The numbered lines of a rendered dossier. */
+	static int numbered(String text) {
+		return (int) text.lines().filter(line -> NUMBER.matcher(line).lookingAt()).count();
+	}
+
+	static LineFact fact(String owner, Section section, Change changed) {
+		return new LineFact(owner, section, changed);
+	}
+
+	/** The owners a line may have: a lab service or the header. */
+	static List<String> owners() {
+		List<String> owners = new ArrayList<>(LAB.services());
+		owners.add(LineFact.HEADER);
+		return owners;
+	}
+
+	/**
+	 * F3's outputs with rows at each section's change boundary (ADR-028, Decision 5): latency on gateway-mock and
+	 * payment-service, resources on gateway-mock, and the order events' counts; F3's restart and logs are kept.
+	 */
+	static Dossier boundaries() {
+		Dossier d = gather("f3");
+		List<ServiceLatency> latency = List.of(
+				new ServiceLatency("gateway-mock", new Gathered.Ok<>(new LatencySeries(false, List.of(
+						new UriLatency("/doubled", seconds(0.25), seconds(0.5)),
+						new UriLatency("/below-ratio", seconds(0.3), seconds(0.59)),
+						new UriLatency("/below-floor", seconds(0.2), seconds(0.49)))))),
+				new ServiceLatency("payment-service", new Gathered.Ok<>(new LatencySeries(false, List.of(
+						new UriLatency("/no-previous", new LatencyPoints(10, 0, null, null), seconds(1.0)),
+						new UriLatency("/zero-previous", seconds(0.0), seconds(1.0)))))));
+		List<ServiceResources> resources = List.of(new ServiceResources("gateway-mock", List.of(
+				resource("doubled", new LatencyPoints(4, 4, 1.0, 1.5), new LatencyPoints(4, 4, 2.0, 2.5)),
+				resource("at-previous-max", new LatencyPoints(4, 4, 1.0, 2.0), new LatencyPoints(4, 4, 2.0, 2.2)),
+				resource("below-ratio", new LatencyPoints(4, 4, 1.0, 1.0), new LatencyPoints(4, 4, 1.9, 1.9)),
+				resource("sparse", new LatencyPoints(4, 4, 1.0, 1.0), new LatencyPoints(4, 1, 5.0, 5.0)))));
+		EventCounts previous = new EventCounts(7, List.of(new EventGroup("DOUBLED_TO_4", null, 2),
+				new EventGroup("GREW_TO_3", null, 2), new EventGroup("GONE_3", null, 3)));
+		EventCounts incident = new EventCounts(12, List.of(new EventGroup("APPEARED_3", null, 3),
+				new EventGroup("APPEARED_2", null, 2), new EventGroup("DOUBLED_TO_4", null, 4),
+				new EventGroup("GREW_TO_3", null, 3)));
+		List<SourceEvents> events = d.events()
+			.stream()
+			.map(source -> source.source().equals("order") ? new SourceEvents("order",
+					new Compared<>(new Gathered.Ok<>(previous), new Gathered.Ok<>(incident))) : source)
+			.toList();
+		return new Dossier(d.gatheredAt(), d.incidentWindow(), d.previousWindow(), d.services(), d.states(),
+				d.traffic(), latency, resources, d.logs(), events, d.calls());
+	}
+
+	private static LatencyPoints seconds(double mean) {
+		return new LatencyPoints(10, 10, mean, mean);
+	}
+
+	private static MetricSeries resource(String metric, LatencyPoints previous, LatencyPoints incident) {
+		return new MetricSeries(metric, new Gathered.Ok<>(new ResourceSeries(false, previous, incident)));
 	}
 
 	/** A conservative token estimate: one token per 3 characters, rounded up (English text runs near 4). */

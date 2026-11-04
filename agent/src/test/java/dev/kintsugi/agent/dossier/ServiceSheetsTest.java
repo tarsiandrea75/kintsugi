@@ -5,7 +5,11 @@ import static dev.kintsugi.agent.dossier.DossierRendererTest.BANNED_MARKS;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.CLOCK;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.FIXTURE_TOKEN_CEILING;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.STRESS_TOKEN_CEILING;
+import static dev.kintsugi.agent.dossier.DossierRendererTest.boundaries;
+import static dev.kintsugi.agent.dossier.DossierRendererTest.fact;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.failing;
+import static dev.kintsugi.agent.dossier.DossierRendererTest.numberOf;
+import static dev.kintsugi.agent.dossier.DossierRendererTest.numbered;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.gather;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.golden;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.masked;
@@ -28,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
@@ -398,6 +403,107 @@ class ServiceSheetsTest {
 			TimeZone.setDefault(zone);
 		}
 		assertThat(ServiceSheets.render(gather("f3"), LAB)).isEqualTo(first);
+	}
+
+	@Test
+	void everyNumberedLineHasExactlyOneLineFactWhoseOwnerIsTheLinesOwner() {
+		// ADR-028, Decision 3: the sheets' owners, extended with the section and the change of each line.
+		List<Dossier> all = new ArrayList<>(dossiers());
+		all.add(boundaries());
+		for (Dossier dossier : all) {
+			ServiceSheets.Rendered sheets = ServiceSheets.render(dossier, LAB);
+			assertThat(sheets.facts()).hasSize(numbered(sheets.text())).hasSameSizeAs(sheets.owners());
+			assertThat(sheets.facts().stream().map(LineFact::owner).toList()).isEqualTo(sheets.owners());
+			assertThat(sheets.fact(0)).isEmpty();
+			assertThat(sheets.fact(sheets.facts().size() + 1)).isEmpty();
+		}
+		// The goldens stay byte for byte (the golden tests above).
+		assertThat(ServiceSheets.render(gather("f3"), LAB).text()).isEqualTo(golden("f3-sheets"));
+	}
+
+	@Test
+	void theF3SheetsFactsNameEachLinesOwnerSectionAndChange() {
+		ServiceSheets.Rendered f3 = ServiceSheets.render(gather("f3"), LAB);
+
+		for (int n = 1; n <= 9; n++) {
+			assertThat(f3.fact(n)).as("D%d", n).hasValue(fact(LineFact.HEADER, Section.HEADER, Change.NOT_COMPARED));
+		}
+		Map<Integer, LineFact> expected = new TreeMap<>(Map.ofEntries(
+				// A sheet's place in the call graph states no window's fact.
+				Map.entry(10, fact("gateway-mock", Section.HEADER, Change.NOT_COMPARED)),
+				Map.entry(11, fact("gateway-mock", Section.STATUS, Change.NO)),
+				// A block's "no rows" line has no value to compare.
+				Map.entry(12, fact("gateway-mock", Section.TRAFFIC, Change.NOT_COMPARED)),
+				Map.entry(13, fact("gateway-mock", Section.LATENCY, Change.NO)),
+				Map.entry(14, fact("gateway-mock", Section.RESOURCES, Change.NOT_COMPARED)),
+				Map.entry(15, fact("gateway-mock", Section.LOGS, Change.NOT_COMPARED)),
+				Map.entry(19, fact("inventory-service", Section.TRAFFIC, Change.NO)),
+				Map.entry(24, fact("inventory-service", Section.EVENTS, Change.NO)),
+				Map.entry(25, fact("inventory-service", Section.EVENTS, Change.NO)),
+				Map.entry(34, fact("payment-service", Section.STATES, Change.NOT_COMPARED)),
+				Map.entry(35, fact("payment-service", Section.EVENTS, Change.YES)),
+				Map.entry(37, fact("order-service", Section.STATUS, Change.YES)),
+				Map.entry(38, fact("order-service", Section.TRAFFIC, Change.NO)),
+				Map.entry(42, fact("order-service", Section.TRAFFIC, Change.YES)),
+				Map.entry(44, fact("order-service", Section.LOGS, Change.NOT_COMPARED)),
+				Map.entry(46, fact("order-service", Section.STATES, Change.YES)),
+				Map.entry(47, fact("order-service", Section.EVENTS, Change.NO)),
+				// A row seen only in the previous window keeps its service and its section, and it changed.
+				Map.entry(51, fact("gateway-mock", Section.TRAFFIC, Change.YES)),
+				Map.entry(53, fact("payment-service", Section.TRAFFIC, Change.YES)),
+				Map.entry(54, fact("payment-service", Section.STATES, Change.YES)),
+				Map.entry(55, fact("payment-service", Section.EVENTS, Change.YES)),
+				Map.entry(56, fact("order-service", Section.TRAFFIC, Change.YES)),
+				Map.entry(58, fact("order-service", Section.EVENTS, Change.YES))));
+		expected.forEach((n, fact) -> assertThat(f3.fact(n)).as("D%d", n).hasValue(fact));
+		assertThat(f3.facts()).hasSize(58);
+		// An empty last section's line is the header's, and states no fact.
+		ServiceSheets.Rendered healthy = ServiceSheets.render(gather("healthy"), LAB);
+		assertThat(healthy.fact(healthy.facts().size()))
+			.hasValue(fact(LineFact.HEADER, Section.HEADER, Change.NOT_COMPARED));
+	}
+
+	@Test
+	void eachSectionsChangeRuleHoldsAtItsBoundariesInTheSheets() {
+		ServiceSheets.Rendered sheets = ServiceSheets.render(boundaries(), LAB);
+		String text = sheets.text();
+
+		assertThat(sheets.fact(numberOf(text, "latency /doubled:"))).hasValue(fact("gateway-mock", Section.LATENCY,
+				Change.YES));
+		assertThat(sheets.fact(numberOf(text, "latency /below-ratio:"))).hasValue(fact("gateway-mock",
+				Section.LATENCY, Change.NO));
+		assertThat(sheets.fact(numberOf(text, "latency /below-floor:"))).hasValue(fact("gateway-mock",
+				Section.LATENCY, Change.NO));
+		assertThat(sheets.fact(numberOf(text, "latency /no-previous:"))).hasValue(fact("payment-service",
+				Section.LATENCY, Change.NOT_COMPARED));
+		assertThat(sheets.fact(numberOf(text, "latency /zero-previous:"))).hasValue(fact("payment-service",
+				Section.LATENCY, Change.NOT_COMPARED));
+		assertThat(sheets.fact(numberOf(text, "resource doubled:"))).hasValue(fact("gateway-mock", Section.RESOURCES,
+				Change.YES));
+		assertThat(sheets.fact(numberOf(text, "resource at-previous-max:"))).hasValue(fact("gateway-mock",
+				Section.RESOURCES, Change.NO));
+		assertThat(sheets.fact(numberOf(text, "resource below-ratio:"))).hasValue(fact("gateway-mock",
+				Section.RESOURCES, Change.NO));
+		assertThat(sheets.fact(numberOf(text, "resource sparse:"))).hasValue(fact("gateway-mock", Section.RESOURCES,
+				Change.NOT_COMPARED));
+		assertThat(sheets.fact(numberOf(text, "type=APPEARED_3:"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.YES));
+		assertThat(sheets.fact(numberOf(text, "type=APPEARED_2:"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.NO));
+		assertThat(sheets.fact(numberOf(text, "type=DOUBLED_TO_4:"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.YES));
+		assertThat(sheets.fact(numberOf(text, "type=GREW_TO_3:"))).hasValue(fact("order-service", Section.EVENTS,
+				Change.NO));
+		// Seen only in the previous window: in the last section, its service's, and changed.
+		int gone = numberOf(text, "type=GONE_3:");
+		assertThat(gone).isGreaterThan(numberOf(text, "- calls: inventory-service, payment-service;"));
+		assertThat(sheets.fact(gone)).hasValue(fact("order-service", Section.EVENTS, Change.YES));
+		assertThat(sheets.fact(numberOf(text, "order events: total incident 12 (previous 7)")))
+			.hasValue(fact("order-service", Section.EVENTS, Change.NO));
+		assertThat(sheets.fact(numberOf(text, "- restarts in the incident window: 1 ")))
+			.hasValue(fact("order-service", Section.STATUS, Change.YES));
+		assertThat(sheets.fact(numberOf(text, "- WARN: count_logs=6"))).hasValue(fact("order-service", Section.LOGS,
+				Change.NOT_COMPARED));
 	}
 
 	/**

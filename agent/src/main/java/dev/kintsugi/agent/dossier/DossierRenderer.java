@@ -161,29 +161,56 @@ public final class DossierRenderer {
 				: edge.caller() + " -> " + route;
 	}
 
+	/**
+	 * The tables as written, and the fact of each numbered line (ADR-028, Decision 3): {@code facts.get(n - 1)} is line
+	 * {@code D<n>}'s.
+	 */
+	public record Indexed(String text, List<LineFact> facts) {
+
+		public Indexed {
+			facts = List.copyOf(facts);
+		}
+
+		/** The fact of line {@code D<n>}; empty when the tables have no such line. */
+		public Optional<LineFact> fact(int n) {
+			return n < 1 || n > this.facts.size() ? Optional.empty() : Optional.of(this.facts.get(n - 1));
+		}
+
+	}
+
 	/** The dossier as Markdown, with {@code topology}'s traffic edges, ending with a newline. */
 	public static String render(Dossier dossier, Topology topology) {
+		return indexed(dossier, topology).text();
+	}
+
+	/**
+	 * The dossier as {@link #render} writes it, with the fact of each numbered line: its owner, as the sheets name it
+	 * (a status, latency, resource or log row's service, a traffic row's {@code service} label, a table's or a source's
+	 * owner in {@code topology}), its section, and whether it changed by {@link WindowChange}.
+	 */
+	public static Indexed indexed(Dossier dossier, Topology topology) {
 		Out out = new Out();
 		header(out, dossier);
 		services(out, dossier.services(), topology);
 		for (TableStates table : dossier.states()) {
-			states(out, table);
+			states(out, table, topology.ownerOfTable(table.table()).orElse(LineFact.HEADER));
 		}
-		traffic(out, dossier.traffic(), topology.edges());
+		traffic(out, dossier.traffic(), topology);
 		latency(out, dossier.latency());
 		resources(out, dossier.resources());
 		logs(out, dossier.logs());
-		events(out, dossier.events());
-		return out.text();
+		events(out, dossier.events(), topology);
+		return new Indexed(out.text(), out.facts);
 	}
 
 	private static void header(Out out, Dossier dossier) {
+		LineFact header = LineFact.notCompared(LineFact.HEADER, Section.HEADER);
 		out.heading("# Evidence dossier");
 		out.blank();
-		windowLines(dossier).forEach(out::line);
-		out.line("- Columns \"previous\" and \"incident\" hold the counts of those windows. \"" + NO_VALUE
+		windowLines(dossier).forEach(line -> out.line(header, line));
+		out.line(header, "- Columns \"previous\" and \"incident\" hold the counts of those windows. \"" + NO_VALUE
 				+ "\" means no value.");
-		out.line(UNTRUSTED_TEXT_LINE);
+		out.line(header, UNTRUSTED_TEXT_LINE);
 	}
 
 	/** The header's lines on the two windows and the gathering time, the same in the tables and the sheets. */
@@ -202,26 +229,29 @@ public final class DossierRenderer {
 	private static void services(Out out, Gathered<List<ServiceStatus>> services, Topology topology) {
 		out.section("## Service status (incident window)");
 		List<List<String>> rows = new ArrayList<>();
+		List<LineFact> facts = new ArrayList<>();
 		switch (services) {
 			case Gathered.Ok<List<ServiceStatus>> ok -> {
 				for (ServiceStatus status : ok.value()) {
 					rows.add(List.of(cell(status.service()), String.valueOf(status.restartsInWindow().size()),
 							startTimes(status.restartsInWindow()),
 							status.uptime() == null ? NO_VALUE : duration(status.uptime())));
+					facts.add(new LineFact(status.service(), Section.STATUS, WindowChange.restarts(status)));
 				}
 			}
 			case Gathered.Failed<List<ServiceStatus>> failed -> {
-				out.line(failed(failed, null));
+				out.line(LineFact.notCompared(LineFact.HEADER, Section.STATUS), failed(failed, null));
 				out.blank();
 				for (String service : topology.gatherOrder()) {
 					rows.add(List.of(service, NO_VALUE, NO_VALUE, NO_VALUE));
+					facts.add(LineFact.notCompared(service, Section.STATUS));
 				}
 			}
 		}
-		out.table(List.of("service", "restarts", "start times in window", "uptime at gathering"), rows);
+		out.table(List.of("service", "restarts", "start times in window", "uptime at gathering"), rows, facts);
 	}
 
-	private static void states(Out out, TableStates table) {
+	private static void states(Out out, TableStates table, String owner) {
 		String name = switch (table.table()) {
 			case "orders" -> "Order states";
 			case "payments" -> "Payment states";
@@ -229,7 +259,7 @@ public final class DossierRenderer {
 		};
 		out.section("## " + name + " (" + cell(table.table()) + " table)");
 		Compared<List<StatusCount>> windows = table.windows();
-		failedWindows(out, windows);
+		failedWindows(out, windows, LineFact.notCompared(owner, Section.STATES));
 		Map<List<String>, String> samples = new LinkedHashMap<>();
 		if (windows.incident() instanceof Gathered.Ok<List<StatusCount>> ok) {
 			ok.value()
@@ -240,34 +270,45 @@ public final class DossierRenderer {
 			.map(s -> Map.entry(Arrays.asList(s.status()), s.count()))
 			.toList());
 		out.countTable(windows, List.of("status"), List.of("sample order ids, incident"), rows,
-				row -> List.of(samples.getOrDefault(row.labels(), NO_VALUE)));
+				row -> List.of(samples.getOrDefault(row.labels(), NO_VALUE)), counted(owner, Section.STATES));
 	}
 
-	private static void traffic(Out out, Compared<List<TrafficRow>> traffic, List<Edge> edges) {
+	/** A count row's fact: {@code owner}'s, in {@code section}, changed by {@link WindowChange#counts}. */
+	private static Function<Row, LineFact> counted(String owner, Section section) {
+		return row -> new LineFact(owner, section, WindowChange.counts(row.previous(), row.incident()));
+	}
+
+	private static void traffic(Out out, Compared<List<TrafficRow>> traffic, Topology topology) {
+		List<Edge> edges = topology.edges();
+		LineFact header = LineFact.notCompared(LineFact.HEADER, Section.TRAFFIC);
 		out.section("## Traffic");
-		failedWindows(out, traffic);
-		out.line("Requests per edge from traffic_counts, which leaves out rows of count 0. \"" + NO_ROWS
+		failedWindows(out, traffic, header);
+		out.line(header, "Requests per edge from traffic_counts, which leaves out rows of count 0. \"" + NO_ROWS
 				+ "\": none returned for that side in either window.");
 		List<String> sideHeaders = List.of("side", "status", "outcome", "exception");
 		for (Edge edge : edges) {
 			out.section("### " + heading(edge));
 			List<Row> rows = new ArrayList<>();
-			int hidden = 0;
+			List<Row> hidden = new ArrayList<>();
 			long[] hiddenCounts = new long[2];
 			if (edge.caller() != null) {
 				List<Row> caller = sideRows(traffic, edge::callerRow, "client");
 				rows.addAll(capped(caller));
-				hidden += Math.max(0, caller.size() - ROWS);
+				hidden.addAll(caller.subList(Math.min(ROWS, caller.size()), caller.size()));
 				sum(caller, hiddenCounts);
 			}
 			List<Row> server = sideRows(traffic, edge::serverRow, "server");
 			rows.addAll(capped(server));
-			hidden += Math.max(0, server.size() - ROWS);
+			hidden.addAll(server.subList(Math.min(ROWS, server.size()), server.size()));
 			sum(server, hiddenCounts);
-			out.rawCountTable(sideHeaders, List.of(), rows, row -> List.of());
-			if (hidden > 0) {
+			// A client row is its caller's, a server row its target's: the service label of the rows on that side.
+			Function<Row, LineFact> fact = row -> new LineFact(
+					"client".equals(row.labels().get(0)) ? edge.caller() : edge.target(), Section.TRAFFIC,
+					WindowChange.counts(row.previous(), row.incident()));
+			out.rawCountTable(sideHeaders, List.of(), rows, row -> List.of(), fact);
+			if (!hidden.isEmpty()) {
 				out.blank();
-				out.line(notShown(hidden, traffic, hiddenCounts));
+				out.line(hidden(hidden, fact), notShown(hidden.size(), traffic, hiddenCounts));
 			}
 		}
 		out.section("### Other rows");
@@ -277,7 +318,20 @@ public final class DossierRenderer {
 					row.status(), row.outcome(), row.exception()), row.count()))
 			.toList());
 		out.countTable(traffic, List.of("side", "service", "client", "method", "uri", "status", "outcome", "exception"),
-				List.of(), others, row -> List.of());
+				List.of(), others, row -> List.of(),
+				row -> new LineFact(otherRowOwner(row.labels(), topology), Section.TRAFFIC,
+						WindowChange.counts(row.previous(), row.incident())));
+	}
+
+	/**
+	 * The owner of an "Other rows" line, as the sheets name it: a lab service's client or server row on no edge is that
+	 * service's; a row of no lab service, and the "no rows" row, the header's.
+	 */
+	private static String otherRowOwner(List<String> labels, Topology topology) {
+		String side = labels.get(0);
+		String service = labels.get(1);
+		return ("server".equals(side) || "client".equals(side)) && topology.services().contains(service) ? service
+				: LineFact.HEADER;
 	}
 
 	/** The rows of one side of an edge, by status, outcome and exception; a "no rows" row when there are none. */
@@ -304,48 +358,57 @@ public final class DossierRenderer {
 		out.section("## Latency (server side)");
 		for (ServiceLatency service : latency) {
 			if (service.latency() instanceof Gathered.Failed<LatencySeries> failed) {
-				out.line(failed.tool() + " failed for " + cell(service.service()) + ": " + outcome(failed));
+				out.line(LineFact.notCompared(service.service(), Section.LATENCY),
+						failed.tool() + " failed for " + cell(service.service()) + ": " + outcome(failed));
 				out.blank();
 			}
 		}
-		out.line("Seconds per request by service and uri, from query_metric " + DossierGatherer.LATENCY_METRIC
+		out.line(LineFact.notCompared(LineFact.HEADER, Section.LATENCY),
+				"Seconds per request by service and uri, from query_metric " + DossierGatherer.LATENCY_METRIC
 				+ ": one call per service over both windows, its points split at the incident window's start. \"mean\""
 				+ " and \"max\" are of the points with a value; \"points\" counts those with a value and all points in"
 				+ " the window. A point has no value when no request ended in its rate window. In each cell the arrow"
 				+ " goes from the previous window to the incident window.");
 		out.blank();
 		List<List<String>> rows = new ArrayList<>();
-		List<String> notes = new ArrayList<>();
+		List<LineFact> facts = new ArrayList<>();
+		List<Map.Entry<String, LineFact>> notes = new ArrayList<>();
 		for (ServiceLatency service : latency) {
 			String name = cell(service.service());
+			LineFact noted = LineFact.notCompared(service.service(), Section.LATENCY);
 			switch (service.latency()) {
-				case Gathered.Failed<LatencySeries> failed -> rows.add(List.of(name, NO_VALUE, NO_VALUE, NO_VALUE,
-						NO_VALUE));
+				case Gathered.Failed<LatencySeries> failed -> {
+					rows.add(List.of(name, NO_VALUE, NO_VALUE, NO_VALUE, NO_VALUE));
+					facts.add(noted);
+				}
 				case Gathered.Ok<LatencySeries> ok -> {
 					List<UriLatency> uris = ok.value().uris().stream().sorted(URI_ORDER).toList();
 					if (uris.isEmpty()) {
 						rows.add(List.of(name, NO_ROWS, NO_VALUE, NO_VALUE, NO_VALUE));
+						facts.add(noted);
 					}
 					for (UriLatency uri : uris.subList(0, Math.min(LATENCY_ROWS, uris.size()))) {
 						rows.add(List.of(name, cell(uri.uri()),
 								pair(seconds(uri.previous().mean()), seconds(uri.incident().mean())),
 								pair(seconds(uri.previous().max()), seconds(uri.incident().max())),
 								pair(points(uri.previous()), points(uri.incident()))));
+						facts.add(new LineFact(service.service(), Section.LATENCY,
+								WindowChange.latency(uri.previous(), uri.incident())));
 					}
 					if (uris.size() > LATENCY_ROWS) {
-						notes.add("not shown for " + name + ": rows=" + (uris.size() - LATENCY_ROWS));
+						notes.add(Map.entry("not shown for " + name + ": rows=" + (uris.size() - LATENCY_ROWS), noted));
 					}
 					if (ok.value().truncated()) {
-						notes.add("query_metric for " + name + ": truncated=true");
+						notes.add(Map.entry("query_metric for " + name + ": truncated=true", noted));
 					}
 				}
 			}
 		}
 		out.table(List.of("service", "uri", "mean, previous " + ARROW + " incident",
-				"max, previous " + ARROW + " incident", "points, previous " + ARROW + " incident"), rows);
+				"max, previous " + ARROW + " incident", "points, previous " + ARROW + " incident"), rows, facts);
 		if (!notes.isEmpty()) {
 			out.blank();
-			notes.forEach(out::line);
+			notes.forEach(note -> out.line(note.getValue(), note.getKey()));
 		}
 	}
 
@@ -377,14 +440,17 @@ public final class DossierRenderer {
 	 */
 	private static void resources(Out out, List<ServiceResources> resources) {
 		out.section("## Resources");
-		out.line("Per service, from query_metric " + String.join(", ", DossierGatherer.RESOURCE_METRICS)
+		out.line(LineFact.notCompared(LineFact.HEADER, Section.RESOURCES), "Per service, from query_metric "
+				+ String.join(", ", DossierGatherer.RESOURCE_METRICS)
 				+ ", in the units of the source: one call per service and metric over both windows, its points split as"
 				+ " the latency's. \"mean\", \"max\" and \"points\" as in the latency table.");
 		for (ServiceResources service : resources) {
+			LineFact noted = LineFact.notCompared(service.service(), Section.RESOURCES);
 			out.section("### " + cell(service.service()));
 			List<String> failures = failedResources(service);
-			failures.forEach(out::line);
+			failures.forEach(line -> out.line(noted, line));
 			List<List<String>> rows = new ArrayList<>();
+			List<LineFact> facts = new ArrayList<>();
 			List<String> truncated = new ArrayList<>();
 			for (MetricSeries metric : service.metrics()) {
 				if (metric.series() instanceof Gathered.Ok<ResourceSeries> ok) {
@@ -392,6 +458,7 @@ public final class DossierRenderer {
 					rows.add(List.of(cell(metric.metric()), value(series.previous().mean()),
 							value(series.incident().mean()), value(series.previous().max()),
 							value(series.incident().max()), points(series.previous()), points(series.incident())));
+					facts.add(new LineFact(service.service(), Section.RESOURCES, WindowChange.resource(series)));
 					if (series.truncated()) {
 						truncated.add(cell(metric.metric()));
 					}
@@ -404,10 +471,10 @@ public final class DossierRenderer {
 				out.blank();
 			}
 			out.table(List.of("metric", "previous mean", "incident mean", "previous max", "incident max",
-					"previous points", "incident points"), rows);
+					"previous points", "incident points"), rows, facts);
 			if (!truncated.isEmpty()) {
 				out.blank();
-				out.line("query_metric " + String.join(", ", truncated) + ": truncated=true");
+				out.line(noted, "query_metric " + String.join(", ", truncated) + ": truncated=true");
 			}
 		}
 	}
@@ -449,8 +516,10 @@ public final class DossierRenderer {
 		Map<LevelLogs, Integer> shown = shownSignatures(logs);
 		for (ServiceLogs service : logs) {
 			out.section("### " + cell(service.service()));
+			// Logs are gathered for the incident window only, so no log line is compared (ADR-028, Decision 5).
+			LineFact noted = LineFact.notCompared(service.service(), Section.LOGS);
 			for (LevelLogs level : service.levels()) {
-				levelLines(level, shown.getOrDefault(level, 0)).forEach(out::line);
+				levelLines(level, shown.getOrDefault(level, 0)).forEach(line -> out.line(noted, line));
 			}
 		}
 	}
@@ -505,34 +574,41 @@ public final class DossierRenderer {
 		return shown;
 	}
 
-	private static void events(Out out, List<SourceEvents> events) {
+	private static void events(Out out, List<SourceEvents> events, Topology topology) {
 		out.section("## Event counts");
 		for (SourceEvents source : events) {
+			String owner = topology.ownerOfSource(source.source()).orElse(LineFact.HEADER);
 			out.section("### " + cell(source.source()) + " events");
 			Compared<EventCounts> windows = source.windows();
-			failedWindows(out, windows);
-			out.line("Total: previous " + total(windows.previous()) + ", incident " + total(windows.incident()) + ".");
+			failedWindows(out, windows, LineFact.notCompared(owner, Section.EVENTS));
+			// The totals are one fact with a count per window, compared as a row is.
+			out.line(new LineFact(owner, Section.EVENTS, WindowChange.counts(total(windows.previous()),
+					total(windows.incident()))),
+					"Total: previous " + count(total(windows.previous())) + ", incident "
+							+ count(total(windows.incident())) + ".");
 			out.blank();
 			List<Row> rows = rows(windows, counts -> counts.groups()
 				.stream()
 				.map((EventGroup g) -> Map.entry(Arrays.asList(g.type(), g.outcome()), g.count()))
 				.toList());
-			out.countTable(windows, List.of("type", "outcome"), List.of(), rows, row -> List.of());
+			out.countTable(windows, List.of("type", "outcome"), List.of(), rows, row -> List.of(),
+					counted(owner, Section.EVENTS));
 		}
 	}
 
-	private static String total(Gathered<EventCounts> counts) {
-		return counts instanceof Gathered.Ok<EventCounts> ok ? String.valueOf(ok.value().total()) : NO_VALUE;
+	/** A window's total; {@code null} when the window was not read. */
+	static Long total(Gathered<EventCounts> counts) {
+		return counts instanceof Gathered.Ok<EventCounts> ok ? ok.value().total() : null;
 	}
 
-	/** One fact line, then a blank line, per failed window of a compared section. */
-	private static void failedWindows(Out out, Compared<?> windows) {
+	/** One fact line, then a blank line, per failed window of a compared section, each line's fact {@code fact}. */
+	private static void failedWindows(Out out, Compared<?> windows, LineFact fact) {
 		if (windows.previous() instanceof Gathered.Failed<?> failed) {
-			out.line(failed(failed, "previous"));
+			out.line(fact, failed(failed, "previous"));
 			out.blank();
 		}
 		if (windows.incident() instanceof Gathered.Failed<?> failed) {
-			out.line(failed(failed, "incident"));
+			out.line(fact, failed(failed, "incident"));
 			out.blank();
 		}
 	}
@@ -583,6 +659,17 @@ public final class DossierRenderer {
 			sums[0] += row.previousOrZero();
 			sums[1] += row.incidentOrZero();
 		}
+	}
+
+	/**
+	 * The fact of a line that sums the rows past a cap: not compared, since a sum of rows is no one row's fact, in the
+	 * rows' section, and owned by their one owner, or by the header when they have several (ADR-028, Decision 3: a line
+	 * with no single service).
+	 */
+	static LineFact hidden(List<Row> rows, Function<Row, LineFact> fact) {
+		List<LineFact> facts = rows.stream().map(fact).toList();
+		List<String> owners = facts.stream().map(LineFact::owner).distinct().toList();
+		return LineFact.notCompared(owners.size() == 1 ? owners.get(0) : LineFact.HEADER, facts.get(0).section());
 	}
 
 	private static String notShown(int rows, Compared<?> windows, long[] sums) {
@@ -681,17 +768,18 @@ public final class DossierRenderer {
 	/**
 	 * The text being written; sections are separated by one blank line. Every line written with {@link #line} is
 	 * citable and gets the next number, {@code D1 }, {@code D2 }, ... from the top; headings, blank lines and table
-	 * header and separator rows are not numbered (evidence-by-reference).
+	 * header and separator rows are not numbered (evidence-by-reference). Each numbered line is written with its
+	 * {@link LineFact}, so the index has one fact per line by construction.
 	 */
 	private static final class Out {
 
 		private final StringBuilder text = new StringBuilder();
 
-		private int lines;
+		private final List<LineFact> facts = new ArrayList<>();
 
-		void line(String line) {
-			this.lines++;
-			this.text.append(linePrefix(this.lines)).append(line).append('\n');
+		void line(LineFact fact, String line) {
+			this.facts.add(fact);
+			this.text.append(linePrefix(this.facts.size())).append(line).append('\n');
 		}
 
 		/** A heading, or a table's header or separator row: not citable, so not numbered. */
@@ -712,18 +800,25 @@ public final class DossierRenderer {
 			blank();
 		}
 
-		void table(List<String> headers, List<List<String>> rows) {
+		/** A table; {@code facts.get(i)} is the fact of {@code rows.get(i)}. */
+		void table(List<String> headers, List<List<String>> rows, List<LineFact> facts) {
+			if (facts.size() != rows.size()) {
+				throw new IllegalArgumentException("one fact per row: " + facts.size() + " for " + rows.size());
+			}
 			heading("| " + String.join(" | ", headers) + " |");
 			heading("|" + "---|".repeat(headers.size()));
-			rows.forEach(row -> line("| " + String.join(" | ", row) + " |"));
+			for (int i = 0; i < rows.size(); i++) {
+				line(facts.get(i), "| " + String.join(" | ", rows.get(i)) + " |");
+			}
 		}
 
 		/**
 		 * A table of labelled rows with their previous and incident counts, then {@code extra} columns; at most
-		 * {@link #ROWS} rows, the others counted in one line; a "no rows" row when there are none.
+		 * {@link #ROWS} rows, the others counted in one line; a "no rows" row when there are none. A row's fact is
+		 * {@code fact}'s; the line counting the others sums several rows, so it is not compared (see {@link #hidden}).
 		 */
 		void countTable(Compared<?> windows, List<String> labelHeaders, List<String> extraHeaders, List<Row> rows,
-				Function<Row, List<String>> extra) {
+				Function<Row, List<String>> extra, Function<Row, LineFact> fact) {
 			List<Row> shown = rows;
 			if (rows.isEmpty()) {
 				List<String> labels = new ArrayList<>();
@@ -733,17 +828,17 @@ public final class DossierRenderer {
 				}
 				shown = List.of(new Row(labels, zeroOrNull(windows.previous()), zeroOrNull(windows.incident())));
 			}
-			rawCountTable(labelHeaders, extraHeaders, capped(shown), extra);
+			rawCountTable(labelHeaders, extraHeaders, capped(shown), extra, fact);
 			if (rows.size() > ROWS) {
 				long[] sums = new long[2];
 				sum(rows, sums);
 				blank();
-				line(notShown(rows.size() - ROWS, windows, sums));
+				line(hidden(rows.subList(ROWS, rows.size()), fact), notShown(rows.size() - ROWS, windows, sums));
 			}
 		}
 
 		void rawCountTable(List<String> labelHeaders, List<String> extraHeaders, List<Row> rows,
-				Function<Row, List<String>> extra) {
+				Function<Row, List<String>> extra, Function<Row, LineFact> fact) {
 			List<String> headers = new ArrayList<>(labelHeaders);
 			headers.add("previous");
 			headers.add("incident");
@@ -757,7 +852,7 @@ public final class DossierRenderer {
 				line.addAll(extra.apply(row));
 				cells.add(line);
 			}
-			table(headers, cells);
+			table(headers, cells, rows.stream().map(fact).toList());
 		}
 
 		String text() {

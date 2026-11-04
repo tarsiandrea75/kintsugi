@@ -1049,6 +1049,18 @@ Every citable line of the sheets is numbered `D1`, `D2`, … exactly as in the t
 
 The sheets MUST state facts only, as the tables do: the banned-words test runs on them too. What they add is arrangement, which ADR-014 allows as an amendment of ADR-011's "facts only" rule **(service-assessment T3)**: the order and the "calls; called by" lines come from the topology, the split into "Seen only in the previous window" compares a count with 0, and the `/actuator/*` rows are dropped for every fault alike. No line says which service is slow, failing or the cause.
 
+**The line-fact index (verification-levels T2).** Both renderers MUST return, beside their text, one **line fact** per numbered line `D<n>`, `LineFact(owner, section, changed)` ([ADR-028](../../../docs/adr/ADR-028-verification-levels.md), Decision 3; [feature document](../../../odd/tasks/verification-levels.md)): `DossierRenderer.indexed` for the tables, and `ServiceSheets.Rendered.facts` for the sheets, whose owners are the sheets' owners above. `render` keeps its signature and writes the same text byte for byte: the index is computed from the typed `Dossier` while each line is written, never parsed back from the text, and it never reaches the prompt. The **owner** is the service the fact is about: a status, latency, resource or log row's service; a traffic row's `service` label, so a client row is its caller's and a server row its callee's; a state table's or an event source's owner in the topology; and `header` for the header's lines, a section's introductory line, a line that sums rows of several services, and a row no lab service owns ("Other rows"). In the sheets, a service's "calls; called by" line is its own, in section `header`. The **section** is one of `header`, `status`, `states`, `traffic`, `latency`, `resources`, `logs`, `events`. **Changed** is `YES`, `NO` or `NOT_COMPARED`, by `WindowChange`'s rule for the section (ADR-028, Decision 5):
+
+| Section | `YES` when | `NOT_COMPARED` when |
+|---|---|---|
+| `latency` (one row: service, uri) | incident mean ≥ 2 × previous mean and ≥ 0.5 s (R-DOWN's slow test) | either mean is missing or the previous mean is not above 0 |
+| `resources` (one row: service, metric) | incident mean ≥ 2 × previous mean and > previous max (R-RES) | a window is not usable (fewer than 2 values, or fewer than half the fuller window's points) or the previous mean is not above 0 |
+| `traffic`, `states`, `events` (one row, or a source's total) | the larger count is ≥ 3 and ≥ 2 × the smaller, so a row seen only in the previous window counts | a window was not read |
+| `status` | the service restarted inside the incident window | `service_restarts` failed |
+| `logs`, `header` | never | always: logs are gathered for the incident window only |
+
+Any other line is `NOT_COMPARED` too: a failed call's line, a sheet block's `no rows ...` line, a latency `no rows` row, a `not shown` line (a sum of rows), and a `truncated=true` note. Elsewhere `NO`; a tables' count row `no rows` holds 0 in both windows read, so it is `NO`. The thresholds are copies of `RulesDiagnosis`' and `ResourceRule`'s constants, not references, so Config 0's code does not change and the dossier package does not depend on the rules; a test in the rules package pins each copy to its rule's constant. Why: L2 and L3 ("Evidence is checked") read a cited line's owner and whether its fact changed, and the tables had no owner per line and neither view a change; a fact that was never compared is not called changed, so the verifier never claims more than it checked.
+
 #### Scenario: Citable lines numbered (evidence-by-reference)
 - WHEN the F3 dossier is rendered
 - THEN its first table row or bullet fact starts with `D1 `, and every later citable line with the next number, with no gap and no repeat
@@ -1158,6 +1170,25 @@ The sheets MUST state facts only, as the tables do: the banned-words test runs o
 - WHEN it is rendered as sheets
 - THEN the rendering goes on: the sheets and the last section are as without them, and `## Other rows` follows with `- stock table status=LOW: incident 3 (previous 2).`, `- stock table status=OUT: incident 0 (previous 1).`, the events' total and their row, all owned by `header`
 - AND a test fails when a table or an event source the gatherer reads has no owner in the lab topology
+
+#### Scenario: One line fact per numbered line (verification-levels T2)
+- GIVEN the F3, healthy, failing, stress and boundary dossiers
+- WHEN each is rendered as tables and as sheets
+- THEN each view returns exactly one line fact per numbered line, the text equals `render`'s and the golden files byte for byte, and the sheets' facts have the sheets' owners
+- AND in F3's tables `D1` to `D5` are `header`'s, `D6` (order-service restarted at 09:53:12) is `order-service`, `status`, `YES`, `D15` (the client row of order-service -> inventory-service) is order-service's and `D16` (its server row) inventory-service's, `D17` (`ConnectException`, 0 -> 6) is order-service's `traffic` `YES`, and `D37` (order-service's `WARN` line) is `logs`, `NOT_COMPARED`
+
+#### Scenario: Each section's change rule at its boundaries (verification-levels T2)
+- GIVEN latency rows of 0.25 -> 0.5 s, 0.3 -> 0.59 s and 0.2 -> 0.49 s, and rows with no previous mean or a previous mean of 0
+- AND resource series doubling to above the previous max, doubling to exactly the previous max, rising 1.9×, and with an incident window of 1 value
+- AND event counts 0 -> 3, 0 -> 2, 2 -> 4, 2 -> 3 and 3 -> 0
+- WHEN the dossier is rendered as tables and as sheets
+- THEN in both views the latency rows are `YES`, `NO`, `NO`, `NOT_COMPARED` and `NOT_COMPARED`; the resource rows `YES`, `NO`, `NO` and `NOT_COMPARED`; the counts `YES`, `NO`, `YES`, `NO` and `YES`, the last in the sheets' "Seen only in the previous window", owned by order-service
+- AND a restart in the incident window is `YES`, and a log line is `NOT_COMPARED`
+
+#### Scenario: A traffic row on no edge in the tables (verification-levels T2)
+- GIVEN order-service's client row to gateway-mock's `POST /authorize`, on no edge, and a server row of `postgres-exporter`, a service outside the topology
+- WHEN the dossier is rendered as tables
+- THEN both rows are under "Other rows", the first owned by order-service as in the sheets and the second by `header`
 
 #### Scenario: An invalid topology file stops the start (topology-data T3)
 - GIVEN `kintsugi.agent.topology` names a file that is missing, empty, not a JSON object, lacks one of `services`, `datastores`, `edges`, `tableOwners` and `sourceOwners`, holds one of them with the wrong JSON type, or names an edge caller, edge target or owner that is not a service, a duplicate name, a component named `UNKNOWN` or a cycle
