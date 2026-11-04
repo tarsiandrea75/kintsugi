@@ -57,7 +57,7 @@ When a run makes more than one paired test, the report MUST also give Holm-adjus
 ### REQ-7 Scoring a row
 Each row MUST be rescored from `status`, `truth` and `reported`, ignoring `verdict`:
 - on a fault truth, a COMPLETED run reporting the truth is correct, `UNKNOWN|UNKNOWN` is an abstention, anything else is a miss;
-- on the healthy truth `NONE|NONE` (provisional until follow-up 10, lab-realism), `UNKNOWN|UNKNOWN` is correct, any cause is a false alarm, and no report is a miss.
+- on the healthy truth `NONE|NONE` (final since lab-realism-min T5, ADR-015's amendment of 2026-11-03), `UNKNOWN|UNKNOWN` is correct, any cause is a false alarm, and no report is a miss.
 
 AC@1 MUST count an abstention as not correct. Coverage MUST be the share of fault rows with an answer (ADR-015): an abstention, a row whose status is not `COMPLETED` (`TIMED_OUT`, `FAILED`, `INVALID_REPORT`) and a row with no report have none. Selective accuracy MUST be the share correct among the answered rows. Healthy rows MUST NOT enter AC@1 or the paired comparison.
 

@@ -17,7 +17,8 @@ ABSTAIN = "abstain"
 FALSE_ALARM = "false_alarm"
 
 UNKNOWN_ANSWER = "UNKNOWN|UNKNOWN"
-# Provisional until follow-up 10 (lab-realism) fixes the format of healthy recordings.
+# The truth of a healthy control, final since lab-realism-min T5 (ADR-015, amendment of 2026-11-03): the harness writes
+# it into every healthy recording's score file and manifest row.
 HEALTHY_TRUTH = "NONE|NONE"
 NO_REPORT = "none"
 

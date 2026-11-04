@@ -51,7 +51,7 @@ On dev, a variant is kept only with a net gain of at least 3 cases over the base
 
 - On a fault case, the answer is correct when the run completed and its `service|category` equals the truth. `UNKNOWN|UNKNOWN` is an abstention: it counts as a miss for AC@1 and lowers coverage. Any other answer, or no report, is a miss.
 - On a healthy case, `UNKNOWN|UNKNOWN` is correct and any cause is a false alarm.
-- The healthy truth token is `NONE|NONE`. It is provisional until follow-up 10 (lab-realism) fixes the format of healthy recordings.
+- The healthy truth token is `NONE|NONE`. It was provisional until lab-realism fixed the format of healthy recordings; the amendment of 2026-11-03 below makes it final.
 - Coverage is the share of fault cases with an answer; selective accuracy is the accuracy on those cases.
 
 ### Results
@@ -63,6 +63,15 @@ The output of every scored run is committed under `evals/results/<date>-<name>/`
 - The scorer is the `kintsugi_evals` package under `evals/`, run as `python -m kintsugi_evals score`.
 - It uses the Python standard library only. Why: a measurement must run with a bare `python3`, with no install step that could drift between runs, and the statistics here (a binomial tail, a Wilson formula, a seeded resample) need no numeric library. This narrows ADR-001's "pandas, matplotlib" to what the scorer needs today; plotting can add a dependency later, outside the scorer.
 - pytest is a dev dependency only, pinned in `evals/requirements-dev.txt` to `pytest==9.1.1` (released 2026-06-19). 9.2.0 was one day old when this was decided, under the project's two-week rule. It is installed in `evals/.venv`, which is git-ignored.
+
+### Amendment, 2026-11-03: the healthy truth is final
+
+`odd/tasks/lab-realism-min.md` T5 fixed the format of healthy recordings, so `NONE|NONE` is no longer provisional.
+- `verify-agent.sh --schedule` runs a healthy control of holdout-2's schedule exactly as a fault case, with no injection, and writes `NONE|NONE` as its truth in its score file and `summary.tsv`.
+- `record-replay.sh` copies that truth into the control's manifest row, whose fault is `healthy`.
+- The scoring rule above is unchanged: `UNKNOWN|UNKNOWN` is correct on a healthy case, any cause a false alarm, no report a miss. `verify-agent.sh`'s live verdict applies the same rule.
+
+Why final now: holdout-2 is recorded after the freeze and read once, so its healthy rows must carry the token the scorer reads. Changing it after a recording would mean rewriting a holdout's manifest.
 
 ## Alternatives considered
 
@@ -83,4 +92,4 @@ The output of every scored run is committed under `evals/results/<date>-<name>/`
 
 - Hand-written statistics need their own tests; the tests pin the vision's quoted numbers.
 - A plan per run adds a commit before each measurement.
-- The healthy token may change with follow-up 10, and the scorer with it.
+- The healthy token may change with follow-up 10, and the scorer with it. (Closed by the amendment of 2026-11-03.)
