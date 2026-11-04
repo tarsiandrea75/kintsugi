@@ -96,6 +96,8 @@ Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain
   - Open, for T6: the injector storing the nested value; truths at every value (AC5); a live healthy recording passing `check-recordings.sh` (AC4 is shown on a fixture only). One timing difference remains between a healthy and an F3 case: F3's recreate.
   - Open, later: `replay-agent.sh` accepts only F1–F3, so healthy rows cannot be replayed yet; `ReplayDriver`'s MATCH/MISS shows a healthy sample as a MISS (the scorer rescores it); no check compares a manifest row's fault with its schedule case's class.
 
+- 2026-11-04: native review of `741c630..d14149a`: four lenses, **approved** and acknowledged (lineage `review-feddfd6cc77c1e44`). WARNING R2-state-says-t5-next fixed in `docs/STATE.md`. WARNING R3-manifest-last-row-case-column checked and false: all 37 manifest lines have 8 columns. Not fixed: WARNING R2-round-holds-case-suffix (`record-replay.sh`:169, a variable named `round` also holds a case); SUGGESTIONs: an injector hiccup during a healthy case's check ends the whole session (`lib.sh`:398-408), the name pattern defined twice, `ReplayCases` not checking the case against the split, `--schedule` not refused outside decision mode.
+
 ## Next step
 
 T6, with a plan and the human's go-ahead (live lab, cloud reports).
