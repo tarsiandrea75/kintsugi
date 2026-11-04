@@ -95,7 +95,7 @@ A report naming `UNKNOWN|UNKNOWN` claims no cause, so L2 and L3 do not apply: it
 
 ### 7. Storage and scoring
 
-- The stored report (`AgentLoop.stored`, :773-788) gains `verification: {level, checks[]}`, each check `{level, name, pass, detail}`, after `evidence` and before `stepsUsed`. A run with no stored report has no level.
+- The stored report (`AgentLoop.stored`, :773-788) gains `verification: {level, checks[]}`, each check `{level, name, pass, detail}`, after the model's fields and immediately before `stepsUsed` (T4 kept the model's fields together; `evidence` is not the last of them), with levels written as the strings `L0` to `L3`. A run with no stored report has no level.
 - `ReplayDriver` adds a `level` column to `summary.tsv`, after every existing column: `L0` to `L3`, or `-` for a run with no stored report and for a `rules` line (Config 0 writes no cited evidence).
 - The scorer reads `level` as an optional column, so older TSVs still score and regenerate byte for byte. When it is present it adds **Verified-correct** (fault rows correct at L3 or above, over fault rows) and the **L1 rate** (rows at L1 or above, over rows with a stored report), each with its Wilson 95% CI like the other rates.
 
