@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-03 (session 01)
+2026-11-04 (session 01)
 
 ## Milestone
 
@@ -16,7 +16,9 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-Latest (journal `docs/journal/2026-11-03-01.md`): BARO reproduced on RE2-TT, AC@3 and Avg@5 in the scorer, and why D abstains (Next action, items 9 to 11).
+Latest (journal `docs/journal/2026-11-04-01.md`): A with today's agent, `check-freeze.sh`, holdout-2's seed (ADR-026), the policy gate (ADR-027) and lab-realism-min, closed with T6's live dev check and T7's healthy replay (Next action, items 16 to 17d).
+
+Before that (journal `docs/journal/2026-11-03-01.md`): BARO reproduced on RE2-TT, AC@3 and Avg@5 in the scorer, why D abstains, the latency pairs, the resource warrant, the ranked report and suspects with an abstention (items 9 to 15).
 
 Before that (journal `docs/journal/2026-11-02-02.md`): `rcaeval-dev-baselines`, T1–T10 complete (`odd/tasks/rcaeval-dev-baselines.md`, ADR-022, ADR-023, ADR-024), chain `feat/rcaeval-dev-baselines` → `-01-baro`. RE2-OB dev, service-only, 30 cases (`evals/results/2026-11-02-baselines-re2ob-dev/`, `evals/results/2026-11-02-a-deadline-re2ob-dev/`, `evals/results/2026-11-02-baro-pipeline-re2ob-dev/`):
 - 0 4/30, 13% [5%, 30%]; 0R 20/30, 67% [49%, 81%]; D 11/30, 37% [22%, 54%]; A at a 2100 s deadline 19/30, 63% [46%, 78%]; BARO with the published pipeline 4/30, 13% [5%, 30%].
@@ -50,7 +52,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 17b. Done 2026-11-03, branch `chore/follow-ups-2026-11-03`: three review follow-ups (`a1a564d` the empty ranking of a row with no answer, pinned; `325e805` latency pairs read whatever the arrow's spacing; `dd8bdfd` holdout-2's schedule after its seed), and `docs/benchmark-limits.md`, the limits `benchmark.md` must state.
 17c. Done 2026-11-03: the policy gate (ADR-027, `odd/tasks/policy-gate.md`, branch `feat/policy-gate`): every tool call, the gatherer's included, passes a deterministic policy; unknown tools are `WRITE` and refused with `REFUSED_POLICY`; counts per incident from a snapshot; the scorer totals them and the benchmark render fails on a non-zero holdout total. Rules unchanged on lab dev, lab holdout and RE2-OB dev.
 17d. Done 2026-11-04: lab-realism-min (`odd/tasks/lab-realism-min.md`, ADR-026), branches `feat/lab-realism-min`, `-01-injector`, `-02-harness`, `-03-healthy-replay`: the holdout-2 schedule generator, `check-freeze.sh` condition 3, the injector's F1 and F2 parameters, the harness (schedule, healthy controls, `holdout-2` split), and healthy rows replayable with an injector retry (T7). T6's live dev check (`evals/results/2026-11-04-lab-realism-dev-check/`): 9 scheduled cases, every stored parameter and truth as specified, all 9 windows clean, the healthy one included; D 9/9, descriptive; about $0.011. Holdout-2 waits for the freeze tag (2026-12-01) and the seed.
-18. **Next:** read A's run (retry, cut and timeout rates under 512 tokens and 2100 s); then policy and approval, lab realism, and the holdout-2 recording feature (its split and seed), before the freeze on 2026-12-01. Still the human's: reading the stop rule (vision §7). The holdout is out until M4.
+18. **Next**, before the freeze on 2026-12-01: choose among the verification levels (L2/L3, so a report can state its level; vision §6), A and the hybrid on RE2-OB dev with today's prompt and report, and NETWORK/CODE_DEFECT (deferred by the human). On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
 
 ## Local branch chains (not pushed)
 
@@ -71,7 +73,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -91,6 +93,12 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+Session of 2026-11-04, lab-realism-min (details in `odd/tasks/lab-realism-min.md`):
+- T7's review: no test shows a dev run's default leaves `healthy` out; a holdout-2 default run needs a healthy row to exist; the `/faults/active` call written twice; duplicated match branches in `ReplayDriver.verdict`.
+- T5's review: `record-replay.sh`'s `round` also holds a case; the file-name pattern defined twice; `ReplayCases` does not check the case against the split; `--schedule` not refused outside decision mode; nothing compares a manifest row's fault with its schedule case's class.
+- After T7's rebase, its unchanged code is a new high-risk candidate for `assess`; not re-reviewed (the journal says why).
+- The timeout test in `AgentLoopDossierModeTest` (421–426) detects the gathering's end by a JDK method name (`getTask`).
 
 Session of 2026-11-03, rcaeval-baro-reproduction (details in `odd/tasks/rcaeval-baro-reproduction.md`):
 - `baro-rcaeval` skips a misnamed case directory silently and does not count 90 cases; `compare_dev.py` cannot see a `data.csv`. The plan checked both by hand; a future read of new data needs them again.
