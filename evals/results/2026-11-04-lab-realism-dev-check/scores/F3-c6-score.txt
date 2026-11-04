@@ -1,0 +1,17 @@
+fault: F3
+mode (requested, recorded): decision, decision
+route (requested, recorded): cloud, cloud
+model: claude-haiku-5-5
+tokens (prompt, completion): 6618, 509
+injection: e6681d8c-fe20-47e4-a568-d55b79c13134
+incident: d66aa98d-ac42-40af-ad4b-5aa19b371d4d
+status: COMPLETED
+failure reason: -
+truth (service|category): order-service|CONFIGURATION
+reported (service|category, from the report): order-service|CONFIGURATION
+steps: 2
+window (minutes): 3
+seconds (incident opened to ended): 14
+verdict: MATCH
+case: 6
+parameters: wrong_port=9999

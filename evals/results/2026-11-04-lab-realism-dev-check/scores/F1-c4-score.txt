@@ -1,0 +1,17 @@
+fault: F1
+mode (requested, recorded): decision, decision
+route (requested, recorded): cloud, cloud
+model: claude-haiku-5-5
+tokens (prompt, completion): 6635, 566
+injection: eb96e0fc-0ee9-43eb-bf76-9d6e0b58c9e1
+incident: 49b64c3c-a013-439a-9d0f-ac58a957821a
+status: COMPLETED
+failure reason: -
+truth (service|category): gateway-mock|DEPENDENCY_LATENCY
+reported (service|category, from the report): gateway-mock|DEPENDENCY_LATENCY
+steps: 2
+window (minutes): 4
+seconds (incident opened to ended): 14
+verdict: MATCH
+case: 4
+parameters: gateway_latency_ms=5000

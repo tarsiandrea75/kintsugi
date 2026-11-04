@@ -1,0 +1,10 @@
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F1-c1-incident.json: previous window: 4 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F1-c4-incident.json: previous window: 5 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F1-c7-incident.json: previous window: 5 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F1-c9-incident.json: previous window: 5 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F2-c2-incident.json: previous window: 4 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F2-c5-incident.json: previous window: 4 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F2-c8-incident.json: previous window: 4 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/F3-c6-incident.json: previous window: 4 PAID orders, no other state, all traffic SUCCESS; incident window: order-service restarted once, F3's own recreate
+PASS  infra/scripts/out/verify-agent-20261104T112337Z/healthy-c3-incident.json: previous window: 4 PAID orders, no other state, all traffic SUCCESS; incident window: no restart
+RESULT: PASS (9 recording(s) clean)

@@ -1,0 +1,17 @@
+fault: F2
+mode (requested, recorded): decision, decision
+route (requested, recorded): cloud, cloud
+model: claude-haiku-5-5
+tokens (prompt, completion): 13961, 1141
+injection: c32ad6f3-458d-4f33-8b3b-8c2c3506b554
+incident: aca63167-20b7-426c-a565-8ed0ac93e0d7
+status: COMPLETED
+failure reason: -
+truth (service|category): gateway-mock|DEPENDENCY_REJECTING
+reported (service|category, from the report): gateway-mock|DEPENDENCY_REJECTING
+steps: 3
+window (minutes): 3
+seconds (incident opened to ended): 15
+verdict: MATCH
+case: 5
+parameters: gateway_error_status=500

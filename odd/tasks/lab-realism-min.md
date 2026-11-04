@@ -54,7 +54,7 @@ A discrete set, drawn uniformly, so each value has about 5 cases and a per-value
 - [x] T3 `check-freeze.sh` condition 3 as ADR-026 Decision 4 says, and its tests. Route: the same writer, its own commit.
 - [x] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
 - [x] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
-- [ ] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
+- [x] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
 - [ ] T7 Before holdout-2 is recorded: a healthy row can be replayed (`replay-agent.sh` accepts the `healthy` class, and `ReplayDriver` scores it against `NONE|NONE`, so a `COMPLETED` `UNKNOWN|UNKNOWN` matches), and `expect_no_injection` retries an injector that does not answer instead of ending the session, while a 200 still fails. Tests first. Route: delegated writer in its own worktree, during T6's run (the run reads `infra/scripts/` from the main worktree, so nothing there changes while it runs); branch `feat/lab-realism-min-03-healthy-replay`.
 
 ## Acceptance criteria
@@ -99,6 +99,8 @@ Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain
 
 - 2026-11-04: native review of `741c630..d14149a`: four lenses, **approved** and acknowledged (lineage `review-feddfd6cc77c1e44`). WARNING R2-state-says-t5-next fixed in `docs/STATE.md`. WARNING R3-manifest-last-row-case-column checked and false: all 37 manifest lines have 8 columns. Not fixed: WARNING R2-round-holds-case-suffix (`record-replay.sh`:169, a variable named `round` also holds a case); SUGGESTIONs: an injector hiccup during a healthy case's check ends the whole session (`lib.sh`:398-408), the name pattern defined twice, `ReplayCases` not checking the case against the split, `--schedule` not refused outside decision mode.
 
+- 2026-11-04: T6 done under its plan (`12a772f`), route inline commands: 9 hand-written cases (every F1 value, every F2 status, F3, a healthy control) recorded live in decision mode on the cloud route, not imported. Checks 1–4 pass: each `injections` row stores the scheduled value and a `root_cause` naming it, every truth keeps its service and category (AC5), the healthy case wrote no row, and `check-recordings.sh` passes all 9, the healthy one included (AC4 now shown live). Descriptive: `/payments` max latency 1.3, 4.3, 8.6 and 14.2 s at L = 2, 5, 10 and 20 s (the caller gives up near 14 s); D 9/9. About $0.011. Results `evals/results/2026-11-04-lab-realism-dev-check/`.
+
 ## Next step
 
-T6, with a plan and the human's go-ahead (live lab, cloud reports).
+T7's branch joins the chain; then the feature is complete. Holdout-2 is recorded after the freeze tag (2026-12-01) and the seed, as `docs/setup.md` says.

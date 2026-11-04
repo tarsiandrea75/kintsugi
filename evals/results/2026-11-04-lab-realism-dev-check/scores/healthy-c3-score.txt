@@ -1,0 +1,17 @@
+fault: healthy
+mode (requested, recorded): decision, decision
+route (requested, recorded): cloud, cloud
+model: claude-haiku-5-5
+tokens (prompt, completion): 6205, 400
+injection: -
+incident: 5b4dd144-bd5b-494e-b2ea-da4edc84f237
+status: COMPLETED
+failure reason: -
+truth (service|category): NONE|NONE
+reported (service|category, from the report): UNKNOWN|UNKNOWN
+steps: 2
+window (minutes): 3
+seconds (incident opened to ended): 16
+verdict: MATCH
+case: 3
+parameters: -

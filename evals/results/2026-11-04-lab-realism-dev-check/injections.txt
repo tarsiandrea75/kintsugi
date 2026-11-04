@@ -1,0 +1,8 @@
+F1|{"latencyMs": 2000}|gateway-mock|DEPENDENCY_LATENCY|RESTORED|The payment gateway answers authorizations after 2 s, so payments and the orders waiting on them stay pending.
+F2|{"latencyMs": 0, "errorStatus": 429}|gateway-mock|DEPENDENCY_REJECTING|RESTORED|The payment gateway rejects every authorization with 429 (rate limited), so payments fail.
+F1|{"latencyMs": 5000}|gateway-mock|DEPENDENCY_LATENCY|RESTORED|The payment gateway answers authorizations after 5 s, so payments and the orders waiting on them stay pending.
+F2|{"latencyMs": 0, "errorStatus": 500}|gateway-mock|DEPENDENCY_REJECTING|RESTORED|The payment gateway rejects every authorization with 500 (internal server error), so payments fail.
+F3|{"ORDER_PAYMENT_BASEURL": "http://payment-service:9999"}|order-service|CONFIGURATION|RESTORED|order-service is deployed with a wrong payment-service URL (http://payment-service:9999), so its payment calls fail to connect.
+F1|{"latencyMs": 10000}|gateway-mock|DEPENDENCY_LATENCY|RESTORED|The payment gateway answers authorizations after 10 s, so payments and the orders waiting on them stay pending.
+F2|{"latencyMs": 0, "errorStatus": 503}|gateway-mock|DEPENDENCY_REJECTING|RESTORED|The payment gateway rejects every authorization with 503 (service unavailable), so payments fail.
+F1|{"latencyMs": 20000}|gateway-mock|DEPENDENCY_LATENCY|RESTORED|The payment gateway answers authorizations after 20 s, so payments and the orders waiting on them stay pending.
