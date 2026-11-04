@@ -53,7 +53,7 @@ A discrete set, drawn uniformly, so each value has about 5 cases and a per-value
 - [x] T2 The schedule generator and its tests. Route: delegated writer (while A runs).
 - [x] T3 `check-freeze.sh` condition 3 as ADR-026 Decision 4 says, and its tests. Route: the same writer, its own commit.
 - [x] T4 The fault injector's parameters for F1 and F2, tests first; its spec. Route: delegated writer, after A's run.
-- [ ] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
+- [x] T5 The harness records a schedule (fault with parameters, or healthy); the `holdout-2` split and the schedule-case column in `record-replay.sh` and `ReplayCases`; ADR-015's amendment. Route: delegated writer, after T4.
 - [ ] T6 A plan and a dev recording of a few scheduled cases, one per F1 value, F2 status and a healthy control, to check mechanics and truth. Route: inline commands.
 
 ## Acceptance criteria
@@ -92,6 +92,10 @@ Forecast: about 800 authored lines in all, over budget, so `feature-branch-chain
 
 - 2026-11-03: native review of `cb48362..741c630` (the policy count fixes and T4): one reliability lens, **approved** and acknowledged (lineage `review-f72393b4297d1264`). SUGGESTION R3-split-truth-table fixed: the injector spec's truth table was split by a paragraph. Follow-up, not fixed: WARNING R3-fragile-pool-end-detection, the policy timeout test (`AgentLoopDossierModeTest.java`:421-426) spins on a JDK method name and fails only by its 30 s timeout if the executor changes.
 
+- 2026-11-04: T5 done by a delegated writer on `feat/lab-realism-min-02-harness`. `10c9846`: `verify-agent.sh --schedule FILE [--cases LIST]` posts each fault case's parameter nested in `parameters`; a healthy case runs the same baseline, orders, settle, symptom and window margin, checks that no fault is active, and has truth `NONE|NONE`; files `<class>-c<case>-…`; `record-replay.sh` adds `holdout-2` and a manifest column `case`, refusing a `holdout-2` recording with no case; `ReplayCases` reads 7 or 8 columns; `check-recordings.sh` admits the `healthy` file name, its checks unchanged, shown on a new fixture. The human approved one line outside the surface (`ServiceSheetsTest.java`:488, `== 7` to `>= 7`). `41b9eb7`: ADR-015's healthy truth made final. RED group by group; GREEN `test-lib.sh` 228 (176 before), Maven 731, evals 381; parent spot check of `test-lib.sh` the same. About 650 authored lines.
+  - Open, for T6: the injector storing the nested value; truths at every value (AC5); a live healthy recording passing `check-recordings.sh` (AC4 is shown on a fixture only). One timing difference remains between a healthy and an F3 case: F3's recreate.
+  - Open, later: `replay-agent.sh` accepts only F1–F3, so healthy rows cannot be replayed yet; `ReplayDriver`'s MATCH/MISS shows a healthy sample as a MISS (the scorer rescores it); no check compares a manifest row's fault with its schedule case's class.
+
 ## Next step
 
-T5.
+T6, with a plan and the human's go-ahead (live lab, cloud reports).
