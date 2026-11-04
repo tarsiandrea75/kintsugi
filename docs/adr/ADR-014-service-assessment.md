@@ -60,6 +60,8 @@ The assessed report sends every broken rule, Graph included, to the loop's singl
 
 It stays a retry in this feature, so V2 is measured as built in T2. Follow-up 13 (verification-levels) decides whether the Graph rule, and the other graph rules, become annotations. Whatever it decides, the measured V2 result stays attributable to the retry version.
 
+**Closed (2026-11-04) by [ADR-028](ADR-028-verification-levels.md), Decision 2:** One origin, Graph and Answer are L2 annotations of the assessed report, never retried; Coverage, the schema and Citation stay errors.
+
 ## Alternatives considered
 
 - **Keep the tables and tune the prompt toward the leaf**: rejected. The prompt already says to follow the calls down (`Prompts.java`), and one generation over tables does not do it. More wording would teach the faults.

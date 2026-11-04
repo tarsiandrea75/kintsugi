@@ -21,7 +21,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import dev.kintsugi.agent.dossier.Change;
 import dev.kintsugi.agent.dossier.DossierRenderer;
+import dev.kintsugi.agent.dossier.LineFact;
+import dev.kintsugi.agent.dossier.Section;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.lab.ToolOutcome;
 import dev.kintsugi.agent.rules.RulesCandidate;
@@ -85,7 +88,50 @@ class ReportCheckTest {
 
 			D10 - payments table status=AUTHORIZED: incident 0 (previous 4).
 			""", List.of(ServiceSheets.HEADER, "gateway-mock", "gateway-mock", "inventory-service", "inventory-service",
-			"payment-service", "payment-service", "order-service", "order-service", "payment-service"));
+			"payment-service", "payment-service", "order-service", "order-service", "payment-service"),
+			List.of(fact(LineFact.HEADER, Section.HEADER, Change.NOT_COMPARED),
+					fact("gateway-mock", Section.HEADER, Change.NOT_COMPARED),
+					fact("gateway-mock", Section.LATENCY, Change.YES),
+					fact("inventory-service", Section.HEADER, Change.NOT_COMPARED),
+					fact("inventory-service", Section.TRAFFIC, Change.NO),
+					fact("payment-service", Section.HEADER, Change.NOT_COMPARED),
+					fact("payment-service", Section.LATENCY, Change.YES),
+					fact("order-service", Section.HEADER, Change.NOT_COMPARED),
+					fact("order-service", Section.TRAFFIC, Change.YES),
+					fact("payment-service", Section.STATES, Change.YES)));
+
+	/**
+	 * A dossier in the tables, cut down to the lines the level checks read, with the fact of each (ADR-028): D2 the
+	 * cause's changed latency, D3 a caller's changed client row, D4 order-service's unchanged status, D5
+	 * inventory-service's unchanged server row, on another branch than gateway-mock's, D6 a log line, never compared.
+	 */
+	private static final String TABLES = """
+			# Evidence dossier
+
+			D1 - Incident window: the last 10 min, 2026-10-16T09:50:00Z to 2026-10-16T10:00:00Z.
+			D2 | gateway-mock | /authorize | 0.012 -> 8.898 | 0.020 -> 10.015 | 10 -> 10 |
+			D3 | client | CLIENT_ERROR | UNKNOWN | HttpTimeoutException | 0 | 6 |
+			D4 | order-service | 0 | - | 300 s |
+			D5 | server | 201 | SUCCESS | none | 4 | 6 |
+			D6 - WARN: count_logs=6
+			""";
+
+	private static final List<LineFact> TABLES_FACTS = List.of(
+			fact(LineFact.HEADER, Section.HEADER, Change.NOT_COMPARED),
+			fact("gateway-mock", Section.LATENCY, Change.YES), fact("payment-service", Section.TRAFFIC, Change.YES),
+			fact("order-service", Section.STATUS, Change.NO), fact("inventory-service", Section.TRAFFIC, Change.NO),
+			fact("gateway-mock", Section.LOGS, Change.NOT_COMPARED));
+
+	/** The checks of a plain or hybrid report, in level order. */
+	private static final List<String> PLAIN_CHECKS = List.of(Verification.SCHEMA, Verification.CITATIONS,
+			Verification.OWNERS_ON_PATH, Verification.CAUSE_FACT_CHANGED);
+
+	/** The checks of an assessed report, in level order. */
+	private static final List<String> ASSESSED_CHECKS = List.of(Verification.SCHEMA, Verification.CITATIONS,
+			Verification.OWNERS_ON_PATH, Verification.ONE_ORIGIN, Verification.GRAPH, Verification.ANSWER,
+			Verification.CAUSE_FACT_CHANGED);
+
+	private static final String ABSTAINED = "both causes are UNKNOWN: the report names no cause to check";
 
 	/** The assessments of a slow leaf: gateway-mock the origin, its callers affected, inventory-service unaffected. */
 	private static final String[] SLOW_LEAF = { assessment("gateway-mock", "ORIGIN", 3),
@@ -666,69 +712,132 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void oneOriginAtMostOneServiceIsTheOrigin() {
+	void oneOriginTwoOriginsLeaveTheReportValidWithAFailedL2Check() {
+		// ADR-028, Decision 2: One origin is an L2 annotation, no longer an error, so the report is not retried.
 		String two = assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF[0], SLOW_LEAF[1],
 				assessment("payment-service", "ORIGIN", 7), SLOW_LEAF[3]);
 
 		ReportCheck.Result result = checkAssessed(two);
 
-		assertThat(result.errors()).containsExactly(
-				"at most one service is the ORIGIN; got 2: gateway-mock, payment-service");
-		assertThat(result.evidence()).isNull();
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).extracting(item -> item.get("line").intValue()).containsExactly(3, 7, 9);
+		assertThat(check(result, Verification.ONE_ORIGIN)).isEqualTo(Verification.Check.failed(2,
+				Verification.ONE_ORIGIN, "at most one service is the ORIGIN; got 2: gateway-mock, payment-service"));
+		// Answer compares the cause with a single ORIGIN only, as the former rule did.
+		assertThat(check(result, Verification.ANSWER).pass()).isTrue();
+		assertThat(result.verification().level()).isEqualTo(1);
 	}
 
 	@Test
 	void oneOriginWithNoOriginEveryServiceIsUnaffectedAndBothCausesAreUnknown() {
-		// An AFFECTED service with no ORIGIN: something is wrong, so the problem must start somewhere.
+		// An AFFECTED service with no ORIGIN, in an abstention: L2 does not apply, and its details keep what the roles
+		// break, One origin and Graph (payment-service's only callee, gateway-mock, is UNAFFECTED).
 		String noOrigin = assessedReport("UNKNOWN", "UNKNOWN", assessment("gateway-mock", "UNAFFECTED", 2),
 				SLOW_LEAF[1], SLOW_LEAF[2], SLOW_LEAF[3]);
-		// Graph then names payment-service too: its only callee, gateway-mock, is UNAFFECTED.
-		assertThat(checkAssessed(noOrigin).errors()).containsExactly(
-				"no service is the ORIGIN, so every service must be UNAFFECTED; got AFFECTED: payment-service, "
-						+ "order-service",
-				"assessments.payment-service is AFFECTED but calls no ORIGIN or AFFECTED service (it calls "
-						+ "gateway-mock: UNAFFECTED); a service is AFFECTED only through a service it calls that is "
-						+ "ORIGIN or AFFECTED");
-		// Every service UNAFFECTED, but a cause named: the cause is then UNKNOWN.
+		ReportCheck.Result abstention = checkAssessed(noOrigin);
+		assertThat(abstention.errors()).isEmpty();
+		assertThat(abstention.evidence()).extracting(item -> item.get("line").intValue()).containsExactly(7, 9);
+		assertThat(check(abstention, Verification.ONE_ORIGIN)).isEqualTo(Verification.Check.notApplicable(2,
+				Verification.ONE_ORIGIN, ABSTAINED + "; the roles break it: no service is the ORIGIN, so every service "
+						+ "must be UNAFFECTED; got AFFECTED: payment-service, order-service"));
+		assertThat(check(abstention, Verification.GRAPH)).isEqualTo(Verification.Check.notApplicable(2,
+				Verification.GRAPH, ABSTAINED + "; the roles break it: assessments.payment-service is AFFECTED but "
+						+ "calls no ORIGIN or AFFECTED service (it calls gateway-mock: UNAFFECTED); a service is "
+						+ "AFFECTED only through a service it calls that is ORIGIN or AFFECTED"));
+		assertThat(abstention.verification().level()).isEqualTo(1);
+		// Every service UNAFFECTED, but a cause named: the cause should then be UNKNOWN.
 		String named = assessedReport("payment-service", "DEPENDENCY_LATENCY",
 				assessment("gateway-mock", "UNAFFECTED", 2), assessment("inventory-service", "UNAFFECTED", 4),
 				assessment("payment-service", "UNAFFECTED", 6), assessment("order-service", "UNAFFECTED", 8));
-		assertThat(checkAssessed(named).errors()).containsExactly("no service is the ORIGIN, so rootCauseService "
-				+ "and rootCauseCategory must both be UNKNOWN; got \"payment-service\" and \"DEPENDENCY_LATENCY\"");
+		ReportCheck.Result result = checkAssessed(named);
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).isEmpty();
+		assertThat(check(result, Verification.ONE_ORIGIN).detail()).isEqualTo("no service is the ORIGIN, so "
+				+ "rootCauseService and rootCauseCategory must both be UNKNOWN; got \"payment-service\" and "
+				+ "\"DEPENDENCY_LATENCY\"");
+		assertThat(result.verification().level()).isEqualTo(1);
 	}
 
 	@Test
-	void graphAnAffectedServiceCallsAnOriginOrAffectedService() {
-		// inventory-service calls no service, so nothing it calls can pass a problem on to it.
+	void graphAnAffectedServiceCallingNoAffectedServiceLeavesTheReportValidWithAFailedL2Check() {
+		// inventory-service calls no service, so nothing it calls can pass a problem on to it; its line is also on
+		// another branch than gateway-mock's.
 		String leaf = assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF[0],
 				assessment("inventory-service", "AFFECTED", 5), SLOW_LEAF[2], SLOW_LEAF[3]);
-		assertThat(checkAssessed(leaf).errors()).containsExactly("assessments.inventory-service is AFFECTED but "
-				+ "calls no service; a service is AFFECTED only through a service it calls that is ORIGIN or "
-				+ "AFFECTED");
-		// payment-service calls gateway-mock, which is UNAFFECTED here.
+		ReportCheck.Result result = checkAssessed(leaf);
+		assertThat(result.errors()).isEmpty();
+		assertThat(check(result, Verification.GRAPH)).isEqualTo(Verification.Check.failed(2, Verification.GRAPH,
+				"assessments.inventory-service is AFFECTED but calls no service; a service is AFFECTED only through a "
+						+ "service it calls that is ORIGIN or AFFECTED"));
+		assertThat(check(result, Verification.OWNERS_ON_PATH)).isEqualTo(Verification.Check.failed(2,
+				Verification.OWNERS_ON_PATH,
+				"D5 is a line of inventory-service, not of gateway-mock or a service on its call path"));
+		assertThat(result.verification().level()).isEqualTo(1);
+		// payment-service calls gateway-mock, which is UNAFFECTED here. The cause's own changed line passes L3, but the
+		// level stops at L1, below the failed L2 check.
 		String unaffectedCallee = assessedReport("order-service", "CONFIGURATION",
 				assessment("gateway-mock", "UNAFFECTED", 2), SLOW_LEAF[1], SLOW_LEAF[2],
 				assessment("order-service", "ORIGIN", 9));
-		assertThat(checkAssessed(unaffectedCallee).errors()).containsExactly("assessments.payment-service is "
-				+ "AFFECTED but calls no ORIGIN or AFFECTED service (it calls gateway-mock: UNAFFECTED); a service "
-				+ "is AFFECTED only through a service it calls that is ORIGIN or AFFECTED");
+		ReportCheck.Result callee = checkAssessed(unaffectedCallee);
+		assertThat(callee.errors()).isEmpty();
+		assertThat(check(callee, Verification.GRAPH).detail()).isEqualTo("assessments.payment-service is AFFECTED but "
+				+ "calls no ORIGIN or AFFECTED service (it calls gateway-mock: UNAFFECTED); a service is AFFECTED only "
+				+ "through a service it calls that is ORIGIN or AFFECTED");
+		assertThat(check(callee, Verification.CAUSE_FACT_CHANGED).pass()).isTrue();
+		assertThat(callee.verification().level()).isEqualTo(1);
 		// A caller of an AFFECTED service is AFFECTED through it: order-service through payment-service.
-		assertThat(checkAssessed(assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF)).errors())
-			.isEmpty();
+		assertThat(check(checkAssessed(assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF)),
+				Verification.GRAPH).pass()).isTrue();
 	}
 
 	@Test
-	void answerTheRootCauseServiceIsTheOrigin() {
+	void answerARootCauseServiceThatIsNotTheOriginLeavesTheReportValidWithAFailedL2Check() {
 		String other = assessedReport("payment-service", "DEPENDENCY_LATENCY", SLOW_LEAF);
 
 		ReportCheck.Result result = checkAssessed(other);
 
-		assertThat(result.errors())
-			.containsExactly("rootCauseService must be the ORIGIN, gateway-mock; got \"payment-service\"");
-		assertThat(result.evidence()).isNull();
+		// The model's answer is kept, as scored; the derived evidence is still the ORIGIN and AFFECTED lines.
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).extracting(item -> item.get("line").intValue()).containsExactly(3, 7, 9);
+		assertThat(check(result, Verification.ANSWER)).isEqualTo(Verification.Check.failed(2, Verification.ANSWER,
+				"rootCauseService must be the ORIGIN, gateway-mock; got \"payment-service\""));
+		assertThat(result.verification().level()).isEqualTo(1);
 		// A service no assessment can name is not the ORIGIN either.
-		assertThat(checkAssessed(assessedReport("postgres", "DEPENDENCY_LATENCY", SLOW_LEAF)).errors())
-			.containsExactly("rootCauseService must be the ORIGIN, gateway-mock; got \"postgres\"");
+		assertThat(check(checkAssessed(assessedReport("postgres", "DEPENDENCY_LATENCY", SLOW_LEAF)),
+				Verification.ANSWER).detail())
+			.isEqualTo("rootCauseService must be the ORIGIN, gateway-mock; got \"postgres\"");
+	}
+
+	@Test
+	void anAssessedReportWhoseRolesFitTheGraphAndCiteTheCausesChangedLineIsAtL3() {
+		ReportCheck.Result result = checkAssessed(assessedReport("gateway-mock", "DEPENDENCY_LATENCY", SLOW_LEAF));
+
+		assertThat(result.verification().checks()).extracting(Verification.Check::name)
+			.containsExactlyElementsOf(ASSESSED_CHECKS);
+		assertThat(result.verification().checks()).extracting(Verification.Check::level)
+			.containsExactly(0, 1, 2, 2, 2, 2, 3);
+		assertThat(result.verification().checks()).allSatisfy(check -> {
+			assertThat(check.pass()).as(check.name()).isTrue();
+			assertThat(check.detail()).as(check.name()).isNull();
+		});
+		assertThat(result.verification().level()).isEqualTo(3);
+	}
+
+	@Test
+	void anAssessedAbstentionStopsAtL1WithItsL2AndL3ChecksNotApplicable() {
+		ReportCheck.Result result = checkAssessed(assessedReport("UNKNOWN", "UNKNOWN",
+				assessment("gateway-mock", "UNAFFECTED", 2), assessment("inventory-service", "UNAFFECTED", 4),
+				assessment("payment-service", "UNAFFECTED", 6), assessment("order-service", "UNAFFECTED", 8)));
+
+		assertThat(result.verification().checks()).filteredOn(check -> check.level() >= 2)
+			.extracting(Verification.Check::name)
+			.containsExactly(Verification.OWNERS_ON_PATH, Verification.ONE_ORIGIN, Verification.GRAPH,
+					Verification.ANSWER, Verification.CAUSE_FACT_CHANGED);
+		assertThat(result.verification().checks()).filteredOn(check -> check.level() >= 2).allSatisfy(check -> {
+			assertThat(check.pass()).as(check.name()).isNull();
+			assertThat(check.detail()).as(check.name()).isEqualTo(ABSTAINED);
+		});
+		assertThat(result.verification().level()).isEqualTo(1);
 	}
 
 	@Test
@@ -892,6 +1001,150 @@ class ReportCheckTest {
 				HYBRID_OUTSIDE.formatted("postgres|RESOURCE_EXHAUSTION"));
 	}
 
+	@Test
+	void anItemOnAnotherBranchFailsL2() {
+		// inventory-service is neither gateway-mock nor a transitive caller or callee of it.
+		ReportCheck.Result result = checkWithFacts(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(2),
+				dossierEvidence(5)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.evidence()).hasSize(2);
+		assertThat(check(result, Verification.OWNERS_ON_PATH)).isEqualTo(Verification.Check.failed(2,
+				Verification.OWNERS_ON_PATH,
+				"D5 is a line of inventory-service, not of gateway-mock or a service on its call path"));
+		assertThat(check(result, Verification.CAUSE_FACT_CHANGED).pass()).isTrue();
+		assertThat(result.verification().level()).isEqualTo(1);
+	}
+
+	@Test
+	void aCallersLinePassesL2AndFailsL3Alone() {
+		// payment-service calls gateway-mock: its timeouts are on the cause's call path, but are not the cause's fact.
+		ReportCheck.Result result = checkWithFacts(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(3)));
+
+		assertThat(check(result, Verification.OWNERS_ON_PATH)).isEqualTo(Verification.Check.passed(2,
+				Verification.OWNERS_ON_PATH));
+		assertThat(check(result, Verification.CAUSE_FACT_CHANGED)).isEqualTo(Verification.Check.failed(3,
+				Verification.CAUSE_FACT_CHANGED,
+				"no cited line is a line of gateway-mock whose fact changed between the windows; none of its lines "
+						+ "is cited"));
+		assertThat(result.verification().level()).isEqualTo(2);
+	}
+
+	@Test
+	void theCausesChangedLatencyLinePassesL3() {
+		ReportCheck.Result result = checkWithFacts(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(3),
+				dossierEvidence(2)));
+
+		assertThat(result.verification().checks()).extracting(Verification.Check::name)
+			.containsExactlyElementsOf(PLAIN_CHECKS);
+		assertThat(result.verification().checks()).extracting(Verification.Check::level).containsExactly(0, 1, 2, 3);
+		assertThat(result.verification().checks()).allSatisfy(check -> assertThat(check.pass()).isTrue());
+		assertThat(result.verification().level()).isEqualTo(3);
+	}
+
+	@Test
+	void aCausesLineNeverComparedDoesNotPassL3() {
+		// ADR-028, Decision 5: a log line is NOT_COMPARED, which never satisfies L3.
+		ReportCheck.Result result = checkWithFacts(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(6),
+				dossierEvidence(3)));
+
+		assertThat(check(result, Verification.CAUSE_FACT_CHANGED).detail()).isEqualTo("no cited line is a line of "
+				+ "gateway-mock whose fact changed between the windows; its cited lines: D6 NOT_COMPARED");
+		assertThat(result.verification().level()).isEqualTo(2);
+	}
+
+	@Test
+	void aToolStepCitationFailsL2() {
+		// A tool step's output has no line fact, so no owner to place on the call path.
+		ReportCheck.Result result = checkWithFacts(report("order-service", "CONFIGURATION", dossierEvidence(4),
+				evidence(4, "search_logs", 2)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(check(result, Verification.OWNERS_ON_PATH)).isEqualTo(Verification.Check.failed(2,
+				Verification.OWNERS_ON_PATH, "step 4 line 2 is a tool step's output, which has no line fact"));
+		assertThat(result.verification().level()).isEqualTo(1);
+		// In explorer mode every citation is a tool step's.
+		assertThat(check(report("order-service", "DEPENDENCY_LATENCY", evidence(4, "search_logs", 2))).verification()
+			.level()).isEqualTo(1);
+	}
+
+	@Test
+	void aDossierLineWithNoFactFailsL2AndL3() {
+		// A dossier checked without its line facts places no line on the call path.
+		ReportCheck.Result result = ReportCheck.check(Answers.json(report("gateway-mock", "DEPENDENCY_LATENCY",
+				dossierEvidence(2))), STEPS, AgentMode.DECISION, TABLES, LAB);
+
+		assertThat(check(result, Verification.OWNERS_ON_PATH).detail()).isEqualTo("D2 has no line fact");
+		assertThat(check(result, Verification.CAUSE_FACT_CHANGED).pass()).isFalse();
+		assertThat(result.verification().level()).isEqualTo(1);
+	}
+
+	@Test
+	void anAbstentionStopsAtL1WithL2AndL3NotApplicable() {
+		ReportCheck.Result result = checkWithFacts(report("UNKNOWN", "UNKNOWN", dossierEvidence(2)));
+
+		assertThat(result.verification().checks()).containsExactly(
+				Verification.Check.passed(0, Verification.SCHEMA), Verification.Check.passed(1, Verification.CITATIONS),
+				Verification.Check.notApplicable(2, Verification.OWNERS_ON_PATH, ABSTAINED),
+				Verification.Check.notApplicable(3, Verification.CAUSE_FACT_CHANGED, ABSTAINED));
+		assertThat(result.verification().level()).isEqualTo(1);
+		// An abstention with no evidence too.
+		assertThat(checkWithFacts(report("UNKNOWN", "UNKNOWN")).verification().level()).isEqualTo(1);
+	}
+
+	@Test
+	void aDroppedItemGivesL0AndTheOtherChecksStillRun() {
+		ReportCheck.Result result = checkWithFacts(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(2),
+				dossierEvidence(99)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.dropped()).containsExactly("evidence[1]: line 99 is not in the dossier");
+		assertThat(check(result, Verification.CITATIONS)).isEqualTo(Verification.Check.failed(1,
+				Verification.CITATIONS, "evidence[1]: line 99 is not in the dossier"));
+		assertThat(check(result, Verification.OWNERS_ON_PATH).pass()).isTrue();
+		assertThat(check(result, Verification.CAUSE_FACT_CHANGED).pass()).isTrue();
+		assertThat(result.verification().level()).isZero();
+		// An abstention whose only item is dropped is L0 too.
+		assertThat(checkWithFacts(report("UNKNOWN", "UNKNOWN", dossierEvidence(99))).verification().level()).isZero();
+	}
+
+	@Test
+	void aSummaryCutIsNotADroppedItem() {
+		String answer = report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(2))
+			.replaceFirst("\"summary\":\"[^\"]*\"", "\"summary\":\"" + "a".repeat(600) + "\"");
+
+		ReportCheck.Result result = checkWithFacts(answer);
+
+		assertThat(result.dropped()).containsExactly("summary cut from 600 to 500 characters");
+		assertThat(check(result, Verification.CITATIONS).pass()).isTrue();
+		assertThat(result.verification().level()).isEqualTo(3);
+	}
+
+	@Test
+	void anInvalidReportHasNoVerification() {
+		ReportCheck.Result result = checkWithFacts(report("gateway-mock", "DEPENDENCY_LATENCY", dossierEvidence(99)));
+
+		assertThat(result.errors()).isNotEmpty();
+		assertThat(result.verification()).isNull();
+		assertThat(checkAssessed("not json").verification()).isNull();
+	}
+
+	@Test
+	void aHybridReportIsAnnotatedAsThePlainOneIs() {
+		// order-service's own status did not change: L2 passes, L3 fails.
+		ReportCheck.Result result = ReportCheck.checkHybrid(Answers.json(hybridReport("order-service",
+				"CONFIGURATION", dossierEvidence(4))), STEPS, AgentMode.DECISION, TABLES, TABLES_FACTS, CANDIDATES, LAB);
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(result.verification().checks()).extracting(Verification.Check::name)
+			.containsExactlyElementsOf(PLAIN_CHECKS);
+		assertThat(result.verification().level()).isEqualTo(2);
+		// A pair outside the list is still an L0 error, and an invalid report has no level.
+		assertThat(ReportCheck.checkHybrid(Answers.json(hybridReport("gateway-mock", "DEPENDENCY_LATENCY",
+				dossierEvidence(2))), STEPS, AgentMode.DECISION, TABLES, TABLES_FACTS, CANDIDATES, LAB).verification())
+			.isNull();
+	}
+
 	/** The candidates of the hybrid checks: two, in the order the rules propose them. */
 	private static final List<RulesCandidate> CANDIDATES = List.of(
 			new RulesCandidate("order-service", "CONFIGURATION", "R-REACH", List.of("a connection failure")),
@@ -909,6 +1162,20 @@ class ReportCheckTest {
 	private static ToolStep ran(int stepNo, String tool, String fixture) {
 		String output = fixture(fixture);
 		return new ToolStep(stepNo, tool, "OK", output, ToolSummaries.summarize(stepNo, tool, ToolOutcome.OK, output));
+	}
+
+	/** Checks a decision-mode report against {@link #TABLES} and its line facts. */
+	private static ReportCheck.Result checkWithFacts(String answer) {
+		return ReportCheck.check(Answers.json(answer), STEPS, AgentMode.DECISION, TABLES, TABLES_FACTS, LAB);
+	}
+
+	/** The check of {@code result} named {@code name}. */
+	private static Verification.Check check(ReportCheck.Result result, String name) {
+		return result.verification().check(name).orElseThrow();
+	}
+
+	private static LineFact fact(String owner, Section section, Change changed) {
+		return new LineFact(owner, section, changed);
 	}
 
 	private static ReportCheck.Result checkInDossierMode(String answer) {

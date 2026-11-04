@@ -45,7 +45,9 @@ import tools.jackson.databind.node.StringNode;
 
 import dev.kintsugi.agent.dossier.Dossier;
 import dev.kintsugi.agent.dossier.DossierGatherer;
+import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.DossierView;
+import dev.kintsugi.agent.dossier.LineFact;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.incident.IncidentRepository;
@@ -438,7 +440,11 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			DossierView view = run.mode.viewFrom(this.decisionView).orElse(DossierView.TABLES);
 			// The sheets are kept with the service that owns each line, which the assessed report's checks read (T2).
 			run.sheets = view == DossierView.SHEETS ? ServiceSheets.render(dossier, this.topology) : null;
-			run.dossierText = run.sheets == null ? view.render(dossier, this.topology) : run.sheets.text();
+			// The tables with their line facts, which the report's level checks read (ADR-028); the same text render
+			// writes.
+			DossierRenderer.Indexed tables = run.sheets == null ? DossierRenderer.indexed(dossier, this.topology) : null;
+			run.dossierText = run.sheets == null ? tables.text() : run.sheets.text();
+			run.dossierFacts = run.sheets == null ? tables.facts() : run.sheets.facts();
 			// The hybrid report's candidates, from the typed record, never the text, so either view gives the same.
 			run.candidates = report(run) == DecisionReport.HYBRID ? this.rules.candidates(dossier, this.topology)
 					: null;
@@ -711,9 +717,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 			JsonNode report = Answers.json(answer.text());
 			ReportCheck.Result checked = assessed ? ReportCheck.checkAssessed(report, run.sheets, this.topology)
 					: candidates != null
-							? ReportCheck.checkHybrid(report, run.toolSteps, run.mode, run.dossierText, candidates,
-									this.topology)
-							: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText, this.topology);
+							? ReportCheck.checkHybrid(report, run.toolSteps, run.mode, run.dossierText, run.dossierFacts,
+									candidates, this.topology)
+							: ReportCheck.check(report, run.toolSteps, run.mode, run.dossierText, run.dossierFacts,
+									this.topology);
 			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
 				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one. The
@@ -753,7 +760,8 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		report.put("confidence", 0.0);
 		write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), null, null, null, null, null, null, null,
 				null, NO_CANDIDATE, null, 0, now()));
-		ReportCheck.Result checked = new ReportCheck.Result(List.of(), List.of(), List.of(), NO_CANDIDATE_SUMMARY);
+		ReportCheck.Result checked = new ReportCheck.Result(List.of(), List.of(), List.of(), NO_CANDIDATE_SUMMARY,
+				ReportCheck.withoutEvidence(report, this.topology));
 		return stored(run, report, checked, false, ReportCheck.HYBRID_FIELDS);
 	}
 
@@ -1025,6 +1033,12 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		 * (T5b); null in explorer mode and when the gathering gave no dossier.
 		 */
 		String dossierText;
+
+		/**
+		 * The fact of each numbered line of {@link #dossierText}, in either view (ADR-028): what the report's level
+		 * checks read. Empty when the gathering gave no dossier and in explorer mode.
+		 */
+		List<LineFact> dossierFacts = List.of();
 
 		/**
 		 * The sheets with the owner of each numbered line, when the run's dossier is written in the sheets: what an

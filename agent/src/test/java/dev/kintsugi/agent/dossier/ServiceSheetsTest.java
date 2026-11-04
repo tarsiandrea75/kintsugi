@@ -18,6 +18,7 @@ import static dev.kintsugi.agent.dossier.DossierRendererTest.tokens;
 import static dev.kintsugi.agent.dossier.DossierRendererTest.unnumbered;
 import static dev.kintsugi.agent.dossier.LabTopology.LAB;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -419,6 +420,24 @@ class ServiceSheetsTest {
 		}
 		// The goldens stay byte for byte (the golden tests above).
 		assertThat(ServiceSheets.render(gather("f3"), LAB).text()).isEqualTo(golden("f3-sheets"));
+	}
+
+	@Test
+	void theSheetsRefuseFactsWhoseOwnersAreNotTheLinesOwners() {
+		// The facts and the owners are two views of one index: the canonical constructor keeps them in step.
+		String text = "D1 - a header line.\nD2 - a gateway-mock line.\n";
+		List<String> owners = List.of(ServiceSheets.HEADER, "gateway-mock");
+		LineFact header = fact(LineFact.HEADER, Section.HEADER, Change.NOT_COMPARED);
+		LineFact gateway = fact("gateway-mock", Section.LATENCY, Change.YES);
+
+		assertThat(new ServiceSheets.Rendered(text, owners, List.of(header, gateway)).fact(2)).hasValue(gateway);
+		for (List<LineFact> facts : List.of(List.of(header, header), List.of(gateway, gateway), List.of(header))) {
+			assertThatThrownBy(() -> new ServiceSheets.Rendered(text, owners, facts)).as("%s", facts)
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessage("the facts' owners must be the lines' owners");
+		}
+		// Sheets built from a text and its owners alone index no fact.
+		assertThat(new ServiceSheets.Rendered(text, owners).fact(1)).isEmpty();
 	}
 
 	@Test

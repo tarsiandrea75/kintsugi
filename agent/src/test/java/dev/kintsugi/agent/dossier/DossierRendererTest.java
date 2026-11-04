@@ -473,6 +473,53 @@ class DossierRendererTest {
 			.hasValue(fact(LineFact.HEADER, Section.TRAFFIC, Change.YES));
 	}
 
+	@Test
+	void aNotShownLineIsOwnedByItsHiddenRowsOneOwnerElseByTheHeader() {
+		// ADR-028, Decision 3: a line summing rows of several services has no single service. In the stress dossier an
+		// edge with a caller hides client rows (the caller's) and server rows (the target's); the external client's
+		// edge hides server rows only, and "Other rows" hides gateway-mock's server rows only.
+		DossierRenderer.Indexed tables = DossierRenderer.indexed(stress(), LAB);
+		Map<String, LineFact> notShown = new TreeMap<>();
+		String heading = null;
+		int n = 0;
+		boolean inTraffic = false;
+		for (String line : tables.text().lines().toList()) {
+			if (line.startsWith("## ")) {
+				inTraffic = line.equals("## Traffic");
+			}
+			else if (line.startsWith("### ")) {
+				heading = line.substring(4);
+			}
+			if (NUMBER.matcher(line).lookingAt()) {
+				n++;
+				if (inTraffic && line.contains("not shown: rows=")) {
+					notShown.put(heading, tables.fact(n).orElseThrow());
+				}
+			}
+		}
+
+		assertThat(notShown).hasSize(LAB.edges().size() + 1);
+		notShown.forEach((at, fact) -> {
+			assertThat(fact.section()).as(at).isEqualTo(Section.TRAFFIC);
+			assertThat(fact.changed()).as(at).isEqualTo(Change.NOT_COMPARED);
+		});
+		LAB.edges().stream().filter(edge -> edge.caller() != null).forEach(edge -> assertThat(notShown)
+			.as("%s -> %s", edge.caller(), edge.target())
+			.hasEntrySatisfying(heading(notShown, edge.caller() + " -> " + edge.target() + " "),
+					fact -> assertThat(fact.owner()).isEqualTo(LineFact.HEADER)));
+		assertThat(notShown).hasEntrySatisfying(heading(notShown, Topology.EXTERNAL_CLIENT + " -> "),
+				fact -> assertThat(fact.owner()).isEqualTo("order-service"));
+		assertThat(notShown).hasEntrySatisfying("Other rows",
+				fact -> assertThat(fact.owner()).isEqualTo("gateway-mock"));
+	}
+
+	/** The one key of {@code byHeading} starting with {@code prefix}. */
+	private static String heading(Map<String, LineFact> byHeading, String prefix) {
+		List<String> found = byHeading.keySet().stream().filter(key -> key.startsWith(prefix)).toList();
+		assertThat(found).as("headings starting with %s", prefix).hasSize(1);
+		return found.get(0);
+	}
+
 	/** The number of the one numbered line holding {@code fragment}; fails when none or several do. */
 	static int numberOf(String text, String fragment) {
 		List<Integer> found = new ArrayList<>();

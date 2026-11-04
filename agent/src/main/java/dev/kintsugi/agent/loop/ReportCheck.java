@@ -3,22 +3,29 @@ package dev.kintsugi.agent.loop;
 import static dev.kintsugi.agent.loop.PlanCheck.addIfError;
 import static dev.kintsugi.agent.loop.PlanCheck.unexpected;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.IntFunction;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import dev.kintsugi.agent.dossier.Change;
 import dev.kintsugi.agent.dossier.DossierRenderer;
+import dev.kintsugi.agent.dossier.LineFact;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.dossier.Topology;
+import dev.kintsugi.agent.loop.Verification.Check;
 import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.summary.ToolSummaries;
 
@@ -82,6 +89,9 @@ final class ReportCheck {
 
 	private static final String NOT_AN_OBJECT = "the answer is not a JSON object";
 
+	/** Why an abstention's L2 and L3 checks do not apply (ADR-028, Decision 6). */
+	static final String ABSTAINED = "both causes are UNKNOWN: the report names no cause to check";
+
 	/** The longest summary stored; a longer one is cut to it, the last character an ellipsis (report-field-order). */
 	static final int MAX_SUMMARY_LENGTH = 500;
 
@@ -117,8 +127,11 @@ final class ReportCheck {
 	 * {@code {toolCallId, tool, line, quote, why}} with the quote code filled in; null otherwise
 	 * @param summary when the report is valid, its summary as stored: cut to {@value #MAX_SUMMARY_LENGTH} characters
 	 * when it was longer; null otherwise
+	 * @param verification when the report is valid, its level and the checks that decide it (ADR-028), an annotation
+	 * that never adds to {@code errors}; null otherwise
 	 */
-	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence, String summary) {
+	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence, String summary,
+			Verification verification) {
 	}
 
 	/**
@@ -182,7 +195,18 @@ final class ReportCheck {
 	 */
 	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
 			Topology topology) {
-		return check(report, toolSteps, mode, dossier, topology, true);
+		return check(report, toolSteps, mode, dossier, List.of(), topology);
+	}
+
+	/**
+	 * Checks {@code report} as {@link #check(JsonNode, Map, AgentMode, String, Topology)} does, and annotates a valid
+	 * one with its verification level (ADR-028), read from the fact of each cited dossier line.
+	 * @param facts the fact of each numbered line of {@code dossier}, {@code facts.get(n - 1)} line {@code D<n>}'s;
+	 * empty when the dossier indexes none, and then no dossier line has a fact
+	 */
+	static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
+			List<LineFact> facts, Topology topology) {
+		return check(report, toolSteps, mode, dossier, facts, topology, true);
 	}
 
 	/**
@@ -190,7 +214,7 @@ final class ReportCheck {
 	 * alternatives (ADR-025), or the hybrid one, which has none.
 	 */
 	private static Result check(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
-			Topology topology, boolean ranked) {
+			List<LineFact> facts, Topology topology, boolean ranked) {
 		if (report == null || !report.isObject()) {
 			return invalid(List.of(NOT_AN_OBJECT));
 		}
@@ -233,8 +257,11 @@ final class ReportCheck {
 		if (fatal || (verified.isEmpty() && !unknown)) {
 			return invalid(errors);
 		}
+		// L1 reads the dropped items only: the summary cut storedSummary records next is not one.
+		Verification verification = verification(report, verified, dropped, line -> fact(facts, line), topology,
+				List.of());
 		String text = storedSummary(report, dropped);
-		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text);
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text, verification);
 	}
 
 	/**
@@ -246,7 +273,13 @@ final class ReportCheck {
 	 */
 	static Result checkHybrid(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
 			List<RulesCandidate> candidates, Topology topology) {
-		Result checked = check(report, toolSteps, mode, dossier, topology, false);
+		return checkHybrid(report, toolSteps, mode, dossier, List.of(), candidates, topology);
+	}
+
+	/** Checks a hybrid report as {@link #checkHybrid} does, annotating a valid one as {@link #check} does. */
+	static Result checkHybrid(JsonNode report, Map<Integer, ToolStep> toolSteps, AgentMode mode, String dossier,
+			List<LineFact> facts, List<RulesCandidate> candidates, Topology topology) {
+		Result checked = check(report, toolSteps, mode, dossier, facts, topology, false);
 		if (report == null || !report.isObject()) {
 			return checked;
 		}
@@ -269,16 +302,20 @@ final class ReportCheck {
 
 	/**
 	 * Checks an assessed report (service-assessment T2; agent spec, "Evidence is checked", the assessed report): its
-	 * schema, then the rules that check the model's own claims against the call graph, which never name a cause. Every
-	 * broken rule rejects the report, for the one retry; nothing is dropped but a summary too long, which is cut as the
-	 * plain report's is. The rules, in order: <b>Coverage</b>, every lab service is assessed once and no other name;
-	 * <b>Citation</b>, each assessment's line is a line of the sheets its own service owns, in its sheet or in its part
-	 * of the last section; then, once every service is assessed: <b>One origin</b>, at most one ORIGIN, and none only
-	 * when every service is UNAFFECTED and both causes are UNKNOWN; <b>Graph</b>, an AFFECTED service calls an ORIGIN
-	 * or AFFECTED service ({@link Topology#calls}); <b>Answer</b>, {@code rootCauseService} is the ORIGIN. A valid
-	 * report's evidence is derived by code: the lines of the ORIGIN and AFFECTED services, in sheet order, each an
-	 * item citing the dossier with its quote filled in, as a plain report's verified dossier item is, so that storage
-	 * and scoring read it as they read a plain report. When every service is UNAFFECTED, the report has no evidence.
+	 * schema, then the rules its derived evidence needs. Every broken rule rejects the report, for the one retry;
+	 * nothing is dropped but a summary too long, which is cut as the plain report's is. The rules, in order:
+	 * <b>Coverage</b>, every lab service is assessed once and no other name; <b>Citation</b>, each assessment's line is
+	 * a line of the sheets its own service owns, in its sheet or in its part of the last section. A valid report's
+	 * evidence is derived by code: the lines of the ORIGIN and AFFECTED services, in sheet order, each an item citing
+	 * the dossier with its quote filled in, as a plain report's verified dossier item is, so that storage and scoring
+	 * read it as they read a plain report. When every service is UNAFFECTED, the report has no evidence.
+	 *
+	 * <p>
+	 * The graph rules, which check the model's roles against the call graph, are L2 checks of the valid report
+	 * (ADR-028, Decision 2), never errors, so they never cause the retry: <b>One origin</b>, at most one ORIGIN, and
+	 * none only when every service is UNAFFECTED and both causes are UNKNOWN; <b>Graph</b>, an AFFECTED service calls
+	 * an ORIGIN or AFFECTED service ({@link Topology#calls}); <b>Answer</b>, {@code rootCauseService} is the ORIGIN.
+	 * A report breaking one keeps the model's cause, which is what is scored.
 	 * @param sheets the sheets the model read, with the service that owns each numbered line
 	 * @param topology the services to assess, leaf first, and the call graph the Graph rule reads
 	 */
@@ -297,10 +334,6 @@ final class ReportCheck {
 		assessments.values()
 			.forEach(assessment -> cited(assessment, sheets, errors)
 				.ifPresent(quote -> quotes.put(assessment.service(), quote)));
-		if (assessments.size() == services.size()) {
-			// The graph rules read every service's role, so they wait for Coverage and each assessment's schema.
-			graphRules(assessments, report, topology, errors);
-		}
 		if (!errors.isEmpty()) {
 			return invalid(errors);
 		}
@@ -310,9 +343,12 @@ final class ReportCheck {
 				evidence.add(dossierItem(assessment.line(), quotes.get(assessment.service()), assessment.why()));
 			}
 		}
+		// Valid, so every service is assessed: the graph rules read every role.
+		Verification verification = verification(report, evidence, List.of(), sheets::fact, topology,
+				graphRules(assessments, report, topology));
 		List<String> dropped = new ArrayList<>();
 		String text = storedSummary(report, dropped);
-		return new Result(List.of(), List.copyOf(dropped), List.copyOf(evidence), text);
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(evidence), text, verification);
 	}
 
 	/**
@@ -390,26 +426,28 @@ final class ReportCheck {
 	}
 
 	/**
-	 * One origin, Graph and Answer, over the assessments of every service, in sheet order: each adds an error naming
-	 * the claims that break it. They check the report against its own roles and the call graph, never against a cause.
+	 * One origin, Graph and Answer, over the assessments of every service, in sheet order: each the L2 check
+	 * ({@link Check#of}) whose detail names the claims that break it. They check the report against its own roles and
+	 * the call graph, never against a cause.
 	 */
-	private static void graphRules(Map<String, Assessment> assessments, JsonNode report, Topology topology,
-			List<String> errors) {
+	private static List<Check> graphRules(Map<String, Assessment> assessments, JsonNode report, Topology topology) {
 		List<String> origins = withRole(assessments, Role.ORIGIN);
 		List<String> affected = withRole(assessments, Role.AFFECTED);
 		String service = report.path("rootCauseService").asString("");
 		String category = report.path("rootCauseCategory").asString("");
+		String oneOrigin = null;
 		if (origins.size() > 1) {
-			errors.add("at most one service is the ORIGIN; got " + origins.size() + ": " + String.join(", ", origins));
+			oneOrigin = "at most one service is the ORIGIN; got " + origins.size() + ": " + String.join(", ", origins);
 		}
 		else if (origins.isEmpty() && !affected.isEmpty()) {
-			errors.add("no service is the ORIGIN, so every service must be UNAFFECTED; got AFFECTED: "
-					+ String.join(", ", affected));
+			oneOrigin = "no service is the ORIGIN, so every service must be UNAFFECTED; got AFFECTED: "
+					+ String.join(", ", affected);
 		}
 		else if (origins.isEmpty() && !(Causes.UNKNOWN.equals(service) && Causes.UNKNOWN.equals(category))) {
-			errors.add("no service is the ORIGIN, so rootCauseService and rootCauseCategory must both be UNKNOWN; got \""
-					+ service + "\" and \"" + category + "\"");
+			oneOrigin = "no service is the ORIGIN, so rootCauseService and rootCauseCategory must both be UNKNOWN; got \""
+					+ service + "\" and \"" + category + "\"";
 		}
+		List<String> graph = new ArrayList<>();
 		for (String name : affected) {
 			List<String> calls = topology.calls(name);
 			if (calls.stream().noneMatch(callee -> assessments.get(callee).role() != Role.UNAFFECTED)) {
@@ -417,13 +455,114 @@ final class ReportCheck {
 						: "calls no ORIGIN or AFFECTED service (it calls " + String.join(", ", calls.stream()
 							.map(callee -> callee + ": " + assessments.get(callee).role())
 							.toList()) + ")";
-				errors.add("assessments." + name + " is AFFECTED but " + called
+				graph.add("assessments." + name + " is AFFECTED but " + called
 						+ "; a service is AFFECTED only through a service it calls that is ORIGIN or AFFECTED");
 			}
 		}
-		if (origins.size() == 1 && !origins.getFirst().equals(service)) {
-			errors.add("rootCauseService must be the ORIGIN, " + origins.getFirst() + "; got \"" + service + "\"");
+		// With no single ORIGIN there is none for the cause to be: One origin fails and names why.
+		String answer = origins.size() == 1 && !origins.getFirst().equals(service)
+				? "rootCauseService must be the ORIGIN, " + origins.getFirst() + "; got \"" + service + "\"" : null;
+		return List.of(Check.of(2, Verification.ONE_ORIGIN, oneOrigin),
+				Check.of(2, Verification.GRAPH, graph.isEmpty() ? null : String.join("; ", graph)),
+				Check.of(2, Verification.ANSWER, answer));
+	}
+
+	/**
+	 * The verification of an accepted report (ADR-028): L0 its schema, passed, since the report is accepted; L1 no
+	 * evidence item was dropped; L2 every stored item's line is owned by the cause or a service on its call path, then
+	 * {@code graphRules}, the assessed report's; L3 at least one stored item cites a line of the cause whose fact
+	 * changed. A report naming {@code UNKNOWN|UNKNOWN} claims no cause, so its L2 and L3 checks do not apply ({@code pass}
+	 * null), and a graph rule its roles break keeps that in its detail. The alternatives being causes of the topology is
+	 * an L0 rule of the plain report already ({@link #alternatives}), so L2 does not check it again.
+	 * @param evidence the stored evidence items, each {@code {toolCallId, tool, line, quote, why}}
+	 * @param dropped the evidence items dropped, as {@link Result#dropped} names them, without a summary cut
+	 * @param facts the fact of a dossier line by its number, empty when it has none
+	 */
+	private static Verification verification(JsonNode report, List<JsonNode> evidence, List<String> dropped,
+			IntFunction<Optional<LineFact>> facts, Topology topology, List<Check> graphRules) {
+		List<Check> checks = new ArrayList<>();
+		checks.add(Check.passed(0, Verification.SCHEMA));
+		checks.add(Check.of(1, Verification.CITATIONS, dropped.isEmpty() ? null : String.join("; ", dropped)));
+		String cause = report.path("rootCauseService").asString("");
+		if (Causes.UNKNOWN.equals(cause) && Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""))) {
+			checks.add(Check.notApplicable(2, Verification.OWNERS_ON_PATH, ABSTAINED));
+			graphRules.forEach(rule -> checks.add(Check.notApplicable(2, rule.name(),
+					rule.detail() == null ? ABSTAINED : ABSTAINED + "; the roles break it: " + rule.detail())));
+			checks.add(Check.notApplicable(3, Verification.CAUSE_FACT_CHANGED, ABSTAINED));
+			return Verification.of(checks);
 		}
+		Set<String> path = callPath(cause, topology);
+		List<String> offPath = new ArrayList<>();
+		List<String> causeLines = new ArrayList<>();
+		boolean changed = false;
+		for (JsonNode item : evidence) {
+			int line = item.get("line").intValue();
+			if (!DOSSIER.equals(item.get("toolCallId").asString(""))) {
+				offPath.add("step " + item.get("toolCallId").intValue() + " line " + line
+						+ " is a tool step's output, which has no line fact");
+				continue;
+			}
+			Optional<LineFact> fact = facts.apply(line);
+			if (fact.isEmpty()) {
+				offPath.add("D" + line + " has no line fact");
+				continue;
+			}
+			String owner = fact.get().owner();
+			if (!path.contains(owner)) {
+				offPath.add("D" + line + " is a line of " + (LineFact.HEADER.equals(owner) ? "the header" : owner)
+						+ ", not of " + cause + " or a service on its call path");
+			}
+			if (owner.equals(cause)) {
+				causeLines.add("D" + line + " " + fact.get().changed());
+				changed |= fact.get().changed() == Change.YES;
+			}
+		}
+		checks.add(Check.of(2, Verification.OWNERS_ON_PATH, offPath.isEmpty() ? null : String.join("; ", offPath)));
+		checks.addAll(graphRules);
+		checks.add(Check.of(3, Verification.CAUSE_FACT_CHANGED, changed ? null
+				: "no cited line is a line of " + cause + " whose fact changed between the windows; "
+						+ (causeLines.isEmpty() ? "none of its lines is cited"
+								: "its cited lines: " + String.join(", ", causeLines))));
+		return Verification.of(checks);
+	}
+
+	/**
+	 * The verification of {@code report} as code wrote it, with no evidence item: a hybrid run whose rules proposed no
+	 * candidate stores such a report, both causes UNKNOWN, so it is at L1.
+	 */
+	static Verification withoutEvidence(JsonNode report, Topology topology) {
+		return verification(report, List.of(), List.of(), line -> Optional.empty(), topology, List.of());
+	}
+
+	/**
+	 * The cause and every service on its call path (ADR-028, Decision 4): its transitive callers ({@link Topology#calledBy})
+	 * and its transitive callees ({@link Topology#calls}), each direction followed on its own, so that a service on
+	 * another branch, reached only through a common caller, is not on it.
+	 */
+	private static Set<String> callPath(String cause, Topology topology) {
+		Set<String> path = new HashSet<>();
+		path.add(cause);
+		path.addAll(reachable(cause, topology::calls));
+		path.addAll(reachable(cause, topology::calledBy));
+		return path;
+	}
+
+	/** Every name reachable from {@code start} over {@code next}, {@code start} excluded unless on a cycle. */
+	private static Set<String> reachable(String start, Function<String, List<String>> next) {
+		Set<String> seen = new HashSet<>();
+		Deque<String> queue = new ArrayDeque<>(next.apply(start));
+		while (!queue.isEmpty()) {
+			String name = queue.removeFirst();
+			if (seen.add(name)) {
+				queue.addAll(next.apply(name));
+			}
+		}
+		return seen;
+	}
+
+	/** The fact of line {@code D<n>} in {@code facts}; empty when it has none. */
+	private static Optional<LineFact> fact(List<LineFact> facts, int n) {
+		return n < 1 || n > facts.size() ? Optional.empty() : Optional.of(facts.get(n - 1));
 	}
 
 	/** The services whose role is {@code role}, in sheet order. */
@@ -515,7 +654,7 @@ final class ReportCheck {
 	}
 
 	private static Result invalid(List<String> errors) {
-		return new Result(List.copyOf(errors), List.of(), null, null);
+		return new Result(List.copyOf(errors), List.of(), null, null, null);
 	}
 
 	/**

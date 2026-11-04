@@ -1631,6 +1631,54 @@ Each evidence item MUST cite a `TOOL_CALL` step of this incident (a `toolCallId`
 
 An evidence item MAY instead cite the dossier **(T5b)**: `toolCallId` `"dossier"` and `tool` `"dossier"`, and as `line` the number of a line of the rendered dossier the model read, `D7` written as `line: 7` ("Evidence dossier rendering", **evidence-by-reference**). In dossier and decision mode, once the dossier is gathered, it is verified when that numbered line exists, and code fills its `quote` the same way, from the line's text without `D<line> `. Every way such an item fails is dropped, never fatal on its own (T5c11): `evidence[<i>]: line <N> is not in the dossier`; `evidence[<i>].tool is <tool>, but toolCallId dossier is the dossier`; in dossier or decision mode when the gathering gave no dossier, `evidence[<i>].toolCallId dossier: the dossier was not gathered`; and in explorer mode, `evidence[<i>].toolCallId dossier: this run has no dossier`. A `toolCallId` that is neither an integer nor `"dossier"` stays fatal (`must be an integer`, and in dossier and decision mode `must be an integer or "dossier"`), and the rule "at least one verified item unless both causes are `UNKNOWN`" is unchanged. The schema sent with the report call is explorer mode's in explorer mode; in dossier and decision mode its `toolCallId` is `anyOf` an integer of at least 1 or the string `"dossier"`. Once a dossier is gathered, the report task says `To cite the dossier, write toolCallId "dossier" and tool "dossier", with the number of the line you cite: D7 is line 7.` and lists `dossier` last among the citable ids (`Citable toolCallIds: 3, dossier.`, or `Citable toolCallIds: dossier.` with no tool step). Why (T5b): in dossier mode the dossier holds most of the evidence, so a report that could cite only the model's own follow-up calls would have to repeat the dossier's calls to prove what it already shows; checking its lines against the text the model read keeps "the LLM proposes, code verifies". Why one id for the whole dossier, not its 33 calls (29 in T5a): those calls are code's and their outputs are not what the model read.
 
+Every accepted report MUST carry its **verification level**, computed by code as an annotation **(verification-levels T3; [ADR-028](../../../docs/adr/ADR-028-verification-levels.md))**: `{level, checks}`, each check `{level, name, pass, detail}`, `pass` true, false, or null when the check does not apply, and `detail` saying what failed or why it does not apply, null when it passes. A level MUST NOT add an error, reject a report or cause a model call: only the rules above (L0) get the one retry, and an L1 item is dropped as above. The checks, in this order, for the plain and the hybrid report:
+
+| Level | Check | Passes when |
+|-------|-------|-------------|
+| L0 | `schema` | always, since only a report that holds the schema and the rules above is accepted |
+| L1 | `citations` | no evidence item was dropped; a summary cut is not a dropped item. The detail names the dropped items |
+| L2 | `owners-on-path` | every stored item cites a dossier line whose owner ("Evidence dossier rendering", the line-fact index) is the claimed `rootCauseService`, or a transitive caller or a transitive callee of it (`Topology.calls`, `calledBy`, each direction followed on its own). A tool step's citation has no line fact and fails it (`step <n> line <N> is a tool step's output, which has no line fact`); so does a dossier line with no fact (`D<N> has no line fact`); a line off the path fails with `D<N> is a line of <owner>, not of <cause> or a service on its call path` (`the header` for a header line) |
+| L3 | `cause-fact-changed` | at least one stored item cites a line owned by the claimed cause whose `changed` is `YES`; `NOT_COMPARED` never satisfies it. The detail lists the cause's cited lines and their change, or says none is cited |
+
+The level is the highest `k` such that every check at levels 0 to `k` passes, so a report with a dropped item is at L0. A report naming `UNKNOWN|UNKNOWN` claims no cause: its L2 and L3 checks have `pass` null and the detail `both causes are UNKNOWN: the report names no cause to check`, so its level is at most L1. The alternatives of a plain report are causes of the topology by an L0 rule already, so L2 does not check them again. The loop passes the checks the line facts of the dossier the model read, in either view; storing the level is "The report"'s. Why: the core rule says code verifies "at a stated level", and vision §3 makes L2 and L3 annotations, not retries, so a check never steers the model; L1 alone is the old "real evidence", and L3 asks for one cited fact that belongs to the cause and changed, since citing a caller's symptoms is legitimate evidence (ADR-028, Decisions 4 and 5).
+
+#### Scenario: An item on another branch fails L2 (verification-levels T3)
+- GIVEN a decision-mode report naming gateway-mock that cites gateway-mock's changed latency line and a server row of inventory-service
+- WHEN the report is checked
+- THEN it is valid and not retried, `owners-on-path` fails naming the inventory-service line, `cause-fact-changed` passes, and its level is L1
+
+#### Scenario: A caller's line passes L2 and fails L3 alone (verification-levels T3)
+- GIVEN a report naming gateway-mock whose only item is payment-service's client row of timeouts, a changed line
+- WHEN the report is checked
+- THEN `owners-on-path` passes, since payment-service calls gateway-mock, `cause-fact-changed` fails with `none of its lines is cited`, and its level is L2
+
+#### Scenario: The cause's changed latency line passes L3 (verification-levels T3)
+- GIVEN a report naming gateway-mock that cites that caller's row and gateway-mock's latency line, whose `changed` is `YES`
+- WHEN the report is checked
+- THEN its checks are `schema`, `citations`, `owners-on-path`, `cause-fact-changed`, at levels 0 to 3, all passing, and its level is L3
+- AND a report whose only cause-owned line is a log line, `NOT_COMPARED`, stays at L2
+
+#### Scenario: A tool-step citation fails L2 (verification-levels T3)
+- GIVEN a dossier-mode report that cites a line of the dossier and a line of step 4's summary
+- WHEN the report is checked
+- THEN `owners-on-path` fails with `step 4 line 2 is a tool step's output, which has no line fact`, and its level is L1
+- AND an explorer-mode report, whose every item cites a tool step, is at L1
+
+#### Scenario: An abstention stops at L1 (verification-levels T3)
+- WHEN a report naming `UNKNOWN|UNKNOWN` is checked, with or without evidence
+- THEN its `owners-on-path` and `cause-fact-changed` checks have `pass` null, and its level is L1
+- AND a hybrid run whose rules proposed no candidate stores its report at L1
+
+#### Scenario: A dropped item gives L0 (verification-levels T3)
+- GIVEN a report naming a cause whose item 1 cites a dossier line that does not exist
+- WHEN the report is checked
+- THEN it is valid with item 0 only, `citations` fails naming `evidence[1]: line 99 is not in the dossier`, the L2 and L3 checks still run, and its level is L0
+- AND a summary cut alone leaves `citations` passing
+
+#### Scenario: An invalid report has no level (verification-levels T3)
+- WHEN a report breaks an L0 rule
+- THEN it has no verification, and it gets the one retry as before
+
 #### Scenario: A line of the dossier (T5b)
 - GIVEN a dossier-mode run whose rendered dossier holds the line `D7 | client | CLIENT_ERROR | UNKNOWN | ConnectException | 0 | 6 |`
 - WHEN the report cites `{toolCallId: "dossier", tool: "dossier", line: 7}`
@@ -1732,9 +1780,9 @@ The model writes no `evidence`, and a report that carries one fails the schema. 
 
 The task MUST define the three roles by the facts and the calls, for any problem: `ORIGIN`, the problem starts in this service, its own facts show it, and the services it calls do not show that problem themselves; `AFFECTED`, it shows the problem because a service it calls, an `ORIGIN` or `AFFECTED` one, does; `UNAFFECTED`, its own facts show no problem in the incident window. It MUST state the rules below, say that `line` is a line of the service's own sheet or of its part of "Seen only in the previous window" (`D7 is line 7`), that `rootCauseService` is the `ORIGIN`, or `UNKNOWN` when no service is, and that code builds the evidence. It names no lab service, category or fault as an example, and the categories stay those of the system message.
 
-Code MUST check the report, then the rules below, which check the model's own claims against its roles and the topology's call graph and never name a cause. Every broken rule rejects the report with an exact error, for the one retry of "Evidence is checked", and a second invalid report ends the run `INVALID_REPORT`; nothing is dropped but a summary too long. Coverage, the schema and Citation are checked first; the other three read every role, so they are checked only once every service is assessed within the schema.
+Code MUST check the report, then the rules below, which check the model's own claims against its roles and the topology's call graph and never name a cause. Coverage, the schema and Citation are L0 rules, since the derived evidence needs them: each broken one rejects the report with an exact error, for the one retry of "Evidence is checked", and a second invalid report ends the run `INVALID_REPORT`; nothing is dropped but a summary too long. One origin, Graph and Answer MUST be L2 checks of the accepted report, named `one-origin`, `graph` and `answer`, never errors **(verification-levels T3; ADR-028, Decision 2)**: a report breaking one is valid and stored, not retried, with that check failed, its detail the text below, and its level at most L1. They read every role, so they run only on a report whose every service is assessed within the schema, which a valid one is.
 
-| Rule | It checks | Error |
+| Rule | It checks | Error (L0) or detail (L2) |
 |------|-----------|-------|
 | Coverage | every lab service is assessed once, and no other name | `assessments.<service> is missing: assess every service once`; `assessments.unexpected field "<name>"; allowed: ...` |
 | Citation | each `line` is owned by its service in the sheets ("Evidence dossier rendering"): a line of its sheet or of its part of the last section, whose text the sheets hold, so that its evidence can be quoted **(service-assessment T2r)** | `assessments.<service>.line <N> is a line of <owner>, not of <service>` (`the header` for a header line), or `... is not in the sheets`, then `; cite a line`; or, for an owned line with no text, `assessments.<service>.line <N> is a line of <service> whose text is not in the sheets; cite another line`; then ` of its own sheet or of its part of "Seen only in the previous window"` |
@@ -1742,11 +1790,13 @@ Code MUST check the report, then the rules below, which check the model's own cl
 | Graph | an `AFFECTED` service calls an `ORIGIN` or `AFFECTED` service | `assessments.<service> is AFFECTED but calls no service` or `... but calls no ORIGIN or AFFECTED service (it calls <callee>: <role>, ...)`; then `; a service is AFFECTED only through a service it calls that is ORIGIN or AFFECTED` |
 | Answer | `rootCauseService` is the `ORIGIN` | `rootCauseService must be the ORIGIN, <service>; got "<value>"` |
 
-So a valid assessed report never names `postgres`, which has no sheet. Code then derives the **evidence** of a valid report: one item per `ORIGIN` and `AFFECTED` service, in the sheets' order, citing its assessment's line as a dossier item does, `{toolCallId: "dossier", tool: "dossier", line, quote, why}`, with the quote filled in by code from the line's text and the `why` the assessment's; a report whose every service is `UNAFFECTED` has none. The stored report is the plain report's, the checked `assessments` written first, after `model`, so that storage and scoring read its evidence as they read a plain report's. A cut assessed report's retry asks for `a shorter summary and shorter whys`, since it has no evidence items to shorten.
+A report breaking Answer keeps the model's `rootCauseService` as its answer, which is what is scored; Answer compares it with a single `ORIGIN` only, as One origin fails when there is none or several. The assessed report's checks are `schema`, `citations` (always passing, since nothing but a summary is cut), `owners-on-path` over its derived evidence, `one-origin`, `graph`, `answer`, then `cause-fact-changed`, with the levels and the level rule of "Evidence is checked", read from the sheets' line facts. An abstention's L2 and L3 checks have `pass` null as there; a graph rule its roles break adds `; the roles break it: <detail>` to its detail.
+
+Code then derives the **evidence** of a valid report: one item per `ORIGIN` and `AFFECTED` service, in the sheets' order, citing its assessment's line as a dossier item does, `{toolCallId: "dossier", tool: "dossier", line, quote, why}`, with the quote filled in by code from the line's text and the `why` the assessment's; a report whose every service is `UNAFFECTED` has none. The stored report is the plain report's, the checked `assessments` written first, after `model`, so that storage and scoring read its evidence as they read a plain report's. A cut assessed report's retry asks for `a shorter summary and shorter whys`, since it has no evidence items to shorten.
 
 Why: a caller's latency contains its callee's, so comparing magnitudes cannot find the origin, while the call graph can; in M0 the local model's misses on F1 and F3 were hops along the graph ("Evidence dossier rendering"). Assessing each service from its own sheet turns one synthesis over the dossier into four local judgments that code can check against the graph and the line owners: the LLM proposes, deterministic code verifies. Why the rules never name a cause: they hold for any fault, so they cannot leak an answer into the retry.
 
-ADR-014 records the decision **(service-assessment T3)**: the roles live in the report task, never in the facts, and the checks test the report against its own roles and the graph. Open question: every broken rule, Graph included, goes to the one retry, while vision §3 makes L2 ("the claims fit the topology") and L3 annotations, not retries. The retry stays in this feature, so V2 is measured as built; follow-up 13 (verification-levels) decides whether the graph rules become annotations.
+ADR-014 records the decision **(service-assessment T3)**: the roles live in the report task, never in the facts, and the checks test the report against its own roles and the graph. ADR-028 closes its open question on the Graph rule's retry **(verification-levels T3)**: One origin, Graph and Answer are L2 annotations, never retried, because a retry fed the broken rule's text, which names services and their roles, back into the prompt and so steered the model toward a graph-consistent answer (vision §3). Committed SHEETS/assessed results were measured with the retry and stay valid as historical results; a new assessed run is not comparable to them without saying so.
 
 #### Scenario: The assessments come first (service-assessment T2)
 - WHEN the loop builds the assessed schema, on either route
@@ -1770,8 +1820,8 @@ ADR-014 records the decision **(service-assessment T3)**: the roles live in the 
 
 #### Scenario: Every service unaffected (service-assessment T2)
 - WHEN every service is `UNAFFECTED` and both causes are `UNKNOWN`
-- THEN the report is valid with no evidence
-- AND a report that names a cause with every service `UNAFFECTED` is rejected by One origin
+- THEN the report is valid with no evidence, its L2 and L3 checks have `pass` null, and its level is L1
+- AND a report that names a cause with every service `UNAFFECTED` is valid with `one-origin` failed (verification-levels T3)
 
 #### Scenario: A line of another service (service-assessment T2)
 - GIVEN payment-service's assessment cites a line of gateway-mock's sheet
@@ -1779,17 +1829,25 @@ ADR-014 records the decision **(service-assessment T3)**: the roles live in the 
 - THEN it is rejected with `assessments.payment-service.line <N> is a line of gateway-mock, not of payment-service; cite a line of its own sheet or of its part of "Seen only in the previous window"`
 - AND the retry is told exactly that, and a valid retry completes the run
 
-#### Scenario: Two origins (service-assessment T2)
-- WHEN gateway-mock and payment-service are both `ORIGIN`
-- THEN the report is rejected with `at most one service is the ORIGIN; got 2: gateway-mock, payment-service`
+#### Scenario: Two origins (verification-levels T3)
+- GIVEN gateway-mock and payment-service are both `ORIGIN`
+- WHEN the report is checked
+- THEN it is valid and not retried, its evidence derived as usual, `one-origin` fails with `at most one service is the ORIGIN; got 2: gateway-mock, payment-service`, and its level is L1
 
-#### Scenario: Affected through nothing (service-assessment T2)
-- WHEN inventory-service, which calls no service, is `AFFECTED`, or payment-service is `AFFECTED` while gateway-mock, the one service it calls, is `UNAFFECTED`
-- THEN the report is rejected by Graph, the error naming the service and what it calls
+#### Scenario: Affected through nothing (verification-levels T3)
+- GIVEN inventory-service, which calls no service, is `AFFECTED`, or payment-service is `AFFECTED` while gateway-mock, the one service it calls, is `UNAFFECTED`
+- WHEN the report is checked
+- THEN it is valid and not retried, `graph` fails with a detail naming the service and what it calls, and its level is L1, even when its `cause-fact-changed` passes
 
-#### Scenario: The cause is the origin (service-assessment T2)
-- WHEN gateway-mock is the `ORIGIN` and `rootCauseService` is payment-service
-- THEN the report is rejected with `rootCauseService must be the ORIGIN, gateway-mock; got "payment-service"`
+#### Scenario: The cause is not the origin (verification-levels T3)
+- GIVEN gateway-mock is the `ORIGIN` and `rootCauseService` is payment-service
+- WHEN the report is checked
+- THEN it is valid and stored with payment-service as its cause, `answer` fails with `rootCauseService must be the ORIGIN, gateway-mock; got "payment-service"`, and its level is L1
+
+#### Scenario: Roles that fit the graph and cite the cause's change (verification-levels T3)
+- GIVEN gateway-mock the `ORIGIN` citing its changed latency line, payment-service and order-service `AFFECTED`, inventory-service `UNAFFECTED`, and `rootCauseService` gateway-mock
+- WHEN the report is checked
+- THEN its seven checks pass and its level is L3
 
 #### Scenario: A service left out (service-assessment T2)
 - WHEN the assessments leave out a service
