@@ -162,6 +162,53 @@ recorded=$(last_fault_end)
 expect "a confirmed restore records its time" "$(( ${recorded:-0} >= $(date +%s) - 5 ))" 1
 unset -f injector_call
 
+# expect_no_injection (a healthy case's check, lab-realism-min T7): a transport failure (000, no status code) is asked
+# again up to NO_INJECTION_ATTEMPTS times, with a pause, so an injector slow to answer does not end the session; a 204
+# passes, a 200 (an injection is active) still fails and exits at once, and so does a persistent non-answer.
+# injector_call answers from its arguments, one code per call (000 once they run out), counted in a file since it runs
+# in a command substitution; sleep is stubbed, so no case waits. Each case runs in a subshell, since it exits.
+no_injection() {
+  (
+    answers=("$@")
+    calls_file="$FAULT_END_DIR/injector-calls"
+    : >"$calls_file"
+    injector_call() {
+      local n
+      n=$(wc -l <"$calls_file")
+      echo "$1 $2" >>"$calls_file"
+      echo "${answers[$n]:-000} "
+    }
+    sleep() { echo "slept $1"; }
+    expect_no_injection healthy-c2
+    echo "exit 0 after $(wc -l <"$calls_file") call(s)"
+  ) 2>&1 || echo "exit $?"
+}
+pause=${NO_INJECTION_PAUSE_SECONDS:-unset}
+attempts=${NO_INJECTION_ATTEMPTS:-unset}
+expect "no injection active passes at the first answer" "$(no_injection 204)" \
+  "PASS  healthy-c2: no injection is active, so none is in its windows"$'\n'"exit 0 after 1 call(s)"
+expect "an injector that does not answer at first is asked again after a pause" "$(no_injection 000 000 204)" \
+  "....  healthy-c2: GET /faults/active got no answer (attempt 1 of $attempts); asking again in ${pause}s
+slept $pause
+....  healthy-c2: GET /faults/active got no answer (attempt 2 of $attempts); asking again in ${pause}s
+slept $pause
+PASS  healthy-c2: no injection is active, so none is in its windows
+exit 0 after 3 call(s)"
+expect "an active injection fails and exits at once, with no retry" "$(no_injection 200)" \
+  "FAIL  healthy-c2: GET /faults/active answered 200, not 204: an injection is active, so the healthy control is not\
+ healthy; nothing opened"$'\n'"exit 1"
+expect "an active injection after a non-answer still fails and exits" "$(no_injection 000 200 | tail -n 2)" \
+  "FAIL  healthy-c2: GET /faults/active answered 200, not 204: an injection is active, so the healthy control is not\
+ healthy; nothing opened"$'\n'"exit 1"
+expect "an injector that never answers fails and exits after the last attempt, with no pause after it" \
+  "$(no_injection | tail -n 3)" \
+  "slept $pause
+FAIL  healthy-c2: GET /faults/active got no answer in $attempts attempts: the injector at $INJECTOR may be\
+ down, so whether an injection is active is unknown; nothing opened"$'\n'"exit 1"
+expect "an injector that never answers is asked NO_INJECTION_ATTEMPTS times, the only call each time" \
+  "$(no_injection >/dev/null; sort -u "$FAULT_END_DIR/injector-calls"; wc -l <"$FAULT_END_DIR/injector-calls")" \
+  "GET /faults/active"$'\n'"$attempts"
+
 # space_out, with sleep stubbed so no case waits: no wait without a restore time or once the margin has passed.
 sleep() { echo "slept $1"; }
 expect "no restore time, no wait" "$(space_out "")" ""
@@ -819,6 +866,41 @@ expect "a manifest line the driver refuses stops the run before Maven" \
   "$(replay_agent_over "$bad_dir" --mode decision --faults F1; echo "exit $?")" \
   "a manifest line has the split 'test', not dev, holdout, stress, probe or holdout-2: $bad_line"$'\n'"exit 2"
 
+# The healthy class (lab-realism-min T7; ADR-015, ADR-026): holdout-2's healthy controls, truth NONE|NONE, replay in
+# decision mode like a fault's cases. A holdout-2 run takes them by default, with F1, F2 and F3; every other split's
+# default stays F1, F2 and F3, since none of them holds a healthy row. Checked before Maven, as above.
+holdout2_dir="$KEY_DIR/replay-holdout-2"
+mkdir -p "$holdout2_dir"
+printf '%s\n' "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split${tab}case" \
+  "F2${tab}decision${tab}local${tab}c|D${tab}F2/r1-c1-F2.json${tab}id-1${tab}holdout-2${tab}1" \
+  "healthy${tab}decision${tab}local${tab}NONE|NONE${tab}healthy/r1-c2-healthy.json${tab}id-2${tab}holdout-2${tab}2" \
+  "F1${tab}decision${tab}local${tab}a|B${tab}F1/r1-c3-F1.json${tab}id-3${tab}holdout-2${tab}3" \
+  "F3${tab}decision${tab}local${tab}e|F${tab}F3/r1-c4-F3.json${tab}id-4${tab}holdout-2${tab}4" \
+  "healthy${tab}decision${tab}local${tab}NONE|NONE${tab}healthy/r1-c5-healthy.json${tab}id-5${tab}holdout-2${tab}5" \
+  >"$holdout2_dir/recordings.tsv"
+expect "the healthy class alone replays a holdout-2 manifest's healthy rows" \
+  "$(replay_agent_over "$holdout2_dir" --mode decision --split holdout-2 --faults healthy | grep -F '....  decision')" \
+  "....  decision mode, split holdout-2, view tables, report plain: 2 recording(s) of healthy, each replayed 1\
+ time(s): 2 samples"
+expect "a holdout-2 run takes the healthy class by default, after F1, F2 and F3" \
+  "$(replay_agent_over "$holdout2_dir" --mode decision --split holdout-2 | grep -F '....  decision')" \
+  "....  decision mode, split holdout-2, view tables, report plain: 5 recording(s) of F1 F2 F3 healthy,\
+ each replayed 1 time(s): 5 samples"
+expect "another split's default stays F1, F2 and F3, so no healthy row is asked for" \
+  "$(replay_agent --mode decision; echo "exit $?")" \
+  "no decision or dossier recording of F2 in split dev of $manifest_dir/recordings.tsv"$'\n'"exit 2"
+expect "a split with no healthy row refuses the healthy class before Maven" \
+  "$(replay_agent --mode decision --faults F1,healthy; echo "exit $?")" \
+  "no decision or dossier recording of healthy in split dev of $manifest_dir/recordings.tsv"$'\n'"exit 2"
+expect "dossier mode refuses the healthy class, which has no stress recording to pool" \
+  "$(replay_agent --mode dossier --faults healthy; echo "exit $?")" \
+  "--faults healthy applies to decision mode only: a healthy control is a holdout-2 case, with no stress recording\
+ to pool"$'\n'"exit 2"
+expect "re2-ob has no healthy class" \
+  "$(replay_agent_over "$REPO_DIR/agent/src/test/resources/rcaeval" --dataset re2-ob --mode decision \
+    --faults healthy; echo "exit $?")" \
+  "Unknown fault 'healthy'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"
+
 # --dataset (odd/tasks/rcaeval-converter.md T5): re2-ob replays the RCAEval converter's recordings, whose faults are
 # RCAEval's, from a recordings directory that must be named, in decision mode only. The committed converter output
 # (agent/src/test/resources/rcaeval/) holds one dev case of cpu. Checked before Maven, as above.
@@ -828,7 +910,7 @@ expect "an unknown dataset exits 2 and names the two datasets" \
   "Unknown dataset 're2-tt'; choose lab or re2-ob"$'\n'"exit 2"
 expect "the lab dataset keeps the lab's faults" \
   "$(replay_agent --dataset lab --mode decision --faults cpu; echo "exit $?")" \
-  "Unknown fault 'cpu'; choose from F1 F2 F3"$'\n'"exit 2"
+  "Unknown fault 'cpu'; choose from F1 F2 F3 healthy"$'\n'"exit 2"
 expect "re2-ob takes RCAEval's faults, not the lab's" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode decision --faults F1; echo "exit $?")" \
   "Unknown fault 'F1'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"

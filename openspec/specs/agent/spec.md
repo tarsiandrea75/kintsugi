@@ -703,6 +703,20 @@ A sample is counted in the totals even when writing its files fails. A miss is a
 - THEN the `holdout-2` cases carry cases 12 and 3, the healthy one its truth `NONE|NONE`, and both `dev` cases an empty case
 - AND the committed manifest's header ends with `split case`, and every one of its rows has an empty case
 
+**Healthy controls replay (lab-realism-min T7).** A sample's verdict MUST be `agent_verdict`'s rule in `lib.sh` (`ReplayDriver.verdict`): `MATCH` for a `COMPLETED` report naming the truth, `MISS` otherwise; on a healthy control, truth `NONE|NONE` (ADR-015), `MATCH` only for a `COMPLETED` report naming `UNKNOWN|UNKNOWN`, so a named cause, the truth's own `NONE|NONE` included, is a `MISS`, which the evals scorer counts as a false alarm. `replay-agent.sh --faults` MUST take `healthy` on the lab dataset in decision mode and refuse it in explorer and dossier mode with exit 2 (it has no `stress` recording to pool). Its default faults MUST stay `F1,F2,F3`, and on `--split holdout-2`, the only split that records healthy controls, MUST be `F1,F2,F3,healthy`, so a holdout-2 run scores every case of the schedule.
+
+#### Scenario: A healthy control matches only a completed UNKNOWN report (lab-realism-min T7)
+- GIVEN a sample whose truth is `NONE|NONE`
+- WHEN it ends `COMPLETED` reporting `UNKNOWN|UNKNOWN`, `COMPLETED` reporting `gateway-mock|DEPENDENCY_LATENCY` or `NONE|NONE`, or `TIMED_OUT` or `FAILED` reporting `UNKNOWN|UNKNOWN`
+- THEN the first is a `MATCH` and every other a `MISS`
+- AND a fault's sample reporting `UNKNOWN|UNKNOWN` stays a `MISS`
+
+#### Scenario: replay-agent.sh replays holdout-2's healthy controls (lab-realism-min T7)
+- GIVEN a manifest whose `holdout-2` lines are one case each of F1, F2 and F3 and two healthy controls
+- WHEN `replay-agent.sh --mode decision --split holdout-2` runs with `--faults healthy`, or with no `--faults`
+- THEN it lists 2 cases of `healthy`, or 5 cases of `F1 F2 F3 healthy`, before Maven
+- AND on `dev` its default asks for F1, F2 and F3 only, `--faults healthy` with a split that has no healthy line stops before Maven naming `healthy`, and dossier mode refuses `healthy` with exit 2
+
 #### Scenario: Each case repeated (decision-instrument T3)
 - GIVEN two `dev` cases of F1 and `replay.repeats` = 2
 - WHEN the decision run replays them

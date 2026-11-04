@@ -133,6 +133,12 @@ final class ReplayDriver {
 
 	private static final String NONE = "-";
 
+	/** The truth of a healthy control (ADR-015), as the harness records it and the evals scorer reads it. */
+	static final String HEALTHY_TRUTH = "NONE|NONE";
+
+	/** The report that names no cause: the only right answer on a healthy control. */
+	static final String UNKNOWN_ANSWER = Causes.UNKNOWN + "|" + Causes.UNKNOWN;
+
 	private final ModelRouter router;
 
 	private final LoopSettings settings;
@@ -514,10 +520,17 @@ final class ReplayDriver {
 		return ofFault.stream().filter(recording -> recording.recording().mode().equals(mode.value())).findFirst();
 	}
 
-	/** The rule of {@code agent_verdict} in {@code lib.sh}: a completed report naming the truth, else a miss. */
+	/**
+	 * The rule of {@code agent_verdict} in {@code lib.sh}: a completed report naming the truth, else a miss. On a
+	 * healthy control (truth {@link #HEALTHY_TRUTH}, ADR-015) only a completed {@link #UNKNOWN_ANSWER} matches; a named
+	 * cause is a false alarm, a miss here, which the evals scorer counts as {@code false_alarm}.
+	 */
 	static String verdict(IncidentStatus status, String reported, String truth) {
-		return status == IncidentStatus.COMPLETED && truth != null && !truth.isEmpty() && truth.equals(reported)
-				? "MATCH" : "MISS";
+		boolean completed = status == IncidentStatus.COMPLETED;
+		if (HEALTHY_TRUTH.equals(truth)) {
+			return completed && UNKNOWN_ANSWER.equals(reported) ? "MATCH" : "MISS";
+		}
+		return completed && truth != null && !truth.isEmpty() && truth.equals(reported) ? "MATCH" : "MISS";
 	}
 
 	/**

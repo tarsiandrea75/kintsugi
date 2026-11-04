@@ -15,6 +15,7 @@ recorded tool outputs").
   infra/scripts/replay-agent.sh --route local         # the local model on Ollama, 127.0.0.1:11434
   infra/scripts/replay-agent.sh --mode decision       # each dev recording once: the dossier, then one report call
   infra/scripts/replay-agent.sh --mode decision --split holdout --repeats 3
+  infra/scripts/replay-agent.sh --route rules --mode decision --split holdout-2   # F1-F3 and healthy; read once
   infra/scripts/replay-agent.sh --mode decision --view sheets   # the dossier as one fact sheet per service
   infra/scripts/replay-agent.sh --mode decision --view sheets --report assessed   # each service's role first
   infra/scripts/replay-agent.sh --route local --mode decision --report hybrid   # Config H: the model picks a candidate
@@ -30,7 +31,8 @@ recorded tool outputs").
   --route cloud|local|rules      the model's route (default cloud), or rules: Config 0, decision mode only
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
   --samples N                    explorer and dossier: samples per fault and mode, 1 to 999 (default 1)
-  --split NAME                   decision: the recordings to replay, dev (default), holdout, stress or probe
+  --split NAME                   decision: the recordings to replay, dev (default), holdout, stress, probe or
+                                 holdout-2
   --repeats M                    decision: runs of each recording, 1 to 999 (default 1)
   --view tables|sheets           decision: how the dossier is written for the model (default tables)
   --report plain|assessed|hybrid decision: which report the model writes (default plain); assessed needs --view
@@ -38,7 +40,8 @@ recorded tool outputs").
   --rules v1|v2                  decision, --route rules or --report hybrid: the rules version (default v1), v1
                                  Config 0 (ADR-016), v2 Config 0R (ADR-021)
   --faults F1,F2,F3              the recorded faults to replay (default: the dataset's, F1,F2,F3 for lab and
-                                 cpu,mem,disk,delay,loss,socket for re2-ob)
+                                 cpu,mem,disk,delay,loss,socket for re2-ob); lab also takes healthy, the healthy
+                                 controls, in decision mode, and on --split holdout-2 the default adds it
   --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
   --think on|off                 local: send Ollama's think field with this value (default: no think field)
   --report-cap N                 local: the report's answer cap, num_predict, 1 to 99999 tokens (default 512)
@@ -66,7 +69,14 @@ which holds every call the dossier makes, --repeats times: the dossier, then the
 drill-down call. Before Maven, the script lists the cases with ReplayCases, the class ReplayRunTest picks them with,
 run from its source by the JDK (about a second): an unknown split, a chosen fault with no recording in the split, or a
 manifest line the driver refuses stops the run there. The splits: dev to tune on, holdout read once, stress for the
-2026-10-19 recordings whose windows hold other faults, probe for faults never tuned on.
+2026-10-19 recordings whose windows hold other faults, probe for faults never tuned on, holdout-2 for the cases of
+holdout-2's schedule (ADR-026), recorded after the freeze.
+
+The class healthy (lab-realism-min T7) is the lab's healthy controls: recordings with no fault injected, truth
+NONE|NONE (ADR-015). Each is a decision case like a fault's; only a COMPLETED report naming UNKNOWN|UNKNOWN is a
+MATCH, and a named cause a MISS, which the evals scorer counts as a false alarm. Only holdout-2 records them, so a
+--split holdout-2 run takes healthy by default after F1, F2 and F3, and every other split's default stays F1,F2,F3.
+Explorer and dossier mode refuse it: it has no stress recording to pool.
 
 --view sets kintsugi.agent.decision.view for the run (agent spec, "Decision mode"; odd/tasks/service-assessment.md):
 tables, the default, is the dossier of dossier mode, by data source; sheets writes the same facts as one sheet per
@@ -129,6 +139,10 @@ OLLAMA=http://127.0.0.1:11434
 MODEL=granite4.1:8b
 # The recorded faults and the topology of each dataset: the lab's, and RCAEval RE2-OB's fault types (ADR-020).
 LAB_FAULTS=(F1 F2 F3)
+# A healthy control (ADR-015): a lab class with no fault, truth NONE|NONE, recorded in the holdout-2 split only
+# (ADR-026; lab-realism-min T7). It replays in decision mode, by default only in that split.
+HEALTHY=healthy
+HEALTHY_SPLIT=holdout-2
 RE2_FAULTS=(cpu mem disk delay loss socket)
 LAB_TOPOLOGY=classpath:topology/lab.json
 RE2_OB_TOPOLOGY=classpath:topology/re2-ob.json
@@ -167,11 +181,10 @@ while (( $# )); do
   esac
 done
 case "$dataset" in
-  lab) ALL_FAULTS=("${LAB_FAULTS[@]}"); topology=$LAB_TOPOLOGY ;;
-  re2-ob) ALL_FAULTS=("${RE2_FAULTS[@]}"); topology=$RE2_OB_TOPOLOGY ;;
+  lab) ALL_FAULTS=("${LAB_FAULTS[@]}" "$HEALTHY"); DEFAULT_FAULTS=("${LAB_FAULTS[@]}"); topology=$LAB_TOPOLOGY ;;
+  re2-ob) ALL_FAULTS=("${RE2_FAULTS[@]}"); DEFAULT_FAULTS=("${RE2_FAULTS[@]}"); topology=$RE2_OB_TOPOLOGY ;;
   *) echo "Unknown dataset '$dataset'; choose lab or re2-ob" >&2; exit 2 ;;
 esac
-faults=${faults-$(IFS=,; echo "${ALL_FAULTS[*]}")}
 [[ "$route" == cloud || "$route" == local || "$route" == rules ]] \
   || { echo "Unknown route '$route'; choose cloud, local or rules" >&2; exit 2; }
 [[ "$mode" == explorer || "$mode" == dossier || "$mode" == decision || "$mode" == both ]] \
@@ -241,6 +254,12 @@ else
   [[ "$samples" =~ ^[1-9][0-9]{0,2}$ ]] \
     || { echo "--samples needs an integer from 1 to 999, not '$samples'" >&2; exit 2; }
 fi
+# The default faults: the dataset's, and on the lab's holdout-2 split its healthy controls too, so a holdout-2 run
+# scores every case of its schedule. No other split holds a healthy row, so none asks for one.
+if [[ -z "${faults+given}" ]]; then
+  [[ "$dataset" != lab || "$mode" != decision || "$split" != "$HEALTHY_SPLIT" ]] || DEFAULT_FAULTS+=("$HEALTHY")
+  faults=$(IFS=,; echo "${DEFAULT_FAULTS[*]}")
+fi
 IFS=, read -r -a selected <<<"$faults"
 (( ${#selected[@]} )) || { echo "--faults needs at least one fault" >&2; exit 2; }
 seen=" "
@@ -248,6 +267,8 @@ for fault in "${selected[@]}"; do
   [[ " ${ALL_FAULTS[*]} " == *" $fault "* ]] || { echo "Unknown fault '$fault'; choose from ${ALL_FAULTS[*]}" >&2; exit 2; }
   [[ "$seen" != *" $fault "* ]] || { echo "Fault '$fault' is listed twice" >&2; exit 2; }
   seen+="$fault "
+  [[ "$fault" != "$HEALTHY" || "$mode" == decision ]] || { echo "--faults $HEALTHY applies to decision mode only: a" \
+    "healthy control is a $HEALTHY_SPLIT case, with no stress recording to pool" >&2; exit 2; }
 done
 
 # The converted recordings live outside the repository (ADR-020), so an RCAEval run names its directory.

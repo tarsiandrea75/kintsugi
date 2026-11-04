@@ -786,6 +786,22 @@ class ReplayDriverTest {
 	}
 
 	@Test
+	void aHealthyControlMatchesOnlyACompletedUnknownReport() {
+		// ADR-015: a healthy row's truth is NONE|NONE, the scorer's and lib.sh's HEALTHY_TRUTH; naming no cause is
+		// right, naming one is a false alarm, a miss.
+		String healthy = "NONE|NONE";
+		String unknown = "UNKNOWN|UNKNOWN";
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, unknown, healthy)).isEqualTo("MATCH");
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, "gateway-mock|DEPENDENCY_LATENCY", healthy))
+			.isEqualTo("MISS");
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, healthy, healthy)).isEqualTo("MISS");
+		assertThat(ReplayDriver.verdict(IncidentStatus.TIMED_OUT, unknown, healthy)).isEqualTo("MISS");
+		assertThat(ReplayDriver.verdict(IncidentStatus.FAILED, unknown, healthy)).isEqualTo("MISS");
+		assertThat(ReplayDriver.verdict(IncidentStatus.COMPLETED, unknown, "gateway-mock|DEPENDENCY_LATENCY"))
+			.isEqualTo("MISS");
+	}
+
+	@Test
 	void theAggregateCountsMatchesCoverageAndCost() {
 		ReplayDriver.Sample a = sample("MATCH", 1.0, 1_000_000, 100_000);
 		ReplayDriver.Sample b = sample("MISS", 0.5, 1_000_000, 100_000);

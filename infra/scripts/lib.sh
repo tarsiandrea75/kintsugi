@@ -30,6 +30,10 @@ CURL_MAX_SECONDS=5
 # Transport cap for POST /faults and POST /faults/{id}/restore: an F3 or F4 step is a recreate that waits for health,
 # bounded by the injector's recreate-wait-timeout (120 s) plus its 30 s kill margin.
 INJECTOR_MAX_SECONDS=180
+# A healthy case's GET /faults/active (expect_no_injection): a transport failure, no status code, is asked again up to
+# this many times in all, this many seconds apart, before the case fails (lab-realism-min T7).
+NO_INJECTION_ATTEMPTS=3
+NO_INJECTION_PAUSE_SECONDS=10
 
 down=false
 failures=0
@@ -395,11 +399,25 @@ read_schedule() {
 
 # A healthy control's check where a fault case injects ($1 names the case): GET /faults/active must answer 204, so no
 # injection is in its windows. Passes, or fails and exits; it never restores another injection, which would be one.
+# A transport failure (000, no status code) says nothing about the injector's state, so it is asked again, up to
+# NO_INJECTION_ATTEMPTS times NO_INJECTION_PAUSE_SECONDS apart, before the case fails; any status code but 204 fails at
+# once. Tested by test-lib.sh.
 expect_no_injection() {
-  local code body
+  local code body attempt=1
   read -r code body <<<"$(injector_call GET /faults/active)" || true
+  while [[ "$code" == 000 ]] && (( attempt < NO_INJECTION_ATTEMPTS )); do
+    info "$1: GET /faults/active got no answer (attempt $attempt of $NO_INJECTION_ATTEMPTS); asking again in" \
+      "${NO_INJECTION_PAUSE_SECONDS}s"
+    sleep "$NO_INJECTION_PAUSE_SECONDS"
+    attempt=$((attempt + 1))
+    read -r code body <<<"$(injector_call GET /faults/active)" || true
+  done
   if [[ "$code" == 204 ]]; then
     pass "$1: no injection is active, so none is in its windows"
+  elif [[ "$code" == 000 ]]; then
+    fail "$1: GET /faults/active got no answer in $NO_INJECTION_ATTEMPTS attempts: the injector at $INJECTOR may be" \
+      "down, so whether an injection is active is unknown; nothing opened"
+    exit 1
   else
     fail "$1: GET /faults/active answered $code, not 204: an injection is active, so the healthy control is not" \
       "healthy; nothing opened"
