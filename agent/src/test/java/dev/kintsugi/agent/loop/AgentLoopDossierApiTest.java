@@ -86,6 +86,14 @@ class AgentLoopDossierApiTest {
 		assertThat(incident.get("status").asString()).isEqualTo("COMPLETED");
 		assertThat(incident.get("mode").asString()).isEqualTo("dossier");
 		assertThat(incident.get("report").get("mode").asString()).isEqualTo("dossier");
+		// The incident nests the stored report, so it carries the report's level (verification-levels T4): an
+		// abstention, its L2 and L3 checks not applicable, is at L1.
+		JsonNode verification = incident.get("report").get("verification");
+		assertThat(verification.get("level").asString()).isEqualTo("L1");
+		assertThat(verification.get("checks")).extracting(check -> check.get("name").asString())
+			.containsExactly("schema", "citations", "owners-on-path", "cause-fact-changed");
+		assertThat(verification.get("checks")).extracting(check -> check.get("pass").isNull())
+			.containsExactly(false, false, true, true);
 		JsonNode dossier = incident.get("steps").get(0);
 		assertThat(dossier.get("kind").asString()).isEqualTo("DOSSIER");
 		assertThat(dossier.get("phase").asString()).isEqualTo("DOSSIER");

@@ -774,7 +774,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * The summary is stored as {@link ReportCheck} kept it, cut when it was too long (report-field-order). An assessed
 	 * report (T2) also keeps its checked assessments, first, and its evidence is the one code derived from them, so
 	 * that storage and scoring read it as they read a plain report. Only the plain report keeps the model's checked
-	 * {@code alternatives}, after the cause (ranked-report T2; ADR-025); the hybrid and assessed reports have none.
+	 * {@code alternatives}, after the cause (ranked-report T2; ADR-025); the hybrid and assessed reports have none. Every
+	 * stored report carries its {@code verification}, after the model's fields and before {@code stepsUsed}
+	 * (verification-levels T4; ADR-028): an annotation code computed, which caused no model call.
 	 * @param fields the model's fields, in order: {@link ReportCheck#MODEL_FIELDS} for the plain report,
 	 * {@link ReportCheck#HYBRID_FIELDS} for the others
 	 */
@@ -791,8 +793,27 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		fields.forEach(field -> stored.set(field, report.get(field)));
 		stored.put("summary", checked.summary());
 		stored.putArray("evidence").addAll(checked.evidence());
+		stored.set("verification", verification(checked.verification()));
 		stored.put("stepsUsed", run.steps);
 		return JSON.writeValueAsString(stored);
+	}
+
+	/**
+	 * The stored {@code verification} of an accepted report (verification-levels T4; ADR-028): {@code {level, checks}},
+	 * each check {@code {level, name, pass, detail}}, every level written {@code L0} to {@code L3}
+	 * ({@link Verification#label}), and {@code pass} and {@code detail} null where the check has none.
+	 */
+	private static ObjectNode verification(Verification verification) {
+		ObjectNode stored = JSON.createObjectNode().put("level", Verification.label(verification.level()));
+		ArrayNode checks = stored.putArray("checks");
+		for (Verification.Check check : verification.checks()) {
+			checks.addObject()
+				.put("level", Verification.label(check.level()))
+				.put("name", check.name())
+				.put("pass", check.pass())
+				.put("detail", check.detail());
+		}
+		return stored;
 	}
 
 	/**

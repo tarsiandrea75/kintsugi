@@ -1003,7 +1003,7 @@ class AgentLoopDecisionModeTest {
 	 * A lab with the healthy traffic of the golden dossiers: no connection failure, and no slow or refusing service, so
 	 * the rules propose no candidate.
 	 */
-	private static FakeLabTools noCandidateLab() {
+	static FakeLabTools noCandidateLab() {
 		return new FakeLabTools().answer("traffic_counts", resource("/dossier/healthy/traffic_counts-incident.json"));
 	}
 
@@ -1069,13 +1069,13 @@ class AgentLoopDecisionModeTest {
 	}
 
 	/** The lab of these tests: F3's traffic and order events over the recorded mcp-tools outputs. */
-	private static FakeLabTools lab() {
+	static FakeLabTools lab() {
 		return new FakeLabTools().answer("traffic_counts", dossierFixture("traffic_counts-incident"))
 			.answer("event_counts", dossierFixture("event_counts-order-incident"));
 	}
 
 	/** One fixed clock, so that two gatherings, windows and uptimes included, give the same dossier. */
-	private static Clock fixedClock() {
+	static Clock fixedClock() {
 		return Clock.fixed(Instant.now().plus(Duration.ofMinutes(1)), ZoneOffset.UTC);
 	}
 
@@ -1107,7 +1107,7 @@ class AgentLoopDecisionModeTest {
 		return calls;
 	}
 
-	private static UUID open() {
+	static UUID open() {
 		UUID id = UUID.randomUUID();
 		AgentDatabase.admin()
 			.sql("INSERT INTO incidents (id, signal, status, started_at) VALUES (?, CAST(? AS jsonb), 'RUNNING', ?)")

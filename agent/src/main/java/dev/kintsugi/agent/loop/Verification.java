@@ -96,6 +96,17 @@ record Verification(int level, List<Check> checks) {
 		return new Verification(level, checks);
 	}
 
+	/**
+	 * A level as it is stored and reported: {@code L0} to {@code L3} (verification-levels T4). The one place that writes
+	 * a level, so the report's level and each check's read the same.
+	 */
+	static String label(int level) {
+		if (level < 0 || level > MAX_LEVEL) {
+			throw new IllegalArgumentException("a level is 0 to " + MAX_LEVEL + ", got " + level);
+		}
+		return "L" + level;
+	}
+
 	/** The check named {@code name}, when there is one. */
 	Optional<Check> check(String name) {
 		return this.checks.stream().filter(check -> check.name().equals(name)).findFirst();
