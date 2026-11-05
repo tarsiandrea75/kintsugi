@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-04 (session 01)
+2026-11-04 (session 02, closed after midnight)
 
 ## Milestone
 
@@ -16,7 +16,9 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-Latest (journal `docs/journal/2026-11-04-01.md`): A with today's agent, `check-freeze.sh`, holdout-2's seed (ADR-026), the policy gate (ADR-027) and lab-realism-min, closed with T6's live dev check and T7's healthy replay (Next action, items 16 to 17d).
+Latest (journal `docs/journal/2026-11-04-02.md`): verification-levels, T1–T8 complete (`odd/tasks/verification-levels.md`, ADR-028): every stored report states L0–L3 as an annotation, the scorer reports Verified-correct and the L1 rate (Next action, item 17e).
+
+Before that (journal `docs/journal/2026-11-04-01.md`): A with today's agent, `check-freeze.sh`, holdout-2's seed (ADR-026), the policy gate (ADR-027) and lab-realism-min, closed with T6's live dev check and T7's healthy replay (Next action, items 16 to 17d).
 
 Before that (journal `docs/journal/2026-11-03-01.md`): BARO reproduced on RE2-TT, AC@3 and Avg@5 in the scorer, why D abstains, the latency pairs, the resource warrant, the ranked report and suspects with an abstention (items 9 to 15).
 
@@ -52,7 +54,8 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 17b. Done 2026-11-03, branch `chore/follow-ups-2026-11-03`: three review follow-ups (`a1a564d` the empty ranking of a row with no answer, pinned; `325e805` latency pairs read whatever the arrow's spacing; `dd8bdfd` holdout-2's schedule after its seed), and `docs/benchmark-limits.md`, the limits `benchmark.md` must state.
 17c. Done 2026-11-03: the policy gate (ADR-027, `odd/tasks/policy-gate.md`, branch `feat/policy-gate`): every tool call, the gatherer's included, passes a deterministic policy; unknown tools are `WRITE` and refused with `REFUSED_POLICY`; counts per incident from a snapshot; the scorer totals them and the benchmark render fails on a non-zero holdout total. Rules unchanged on lab dev, lab holdout and RE2-OB dev.
 17d. Done 2026-11-04: lab-realism-min (`odd/tasks/lab-realism-min.md`, ADR-026), branches `feat/lab-realism-min`, `-01-injector`, `-02-harness`, `-03-healthy-replay`: the holdout-2 schedule generator, `check-freeze.sh` condition 3, the injector's F1 and F2 parameters, the harness (schedule, healthy controls, `holdout-2` split), and healthy rows replayable with an injector retry (T7). T6's live dev check (`evals/results/2026-11-04-lab-realism-dev-check/`): 9 scheduled cases, every stored parameter and truth as specified, all 9 windows clean, the healthy one included; D 9/9, descriptive; about $0.011. Holdout-2 waits for the freeze tag (2026-12-01) and the seed.
-18. **Next**, before the freeze on 2026-12-01: choose among the verification levels (L2/L3, so a report can state its level; vision §6), A and the hybrid on RE2-OB dev with today's prompt and report, and NETWORK/CODE_DEFECT (deferred by the human). On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
+17e. Done 2026-11-04: verification-levels (`odd/tasks/verification-levels.md`, ADR-028), chain `feat/verification-levels` → `-01-line-facts` → `-02-level-checks` → `-03-stored-level` → `-04-level-report` → `-05-latency-change`. A per-line fact index (owner, section, changed) beside byte-identical dossier text; L2 (cited owners on the cause's call path) and L3 (a cited fact of the cause changed) as annotations, never retries; the SHEETS graph rules are L2 annotations now (ADR-014's open question closed); `verification` in the stored report, `level` in `summary.tsv`, Verified-correct and the L1 rate in the scorer. Logs stay `NOT_COMPARED`; the human removed the 0.5 s latency floor (ratio ≥ 2× only, post hoc, ADR-028 Decision 5 amended). Descriptive results, dev only: RE2-OB re-checked DS 25/30 verified-correct, AS 11/30 (`evals/results/2026-11-04-verification-levels-ratio/`; with the floor 18/30 and 10/30, `-descriptive/`); lab dev one fresh DS run, AC@1 14/15, verified-correct 14/14 with a level, about $0.017 (`-lab-dev/`). No correct answer rests on log lines alone (RE2-OB 1, which also fails L2; lab 0), so no previous log window. Config 0's verdicts unchanged (AC7). One wrong DS answer, a caller of the cause, reaches L3: L3 alone does not mean correct.
+18. **Next**, before the freeze on 2026-12-01: A and the hybrid on RE2-OB dev with today's prompt and report, and NETWORK/CODE_DEFECT (deferred by the human). On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
 
 ## Local branch chains (not pushed)
 
@@ -73,7 +76,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` → `feat/verification-levels` → `-01-line-facts` → `-02-level-checks` → `-03-stored-level` → `-04-level-report` → `-05-latency-change` (current).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -87,12 +90,19 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 ## Open questions
 
+- L3 asks only that the claimed cause owns a changed cited fact, so a caller of the cause, whose latency rises with it, can reach L3 (one wrong DS answer on RE2-OB dev). Whether L3 should ask more is open (`odd/tasks/verification-levels.md`); any change to the agent must land before 2026-12-01.
 - Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service still stores an AUTHORIZED payment after order-service has timed out (observed).
 - Datasource socket timeout. Without one, a database that stops responding keeps the count refresh busy until TCP gives up. The gauges still show NaN after 10 s. A socket timeout would apply to every query, including F4's slow queries.
 - Reconciliation and reservation release: the evidence now exists in the event tables (order/payment and order/reservation mismatches); deciding what to do with it is a future feature.
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+Session of 2026-11-04 (02), verification-levels (details in `odd/tasks/verification-levels.md`):
+- `LevelRecheck` catches only `Refused` per incident: a corrupt incident file or an unparseable answer aborts the run with a stack trace (WARNINGs R3-001, R4-001; fails closed).
+- Review SUGGESTIONs on T4 to T6 (level-range test, the explorer test's `verification` value, the scorer's level counts wording, the evals spec template).
+- A slice with generated results exceeds the reviewer's context budget: T5 and T6 were reviewed per commit from detached worktrees.
+- Lab dev replays from before 2026-11-01 cannot be re-checked (the dossier text changed).
 
 Session of 2026-11-04, lab-realism-min (details in `odd/tasks/lab-realism-min.md`):
 - T7's review: no test shows a dev run's default leaves `healthy` out; a holdout-2 default run needs a healthy row to exist; the `/faults/active` call written twice; duplicated match branches in `ReplayDriver.verdict`.
