@@ -81,7 +81,8 @@ class AgentLoopDecisionModeTest {
 			+ "\"maxItems\":4,\"items\":{\"type\":\"object\",\"properties\":{\"rootCauseService\":{\"type\":"
 			+ "\"string\",\"enum\":[\"gateway-mock\",\"payment-service\",\"order-service\",\"inventory-service\","
 			+ "\"postgres\"]},\"rootCauseCategory\":{\"type\":\"string\",\"enum\":[\"DEPENDENCY_LATENCY\","
-			+ "\"DEPENDENCY_REJECTING\",\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\"]}},\"required\":["
+			+ "\"DEPENDENCY_REJECTING\",\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\",\"NETWORK\",\"CODE_DEFECT\"]}},"
+			+ "\"required\":["
 			+ "\"rootCauseService\",\"rootCauseCategory\"],\"additionalProperties\":false}},";
 
 	/** The alternatives' sentence of the plain report's task, its leading space included. */
@@ -120,7 +121,8 @@ class AgentLoopDecisionModeTest {
 			+ "\"additionalProperties\":false}},\"rootCauseService\":{\"type\":\"string\",\"enum\":[\"gateway-mock\","
 			+ "\"payment-service\",\"order-service\",\"inventory-service\",\"postgres\",\"UNKNOWN\"]},"
 			+ "\"rootCauseCategory\":{\"type\":\"string\",\"enum\":[\"DEPENDENCY_LATENCY\",\"DEPENDENCY_REJECTING\","
-			+ "\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\",\"UNKNOWN\"]}," + ALTERNATIVES_SCHEMA
+			+ "\"CONFIGURATION\",\"RESOURCE_EXHAUSTION\",\"NETWORK\",\"CODE_DEFECT\",\"UNKNOWN\"]},"
+			+ ALTERNATIVES_SCHEMA
 			+ "\"confidence\":{\"type\":\"number\","
 			+ "\"minimum\":0,\"maximum\":1}},\"required\":[\"summary\",\"evidence\",\"rootCauseService\","
 			+ "\"rootCauseCategory\",\"alternatives\",\"confidence\"],\"additionalProperties\":false}";
@@ -201,6 +203,21 @@ class AgentLoopDecisionModeTest {
 		assertThat(stored.get("alternatives")).extracting(item -> item.get("rootCauseService").asString() + "|"
 				+ item.get("rootCauseCategory").asString())
 			.containsExactly("gateway-mock|DEPENDENCY_LATENCY", "order-service|CONFIGURATION");
+	}
+
+	/** A decoy category (ADR-029) is a valid cause and alternative, so the report naming it is stored. */
+	@Test
+	void aReportNamingTheDecoyCategoriesIsStored() {
+		this.model.text(rankedReport("payment-service", "CODE_DEFECT", List.of("gateway-mock|NETWORK"),
+				dossierEvidence(1)));
+
+		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
+
+		JsonNode stored = storedReport();
+		assertThat(stored.get("rootCauseCategory").asString()).isEqualTo("CODE_DEFECT");
+		assertThat(stored.get("alternatives")).extracting(item -> item.get("rootCauseService").asString() + "|"
+				+ item.get("rootCauseCategory").asString())
+			.containsExactly("gateway-mock|NETWORK");
 	}
 
 	/**

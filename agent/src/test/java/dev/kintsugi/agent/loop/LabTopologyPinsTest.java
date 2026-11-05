@@ -20,7 +20,8 @@ import dev.kintsugi.agent.lab.Phase;
  * system message, every report schema that holds the cause enum, and the enum errors of the plan and report checks.
  * The expected values were captured from the code before T4 derived them from the topology, under
  * {@code src/test/resources/topology-pins}; they change only when a text changes on purpose, by that text alone (the
- * system message gained the resource warrant in odd/tasks/resource-warrant.md T3). Only the helpers at the bottom name the API, so a
+ * system message gained the resource warrant in odd/tasks/resource-warrant.md T3; the message and the category enums
+ * gained NETWORK and CODE_DEFECT in odd/tasks/decoy-categories.md T2). Only the helpers at the bottom name the API, so a
  * signature change touches them and nothing else.
  */
 class LabTopologyPinsTest {

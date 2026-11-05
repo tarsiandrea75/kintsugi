@@ -1535,6 +1535,7 @@ The system message MUST also say **(T5c8)**:
 - that for `DEPENDENCY_LATENCY` and `DEPENDENCY_REJECTING`, `rootCauseService` is the component where the slowness or the error answer starts, not its caller: name B when A waits for B or gets an error answer from B, and if B in turn waits for C or gets an error answer from C, name C; follow the calls down to the last component that is slow or refuses, and an answer that takes long is that component's own failure even when it ends in success and logs no error **(F3 T5)**;
 - that `DEPENDENCY_REJECTING` means B is reached and answers with an error, and `CONFIGURATION` includes a wrong address or port of a component A calls; when A cannot reach B at all (connection refused or closed, unknown host; a timeout is not this case) while B shows no failure of its own (no errors, no restarts, healthy metrics), B is not the cause and A's own setting for B, a `CONFIGURATION` of A, is suspected **(F3 T3)**;
 - right after the `RESOURCE_EXHAUSTION` definition, and once: `The dossier shows how much of a resource a component uses, not its limit: use that rises sharply from the previous window to the incident window is evidence that the component is running out, even when it logs no error and answers quickly.` It gives no number and no threshold, and `Prefer UNKNOWN to a guess` stays as it is **(resource-warrant T3)**;
+- after the `RESOURCE_EXHAUSTION` definition and before `UNKNOWN`, the two decoy categories' definitions: `- NETWORK: the network between components drops, delays or blocks traffic, while the components at both ends do their own work normally.` and `- CODE_DEFECT: a component's own code fails on valid requests: it throws errors or returns wrong results, although its settings, resources and dependencies are healthy.` **(decoy-categories T2)**;
 - that an affected order to trace is found with `recent_events` with `source=order`, not an older `PAID` one, and that its `orderId` is copied from a result, never a placeholder;
 - that an order never paid stays `PAYMENT_PENDING`, with `PAYMENT_UNAVAILABLE` order events, so `source=order` is filtered by `type=PAYMENT_UNAVAILABLE` or `outcome=PAYMENT_PENDING`, or not at all, and by `outcome=PAYMENT_FAILED` only when `status_summary` shows `PAYMENT_FAILED` orders **(T5c9)**.
 
@@ -1543,6 +1544,8 @@ Why (F3 T3): the recorded F3 runs applied "if A times out or fails because B doe
 Why (F3 T5): after T3 every recorded F1 run named the caller of the slow component (`payment-service|DEPENDENCY_LATENCY` for a slow gateway-mock, 0/6 against 3/6 before), while F3 went from 0/6 to 3/6. The model applied the rule one hop only, read a slow answer that ended in success with no warning or error as healthy, and risked reading a caller's timeout as "cannot reach". The rule now follows the calls down to the last slow or refusing component, says a slow success is still that component's failure, and excludes a timeout from "cannot reach". It still describes categories, never a fault, service or port of the lab.
 
 Why (resource-warrant T3): in 8 of the 12 resource cases decision mode abstained on in RE2-OB dev, the model saw the true service's resource rise and dismissed it, mostly because latency was normal or nothing logged an error (`odd/tasks/d-abstention.md`). The prompt gave latency a warrant but resources none, and defined `RESOURCE_EXHAUSTION` as a component that has run out, which the dossier cannot show: it holds use, not limits. The sentence mirrors the latency warrant and names no threshold, so the rules' thresholds are not read aloud to the model ([feature document](../../../odd/tasks/resource-warrant.md)).
+
+Why (decoy-categories T2): the taxonomy was exactly the catalog's four categories, so the model knew the answer was one of them ([ADR-029](../../../docs/adr/ADR-029-decoy-categories.md); `docs/vision.md`, "decoy categories"). `NETWORK` and `CODE_DEFECT` widen it, and no truth holds them, so a report naming one is wrong by construction and the cost of the wider choice shows directly. Each has a definition, as every other category does, so the model can weigh the evidence against it. The rules (Config 0) never emit them (ADR-016).
 
 Why (T5c9): in the fifth full run one incident filtered `source=order` by `outcome=PAYMENT_FAILED` while its orders were `PAYMENT_PENDING` with `PAYMENT_UNAVAILABLE` events, so it saw nothing. The line describes the order states the lab records, never a cause the lab may be put through.
 
@@ -1570,7 +1573,7 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 - WHEN the loop builds the system message
 - THEN it says `Its components are a, b, c and their database, db. The call path: a calls b; b calls c; the three services keep their data in db.`
 - AND it lists `a, b, c, db, or UNKNOWN` as the values of `rootCauseService`, the report schema's enum is the same list, and the gatherer reads `a`, `b`, `c` in that order
-- AND with the lab file the message, the schemas and the gathered lists are the same as before T4, byte for byte, but for the system message's resource warrant (resource-warrant T3)
+- AND with the lab file the message, the schemas and the gathered lists are the same as before T4, byte for byte, but for the system message's resource warrant (resource-warrant T3) and the two decoy categories in the message and the schemas' category enums (decoy-categories T2)
 
 #### Scenario: A caller that cannot reach a healthy dependency points at its own setting (F3 T3)
 - GIVEN A's calls to B fail because the connection is refused or closed, or the host is unknown
@@ -1592,6 +1595,11 @@ Why: a call's evidence always starts with the previous call's, so the prompt's b
 - THEN right after the `RESOURCE_EXHAUSTION` definition it says, once, that use rising sharply from the previous window to the incident window is evidence that the component is running out, even when it logs no error and answers quickly
 - AND it gives no number or threshold, and still says to prefer `UNKNOWN` to a guess
 
+#### Scenario: The decoy categories are defined (decoy-categories T2)
+- WHEN the loop builds the system message, in any mode and on any route
+- THEN after the `RESOURCE_EXHAUSTION` definition and before `UNKNOWN` it defines `NETWORK`, then `CODE_DEFECT`
+- AND the assessed report's task still names no category
+
 ### Requirement: The report
 
 In `CONCLUDE` the model MUST be called without tools, constrained by the report schema. The model writes these fields in this order, which the schema's properties, its `required` list and the report task all follow **(report-field-order)**: the reasoning (`summary`, then `evidence`) before the cause it leads to (`rootCauseService`, `rootCauseCategory`), then the `alternatives` ranked below that cause **(ranked-report T2)**, then `confidence`. A model writes left to right, so a field written earlier conditions the later ones; with the cause first, cloud F3 reports named a cause their own summary then argued against (`odd/tasks/report-field-order.md`).
@@ -1605,7 +1613,7 @@ In `CONCLUDE` the model MUST be called without tools, constrained by the report 
 | `evidence[].line` | an integer of at least 1: the number of the cited line in that step's summary, or `D<line>` in the dossier **(evidence-by-reference)** |
 | `evidence[].why` | at most 200 characters **(chosen)** |
 | `rootCauseService` | the loaded topology's causes: its services in display order, its datastores, then `UNKNOWN` (**topology-data T4**); for the lab, `gateway-mock`, `payment-service`, `order-service`, `inventory-service`, `postgres` or `UNKNOWN` |
-| `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION` or `UNKNOWN` |
+| `rootCauseCategory` | `DEPENDENCY_LATENCY`, `DEPENDENCY_REJECTING`, `CONFIGURATION`, `RESOURCE_EXHAUSTION`, `NETWORK`, `CODE_DEFECT` or `UNKNOWN`; `NETWORK` and `CODE_DEFECT` are decoys **(decoy-categories T2)** |
 | `alternatives` | 0 to 4 items `{rootCauseService, rootCauseCategory}`, best first, from the same enums but `UNKNOWN`; no service twice, the first cause's counted; when both causes are `UNKNOWN`, the suspects the model cannot support, under the same rules **(ranked-report T2; T6)** |
 | `confidence` | number, 0 to 1 |
 
@@ -1667,6 +1675,16 @@ Every stored report MUST carry its `verification` **(verification-levels T4; [AD
 - GIVEN a plain report naming `order-service|CONFIGURATION`
 - WHEN its alternatives repeat `order-service`, name one service twice, hold an item `UNKNOWN` in either field, hold five items, or are missing
 - THEN the report is invalid, its error names the breach and the item, and it gets the one retry
+
+#### Scenario: A decoy category is a valid cause and alternative (decoy-categories T2)
+- GIVEN a plain decision report naming `payment-service|CODE_DEFECT`, with the alternative `gateway-mock|NETWORK`, citing a dossier line
+- WHEN it is checked and stored
+- THEN the run completes, the stored category is `CODE_DEFECT`, and the stored `alternatives` are `gateway-mock|NETWORK`
+- AND a report naming `NETWORK` is valid too
+
+#### Scenario: An unknown category lists the seven values (decoy-categories T2)
+- WHEN a report's `rootCauseCategory`, or an alternative's, is `SLOW`
+- THEN the report is invalid with `rootCauseCategory must be one of DEPENDENCY_LATENCY, DEPENDENCY_REJECTING, CONFIGURATION, RESOURCE_EXHAUSTION, NETWORK, CODE_DEFECT, UNKNOWN; got "SLOW"`, prefixed by `alternatives[<i>].` for an alternative
 - AND a report naming `UNKNOWN|UNKNOWN` whose suspects break one of these rules is invalid in the same way
 
 #### Scenario: An abstention may list suspects (ranked-report T6)

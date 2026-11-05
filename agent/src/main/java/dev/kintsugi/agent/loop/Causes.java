@@ -14,8 +14,12 @@ final class Causes {
 
 	static final String UNKNOWN = "UNKNOWN";
 
+	/**
+	 * The catalog's four categories, then NETWORK and CODE_DEFECT, decoys that no truth holds, so the taxonomy is wider
+	 * than the catalog (ADR-029), then UNKNOWN.
+	 */
 	static final List<String> CATEGORIES = List.of("DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION",
-			"RESOURCE_EXHAUSTION", UNKNOWN);
+			"RESOURCE_EXHAUSTION", "NETWORK", "CODE_DEFECT", UNKNOWN);
 
 	private Causes() {
 	}

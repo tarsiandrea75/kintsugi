@@ -67,10 +67,19 @@ class PromptsTest {
 		String system = Prompts.system(LAB, "orders are slow", 15);
 
 		assertThat(system).contains("- RESOURCE_EXHAUSTION: a component has run out of a limited resource, such as "
-				+ "connections, memory, disk or threads. " + warrant + "\n- UNKNOWN:");
+				+ "connections, memory, disk or threads. " + warrant + "\n- NETWORK:");
 		assertThat(system.indexOf(warrant)).isEqualTo(system.lastIndexOf(warrant));
 		assertThat(system).contains("- Prefer UNKNOWN to a guess: name a component or a category only when the "
 				+ "evidence supports it.\n");
+	}
+
+	@Test
+	void theDecoyCategoriesAreDefinedBeforeUnknown() {
+		// ADR-029, Decision 2: each decoy has a definition, so the model can weigh the evidence against it.
+		assertThat(Prompts.system(LAB, "orders are slow", 15)).contains("\n- NETWORK: the network between components "
+				+ "drops, delays or blocks traffic, while the components at both ends do their own work normally.\n"
+				+ "- CODE_DEFECT: a component's own code fails on valid requests: it throws errors or returns wrong "
+				+ "results, although its settings, resources and dependencies are healthy.\n- UNKNOWN:");
 	}
 
 	@Test
@@ -270,7 +279,8 @@ class PromptsTest {
 			.doesNotContain("Citable");
 		// Fault-agnostic: no lab component, cause or fault named as an example.
 		for (String name : List.of("gateway-mock", "payment-service", "order-service", "inventory-service", "postgres",
-				"DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION", "RESOURCE_EXHAUSTION")) {
+				"DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION", "RESOURCE_EXHAUSTION", "NETWORK",
+				"CODE_DEFECT")) {
 			assertThat(task).as(name).doesNotContain(name);
 		}
 		assertThat(task).doesNotContainPattern("(?i)\\b(F[1-8]\\b|fault|inject)");

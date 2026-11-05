@@ -522,7 +522,8 @@ class ReportCheckTest {
 			assertThat(item.at("/properties/rootCauseService/enum")).extracting(JsonNode::asString)
 				.containsExactly("gateway-mock", "payment-service", "order-service", "inventory-service", "postgres");
 			assertThat(item.at("/properties/rootCauseCategory/enum")).extracting(JsonNode::asString)
-				.containsExactly("DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION", "RESOURCE_EXHAUSTION");
+				.containsExactly("DEPENDENCY_LATENCY", "DEPENDENCY_REJECTING", "CONFIGURATION", "RESOURCE_EXHAUSTION",
+						"NETWORK", "CODE_DEFECT");
 		}
 	}
 
@@ -546,6 +547,15 @@ class ReportCheckTest {
 				evidence(4, "search_logs", 2)))).isEmpty();
 		assertThat(errors(report("order-service", "CONFIGURATION", evidence(4, "search_logs", 2)))).isEmpty();
 		assertThat(errors(report("UNKNOWN", "UNKNOWN"))).isEmpty();
+	}
+
+	@Test
+	void theDecoyCategoriesAreValidCausesAndAlternatives() {
+		// ADR-029: NETWORK and CODE_DEFECT widen the taxonomy past the catalog's four categories.
+		assertThat(errors(report("order-service", "NETWORK", evidence(4, "search_logs", 2)))).isEmpty();
+		assertThat(errors(report("order-service", "CODE_DEFECT", evidence(4, "search_logs", 2)))).isEmpty();
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+				List.of("payment-service|NETWORK", "postgres|CODE_DEFECT"), evidence(4, "search_logs", 2)))).isEmpty();
 	}
 
 	@Test
@@ -606,7 +616,7 @@ class ReportCheckTest {
 						"alternatives[0].rootCauseService must be one of gateway-mock, payment-service, order-service, "
 								+ "inventory-service, postgres, UNKNOWN; got \"payment-gateway\"",
 						"alternatives[0].rootCauseCategory must be one of DEPENDENCY_LATENCY, DEPENDENCY_REJECTING, "
-								+ "CONFIGURATION, RESOURCE_EXHAUSTION, UNKNOWN; got \"SLOW\"");
+								+ "CONFIGURATION, RESOURCE_EXHAUSTION, NETWORK, CODE_DEFECT, UNKNOWN; got \"SLOW\"");
 		String shapes = rankedReport("order-service", "CONFIGURATION", List.of(), evidence(4, "search_logs", 2))
 			.replace("\"alternatives\":[]", "\"alternatives\":[\"postgres\",{\"rootCauseService\":\"postgres\","
 					+ "\"rootCauseCategory\":\"CONFIGURATION\",\"why\":\"x\"}]");
@@ -917,7 +927,7 @@ class ReportCheckTest {
 			.replace("\"summary\":\"what the sheets show\",", "");
 		assertThat(checkAssessed(outsideTheEnums).errors()).containsExactly(
 				"rootCauseCategory must be one of DEPENDENCY_LATENCY, DEPENDENCY_REJECTING, CONFIGURATION, "
-						+ "RESOURCE_EXHAUSTION, UNKNOWN; got \"SLOW\"",
+						+ "RESOURCE_EXHAUSTION, NETWORK, CODE_DEFECT, UNKNOWN; got \"SLOW\"",
 				"summary must be a string of 1 to 500 characters");
 	}
 
