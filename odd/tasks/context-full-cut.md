@@ -50,7 +50,7 @@ Out of scope:
 - [x] T1 This document. Route: inline (one file).
 - [x] T2 Context-full message, test-first (`AgentLoop`, `ModelRoute`/`OllamaRoute`, `ScriptedChatModel`, `AgentLoopTest`). Route: delegated writer, T2 and T3 together (2+ non-trivial files).
 - [x] T3 The `--num-ctx` override and the `numCtx` column (`replay-agent.sh`, `ReplayDriver`, `LocalRouteSettingsTest`, `ReplayDriverTest`, evals reader if needed, `openspec/specs/agent/spec.md`, `docs/setup.md`).
-- [ ] T4 Plan, rerun, score, notes.
+- [x] T4 Plan, rerun, score, notes.
 
 ## Delivery
 
@@ -68,4 +68,7 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2–
   - R3-001: if Ollama's prompt count left out a cached prefix, a full window would be reported as a cap cut again. The fallback is today's message. In HT all 5 cut attempts, the retries included, summed to exactly 8192. Follow-up.
   - R3-002: the `--num-ctx` bounds and its refusal on other routes are checked by hand only, like the earlier override options. Follow-up.
 - T4: plan `evals/plans/2026-11-05-hybrid-ctx12k-re2ob-dev.md` (label HC).
-- Next: T4, the rules replays, then the HC run.
+- T4: HC run `replay-20261105T115842Z-local`, results `evals/results/2026-11-05-hybrid-ctx12k-re2ob-dev/`.
+  - 30/30 `COMPLETED`, 0 cut report attempts, 24/30 AC@1 (the ceiling). HC − HT is 1 to 0, p = 1.
+  - The deadline rule fired: the maximum sample time was 2,540 s, over 1,800 s. That decision is the human's. AC5 met.
+- Next: the human decides on the default window (an ADR-010 amendment) and on the deadline (ADR-023).

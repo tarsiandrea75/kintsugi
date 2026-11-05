@@ -1,0 +1,6 @@
+label	source	sha256	rows
+0	../infra/scripts/out/replay-20261105T115822Z-rules	9911584908e42f89db86f21faa7bd46a20e79fe92289c7bc9a608f0c1281e63f	30
+0R	../infra/scripts/out/replay-20261105T115827Z-rules	4f37b0902e0bcd66e1bbb7d56617a9ea4f701ac10dee2c6d9742faeb60773071	30
+HR	results/2026-11-01-hybrid-rules-v2-re2ob-dev/inputs/HR-summary.tsv	337852381666f1083fcca7e72c366f685cdfb1b164c087fe94b84e62bf9ffdc4	30
+HT	results/2026-11-05-hybrid-today-re2ob-dev/inputs/HT-summary.tsv	c8a00b213b92c91ca93d187712aa7bbce9d7000147bd21e45357043b0fb7c951	30
+HC	../infra/scripts/out/replay-20261105T115842Z-local	be9bad22664066fa0b3301258038a3b33beae9fd91ba14879478d7546d08e58b	30
