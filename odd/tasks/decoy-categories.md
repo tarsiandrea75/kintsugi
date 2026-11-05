@@ -40,7 +40,7 @@ Out of scope:
 ## Tasks
 
 - [x] T1 This document and ADR-029. Route: inline.
-- [ ] T2 The taxonomy, the prompt, the pins and the spec. Route: delegated writer (2+ non-trivial files).
+- [x] T2 The taxonomy, the prompt, the pins and the spec. Route: delegated writer (2+ non-trivial files).
 - [ ] T3 The plan, the runs, the results and notes; STATE.
 
 ## Delivery
@@ -50,3 +50,9 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 is
 ## Progress
 
 - T1: `aac223f`. ADR-029 accepted. The human confirmed both definitions on 2026-11-05.
+- T2: `aa25d35`. Route: delegated writer (code, tests, six pin files and the spec).
+  - RED: 9 failures before the code change, in `ReportCheckTest` (4: the new decoy test, both enum error strings, the alternatives' schema enum), `AgentLoopDecisionModeTest` (3: the new stored-decoy test, the plain and hybrid byte-for-byte schemas) and `PromptsTest` (2: the new definitions test, the warrant now followed by `NETWORK`).
+  - GREEN: `./mvnw test` in `agent/`: 794 tests, 0 failures, 0 errors; `pytest -q` in `evals/`: 412 passed.
+  - AC1: `theDecoyCategoriesAreValidCausesAndAlternatives` and `aReportNamingTheDecoyCategoriesIsStored`; the enum errors list the six values plus `UNKNOWN`.
+  - AC2: each schema pin changes by `"NETWORK","CODE_DEFECT"` in its category enums only; each system pin gains the two definition lines before `UNKNOWN`.
+  - The rules are untouched. AC3 (the Config 0 replays) is left to T3.
