@@ -45,7 +45,7 @@ Out of scope:
 
 ## Tasks
 
-- [ ] T1 This document and the ADR-028 amendment. Route: inline.
+- [x] T1 This document and the ADR-028 amendment. Route: inline.
 - [x] T2 The `no-changed-callee` check and its spec. Route: delegated writer (2+ non-trivial files), together with T3.
 - [x] T3 `LevelRecheck` for hybrid rows. Route: delegated writer, with T2.
 - [ ] T4 The plan, the re-check, the results and notes; STATE.
@@ -59,4 +59,10 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 an
 - T1: created, with the ADR-028 amendment.
 - T2: `916c68d`. Route: delegated writer (2+ non-trivial files: `ReportCheck`, `Verification`, tests, spec). RED: with the constant added and no check, `ReportCheckTest` ran 95 tests with 5 failures and 6 errors (the new check absent from every verification). GREEN: `./mvnw test` 788 tests, 0 failures. `verification()` now takes the dossier's full fact list, since the check reads uncited lines. Changed expectations: only the check lists (stored and in `ReportCheckTest`) gain `no-changed-callee`; no fixture's level changed (AC3).
 - T3: `73a65c9`. Route: delegated writer, with T2. RED: with a stub overload ignoring the candidates, `LevelRecheckTest` ran 11 tests with 3 errors (the plain check rejects a hybrid answer and a no-candidate step; `run` refuses a hybrid row). GREEN: `./mvnw test` 791 tests, 0 failures. A hybrid row is checked against its `candidates` column; a no-candidate run is re-checked with `withoutEvidence` at L1. `infra/scripts/recheck-levels.sh` help updated.
-- Next: T4, the committed plan, then the re-check of the dev results.
+- T1: `2e710bd`.
+- Review of `2e710bd..dc7b6ef` (T2 and T3): high risk, four lenses, consent granted by standing preference. Approved and acknowledged (`review-56a715f211df6d41`). Advisories:
+  - R4, a null owner could throw: not reachable, because `LineFact`'s constructor requires a non-null owner (`LineFact.java:20`).
+  - R2: `LevelRecheck.recheck` carries three states in one nullable list. The candidates parse in `row()` is a fail-before-write guard and says nothing to show it. `hybridRow` in the test builds its fixture by string replace. Follow-ups.
+  - R3: `LevelRecheck`'s no-candidate refusals and its hybrid-row validation have no test. Follow-ups.
+- T4: plan `evals/plans/2026-11-05-l3-callee-recheck.md`.
+- Next: T4, the re-checks.
