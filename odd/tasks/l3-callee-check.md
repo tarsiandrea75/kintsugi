@@ -46,8 +46,8 @@ Out of scope:
 ## Tasks
 
 - [ ] T1 This document and the ADR-028 amendment. Route: inline.
-- [ ] T2 The `no-changed-callee` check and its spec. Route: delegated writer (2+ non-trivial files), together with T3.
-- [ ] T3 `LevelRecheck` for hybrid rows.
+- [x] T2 The `no-changed-callee` check and its spec. Route: delegated writer (2+ non-trivial files), together with T3.
+- [x] T3 `LevelRecheck` for hybrid rows. Route: delegated writer, with T2.
 - [ ] T4 The plan, the re-check, the results and notes; STATE.
 
 ## Delivery
@@ -57,3 +57,6 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 an
 ## Progress
 
 - T1: created, with the ADR-028 amendment.
+- T2: `916c68d`. Route: delegated writer (2+ non-trivial files: `ReportCheck`, `Verification`, tests, spec). RED: with the constant added and no check, `ReportCheckTest` ran 95 tests with 5 failures and 6 errors (the new check absent from every verification). GREEN: `./mvnw test` 788 tests, 0 failures. `verification()` now takes the dossier's full fact list, since the check reads uncited lines. Changed expectations: only the check lists (stored and in `ReportCheckTest`) gain `no-changed-callee`; no fixture's level changed (AC3).
+- T3: `73a65c9`. Route: delegated writer, with T2. RED: with a stub overload ignoring the candidates, `LevelRecheckTest` ran 11 tests with 3 errors (the plain check rejects a hybrid answer and a no-candidate step; `run` refuses a hybrid row). GREEN: `./mvnw test` 791 tests, 0 failures. A hybrid row is checked against its `candidates` column; a no-candidate run is re-checked with `withoutEvidence` at L1. `infra/scripts/recheck-levels.sh` help updated.
+- Next: T4, the committed plan, then the re-check of the dev results.
