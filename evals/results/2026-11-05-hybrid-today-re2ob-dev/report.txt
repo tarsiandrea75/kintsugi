@@ -1,0 +1,77 @@
+0: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0  cpu      0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  disk     0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  loss     2/5   AC@1  40%  [12%, 77%]  recall 60%
+0  mem      1/5   AC@1  20%  [4%, 62%]  recall 20%
+0  socket   0/5   AC@1   0%  [0%, 43%]  recall 0%
+0  pooled   4/30  AC@1  13%  [5%, 30%]  coverage 37%  selective 36%  recall 17%
+0  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+0  verified  0/0   verified-correct n/a  without a level: 30 fault rows
+0  L1        0/0   L1 rate n/a  without a level: 30 rows
+0  ranked cpu      5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.00
+0  ranked delay    5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+0  ranked disk     5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.40
+0  ranked loss     5  AC@1 2/5 40% [12%, 77%]  AC@3 3/5 60% [23%, 88%]  AC@5 3/5 60% [23%, 88%]  Avg@5 56%  mean list 2.00
+0  ranked mem      5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+0  ranked socket   5  AC@1 0/5 0% [0%, 43%]  AC@3 0/5 0% [0%, 43%]  AC@5 0/5 0% [0%, 43%]  Avg@5 0%  mean list 0.20
+0  ranked pooled  30  AC@1 4/30 13% [5%, 30%]  AC@3 5/30 17% [7%, 34%]  AC@5 5/30 17% [7%, 34%]  Avg@5 16%  mean list 0.63
+0R: route rules, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+0R  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+0R  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+0R  disk     4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+0R  mem      4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  socket   4/5   AC@1  80%  [38%, 96%]  recall 100%
+0R  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%  recall 80%
+0R  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+0R  verified  0/0   verified-correct n/a  without a level: 30 fault rows
+0R  L1        0/0   L1 rate n/a  without a level: 30 rows
+0R  ranked cpu      5  AC@1 4/5 80% [38%, 96%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 80%  mean list 0.80
+0R  ranked delay    5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+0R  ranked disk     5  AC@1 4/5 80% [38%, 96%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 92%  mean list 1.40
+0R  ranked loss     5  AC@1 3/5 60% [23%, 88%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 76%  mean list 2.20
+0R  ranked mem      5  AC@1 4/5 80% [38%, 96%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 92%  mean list 1.40
+0R  ranked socket   5  AC@1 4/5 80% [38%, 96%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 96%  mean list 1.20
+0R  ranked pooled  30  AC@1 20/30 67% [49%, 81%]  AC@3 24/30 80% [63%, 90%]  AC@5 24/30 80% [63%, 90%]  Avg@5 76%  mean list 1.27
+HR: route local, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+HR  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+HR  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+HR  disk     5/5   AC@1 100%  [57%, 100%]  recall 100%
+HR  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+HR  mem      5/5   AC@1 100%  [57%, 100%]  recall 100%
+HR  socket   5/5   AC@1 100%  [57%, 100%]  recall 100%
+HR  pooled  23/30  AC@1  77%  [59%, 88%]  coverage 83%  selective 92%  recall 80%
+HR  policy   riskyExecuted -  policyRefused -  known for 0/30 rows
+HR  ranked cpu      5  AC@1 4/5 80% [38%, 96%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 80%  mean list 0.80
+HR  ranked delay    5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.60
+HR  ranked disk     5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.40
+HR  ranked loss     5  AC@1 3/5 60% [23%, 88%]  AC@3 3/5 60% [23%, 88%]  AC@5 3/5 60% [23%, 88%]  Avg@5 60%  mean list 1.00
+HR  ranked mem      5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.40
+HR  ranked socket   5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.20
+HR  ranked pooled  30  AC@1 23/30 77% [59%, 88%]  AC@3 23/30 77% [59%, 88%]  AC@5 23/30 77% [59%, 88%]  Avg@5 77%  mean list 1.07
+HT: route local, mode decision, view tables; 30 fault cases, 0 healthy; AC@1 on the service only
+HT  cpu      4/5   AC@1  80%  [38%, 96%]  recall 80%
+HT  delay    1/5   AC@1  20%  [4%, 62%]  recall 20%
+HT  disk     5/5   AC@1 100%  [57%, 100%]  recall 100%
+HT  loss     3/5   AC@1  60%  [23%, 88%]  recall 80%
+HT  mem      5/5   AC@1 100%  [57%, 100%]  recall 100%
+HT  socket   5/5   AC@1 100%  [57%, 100%]  recall 100%
+HT  pooled  23/30  AC@1  77%  [59%, 88%]  coverage 80%  selective 96%  recall 80%
+HT  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+HT  verified 21/27  verified-correct  78%  [59%, 89%]  without a level: 3 fault rows
+HT  L1       27/27  L1 rate 100%  [88%, 100%]  without a level: 3 rows
+HT  ranked cpu      5  AC@1 4/5 80% [38%, 96%]  AC@3 4/5 80% [38%, 96%]  AC@5 4/5 80% [38%, 96%]  Avg@5 80%  mean list 0.80
+HT  ranked delay    5  AC@1 1/5 20% [4%, 62%]  AC@3 1/5 20% [4%, 62%]  AC@5 1/5 20% [4%, 62%]  Avg@5 20%  mean list 0.40
+HT  ranked disk     5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.40
+HT  ranked loss     5  AC@1 3/5 60% [23%, 88%]  AC@3 3/5 60% [23%, 88%]  AC@5 3/5 60% [23%, 88%]  Avg@5 60%  mean list 1.00
+HT  ranked mem      5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.40
+HT  ranked socket   5  AC@1 5/5 100% [57%, 100%]  AC@3 5/5 100% [57%, 100%]  AC@5 5/5 100% [57%, 100%]  Avg@5 100%  mean list 1.20
+HT  ranked pooled  30  AC@1 23/30 77% [59%, 88%]  AC@3 23/30 77% [59%, 88%]  AC@5 23/30 77% [59%, 88%]  Avg@5 77%  mean list 1.03
+chance with 11 services (../agent/src/main/resources/topology/re2-ob.json): AC@1 9.09%  AC@3 27.27%  AC@5 45.45%  Avg@5 27.27%
+0R - 0: 30 cases, 0R only 16, 0 only 0, exact McNemar p = 3.1e-05 (Holm 0.00012); difference +53 points, cluster bootstrap 95% [+33, +70] (seed 1, 10000 resamples)
+HR - 0: 30 cases, HR only 19, 0 only 0, exact McNemar p = 3.8e-06 (Holm 2.3e-05); difference +63 points, cluster bootstrap 95% [+47, +80] (seed 1, 10000 resamples)
+HT - 0: 30 cases, HT only 19, 0 only 0, exact McNemar p = 3.8e-06 (Holm 2.3e-05); difference +63 points, cluster bootstrap 95% [+47, +80] (seed 1, 10000 resamples)
+HR - 0R: 30 cases, HR only 3, 0R only 0, exact McNemar p = 0.25 (Holm 0.75); difference +10 points, cluster bootstrap 95% [+0, +23] (seed 1, 10000 resamples)
+HT - 0R: 30 cases, HT only 3, 0R only 0, exact McNemar p = 0.25 (Holm 0.75); difference +10 points, cluster bootstrap 95% [+0, +23] (seed 1, 10000 resamples)
+HT - HR: 30 cases, HT only 0, HR only 0, exact McNemar p = 1 (Holm 1); difference +0 points, cluster bootstrap 95% [+0, +0] (seed 1, 10000 resamples)
