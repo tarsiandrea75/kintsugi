@@ -39,7 +39,7 @@ Out of scope:
 
 ## Tasks
 
-- [ ] T1 This document and ADR-029. Route: inline.
+- [x] T1 This document and ADR-029. Route: inline.
 - [ ] T2 The taxonomy, the prompt, the pins and the spec. Route: delegated writer (2+ non-trivial files).
 - [ ] T3 The plan, the runs, the results and notes; STATE.
 
@@ -49,4 +49,4 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 is
 
 ## Progress
 
-- T1: created, with ADR-029 (proposed).
+- T1: `aac223f`. ADR-029 accepted. The human confirmed both definitions on 2026-11-05.

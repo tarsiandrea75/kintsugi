@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-11-05). Feature: [`odd/tasks/decoy-categories.md`](../../odd/tasks/decoy-categories.md).
+Accepted (2026-11-05). The human confirmed the definitions in Decision 2. Feature: [`odd/tasks/decoy-categories.md`](../../odd/tasks/decoy-categories.md).
 
 ## Date
 
