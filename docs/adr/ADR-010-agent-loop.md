@@ -221,6 +221,18 @@ ADR-012 (accepted 2026-10-18) adds a development route so design questions get a
 - **Its own deadlines, `kintsugi.agent.cloud.call-timeout`** (`act` 60 s, `report` 90 s, to be measured in T5). The `RestClientCustomizer` still sets the local route's read timeout; the Anthropic SDK's client is not a `RestClient`, so `spring.ai.anthropic.timeout` is set to the longest cloud deadline and `max-retries` to 0, since the loop owns retries.
 - **Start failures and records.** An unknown route stops the start naming `kintsugi.agent.route`; the cloud route without `ANTHROPIC_API_KEY` stops it naming the variable. The incident (migration V6) and the stored report record `route` and `model`, written when the run starts like the mode. `PlanCheck` and `ReportCheck` verify on both routes.
 
+### Amended 2026-11-05 (context-full-cut): the window, set per run, stays 8192 by default
+
+The human chose to keep the default `num-ctx` at 8192. The setting is now the measurable knob that "Alternatives considered" promised (feature document [context-full-cut](../../odd/tasks/context-full-cut.md)).
+
+- **A per-run window.** `replay-agent.sh --num-ctx N` sets `KINTSUGI_AGENT_MODEL_NUM_CTX`, the window used by the local calls and the warm-up. The script unsets the variable otherwise. `summary.tsv` and `aggregate.tsv` record it in a `numCtx` column (`461e2c5`).
+- **A full window is named for its cause.** When a cut answer's prompt plus completion tokens reach the route's window, the error says that the window filled, not that the cap was reached (`8207f37`).
+- **The evidence, from the hybrid on RE2-OB dev:**
+  - [HT](../../evals/results/2026-11-05-hybrid-today-re2ob-dev/notes.md) (8192) cut 5 report attempts, all because the window filled, and scored 23/30.
+  - [HC](../../evals/results/2026-11-05-hybrid-ctx12k-re2ob-dev/notes.md) (12288) cut none and scored 24/30. HC − HT is 1 to 0, p = 1.
+  - HC's median sample time rose from 875 s to 961 s. Its maximum, 2,540 s, passed the 1,800 s deadline rule.
+- **Why the default is not raised:** one case of gain from a single run, against a slower report and a fired deadline rule. ADR-023's deadline stays as it is, because HT's slowest sample at 8192 took 1,553 s.
+
 ### Plan and report schemas
 
 - **Plan:** `hypotheses` (1 to 3 items, each `{rootCauseService, rootCauseCategory, why}`, `why` at most 300 characters since T5c10), `nextTools` (0 to 4 of the phase's tools; since T5c12 an entry outside the phase is dropped). Same enums as the report.

@@ -71,4 +71,4 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2–
 - T4: HC run `replay-20261105T115842Z-local`, results `evals/results/2026-11-05-hybrid-ctx12k-re2ob-dev/`.
   - 30/30 `COMPLETED`, 0 cut report attempts, 24/30 AC@1 (the ceiling). HC − HT is 1 to 0, p = 1.
   - The deadline rule fired: the maximum sample time was 2,540 s, over 1,800 s. That decision is the human's. AC5 met.
-- Next: the human decides on the default window (an ADR-010 amendment) and on the deadline (ADR-023).
+- Closed: the human kept the default window at 8192. A dated amendment is in ADR-010. ADR-023's deadline is unchanged, because the rule fired only at 12288.
