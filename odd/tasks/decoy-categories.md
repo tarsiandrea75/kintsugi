@@ -65,3 +65,6 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 is
   - RE2-OB service: 21/30 against 26/30, p = 0.062, mostly through more abstentions (6 against 3).
   - Results: `evals/results/2026-11-05-decoy-categories-*`. AC5 met.
 - Open, the human's call: whether the RE2-OB drop is the taxonomy or sampling noise. One run per configuration cannot tell.
+- Noise check, plan `4e8cda9` (amended `9849aa7`): 3 runs each, $0.242.
+  - DS′ 71/90 against DK′ 63/90; DK′ − DS′ is −8.9 points [−17.8, 0.0].
+  - The rule's outcome: the CI includes 0, so keep. It is borderline, and the decision is the human's.

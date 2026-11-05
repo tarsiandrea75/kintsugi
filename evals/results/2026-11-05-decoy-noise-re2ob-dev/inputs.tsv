@@ -1,0 +1,5 @@
+label	source	sha256	rows
+0	results/2026-11-05-decoy-categories-re2ob-dev/inputs/0-summary.tsv	9911584908e42f89db86f21faa7bd46a20e79fe92289c7bc9a608f0c1281e63f	30
+0R	results/2026-11-05-decoy-categories-re2ob-dev/inputs/0R-summary.tsv	4f37b0902e0bcd66e1bbb7d56617a9ea4f701ac10dee2c6d9742faeb60773071	30
+DS2	/tmp/claude-1000/-home-andreatarsi-projects-kintsugi/d2c8feec-8a0b-408a-884d-774dc0e39c7e/scratchpad/noise/DS2-summary.tsv	91ce50df6f204d6d59197bb7212cf0f17831bcabc6313b807a527a8ce1983beb	90
+DK2	/tmp/claude-1000/-home-andreatarsi-projects-kintsugi/d2c8feec-8a0b-408a-884d-774dc0e39c7e/scratchpad/noise/DK2-summary.tsv	eaea3967751fff526fc51666b72cc9887ada2127e7cc8dcdcd003090a155c807	90
