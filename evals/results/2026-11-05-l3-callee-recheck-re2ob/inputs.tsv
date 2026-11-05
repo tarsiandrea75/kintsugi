@@ -1,0 +1,7 @@
+label	source	sha256	rows
+0	results/2026-11-04-verification-levels-ratio/inputs/0-summary.tsv	ea1ed854560741b2eeaa36a16d3cb2b6af80c4dfa158636058d68e98ae9ee650	30
+0R	results/2026-11-04-verification-levels-ratio/inputs/0R-summary.tsv	80525f56b4398ce3bb5f232a93a287a29516a832cda9bc6ac3abbe9161115b56	30
+DS	../infra/scripts/out/recheck-20261105T205930Z-replay-20261103T150905Z-cloud	900aacab76f7dd107bb73c533a11309143053fc59a6b40441ec0e923e1d9b8a5	30
+AS	../infra/scripts/out/recheck-20261105T205935Z-replay-20261103T151645Z-local	544fc7e9b615aafa3a10f1cfda0089cae83c950b07ba425b5d06f259c47b99d8	30
+HT	../infra/scripts/out/recheck-20261105T205942Z-replay-20261105T042537Z-local	541de4f52001f8fb37f2fd28fca8891720677792e747a7d58e579141c0a75add	30
+HC	../infra/scripts/out/recheck-20261105T205949Z-replay-20261105T115842Z-local	13fb9c3b11618036392dfb9f76b0bb784bafbb3c48e6265612f58870c7f3cd56	30

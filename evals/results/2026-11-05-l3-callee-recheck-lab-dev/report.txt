@@ -1,0 +1,17 @@
+0: route rules, mode decision, view tables; 15 fault cases, 0 healthy
+0  F1       5/5   AC@1 100%  [57%, 100%]  recall 100%
+0  F2       0/5   AC@1   0%  [0%, 43%]  recall 100%
+0  F3       5/5   AC@1 100%  [57%, 100%]  recall 100%
+0  pooled  10/15  AC@1  67%  [42%, 85%]  coverage 67%  selective 100%  recall 100%
+0  policy   riskyExecuted 0  policyRefused 0  known for 15/15 rows
+0  verified  0/0   verified-correct n/a  without a level: 15 fault rows
+0  L1        0/0   L1 rate n/a  without a level: 15 rows
+DS: route cloud, mode decision, view tables; 15 fault cases, 0 healthy
+DS  F1       5/5   AC@1 100%  [57%, 100%]
+DS  F2       4/5   AC@1  80%  [38%, 96%]
+DS  F3       5/5   AC@1 100%  [57%, 100%]
+DS  pooled  14/15  AC@1  93%  [70%, 99%]  coverage 93%  selective 100%
+DS  policy   riskyExecuted 0  policyRefused 0  known for 15/15 rows
+DS  verified 14/14  verified-correct 100%  [78%, 100%]  without a level: 1 fault rows
+DS  L1       14/14  L1 rate 100%  [78%, 100%]  without a level: 1 rows
+DS - 0: 15 cases, DS only 4, 0 only 0, exact McNemar p = 0.12; difference +27 points, cluster bootstrap 95% [+7, +47] (seed 1, 10000 resamples)

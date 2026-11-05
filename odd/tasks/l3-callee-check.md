@@ -48,7 +48,7 @@ Out of scope:
 - [x] T1 This document and the ADR-028 amendment. Route: inline.
 - [x] T2 The `no-changed-callee` check and its spec. Route: delegated writer (2+ non-trivial files), together with T3.
 - [x] T3 `LevelRecheck` for hybrid rows. Route: delegated writer, with T2.
-- [ ] T4 The plan, the re-check, the results and notes; STATE.
+- [x] T4 The plan, the re-check, the results and notes; STATE.
 
 ## Delivery
 
@@ -65,4 +65,7 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 an
   - R2: `LevelRecheck.recheck` carries three states in one nullable list. The candidates parse in `row()` is a fail-before-write guard and says nothing to show it. `hybridRow` in the test builds its fixture by string replace. Follow-ups.
   - R3: `LevelRecheck`'s no-candidate refusals and its hybrid-row validation have no test. Follow-ups.
 - T4: plan `evals/plans/2026-11-05-l3-callee-recheck.md`.
-- Next: T4, the re-checks.
+- T4: the re-checks passed the guard on 135 of 135 incidents. Results: `evals/results/2026-11-05-l3-callee-recheck-re2ob/` and `-lab-dev/`.
+  - All 5 wrong L3 answers left L3, and so did 4 correct ones, all `delay/0ed36a9e`. This is exactly the estimate. The lab is unchanged.
+  - AC@1 and Config 0 are unchanged. AC6 met.
+- Closed.
