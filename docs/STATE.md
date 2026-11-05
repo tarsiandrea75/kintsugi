@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-04 (session 02, closed after midnight)
+2026-11-05 (session 01)
 
 ## Milestone
 
@@ -16,7 +16,12 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-Latest (journal `docs/journal/2026-11-04-02.md`): verification-levels, T1–T8 complete (`odd/tasks/verification-levels.md`, ADR-028): every stored report states L0–L3 as an annotation, the scorer reports Verified-correct and the L1 rate (Next action, item 17e).
+Latest (journal `docs/journal/2026-11-05-01.md`): HT, a hybrid run with today's agent. Then three features before the freeze, all closed:
+- **context-full-cut:** a full context window is named for its cause, and `--num-ctx` can be set per run (ADR-010, amended; the default stays 8192);
+- **l3-callee-check:** `no-changed-callee`, a second L3 check, post hoc (ADR-028, amended);
+- **decoy-categories:** NETWORK and CODE_DEFECT, kept with their probable cost (ADR-029).
+
+Before that (journal `docs/journal/2026-11-04-02.md`): verification-levels, T1–T8 complete (`odd/tasks/verification-levels.md`, ADR-028): every stored report states L0–L3 as an annotation, the scorer reports Verified-correct and the L1 rate (Next action, item 17e).
 
 Before that (journal `docs/journal/2026-11-04-01.md`): A with today's agent, `check-freeze.sh`, holdout-2's seed (ADR-026), the policy gate (ADR-027) and lab-realism-min, closed with T6's live dev check and T7's healthy replay (Next action, items 16 to 17d).
 
@@ -62,6 +67,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
     - By the pre-registered rule the CI includes 0, so there is no evidence of a cost, and the rule's recommendation is to keep the decoys.
     - The data lean to a cost through more abstentions: 22 against 15.
   - Settled on 2026-11-05: the human kept the decoys (ADR-029, amended, with the probable cost stated).
+  - Before the tag: the human merges today's chain (`feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`).
   - Settled on 2026-11-05: the default context window stays 8192 (ADR-010, amended). L3 gains `no-changed-callee`, post hoc (ADR-028, amended; `evals/results/2026-11-05-l3-callee-recheck-re2ob/notes.md`): no wrong dev answer is left at L3, at the cost of one recording (`delay/0ed36a9e`).
   - Verified-correct on RE2-OB dev: DS 24/30, HC 20/30, HT 20/27.
   - On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
@@ -106,6 +112,15 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 - Runbooks avoid naming the dashboard ("Lab — Faults", uid `lab-f1`) because of the leakage grep; a neutral dashboard name would allow linking it.
 
 ## Follow-ups
+
+Session of 2026-11-05 (details in `odd/tasks/context-full-cut.md`, `odd/tasks/l3-callee-check.md`, `odd/tasks/decoy-categories.md`):
+- **context-full-cut:**
+  - R3-001: a cached prefix Ollama leaves out of its prompt count would make a full window read as a cap cut again.
+  - R3-002: the bounds of `--num-ctx` are checked by hand only.
+- **l3-callee-check:** `LevelRecheck` has no test for its no-candidate refusals or its hybrid-row validation. Its three-state `candidates` parameter is a readability WARNING.
+- **decoy-categories:** no test accepts an assessed report that names a decoy.
+- **Lab F2:** two `INVALID_REPORT`s came from the alternatives rule, which refuses a service named twice. The cloud model breaks it on F2.
+- **Freeze:** the four branches of today (`feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`) must be merged before the tag on 2026-12-01, or the agent at the tag lacks them.
 
 Session of 2026-11-04 (02), verification-levels (details in `odd/tasks/verification-levels.md`):
 - `LevelRecheck` catches only `Refused` per incident: a corrupt incident file or an unparseable answer aborts the run with a stack trace (WARNINGs R3-001, R4-001; fails closed).
