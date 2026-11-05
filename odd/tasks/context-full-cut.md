@@ -48,8 +48,8 @@ Out of scope:
 ## Tasks
 
 - [ ] T1 This document. Route: inline (one file).
-- [ ] T2 Context-full message, test-first (`AgentLoop`, `ModelRoute`/`OllamaRoute`, `ScriptedChatModel`, `AgentLoopTest`). Route: delegated writer, T2 and T3 together (2+ non-trivial files).
-- [ ] T3 The `--num-ctx` override and the `numCtx` column (`replay-agent.sh`, `ReplayDriver`, `LocalRouteSettingsTest`, `ReplayDriverTest`, evals reader if needed, `openspec/specs/agent/spec.md`, `docs/setup.md`).
+- [x] T2 Context-full message, test-first (`AgentLoop`, `ModelRoute`/`OllamaRoute`, `ScriptedChatModel`, `AgentLoopTest`). Route: delegated writer, T2 and T3 together (2+ non-trivial files).
+- [x] T3 The `--num-ctx` override and the `numCtx` column (`replay-agent.sh`, `ReplayDriver`, `LocalRouteSettingsTest`, `ReplayDriverTest`, evals reader if needed, `openspec/specs/agent/spec.md`, `docs/setup.md`).
 - [ ] T4 Plan, rerun, score, notes.
 
 ## Delivery
@@ -59,3 +59,6 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2–
 ## Progress
 
 - T1: created.
+- T2: `8207f37` fix(agent): name a full context window instead of the report cap. `ModelRoute.contextWindow()` (empty by default, `num-ctx` on `OllamaRoute`); a cut answer with prompt + completion ≥ the window names the window in the report error and the ACT note, otherwise the cap as before. RED observed first: `aReportCutByAFullContextWindowNamesTheWindowNotTheCap` and `anActAnswerCutByAFullContextWindowNotesTheWindow` failed, the below-window and cloud tests passed; then GREEN, `AgentLoopTest` 62/62, agent suite 780/780 (`./mvnw test`). AC1 met.
+- T3: `461e2c5` feat(replay): set and record the context window per run. `--num-ctx N` (1 to 999999) exports `KINTSUGI_AGENT_MODEL_NUM_CTX`, cleared otherwise, refused off the local route (exit 2, checked by hand). `LocalRouteSettingsTest` proves the env var reaches the calls and the warm-up (12288; 8192 without it): Spring's relaxed binding needed no code. `numCtx` sits after `reportTimeout` in `summary.tsv` and `aggregate.tsv` (`-` on cloud and rules). RED: `ReplayDriverTest` did not compile against the 4-field `Settings`; GREEN after. Agent suite 782/782; evals 409 passed, including a new reader test with `numCtx`. AC2, AC3 (script part) and AC4 met.
+- Next: T4, the measurement plan, then the HT rerun with `--num-ctx 12288`.
