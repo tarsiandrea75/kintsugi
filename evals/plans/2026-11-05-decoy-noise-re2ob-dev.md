@@ -94,3 +94,12 @@ I=results/2026-11-05-decoy-categories-re2ob-dev/inputs
 ```
 
 The labels are `DS2` and `DK2`: the scorer's input file names keep only ASCII letters, digits, `.`, `_` and `-` (`cli.py:70`). The worktree is removed after its summary is copied into the result's inputs.
+
+## Amendment, 2026-11-05, before any sample was drawn
+
+- **Why.** The first DS′ launch was refused, and no call was made: `replay-agent.sh:324` caps a cloud run at 60 samples, and `--repeats 3` asks for 90.
+- **Six runs instead of two.** Each config runs three times with `--repeats 1` (30 samples each), interleaved DS′, DK′, DS′, DK′, DS′, DK′, so that any drift in the provider over time falls on both.
+- **Repeat *i* of a config is its *i*-th run.**
+- **The merged input.** Each config's input is the concatenation of its three `summary.tsv` files, with the header once, in run order: 90 rows. The scorer keys a case by split and recording (`scoring.py:110`), so the three rows of a case are its repetitions, as with `--repeats 3`.
+- **Cost check.** It runs after the first DS′ and DK′ pair: the next runs start only if those two cost under $0.13 together. The $0.40 bound is unchanged.
+- **The same.** Everything else stays: configs, metric and decision rule.
