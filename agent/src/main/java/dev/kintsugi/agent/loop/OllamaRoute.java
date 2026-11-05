@@ -3,6 +3,7 @@ package dev.kintsugi.agent.loop;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.ChatOptions;
@@ -45,6 +46,12 @@ public record OllamaRoute(String model, ChatModel chatModel, double temperature,
 			return "default";
 		}
 		return this.think ? "on" : "off";
+	}
+
+	/** The {@code num_ctx} every call and the warm-up send. */
+	@Override
+	public OptionalInt contextWindow() {
+		return OptionalInt.of(this.numCtx);
 	}
 
 	/**

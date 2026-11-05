@@ -349,6 +349,65 @@ class AgentLoopTest {
 	}
 
 	@Test
+	void aReportCutByAFullContextWindowNamesTheWindowNotTheCap() {
+		// HT: 5 reports were cut with prompt + completion = 8192 = num-ctx, none near the 512 cap (context-full-cut).
+		this.model.quietPhases()
+			.cutUsing("length", 7900, 292,
+					"{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPENDENCY_LATENCY\",\"summ")
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		String full = "the context window of 8192 tokens filled before the answer ended; write a shorter report, with"
+				+ " a shorter summary and fewer or shorter evidence items";
+		assertThat((String) step(4).get("summary")).startsWith("invalid: " + full);
+		assertThat(userText(this.model.prompts().get(4))).contains(full).doesNotContain("cut at 512 tokens");
+	}
+
+	@Test
+	void aReportCutJustBelowTheContextWindowStillNamesTheCap() {
+		this.model.quietPhases()
+			.cutUsing("length", 7679, 512,
+					"{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPENDENCY_LATENCY\",\"summ")
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat((String) step(4).get("summary")).startsWith("invalid: the answer was cut at 512 tokens");
+		assertThat(userText(this.model.prompts().get(4))).doesNotContain("context window");
+	}
+
+	@Test
+	void anActAnswerCutByAFullContextWindowNotesTheWindow() {
+		this.model.cutUsing("length", 8000, 192, "{\"hypotheses\":[", call("search_logs", "{}"))
+			.quiet()
+			.quietPhasesAfterTriage()
+			.text(unknownReport());
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(step(1)).containsEntry("summary",
+				"1 tool call(s); context window of 8192 tokens filled; plan missing");
+	}
+
+	@Test
+	void aCloudReportCutKeepsTheCapTextWhateverItsTokens() {
+		// The cloud route has no known context window, so a cut always names the cap.
+		this.model.quietPhases()
+			.cutUsing("max_tokens", 200000, 512,
+					"{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPENDENCY_LATENCY\",\"summ")
+			.text(unknownReport());
+		CallTimeouts deadlines = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(5));
+		this.loop = new AgentLoop(this.incidents, task -> new AnthropicRoute("claude-haiku-5-5", this.model,
+				deadlines, CAPS), this.lab, settings(12, Duration.ofMinutes(30), Duration.ofSeconds(5)),
+				Clock.systemUTC(), LAB);
+
+		assertThat(run()).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat((String) step(4).get("summary")).startsWith("invalid: the answer was cut at 512 tokens");
+	}
+
+	@Test
 	void eachRunStartsWithOneWarmUpOnTheRoutesModelAndContext() {
 		this.model.quietPhases().text(unknownReport());
 

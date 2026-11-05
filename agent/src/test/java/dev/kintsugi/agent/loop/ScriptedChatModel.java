@@ -106,10 +106,19 @@ final class ScriptedChatModel implements ChatModel {
 	 * Ollama, {@code max_tokens} on Anthropic (Spring AI passes the provider's stop reason as it is).
 	 */
 	ScriptedChatModel cutWith(String finishReason, String text, ToolCall... calls) {
+		return cutUsing(finishReason, 10, 5, text, calls);
+	}
+
+	/**
+	 * Answers {@code text} and these tool calls, cut with this finish reason and this usage: with prompt and completion
+	 * tokens that add up to the route's context window, the window filled before the answer ended (context-full-cut T2).
+	 */
+	ScriptedChatModel cutUsing(String finishReason, int promptTokens, int completionTokens, String text,
+			ToolCall... calls) {
 		AssistantMessage message = AssistantMessage.builder().content(text).toolCalls(List.of(calls)).build();
 		this.script.add(prompt -> new ChatResponse(
 				List.of(new Generation(message, ChatGenerationMetadata.builder().finishReason(finishReason).build())),
-				ChatResponseMetadata.builder().usage(new DefaultUsage(10, 5)).build()));
+				ChatResponseMetadata.builder().usage(new DefaultUsage(promptTokens, completionTokens)).build()));
 		return this;
 	}
 

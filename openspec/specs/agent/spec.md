@@ -455,6 +455,7 @@ Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it det
 
 - a cut `ACT` answer is recorded with `answer cut at <cap> tokens` in its step's `summary` (after the tool-call count, before the plan's verdict), and its tool calls, if any, are checked and run as usual; with no tool call it is handled like any answer with text and no tool call, so it gets the phase's retry if it has not had it **(T5c12)**;
 - a cut `REPORT` answer that fails the schema or the evidence check gets, first in its list of errors, `the answer was cut at <cap> tokens before it ended; write a shorter report, ...`; the retry rules of "Evidence is checked" apply unchanged. A cut answer that still passes both checks is accepted.
+- a cut answer whose prompt and completion tokens add up to at least the route's context window, its `num-ctx`, was stopped by the full window, not by its cap **(context-full-cut T2)**: its `ACT` note reads `context window of <num-ctx> tokens filled` in place of `answer cut at <cap> tokens`, and its report error starts `the context window of <num-ctx> tokens filled before the answer ended; write a shorter report, ...`, the rest of the sentence unchanged. A route with no known window (the cloud route), or a call whose counts are missing, always names the cap. Why: Ollama reports `length` for both causes; in HT, 5 reports were rejected as cut at 4096 tokens while their prompt + completion was 8192 = `num-ctx` and none came near the cap, so the error pointed at the wrong lever.
 
 #### Scenario: Caps by call
 - WHEN a run makes a phase's first `ACT` call, a later `ACT` call and a report call
@@ -485,6 +486,17 @@ Ollama reports a cut answer with `done_reason` `length`. Code MUST handle it det
 - GIVEN a report answer cut at its cap, so not valid JSON, whether the route says so as Ollama does (`length`) or as Anthropic does (`max_tokens`)
 - WHEN it is checked
 - THEN its `REPORT` step says `invalid: the answer was cut at 512 tokens ...`, and the retry's prompt carries that error
+
+#### Scenario: A report cut by a full context window (context-full-cut T2)
+- GIVEN the local route with `num-ctx` 8192, and a report answer cut (`length`) with 7,900 prompt and 292 completion tokens
+- WHEN it is checked
+- THEN its `REPORT` step says `invalid: the context window of 8192 tokens filled before the answer ended; write a shorter report, with a shorter summary and fewer or shorter evidence items ...`, and the retry's prompt carries that error and not the cap
+- AND with 7,679 and 512 tokens, one below the window, it names the cap as before; on the cloud route, which has no known window, it names the cap whatever the counts
+
+#### Scenario: An `ACT` answer cut by a full context window (context-full-cut T2)
+- GIVEN the local route with `num-ctx` 8192, and a phase's first answer cut with 8,000 prompt and 192 completion tokens, one tool call and no plan
+- WHEN the loop records it
+- THEN the step's summary is `1 tool call(s); context window of 8192 tokens filled; plan missing`
 
 ### Requirement: An abandoned call is aborted
 

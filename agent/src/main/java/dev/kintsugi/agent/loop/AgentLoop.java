@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutionException;
@@ -538,7 +539,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 				note = "retry: " + note;
 			}
 			if (answer.cut()) {
-				note += "; answer cut at " + answer.cap() + " tokens";
+				note += "; " + answer.cutNote();
 			}
 			if (withPlan) {
 				note += "; " + plan(run, phase, answer.text());
@@ -723,11 +724,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 									this.topology);
 			errors = checked.errors();
 			if (!errors.isEmpty() && answer.cut()) {
-				// A report cut at its cap is invalid JSON: the retry is told why, so that it writes a shorter one. The
-				// assessed report has no evidence items to shorten, only its whys.
+				// A report cut at its cap, or by a full context window, is invalid JSON: the retry is told why, so that
+				// it writes a shorter one. The assessed report has no evidence items to shorten, only its whys.
 				errors = new ArrayList<>(errors);
-				errors.addFirst("the answer was cut at " + answer.cap()
-						+ " tokens before it ended; write a shorter report, with a shorter summary and "
+				errors.addFirst(answer.cutReason() + "; write a shorter report, with a shorter summary and "
 						+ (assessed ? "shorter whys" : "fewer or shorter evidence items"));
 			}
 			write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), answer.model(), answer.tokens(),
@@ -872,10 +872,26 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		String finishReason = response.getResult().getMetadata() == null ? null
 				: response.getResult().getMetadata().getFinishReason();
 		boolean cut = "length".equalsIgnoreCase(finishReason) || "max_tokens".equalsIgnoreCase(finishReason);
+		Integer promptTokens = counted ? countOrNull(usage.getPromptTokens()) : null;
+		Integer completionTokens = counted ? countOrNull(usage.getCompletionTokens()) : null;
 		return new Answer(message, message.getText() == null ? "" : message.getText(),
-				counted ? usage.getTotalTokens() : null, counted ? countOrNull(usage.getPromptTokens()) : null,
-				counted ? countOrNull(usage.getCompletionTokens()) : null, route.model(),
-				(int) ((System.nanoTime() - start) / 1_000_000), cut, cap);
+				counted ? usage.getTotalTokens() : null, promptTokens, completionTokens, route.model(),
+				(int) ((System.nanoTime() - start) / 1_000_000), cut, cap,
+				cut ? filledWindow(route, promptTokens, completionTokens) : null);
+	}
+
+	/**
+	 * The route's context window when a cut answer's prompt and answer filled it, else null (context-full-cut T2). Ollama
+	 * reports the same {@code length} reason when {@code num_ctx} fills as when {@code num_predict} does: in HT, five
+	 * reports were cut with prompt + completion = 8192 = {@code num_ctx}, none near their cap of 4096. A route with no
+	 * known window, or a call whose counts are missing, names the cap as before.
+	 */
+	private static Integer filledWindow(ModelRoute route, Integer promptTokens, Integer completionTokens) {
+		OptionalInt window = route.contextWindow();
+		if (window.isEmpty() || promptTokens == null || completionTokens == null) {
+			return null;
+		}
+		return promptTokens + completionTokens >= window.getAsInt() ? window.getAsInt() : null;
 	}
 
 	/**
@@ -1158,12 +1174,26 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	}
 
 	/**
-	 * A model answer; {@code cut} when it reached its {@code cap} of tokens before it ended. {@code tokens},
-	 * {@code promptTokens} and {@code completionTokens} are the provider's total and counts, each null when it was not
-	 * counted.
+	 * A model answer; {@code cut} when it was stopped before it ended, at its {@code cap} of tokens or, when
+	 * {@code filledWindow} is not null, because its prompt and answer filled the route's context window of that many
+	 * tokens (context-full-cut T2). {@code tokens}, {@code promptTokens} and {@code completionTokens} are the provider's
+	 * total and counts, each null when it was not counted.
 	 */
 	private record Answer(AssistantMessage message, String text, Integer tokens, Integer promptTokens,
-			Integer completionTokens, String model, int latencyMs, boolean cut, int cap) {
+			Integer completionTokens, String model, int latencyMs, boolean cut, int cap, Integer filledWindow) {
+
+		/** The ACT step's note on a cut answer: the full window when it filled, else the cap. */
+		String cutNote() {
+			return this.filledWindow != null ? "context window of " + this.filledWindow + " tokens filled"
+					: "answer cut at " + this.cap + " tokens";
+		}
+
+		/** The start of the report error on a cut answer: the full window when it filled, else the cap. */
+		String cutReason() {
+			return this.filledWindow != null
+					? "the context window of " + this.filledWindow + " tokens filled before the answer ended"
+					: "the answer was cut at " + this.cap + " tokens before it ended";
+		}
 	}
 
 	/** Ends the run with a status other than {@code COMPLETED}, and its reason. */

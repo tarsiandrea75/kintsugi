@@ -3,6 +3,7 @@ package dev.kintsugi.agent.loop;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.ChatOptions;
@@ -34,6 +35,15 @@ public sealed interface ModelRoute permits OllamaRoute, AnthropicRoute {
 	 * {@code off} when the route sends one, {@code default} when it leaves it to the model.
 	 */
 	String thinking();
+
+	/**
+	 * The context window every call on this route runs in, in tokens, when the route knows it: the local route sends
+	 * its {@code num_ctx}. A route that does not know it (the cloud route) has none. The loop reads it to tell a cut
+	 * caused by a full window from one caused by the answer's cap (context-full-cut T2).
+	 */
+	default OptionalInt contextWindow() {
+		return OptionalInt.empty();
+	}
 
 	/**
 	 * The options of one call: the route's settings, the answer's cap, the tool definitions offered (none for the
