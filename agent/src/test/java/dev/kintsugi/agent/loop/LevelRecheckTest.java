@@ -30,6 +30,7 @@ import dev.kintsugi.agent.dossier.Section;
 import dev.kintsugi.agent.lab.ReplayLabTools;
 import dev.kintsugi.agent.policy.Policy;
 import dev.kintsugi.agent.policy.PolicyTally;
+import dev.kintsugi.agent.rules.RulesCandidate;
 
 /**
  * The level re-check of stored answers (verification-levels T6; ADR-028): a recorded decision incident is re-checked
@@ -175,6 +176,73 @@ class LevelRecheckTest {
 		assertThat(out).doesNotExist();
 	}
 
+	@Test
+	void aHybridAnswerIsRecheckedAgainstItsListedCandidates() {
+		Fixture f1 = fixture(F1);
+		int line = f1.line("gateway-mock", Section.LATENCY, Change.YES);
+		ObjectNode answer = hybrid(answer("gateway-mock", "DEPENDENCY_LATENCY", line));
+		ObjectNode incident = f1.hybridIncident(answer, List.of(listed("gateway-mock", "DEPENDENCY_LATENCY")));
+
+		LevelRecheck.Rechecked rechecked = this.recheck.recheck(incident, f1.recording,
+				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY"));
+
+		assertThat(rechecked.level()).isEqualTo("L3");
+		assertThat(rechecked.items()).singleElement().satisfies(item -> assertThat(item.causeOwned()).isTrue());
+		// Checked as the plain report, a hybrid answer, which has no alternatives, is rejected: the run's check is the
+		// hybrid one.
+		assertThatThrownBy(() -> this.recheck.recheck(incident, f1.recording))
+			.isInstanceOf(LevelRecheck.Refused.class)
+			.hasMessageContaining("rejects the stored answer");
+		// A pair the run's task did not list is rejected too.
+		assertThatThrownBy(() -> this.recheck.recheck(incident, f1.recording, List.of("payment-service|DEPENDENCY_LATENCY")))
+			.isInstanceOf(LevelRecheck.Refused.class)
+			.hasMessageContaining("is not a listed candidate");
+	}
+
+	@Test
+	void aHybridRunWithNoCandidateIsRecheckedAtL1() {
+		Fixture f1 = fixture(F1);
+
+		LevelRecheck.Rechecked rechecked = this.recheck.recheck(f1.noCandidateIncident(), f1.recording, List.of());
+
+		assertThat(rechecked.level()).isEqualTo("L1");
+		assertThat(rechecked.failedChecks()).isEmpty();
+		assertThat(rechecked.items()).isEmpty();
+	}
+
+	@Test
+	void aRunRechecksAHybridRow(@TempDir Path dir) throws IOException {
+		Fixture f3 = fixture(F3);
+		int line = f3.line("order-service", Section.LOGS, Change.NOT_COMPARED);
+		ObjectNode incident = f3.hybridIncident(hybrid(answer("order-service", "CONFIGURATION", line)),
+				List.of(listed("order-service", "CONFIGURATION")));
+		Path in = replayDirWithRow(dir.resolve("in"), hybridRow("-"), incident);
+		Path out = dir.resolve("out");
+
+		LevelRecheck.Outcome outcome = this.recheck.run(in, ReplayDriver.DEFAULT_RECORDINGS, out);
+
+		assertThat(outcome.refused()).isEmpty();
+		assertThat(Files.readAllLines(out.resolve("summary.tsv")).get(1)).isEqualTo(hybridRow("L2"));
+		assertThat(Files.readAllLines(out.resolve("levels-detail.tsv")).get(1))
+			.contains("\tL2\tcause-fact-changed\tyes\t1\tdossier\t" + line + "\torder-service\tlogs\tNOT_COMPARED\tyes");
+	}
+
+	/** {@code answer} as a hybrid report: the plain one without its alternatives. */
+	private static ObjectNode hybrid(ObjectNode answer) {
+		answer.remove("alternatives");
+		return answer;
+	}
+
+	private static RulesCandidate listed(String service, String category) {
+		return new RulesCandidate(service, category, "R-TEST", List.of("a fact"));
+	}
+
+	/** The F3 r1 sample's row as a hybrid sample that listed order-service|CONFIGURATION. */
+	private static String hybridRow(String level) {
+		return row("dev", level).replace("\ttables\tplain\t", "\ttables\thybrid\t")
+			.replace("\t60s\t-\t\t\t0\t0\t", "\t60s\t-\torder-service|CONFIGURATION\t\t0\t0\t");
+	}
+
 	/** A plain report naming {@code service|category} with one evidence item citing dossier line {@code line}. */
 	private static ObjectNode answer(String service, String category, int line) {
 		ObjectNode answer = JSON.createObjectNode();
@@ -193,8 +261,13 @@ class LevelRecheckTest {
 	}
 
 	private static Path replayDir(Path in, String split, ObjectNode incident) throws IOException {
+		return replayDirWithRow(in, row(split, "-"), incident);
+	}
+
+	/** A replay run's directory holding one summary row, {@code row}, and its F3 r1 incident file. */
+	private static Path replayDirWithRow(Path in, String row, ObjectNode incident) throws IOException {
 		Files.createDirectories(in);
-		Files.writeString(in.resolve("summary.tsv"), ReplayDriver.SUMMARY_HEADER + "\n" + row(split, "-") + "\n");
+		Files.writeString(in.resolve("summary.tsv"), ReplayDriver.SUMMARY_HEADER + "\n" + row + "\n");
 		Files.writeString(in.resolve("F3-decision-verify-agent-20261024T162555Z-r1-F3-1.json"),
 				JSON.writeValueAsString(incident));
 		return in;
@@ -237,8 +310,40 @@ class LevelRecheckTest {
 		 * answer, and the report the loop stored for it, with no {@code verification}.
 		 */
 		ObjectNode incident(ObjectNode answer) {
-			ReportCheck.Result checked = ReportCheck.check(answer, Map.of(), AgentMode.DECISION, this.dossier.text(),
-					this.dossier.facts(), LAB);
+			return incident(answer, ReportCheck.check(answer, Map.of(), AgentMode.DECISION, this.dossier.text(),
+					this.dossier.facts(), LAB));
+		}
+
+		/** A hybrid incident as the loop stores it for {@code answer}, checked against {@code candidates}. */
+		ObjectNode hybridIncident(ObjectNode answer, List<RulesCandidate> candidates) {
+			return incident(answer, ReportCheck.checkHybrid(answer, Map.of(), AgentMode.DECISION, this.dossier.text(),
+					this.dossier.facts(), candidates, LAB));
+		}
+
+		/**
+		 * A hybrid incident whose rules listed no candidate, as the loop stores it: no model was called, its
+		 * {@code REPORT} step holds no answer, and its report names {@code UNKNOWN|UNKNOWN} with no evidence.
+		 */
+		ObjectNode noCandidateIncident() {
+			ObjectNode incident = JSON.createObjectNode();
+			incident.put("status", "COMPLETED");
+			ObjectNode report = incident.putObject("report");
+			report.put("summary", AgentLoop.NO_CANDIDATE_SUMMARY);
+			report.putArray("evidence");
+			report.put("rootCauseService", "UNKNOWN");
+			report.put("rootCauseCategory", "UNKNOWN");
+			report.put("confidence", 0.0);
+			ArrayNode steps = incident.putArray("steps");
+			steps.addObject()
+				.put("stepNo", 1)
+				.put("kind", "DOSSIER")
+				.put("summary", Prompts.dossier(this.dossier.text()))
+				.put("toolOutput", "[]");
+			steps.addObject().put("stepNo", 2).put("kind", "REPORT").putNull("modelOutput");
+			return incident;
+		}
+
+		private ObjectNode incident(ObjectNode answer, ReportCheck.Result checked) {
 			assertThat(checked.errors()).isEmpty();
 			ObjectNode incident = JSON.createObjectNode();
 			incident.put("status", "COMPLETED");
@@ -249,7 +354,9 @@ class LevelRecheckTest {
 			checked.evidence().forEach(evidence::add);
 			report.put("rootCauseService", answer.path("rootCauseService").asString());
 			report.put("rootCauseCategory", answer.path("rootCauseCategory").asString());
-			report.set("alternatives", answer.get("alternatives"));
+			if (answer.has("alternatives")) {
+				report.set("alternatives", answer.get("alternatives"));
+			}
 			report.put("confidence", answer.path("confidence").asDouble());
 			ArrayNode steps = incident.putArray("steps");
 			steps.addObject()

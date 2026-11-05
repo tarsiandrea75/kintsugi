@@ -21,8 +21,10 @@ from the run's recording, on a clock fixed at the stored dossier's "Gathered at"
 re-rendered dossier message equals the stored DOSSIER step's byte for byte, and the re-check of the stored REPORT
 answer verifies exactly the evidence the run stored. Only then is the level the run would have stored written.
 
-Only decision samples of the dev split with the tables and the plain report are read: a row of any other split (a
-holdout) or report refuses the run before anything is written.
+Only decision samples of the dev split with the tables and the plain or the hybrid report are read: a row of any
+other split (a holdout) or report refuses the run before anything is written. A hybrid row is checked against the
+candidates its summary.tsv row lists, as the run's report task listed them; one that listed none is re-checked as the
+loop stores it, UNKNOWN|UNKNOWN at L1.
 
 REPLAY_DIR names the replay directory the run read, agent/src/test/resources/replay by default (the lab's); an
 RCAEval run must name it, since its recordings stay outside the repository. --dataset re2-ob reads Online Boutique's

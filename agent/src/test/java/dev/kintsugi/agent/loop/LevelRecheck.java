@@ -29,6 +29,7 @@ import dev.kintsugi.agent.dossier.LineFact;
 import dev.kintsugi.agent.dossier.Section;
 import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.lab.ReplayLabTools;
+import dev.kintsugi.agent.rules.RulesCandidate;
 import dev.kintsugi.agent.loop.ReplayCases.Recording;
 import dev.kintsugi.agent.policy.Policy;
 import dev.kintsugi.agent.policy.PolicyTally;
@@ -37,7 +38,8 @@ import dev.kintsugi.agent.policy.PolicyTally;
  * Re-checks the verification level of answers a replay run already stored (verification-levels T6; ADR-028), with no
  * model call: each decision incident's dossier is gathered again from its recording, as {@link ReplayDriver} gathers
  * it, and today's {@link ReportCheck} runs on the stored {@code REPORT} answer with the re-rendered text, its line facts
- * and the topology, as the loop does with the tables and the plain report.
+ * and the topology, as the loop does with the tables and the plain report, or with the hybrid report and the candidates
+ * its task listed (l3-callee-check T3).
  *
  * <p>
  * Two guards make the level the one the run would have stored: the dossier message must equal the stored
@@ -66,6 +68,13 @@ final class LevelRecheck {
 	private static final String LEVEL = "level";
 
 	private static final String NONE = "-";
+
+	private static final String PLAIN = "plain";
+
+	private static final String HYBRID = "hybrid";
+
+	/** The {@code summary.tsv} column of a hybrid sample's listed candidates, {@code service|category} joined by ';'. */
+	private static final String CANDIDATES = "candidates";
 
 	private static final JsonMapper JSON = JsonMapper.shared();
 
@@ -96,6 +105,19 @@ final class LevelRecheck {
 	 * stored
 	 */
 	Rechecked recheck(JsonNode incident, JsonNode recording) {
+		return recheck(incident, recording, null);
+	}
+
+	/**
+	 * Re-checks one stored decision incident as {@link #recheck(JsonNode, JsonNode)} does, as a hybrid incident when
+	 * {@code candidates} is not null (l3-callee-check T3): its answer is checked by {@link ReportCheck#checkHybrid}
+	 * against the candidates the run's report task listed. A hybrid run that listed none called no model: its one
+	 * {@code REPORT} step holds no answer, its stored report names {@code UNKNOWN|UNKNOWN} with no evidence, and its level
+	 * is {@link ReportCheck#withoutEvidence}'s, as the loop stores it.
+	 * @param candidates the listed candidates as {@code service|category} pairs, in order, as {@code summary.tsv}'s
+	 * {@code candidates} column holds them; null for a plain incident
+	 */
+	Rechecked recheck(JsonNode incident, JsonNode recording, List<String> candidates) {
 		JsonNode dossierStep = null;
 		JsonNode reportStep = null;
 		for (JsonNode step : incident.path("steps")) {
@@ -119,6 +141,9 @@ final class LevelRecheck {
 
 		JsonNode report = incident.path("report");
 		boolean hasReport = report.isObject();
+		if (candidates != null && candidates.isEmpty()) {
+			return noCandidate(reportStep, report);
+		}
 		if (reportStep == null) {
 			if (hasReport) {
 				throw new Refused("a stored report with no REPORT step");
@@ -127,8 +152,10 @@ final class LevelRecheck {
 		}
 		// The last answer is the one the run accepted, or the one whose rejection ended it.
 		JsonNode answer = Answers.json(reportStep.path("modelOutput").asString(null));
-		ReportCheck.Result checked = ReportCheck.check(answer, Map.of(), AgentMode.DECISION, dossier.text(),
-				dossier.facts(), this.topology);
+		ReportCheck.Result checked = candidates == null
+				? ReportCheck.check(answer, Map.of(), AgentMode.DECISION, dossier.text(), dossier.facts(), this.topology)
+				: ReportCheck.checkHybrid(answer, Map.of(), AgentMode.DECISION, dossier.text(), dossier.facts(),
+						candidates.stream().map(LevelRecheck::candidate).toList(), this.topology);
 		boolean accepted = checked.errors().isEmpty();
 		if (accepted != hasReport) {
 			throw new Refused(accepted ? "the re-check accepts an answer the run rejected"
@@ -148,12 +175,51 @@ final class LevelRecheck {
 		boolean logOnly = !causeOwned.isEmpty() && causeOwned.stream()
 			.allMatch(item -> item.section().equals(name(Section.LOGS)) && item.changed().equals(Change.NOT_COMPARED.name()));
 		Verification verification = checked.verification();
-		List<String> failed = verification.checks()
+		return new Rechecked(Verification.label(verification.level()), failed(verification), items, logOnly);
+	}
+
+	/** A hybrid incident whose rules listed no candidate, re-checked as the loop stores it ({@code noCandidate}). */
+	private Rechecked noCandidate(JsonNode reportStep, JsonNode report) {
+		if (reportStep == null || reportStep.path("modelOutput").isString()) {
+			throw new Refused("a hybrid run with no candidate stores one REPORT step with no answer");
+		}
+		if (!report.isObject() || !Causes.UNKNOWN.equals(report.path("rootCauseService").asString(""))
+				|| !Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""))
+				|| !report.path("evidence").isArray() || !report.path("evidence").isEmpty()) {
+			throw new Refused("a hybrid run with no candidate stores an UNKNOWN|UNKNOWN report with no evidence");
+		}
+		Verification verification = ReportCheck.withoutEvidence(report, this.topology);
+		return new Rechecked(Verification.label(verification.level()), failed(verification), List.of(), false);
+	}
+
+	/** The names of {@code verification}'s failed checks, in level order. */
+	private static List<String> failed(Verification verification) {
+		return verification.checks()
 			.stream()
 			.filter(check -> Boolean.FALSE.equals(check.pass()))
 			.map(Verification.Check::name)
 			.toList();
-		return new Rechecked(Verification.label(verification.level()), failed, items, logOnly);
+	}
+
+	/**
+	 * A listed candidate from its {@code service|category} pair; checkHybrid reads the pair only, so the rule and its
+	 * facts, which {@code summary.tsv} does not hold, are left as {@code -} and none.
+	 */
+	private static RulesCandidate candidate(String pair) {
+		String[] parts = pair.split("\\|", -1);
+		if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+			throw new IllegalArgumentException("a candidate is service|category, got '" + pair + "'");
+		}
+		return new RulesCandidate(parts[0], parts[1], NONE, List.of());
+	}
+
+	/** A hybrid row's candidates, from its {@code candidates} column; null for a plain row. */
+	private static List<String> candidates(Map<String, String> row) {
+		if (!HYBRID.equals(row.get("report"))) {
+			return null;
+		}
+		String listed = row.get(CANDIDATES);
+		return listed.isEmpty() ? List.of() : List.of(listed.split(";", -1));
 	}
 
 	/**
@@ -161,8 +227,8 @@ final class LevelRecheck {
 	 * @param in a replay run's directory: its {@code summary.tsv} and one incident file per row
 	 * @param recordings the replay directory the run read: {@code recordings.tsv} and the files it names
 	 * @throws IllegalArgumentException before anything is written, for a row outside the {@code dev} split, a row
-	 * other than a decision sample with the tables and the plain report, or a row whose recording is not in the
-	 * manifest
+	 * other than a decision sample with the tables and the plain or the hybrid report, a hybrid row with no
+	 * {@code candidates} column or a malformed candidate, or a row whose recording is not in the manifest
 	 */
 	Outcome run(Path in, Path recordings, Path out) {
 		Path summary = in.resolve("summary.tsv");
@@ -193,7 +259,7 @@ final class LevelRecheck {
 			try {
 				JsonNode incident = JSON.readTree(in.resolve(file).toFile());
 				JsonNode recording = JSON.readTree(recordings.resolve(cases.get(row.get("recording")).file()).toFile());
-				Rechecked rechecked = recheck(incident, recording);
+				Rechecked rechecked = recheck(incident, recording, candidates(row));
 				summaryRows.add(withLevel(header, lines.get(i + 1), rechecked.level()));
 				detailRows.addAll(detail(row, rechecked));
 				outcomes.add("PASS     " + file + ": " + rechecked.level());
@@ -326,7 +392,8 @@ final class LevelRecheck {
 	/**
 	 * A summary row by column, checked against the plan's rules.
 	 * @throws IllegalArgumentException for a row outside the dev split, or not a decision sample with the tables and
-	 * the plain report, the only report this re-check runs as the loop does
+	 * the plain or the hybrid report, the reports this re-check runs as the loop does; or a hybrid row with no
+	 * {@code candidates} column or a malformed candidate
 	 */
 	private static Map<String, String> row(List<String> header, String line, Path summary, int number) {
 		String[] values = line.split("\t", -1);
@@ -350,9 +417,16 @@ final class LevelRecheck {
 					+ "never a holdout");
 		}
 		if (!row.get("mode").equals("decision") || !row.get("view").equals("tables")
-				|| !row.get("report").equals("plain")) {
+				|| !List.of(PLAIN, HYBRID).contains(row.get("report"))) {
 			throw new IllegalArgumentException(where + " is " + row.get("mode") + "/" + row.get("view") + "/"
-					+ row.get("report") + ": this re-check runs the decision mode's tables and plain report only");
+					+ row.get("report") + ": this re-check runs the decision mode's tables with the plain or the hybrid "
+					+ "report only");
+		}
+		if (HYBRID.equals(row.get("report"))) {
+			if (!row.containsKey(CANDIDATES)) {
+				throw new IllegalArgumentException(summary + " has no column " + CANDIDATES + ", which a hybrid row needs");
+			}
+			candidates(row).forEach(LevelRecheck::candidate);
 		}
 		return row;
 	}
