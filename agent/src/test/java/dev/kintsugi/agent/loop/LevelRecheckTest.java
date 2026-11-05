@@ -205,7 +205,7 @@ class LevelRecheckTest {
 		return String.join("\t", "F3", "decision", "cloud", "1", "COMPLETED", "order-service|CONFIGURATION",
 				"order-service|CONFIGURATION", "MATCH", "33", "12", "1.00", "0", "5000", "500", "5.0", split,
 				"verify-agent-20261024T162555Z-r1-F3", "tables", "plain", "claude-haiku-5-5", "default", "4096", "60s",
-				"", "", "0", "0", level);
+				"-", "", "", "0", "0", level);
 	}
 
 	private static Fixture fixture(String file) {

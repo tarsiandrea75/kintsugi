@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -103,11 +104,11 @@ final class ReplayDriver {
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
 			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
-			"reportTimeout", "candidates", "ranked", "riskyExecuted", "policyRefused", "level");
+			"reportTimeout", "numCtx", "candidates", "ranked", "riskyExecuted", "policyRefused", "level");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
-			"promptTokens", "completionTokens", "costUsd", "model", "think", "reportCap", "reportTimeout");
+			"promptTokens", "completionTokens", "costUsd", "model", "think", "reportCap", "reportTimeout", "numCtx");
 
 	/**
 	 * The coverage from which a sample counts as covered in {@code aggregate.tsv}: a dossier sample's model-chosen calls
@@ -880,33 +881,36 @@ final class ReplayDriver {
 	}
 
 	/**
-	 * The route settings a sample ran with, the last four columns of {@code aggregate.tsv} and the four before
+	 * The route settings a sample ran with, the last five columns of {@code aggregate.tsv} and the five before
 	 * {@code summary.tsv}'s candidates (agent spec, "Replay of recorded tool outputs"; odd/tasks/qwen-dev.md T3): the model, its thinking setting
-	 * ({@code on}, {@code off} or {@code default}, see {@link ModelRoute#thinking}), the report's answer cap and the
-	 * report's deadline, written in seconds with an {@code s}. They are the route's effective values, overridden or
-	 * not, so a line is attributable to the model and the settings that wrote it. The rules call no model: their model
-	 * is their version's ({@link RulesVersion#model}: {@link #RULES_MODEL} for Config 0, {@code rules-v2} for Config 0R)
-	 * and the other three are {@code -}.
+	 * ({@code on}, {@code off} or {@code default}, see {@link ModelRoute#thinking}), the report's answer cap, the
+	 * report's deadline, written in seconds with an {@code s}, and the context window, the local route's
+	 * {@code num-ctx} or {@code -} on a route with no known window (context-full-cut T3). They are the route's
+	 * effective values, overridden or not, so a line is attributable to the model and the settings that wrote it. The
+	 * rules call no model: their model is their version's ({@link RulesVersion#model}: {@link #RULES_MODEL} for Config
+	 * 0, {@code rules-v2} for Config 0R) and the other four are {@code -}.
 	 */
-	record Settings(String model, String think, String reportCap, String reportTimeout) {
+	record Settings(String model, String think, String reportCap, String reportTimeout, String numCtx) {
 
 		static final Settings RULES = rules(RulesVersion.V1);
 
 		/** The settings of a rules sample diagnosed by {@code rules}. */
 		static Settings rules(RulesVersion rules) {
-			return new Settings(rules.model(), NONE, NONE, NONE);
+			return new Settings(rules.model(), NONE, NONE, NONE, NONE);
 		}
 
 		/** The settings of {@code route}'s report call. */
 		static Settings of(ModelRoute route) {
 			Duration deadline = route.callTimeouts().report();
 			String timeout = deadline.toMillis() % 1000 == 0 ? deadline.toSeconds() + "s" : deadline.toMillis() + "ms";
-			return new Settings(route.model(), route.thinking(), String.valueOf(route.numPredict().report()), timeout);
+			OptionalInt window = route.contextWindow();
+			return new Settings(route.model(), route.thinking(), String.valueOf(route.numPredict().report()), timeout,
+					window.isPresent() ? String.valueOf(window.getAsInt()) : NONE);
 		}
 
-		/** The four columns, tab-separated. */
+		/** The five columns, tab-separated. */
 		String columns() {
-			return String.join("\t", this.model, this.think, this.reportCap, this.reportTimeout);
+			return String.join("\t", this.model, this.think, this.reportCap, this.reportTimeout, this.numCtx);
 		}
 
 	}

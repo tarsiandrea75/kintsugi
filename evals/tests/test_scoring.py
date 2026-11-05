@@ -117,6 +117,22 @@ def test_reader_uses_the_given_label(tmp_path):
     assert row.config == "D"
 
 
+def test_reader_reads_a_summary_with_the_numctx_column(tmp_path):
+    # The replay's summary.tsv gained numCtx after reportTimeout (context-full-cut T3), so the columns after it moved
+    # by one: the reader takes them by name, and the row scores as before.
+    header = HEADER + ["view", "report", "model", "think", "reportCap", "reportTimeout", "numCtx", "candidates",
+                       "ranked", "riskyExecuted", "policyRefused", "level"]
+    values = ["F1", "decision", "local", "1", "COMPLETED", TRUTH, TRUTH, "MATCH", "33", "0", "1.00", "0", "1", "1",
+              "1.0", "dev", "r1-F1", "tables", "hybrid", "granite4.1:8b", "default", "4096", "600s", "12288",
+              TRUTH + ";order-service|CONFIGURATION", "", "0", "1", "L2"]
+    (tmp_path / "summary.tsv").write_text("\t".join(header) + "\n" + "\t".join(values) + "\n")
+    [row] = read_summary(tmp_path)
+    assert row.config == "local-decision-tables-hybrid"
+    assert row.outcome == CORRECT
+    assert row.candidates == (TRUTH, "order-service|CONFIGURATION")
+    assert (row.risky_executed, row.policy_refused, row.level) == (0, 1, "L2")
+
+
 def test_reader_rejects_a_file_without_the_needed_columns(tmp_path):
     (tmp_path / "summary.tsv").write_text("fault\tmode\nF1\tdecision\n")
     with pytest.raises(ValueError, match="truth"):

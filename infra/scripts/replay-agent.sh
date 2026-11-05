@@ -46,6 +46,8 @@ recorded tool outputs").
   --think on|off                 local: send Ollama's think field with this value (default: no think field)
   --report-cap N                 local: the report's answer cap, num_predict, 1 to 99999 tokens (default 512)
   --report-timeout SECONDS       local: the report call's deadline, 1 to 2700 s (default 600)
+  --num-ctx N                    local: the context window, num_ctx, of every call and the warm-up, 1 to 999999
+                                 tokens (default 8192)
 
 It runs ReplayRunTest (./mvnw test -Preplay) in agent/: the real loop and the route's real model over the recorded
 tool outputs in agent/src/test/resources/replay/, each sample scored against the recorded truth. It writes
@@ -99,15 +101,17 @@ joined by ';': on rules lines those of the dossier the rules diagnosed, on hybri
 the model (empty when it had none); it is empty on every other line. The last column, level, is the stored report's
 verification level, L0 to L3 (ADR-028), or - on rules lines and runs with no report.
 
---model, --think, --report-cap and --report-timeout override the local route for this run only (agent spec, "Routes",
-"Answer caps" and "Budgets"; ADR-017; odd/tasks/qwen-dev.md), and are refused on any other route. They reach the agent
-as KINTSUGI_AGENT_MODEL_NAME, KINTSUGI_AGENT_MODEL_THINK (true or false), KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT and
-KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT; an option not given clears its variable, so the run never takes a value the
-shell left, and the agent's default applies. With thinking on, Ollama counts the thinking tokens against the cap, so
-set the cap and the deadline from a calibration. The report deadline stays within the incident's 45-minute budget. The
-last four columns of aggregate.tsv, and the four before candidates in summary.tsv, record each sample's model, think
-(on, off, or default when no field was sent; off on the cloud route, which disables thinking; - for rules), report cap
-and report deadline.
+--model, --think, --report-cap, --report-timeout and --num-ctx override the local route for this run only (agent spec,
+"Routes", "Answer caps" and "Budgets"; ADR-017; odd/tasks/qwen-dev.md, odd/tasks/context-full-cut.md), and are refused
+on any other route. They reach the agent as KINTSUGI_AGENT_MODEL_NAME, KINTSUGI_AGENT_MODEL_THINK (true or false),
+KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT, KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT and KINTSUGI_AGENT_MODEL_NUM_CTX; an
+option not given clears its variable, so the run never takes a value the shell left, and the agent's default applies.
+With thinking on, Ollama counts the thinking tokens against the cap, so set the cap and the deadline from a
+calibration. The report deadline stays within the incident's 45-minute budget. A larger --num-ctx makes Ollama load
+the model with a larger KV cache, so it needs more memory. The last five columns of aggregate.tsv, and the five before
+candidates in summary.tsv, record each sample's model, think (on, off, or default when no field was sent; off on the
+cloud route, which disables thinking; - for rules), report cap, report deadline and context window (- on the cloud
+route, whose window is not known, and for rules).
 
 --dataset re2-ob replays the RCAEval converter's RE2-OB recordings (ADR-020; odd/tasks/rcaeval-converter.md;
 docs/setup.md, "Replay RCAEval cases"). Their faults are RCAEval's fault types, cpu, mem, disk, delay, loss and socket,
@@ -154,14 +158,14 @@ dataset=lab
 route=cloud
 mode=dossier
 # Unset until given: decision mode refuses --samples, and the other modes refuse --split, --repeats, --view and
-# --report; every route but local refuses --model, --think, --report-cap and --report-timeout.
+# --report; every route but local refuses --model, --think, --report-cap, --report-timeout and --num-ctx.
 # --faults defaults to the dataset's faults.
-unset samples split repeats view report rules model think report_cap report_timeout faults
+unset samples split repeats view report rules model think report_cap report_timeout num_ctx faults
 while (( $# )); do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --dataset|--route|--mode|--samples|--split|--repeats|--view|--report|--rules|--faults|--model|--think\
-    |--report-cap|--report-timeout)
+    |--report-cap|--report-timeout|--num-ctx)
       [[ $# -ge 2 ]] || { echo "$1 needs a value; see --help" >&2; exit 2; }
       set -- "$1=$2" "${@:3}" ;;
     --dataset=*) dataset=${1#*=}; shift ;;
@@ -178,6 +182,7 @@ while (( $# )); do
     --think=*) think=${1#*=}; shift ;;
     --report-cap=*) report_cap=${1#*=}; shift ;;
     --report-timeout=*) report_timeout=${1#*=}; shift ;;
+    --num-ctx=*) num_ctx=${1#*=}; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -195,7 +200,7 @@ esac
 [[ "$dataset" == lab || "$mode" == decision ]] || { echo "--dataset $dataset replays decision mode only, not $mode:" \
   "the converter writes one decision case per RCAEval case and no stress recordings" >&2; exit 2; }
 # The local route's overrides (odd/tasks/qwen-dev.md T3), checked before anything runs.
-for option in model think report_cap report_timeout; do
+for option in model think report_cap report_timeout num_ctx; do
   [[ -z "${!option+given}" || "$route" == local ]] || { echo "--${option//_/-} applies to --route local only, not" \
     "$route: it overrides the local Ollama model's settings" >&2; exit 2; }
 done
@@ -205,6 +210,8 @@ done
   || { echo "Unknown think '$think'; choose on or off" >&2; exit 2; }
 [[ -z "${report_cap+given}" || "$report_cap" =~ ^[1-9][0-9]{0,4}$ ]] \
   || { echo "--report-cap needs an integer from 1 to 99999 tokens, not '$report_cap'" >&2; exit 2; }
+[[ -z "${num_ctx+given}" || "$num_ctx" =~ ^[1-9][0-9]{0,5}$ ]] \
+  || { echo "--num-ctx needs an integer from 1 to 999999 tokens, not '$num_ctx'" >&2; exit 2; }
 # The incident's budget, kintsugi.agent.loop.incident-timeout (45 min), bounds every call: a longer deadline would
 # never be reached.
 [[ -z "${report_timeout+given}" || ( "$report_timeout" =~ ^[1-9][0-9]{0,3}$ && "$report_timeout" -le 2700 ) ]] \
@@ -334,7 +341,7 @@ fi
 # binding). Each is set when its option is given and cleared otherwise, so the run never takes a value the shell left
 # and the agent's own default, application.yaml's, applies. The summary records the effective values either way.
 unset KINTSUGI_AGENT_MODEL_NAME KINTSUGI_AGENT_MODEL_THINK KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT \
-  KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT
+  KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT KINTSUGI_AGENT_MODEL_NUM_CTX
 overrides=""
 if [[ -n "${model+given}" ]]; then export KINTSUGI_AGENT_MODEL_NAME=$model; overrides+=" model $model;"; fi
 if [[ -n "${think+given}" ]]; then
@@ -346,6 +353,9 @@ if [[ -n "${report_cap+given}" ]]; then
 fi
 if [[ -n "${report_timeout+given}" ]]; then
   export KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT=${report_timeout}s; overrides+=" report timeout ${report_timeout}s;"
+fi
+if [[ -n "${num_ctx+given}" ]]; then
+  export KINTSUGI_AGENT_MODEL_NUM_CTX=$num_ctx; overrides+=" num-ctx $num_ctx;"
 fi
 [[ -z "$overrides" ]] || info "local route overrides:${overrides%;}"
 

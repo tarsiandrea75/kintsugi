@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.core.env.StandardEnvironment;
@@ -43,10 +45,33 @@ class LocalRouteSettingsTest {
 			.isEqualTo(Duration.ofSeconds(900));
 	}
 
+	/**
+	 * {@code KINTSUGI_AGENT_MODEL_NUM_CTX}, set by {@code replay-agent.sh --num-ctx} (context-full-cut T3), binds to
+	 * {@code kintsugi.agent.model.num-ctx} and reaches the local route's call options and its warm-up; without it, the
+	 * window is 8192.
+	 */
+	@Test
+	void theEnvironmentOverridesTheContextWindowOfTheCallsAndTheWarmUp() throws IOException {
+		assertThat(numCtxOf(bind(Map.of("KINTSUGI_AGENT_MODEL_NUM_CTX", "12288")))).containsExactly(12288, 12288);
+		assertThat(numCtxOf(bind(Map.of()))).containsExactly(8192, 8192);
+	}
+
 	@Test
 	void anEmptyThinkSendsNoThinkField() throws IOException {
 		assertThat(bind(Map.of("KINTSUGI_AGENT_MODEL_THINK", "")).think()).isNull();
 		assertThat(bind(Map.of("KINTSUGI_AGENT_MODEL_THINK", "true")).think()).isTrue();
+	}
+
+	/**
+	 * The {@code num_ctx} of a report call and of the warm-up on the local route {@link LoopConfig} builds from
+	 * {@code local}.
+	 */
+	private static List<Integer> numCtxOf(ModelRouteProperties local) {
+		ModelRoute route = new LoopConfig().modelRouter(new ScriptedChatModel(), local, null, "local")
+			.route(ModelTask.REPORT);
+		OllamaChatOptions call = (OllamaChatOptions) route.options(512, Duration.ofSeconds(600), List.of(), null);
+		OllamaChatOptions warmUp = (OllamaChatOptions) route.warmUpOptions().orElseThrow();
+		return List.of(call.getNumCtx(), warmUp.getNumCtx());
 	}
 
 	/** {@code kintsugi.agent.model} from the packaged application.yaml under {@code env} as the only environment. */

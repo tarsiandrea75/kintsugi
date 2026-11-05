@@ -66,8 +66,11 @@ class ReplayDriverTest {
 
 	private static final NumPredict CAPS = new NumPredict(384, 160, 512);
 
-	/** The settings columns of the tests' local route: granite, no think field, a 512-token report in 5 s. */
-	private static final String LOCAL_COLUMNS = "\tgranite4.1:8b\tdefault\t512\t5s";
+	/**
+	 * The settings columns of the tests' local route: granite, no think field, a 512-token report in 5 s, a context
+	 * window of 8192 tokens.
+	 */
+	private static final String LOCAL_COLUMNS = "\tgranite4.1:8b\tdefault\t512\t5s\t8192";
 
 	/** The policy's last two columns of a run with no write executed and no call refused (ADR-027). */
 	private static final String NO_POLICY_EVENT = "\t0\t0";
@@ -83,7 +86,7 @@ class ReplayDriverTest {
 
 	/** The settings of a hand-made local sample, as the route of application.yaml would record them. */
 	private static final ReplayDriver.Settings LOCAL = new ReplayDriver.Settings("granite4.1:8b", "default", "512",
-			"600s");
+			"600s", "8192");
 
 	private static final Path F1_DOSSIER = ReplayDriver.DEFAULT_RECORDINGS
 		.resolve("F1/verify-agent-20261019T214629Z-F1.json");
@@ -169,7 +172,7 @@ class ReplayDriverTest {
 		assertThat(summary).hasSize(2);
 		assertThat(summary.get(0)).isEqualTo(ReplayDriver.SUMMARY_HEADER);
 		String[] line = summary.get(1).split("\t", -1);
-		assertThat(line).hasSize(28);
+		assertThat(line).hasSize(29);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
 				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "12", "1.00");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
@@ -180,17 +183,18 @@ class ReplayDriverTest {
 		assertThat(List.of(line).subList(15, 17)).containsExactly("-", F1_DOSSIER_STEM);
 		// Only decision mode reads the dossier view: a dossier sample has none.
 		assertThat(line[17]).isEqualTo("-");
-		// The route's settings come last (qwen-dev T3): the model, its thinking, the report's cap and its deadline.
-		assertThat(List.of(line).subList(19, 23)).containsExactly("granite4.1:8b", "default", "512", "5s");
+		// The route's settings come last (qwen-dev T3): the model, its thinking, the report's cap and its deadline, then
+		// the context window (context-full-cut T3).
+		assertThat(List.of(line).subList(19, 24)).containsExactly("granite4.1:8b", "default", "512", "5s", "8192");
 		// The rules' candidates come after them (hybrid T4): only rules and hybrid samples have any.
-		assertThat(line[23]).isEmpty();
-		// The model's ranked alternatives come next (ranked-report T2; ADR-025): this report has none.
 		assertThat(line[24]).isEmpty();
+		// The model's ranked alternatives come next (ranked-report T2; ADR-025): this report has none.
+		assertThat(line[25]).isEmpty();
 		// The policy's counts come next (ADR-027): the dossier's calls ran no write and none was refused.
-		assertThat(List.of(line).subList(25, 27)).containsExactly("0", "0");
+		assertThat(List.of(line).subList(26, 28)).containsExactly("0", "0");
 		// The stored report's verification level comes last (ADR-028): an abstention stops at L1.
-		assertThat(line[27]).isEqualTo("L1");
-		assertThat(summary.get(0)).endsWith("\tview\treport\tmodel\tthink\treportCap\treportTimeout\tcandidates\tranked"
+		assertThat(line[28]).isEqualTo("L1");
+		assertThat(summary.get(0)).endsWith("\tview\treport\tmodel\tthink\treportCap\treportTimeout\tnumCtx\tcandidates\tranked"
 				+ "\triskyExecuted\tpolicyRefused\tlevel");
 
 		JsonNode incident = JSON.readTree(this.out.resolve("F1-dossier-" + F1_DOSSIER_STEM + "-1.json").toFile());
@@ -587,7 +591,7 @@ class ReplayDriverTest {
 		assertThat(config0r.reported()).isEqualTo(config0.reported()).isEqualTo(F1_TRUTH);
 		assertThat(config0r.candidates()).isEqualTo(config0.candidates());
 		assertThat(config0.settings()).isEqualTo(ReplayDriver.Settings.RULES);
-		assertThat(config0r.settings()).isEqualTo(new ReplayDriver.Settings("rules-v2", "-", "-", "-"));
+		assertThat(config0r.settings()).isEqualTo(new ReplayDriver.Settings("rules-v2", "-", "-", "-", "-"));
 		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
 		assertThat(List.of(line).subList(19, 23)).containsExactly("rules-v2", "-", "-", "-");
 		assertThat(config0r.incident().path("model").asString()).isEqualTo("rules-v2");
@@ -684,7 +688,7 @@ class ReplayDriverTest {
 		// A hand-made sample's incident records no policy counts, so those two columns are "-" (ADR-027), and a rules
 		// line states no level (ADR-028).
 		assertThat(rules.summaryLine())
-			.endsWith("\trules-v1\t-\t-\t-\t" + rules.candidatesColumn() + "\t\t-\t-\t-");
+			.endsWith("\trules-v1\t-\t-\t-\t-\t" + rules.candidatesColumn() + "\t\t-\t-\t-");
 		assertThat(decisionSample("dev", "a", "MATCH").candidatesColumn()).isEmpty();
 	}
 
@@ -818,7 +822,7 @@ class ReplayDriverTest {
 		assertThat(lines).containsExactly(ReplayDriver.AGGREGATE_HEADER,
 				// 2 M prompt tokens at $0.10 and 0.2 M completion tokens at $0.50 per million.
 				"F2\texplorer\tcloud\t-\t-\t-\t1\t2\t1/2\t0.75\t1\t1/1\t0/2\t2000000\t200000\t0.3000"
-						+ "\tclaude-haiku-5-5\toff\t768\t90s");
+						+ "\tclaude-haiku-5-5\toff\t768\t90s\t-");
 	}
 
 	/**
@@ -891,7 +895,7 @@ class ReplayDriverTest {
 		assertThat(sample.dossierResourceUnrecorded()).isEqualTo(RESOURCE_CALLS);
 
 		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
-		assertThat(line).hasSize(28);
+		assertThat(line).hasSize(29);
 		assertThat(List.of(line).subList(0, 8)).containsExactly("F1", "decision", "rules", "1", "COMPLETED", F1_TRUTH,
 				F1_TRUTH, "MATCH");
 		// The rules' candidates on the same dossier (hybrid T4), their verdict first, written service|category in order
@@ -899,20 +903,20 @@ class ReplayDriverTest {
 		assertThat(sample.candidates()).isNotEmpty()
 			.first()
 			.satisfies(first -> assertThat(first.service() + "|" + first.category()).isEqualTo(F1_TRUTH));
-		assertThat(line[23]).isEqualTo(sample.candidatesColumn())
+		assertThat(line[24]).isEqualTo(sample.candidatesColumn())
 			.startsWith(F1_TRUTH)
 			.matches("[^|;\t]+\\|[A-Z_]+(;[^|;\t]+\\|[A-Z_]+){0,4}");
 		// The rules write no ranked alternatives: only a model's plain report has them (ranked-report T2; ADR-025).
-		assertThat(line[24]).isEmpty();
+		assertThat(line[25]).isEmpty();
 		assertThat(sample.rankedColumn()).isEmpty();
 		// The gatherer's calls passed the policy gate (ADR-027): no write ran, none was refused.
-		assertThat(List.of(line).subList(25, 27)).containsExactly("0", "0");
+		assertThat(List.of(line).subList(26, 28)).containsExactly("0", "0");
 		// Config 0 writes no cited evidence, so its line states no level (ADR-028).
-		assertThat(line[27]).isEqualTo("-");
+		assertThat(line[28]).isEqualTo("-");
 		assertThat(List.of(line).subList(12, 14)).containsExactly("0", "0");
 		assertThat(List.of(line).subList(15, 19)).containsExactly("dev", r1.stem(), "tables", "plain");
-		// Config 0 calls no model: its model is the rules' version, and it has no thinking, cap or deadline.
-		assertThat(List.of(line).subList(19, 23)).containsExactly("rules-v1", "-", "-", "-");
+		// Config 0 calls no model: its model is the rules' version, and it has no thinking, cap, deadline or window.
+		assertThat(List.of(line).subList(19, 24)).containsExactly("rules-v1", "-", "-", "-", "-");
 
 		JsonNode incident = JSON
 			.readTree(this.out.resolve("F1-decision-verify-agent-20261024T162555Z-r1-F1-1.json").toFile());
@@ -976,14 +980,29 @@ class ReplayDriverTest {
 
 		ReplayDriver.Sample decision = driver.decisionSample(driver.decisionCases("stress", List.of("F1")).get(0), 1);
 
-		assertThat(decision.settings()).isEqualTo(new ReplayDriver.Settings("qwen3.5:9b", "on", "2048", "1800s"));
-		assertThat(withoutLevel(decision.summaryLine()))
-			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain\tqwen3.5:9b\ton\t2048\t1800s\t\t" + NO_POLICY_EVENT);
-		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1)).endsWith("\tqwen3.5:9b\ton\t2048\t1800s");
+		assertThat(decision.settings())
+			.isEqualTo(new ReplayDriver.Settings("qwen3.5:9b", "on", "2048", "1800s", "8192"));
+		assertThat(withoutLevel(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM
+				+ "\ttables\tplain\tqwen3.5:9b\ton\t2048\t1800s\t8192\t\t" + NO_POLICY_EVENT);
+		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1)).endsWith("\tqwen3.5:9b\ton\t2048\t1800s\t8192");
 		// The report call carried the thinking setting and the cap the line names.
 		OllamaChatOptions sent = (OllamaChatOptions) this.model.prompts().get(0).getOptions();
 		assertThat(sent.getThinkOption()).isEqualTo(ThinkOption.ThinkBoolean.ENABLED);
 		assertThat(sent.getNumPredict()).isEqualTo(2048);
+	}
+
+	/**
+	 * The context window is the local route's {@code num-ctx}, overridden or not (context-full-cut T3), and {@code -} on
+	 * the cloud route, which has no known window.
+	 */
+	@Test
+	void theSettingsRecordTheLocalContextWindowAndNoneForTheCloud() {
+		CallTimeouts timeouts = new CallTimeouts(Duration.ofSeconds(5), Duration.ofSeconds(600));
+		assertThat(ReplayDriver.Settings.of(new OllamaRoute("granite4.1:8b", this.model, 0.0, 12288, timeouts, CAPS)))
+			.isEqualTo(new ReplayDriver.Settings("granite4.1:8b", "default", "512", "600s", "12288"));
+		assertThat(ReplayDriver.Settings.of(new AnthropicRoute("claude-haiku-5-5", this.model, timeouts,
+				new NumPredict(384, 160, 768))))
+			.isEqualTo(new ReplayDriver.Settings("claude-haiku-5-5", "off", "768", "600s", "-"));
 	}
 
 	/** Samples of the same fault and split under different route settings are separate aggregate lines. */
@@ -993,12 +1012,12 @@ class ReplayDriverTest {
 		ReplayDriver.Sample qwen = new ReplayDriver.Sample("F1", AgentMode.DECISION, "local", "dev", "a",
 				Optional.of(DossierView.TABLES), Optional.of(DecisionReport.PLAIN), 1, IncidentStatus.TIMED_OUT,
 				F1_TRUTH, "none", "MISS", 33, 0, 1.0, 0, null, null, 1.0, 33, 0, JSON.createObjectNode(),
-				new ReplayDriver.Settings("qwen3.5:9b", "off", "1024", "900s"), List.of());
+				new ReplayDriver.Settings("qwen3.5:9b", "off", "1024", "900s", "8192"), List.of());
 
 		assertThat(ReplayDriver.aggregate(List.of(granite, qwen))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdecision\tlocal\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s",
-				"F1\tdecision\tlocal\tdev\ttables\tplain\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-\tqwen3.5:9b\toff\t1024\t900s");
-		assertThat(ReplayDriver.AGGREGATE_HEADER).endsWith("\tcostUsd\tmodel\tthink\treportCap\treportTimeout");
+				"F1\tdecision\tlocal\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s\t8192",
+				"F1\tdecision\tlocal\tdev\ttables\tplain\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-\tqwen3.5:9b\toff\t1024\t900s\t8192");
+		assertThat(ReplayDriver.AGGREGATE_HEADER).endsWith("\tcostUsd\tmodel\tthink\treportCap\treportTimeout\tnumCtx");
 	}
 
 	@Test
@@ -1009,7 +1028,7 @@ class ReplayDriverTest {
 				ReplayDriver.Settings.RULES, List.of());
 
 		assertThat(ReplayDriver.aggregate(List.of(rules))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdecision\trules\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t0\t0\t0.0000\trules-v1\t-\t-\t-");
+				"F1\tdecision\trules\tdev\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t0\t0\t0.0000\trules-v1\t-\t-\t-\t-");
 	}
 
 	@Test
@@ -1019,7 +1038,7 @@ class ReplayDriverTest {
 				1.0, 0, null, null, 1.0, 29, 0, JSON.createObjectNode(), LOCAL, List.of());
 
 		assertThat(ReplayDriver.aggregate(List.of(local))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F3\tdossier\tlocal\t-\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
+				"F3\tdossier\tlocal\t-\t-\t-\t1\t1\t0/1\t1.00\t1\t0/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s\t8192");
 	}
 
 	@Test
@@ -1033,7 +1052,7 @@ class ReplayDriverTest {
 		// Covered (coverage >= 0.8): samples 1, 2 and 4, two of them matches; a fully recorded dossier: samples 1 and 2.
 		assertThat(ReplayDriver.COVERED_THRESHOLD).isEqualTo(0.8);
 		assertThat(ReplayDriver.aggregate(samples)).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdossier\tlocal\t-\t-\t-\t1\t4\t3/4\t0.75\t3\t2/3\t2/4\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
+				"F1\tdossier\tlocal\t-\t-\t-\t1\t4\t3/4\t0.75\t3\t2/3\t2/4\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s\t8192");
 	}
 
 	@Test
@@ -1045,7 +1064,7 @@ class ReplayDriverTest {
 
 		assertThat(resourcesOnly.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
 		assertThat(ReplayDriver.aggregate(List.of(resourcesOnly, oneMore))).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdossier\tlocal\t-\t-\t-\t1\t2\t2/2\t1.00\t2\t2/2\t1/2\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
+				"F1\tdossier\tlocal\t-\t-\t-\t1\t2\t2/2\t1.00\t2\t2/2\t1/2\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s\t8192");
 	}
 
 	@Test
@@ -1055,8 +1074,8 @@ class ReplayDriverTest {
 				decisionSample("holdout", "c", "MATCH"));
 
 		assertThat(ReplayDriver.aggregate(samples)).containsExactly(ReplayDriver.AGGREGATE_HEADER,
-				"F1\tdecision\tlocal\tdev\ttables\tplain\t2\t3\t2/3\t1.00\t3\t2/3\t3/3\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s",
-				"F1\tdecision\tlocal\tholdout\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s");
+				"F1\tdecision\tlocal\tdev\ttables\tplain\t2\t3\t2/3\t1.00\t3\t2/3\t3/3\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s\t8192",
+				"F1\tdecision\tlocal\tholdout\ttables\tplain\t1\t1\t1/1\t1.00\t1\t1/1\t1/1\t-\t-\t-\tgranite4.1:8b\tdefault\t512\t600s\t8192");
 	}
 
 	private static ReplayDriver.Sample dossierSample(String verdict, double coverage, int dossierUnrecorded) {
@@ -1169,7 +1188,7 @@ class ReplayDriverTest {
 		return new ReplayDriver.Sample("F2", AgentMode.EXPLORER, "cloud", "-", "r", Optional.empty(), Optional.empty(), 1,
 				IncidentStatus.COMPLETED, "gateway-mock|DEPENDENCY_REJECTING", "gateway-mock|DEPENDENCY_REJECTING",
 				verdict, 1, 1, coverage, 0, prompt, completion, 1.0, 0, 0, JSON.createObjectNode(),
-				new ReplayDriver.Settings("claude-haiku-5-5", "off", "768", "90s"), List.of());
+				new ReplayDriver.Settings("claude-haiku-5-5", "off", "768", "90s", "-"), List.of());
 	}
 
 }

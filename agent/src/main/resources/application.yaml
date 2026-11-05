@@ -98,7 +98,9 @@ kintsugi:
     # same settings as spring.ai.ollama.chat.
     # A measurement may override, for its own run only (agent spec, "Routes", "Answer caps", "Budgets"; ADR-017;
     # odd/tasks/qwen-dev.md): the model with KINTSUGI_AGENT_MODEL_NAME, the report's cap with
-    # KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT, the report's deadline with KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT, and
+    # KINTSUGI_AGENT_MODEL_NUM_PREDICT_REPORT, the report's deadline with KINTSUGI_AGENT_MODEL_CALL_TIMEOUT_REPORT, the
+    # context window, num-ctx, with KINTSUGI_AGENT_MODEL_NUM_CTX (odd/tasks/context-full-cut.md; every call and the
+    # warm-up send it), and
     # Ollama's think field with KINTSUGI_AGENT_MODEL_THINK (true or false; kintsugi.agent.model.think). think is unset
     # here, so no request carries the field and every request is the one sent before it existed; an empty value is
     # unset too. With thinking on, Ollama counts the thinking tokens against num_predict, and the answer is still read
