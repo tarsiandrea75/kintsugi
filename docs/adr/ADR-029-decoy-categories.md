@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-11-05). The human confirmed the definitions in Decision 2. Feature: [`odd/tasks/decoy-categories.md`](../../odd/tasks/decoy-categories.md).
+Accepted (2026-11-05). The human confirmed the definitions in Decision 2, and kept the decoys after the dev measurement (amendment below). Feature: [`odd/tasks/decoy-categories.md`](../../odd/tasks/decoy-categories.md).
 
 ## Date
 
@@ -34,6 +34,24 @@ Accepted (2026-11-05). The human confirmed the definitions in Decision 2. Featur
      - on the lab, scored on the full pair;
      - on RE2-OB, scored on the service, with the category reported beside it.
    - A model that picks a decoy is wrong by construction, so the cost shows directly.
+
+### Amended 2026-11-05: measured, and kept
+
+The decoys were measured on dev:
+
+| Set | Without the decoys | With the decoys | Difference |
+|---|---|---|---|
+| Lab dev (`evals/results/2026-11-05-decoy-categories-lab-dev/`) | 14/15 | 13/15, 87% [62%, 96%] | p = 1 |
+| RE2-OB dev, service, 3 repeats per config (`evals/results/2026-11-05-decoy-noise-re2ob-dev/`) | DS′ 71/90, 79% [69%, 86%] | DK′ 63/90, 70% [60%, 78%] | −8.9 points, cluster bootstrap 95% [−17.8, 0.0] |
+
+- **The pre-registered rule says to keep them:** a CI that includes 0 is no evidence of a cost. The human kept the decoys on 2026-11-05.
+- **The probable cost, stated plainly.** The CI's upper bound is exactly 0, and every sign points one way:
+  - DK′ is never above DS′ in any pair of repeats: 23, 19 and 21 against 23, 24 and 24.
+  - DK′ abstains 22 times in 90 against 15.
+  - DK′ names a decoy as its cause once in 90.
+
+  The likely mechanism is that a wider taxonomy makes the model commit less often, not that it picks the decoys.
+- **Every measurement scored with this taxonomy may carry the cost,** a few points of service AC@1 from abstentions, holdout-2 included. Comparisons across the change must name the taxonomy.
 
 ## Alternatives considered
 

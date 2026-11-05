@@ -61,7 +61,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
     - DS′ 71/90, DK′ 63/90; DK′ − DS′ is −8.9 points, cluster bootstrap 95% [−17.8, 0.0].
     - By the pre-registered rule the CI includes 0, so there is no evidence of a cost, and the rule's recommendation is to keep the decoys.
     - The data lean to a cost through more abstentions: 22 against 15.
-  - The human decides: keep or revert before the freeze.
+  - Settled on 2026-11-05: the human kept the decoys (ADR-029, amended, with the probable cost stated).
   - Settled on 2026-11-05: the default context window stays 8192 (ADR-010, amended). L3 gains `no-changed-callee`, post hoc (ADR-028, amended; `evals/results/2026-11-05-l3-callee-recheck-re2ob/notes.md`): no wrong dev answer is left at L3, at the cost of one recording (`delay/0ed36a9e`).
   - Verified-correct on RE2-OB dev: DS 24/30, HC 20/30, HT 20/27.
   - On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
