@@ -89,6 +89,20 @@ Per section, `changed` is decided as follows. Where an existing Config 0 rule de
 
 **Amended 2026-11-04 (verification-levels T7).** The `latency` row drops the absolute 0.5 s floor: `changed` is `YES` when the incident mean is at least 2 × the previous mean (R-DOWN's `SLOW_RATIO`), whatever its seconds; the `NOT_COMPARED` cases are unchanged (a mean missing, the previous mean not above 0). `WindowChange` no longer holds a seconds constant, and the pin test pins the ratio only. Why: the 0.5 s floor is R-DOWN's diagnostic threshold, chosen to call a service slow enough to be a cause, and a diagnostic threshold of another rule should not decide whether a fact changed. The descriptive level report (T6, `evals/results/2026-11-04-verification-levels-descriptive/`) showed its cost on RE2-OB dev: 4 of DS's 5 correct `delay` answers stayed at L2 although the cause's latency rose 10 to 25 times (for example 0.004 to 0.087 s), and 7 of DS's 8 correct answers below L3 failed only `cause-fact-changed`. Cost, stated plainly: the rule was changed after seeing those 30 dev cases, so any level measured on them afterwards is post hoc; a later measurement on unseen cases is what tests the rule. Config 0's rules (`RulesDiagnosis`, `ResourceRule`) are not edited: R-DOWN keeps its floor, and Config 0's verdicts are unchanged. The table row above keeps its original text as the decision of record before this amendment.
 
+**Amended 2026-11-05 (l3-callee-check), post hoc: a second L3 check, `no-changed-callee`.**
+
+- **The rule.** L3 also requires that no service the claimed cause calls directly (`calls` in the topology) has a `latency` or `resources` line whose `changed` is `YES` anywhere in the dossier, cited or not. Both checks must pass for L3.
+- **It is an annotation.** Like every level check, it never retries and never drops an item.
+- **Why.** A caller's latency rises with its callee's, so a wrong answer naming a caller of the cause passed `cause-fact-changed` on its own latency line. On the dev outputs, 5 wrong answers reached L3 this way, in HC, HT and DS. All 5 named a direct caller of the true cause, and in all 5 the true cause had its own changed latency line, which the answer did not cite.
+- **The data the rule needs.** It uses only facts the index already holds (owner, section, `changed`) and the topology.
+- **Cost, estimated before the change.** The estimate re-derived the line facts from the stored dossier text, rounded to 3 decimals, over the 97 stored L3 answers. The check moves the 5 wrong answers off L3, and it moves 4 correct answers off L3 as well. All 4 are one recording, `delay/0ed36a9e`, seen in 4 configs. Its truth, checkoutservice, calls paymentservice and emailservice, and both slowed about 10×. A cause whose callees really changed cannot reach L3 under this check.
+- **Post hoc, stated plainly.** The check was chosen after seeing these dev cases, and every level measured on them afterwards is post hoc. A later measurement on unseen cases is what tests it.
+- **Alternatives rejected on the same data:**
+  - **Transitive callees:** one more correct drop, and it sits inside the rounding error.
+  - **Any section, or "the deepest changed service":** 11 correct drops, the lab's traffic and status answers among them.
+  - **A latency-ratio comparison:** it keeps 2 of the 5 wrong answers, and it needs a ratio that `LineFact` does not hold.
+- **Config 0 is unchanged:** the rules route never computes a level.
+
 **Alternative rejected: every item must pass.** Citing a caller is legitimate evidence: an F1 gateway latency is visible as payment-service's timeouts, and a report that cites both the cause's latency and the callers' timeouts is a better report, not a worse one. "Every item belongs to the cause" would score it below a report that cites one line. L2 already bounds the other items to the cause's call path.
 
 ### 6. Abstention
