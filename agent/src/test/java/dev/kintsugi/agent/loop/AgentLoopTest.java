@@ -350,7 +350,7 @@ class AgentLoopTest {
 
 	@Test
 	void aReportCutByAFullContextWindowNamesTheWindowNotTheCap() {
-		// HT: 5 reports were cut with prompt + completion = 8192 = num-ctx, none near the 512 cap (context-full-cut).
+		// HT: 5 reports were cut with prompt + completion = 8192 = num-ctx, none near HT's 4096 cap; this test's cap is 512 (context-full-cut).
 		this.model.quietPhases()
 			.cutUsing("length", 7900, 292,
 					"{\"rootCauseService\":\"order-service\",\"rootCauseCategory\":\"DEPENDENCY_LATENCY\",\"summ")

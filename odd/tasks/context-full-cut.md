@@ -42,12 +42,12 @@ Out of scope:
 - AC1: a scripted cut with prompt + completion ≥ the route's `numCtx` yields an error naming the full context window. A scripted cut below it still names the cap. The existing cut tests keep passing.
 - AC2: `KINTSUGI_AGENT_MODEL_NUM_CTX=12288` reaches the local call options and the warm-up. Without it, the window is 8192.
 - AC3: `replay-agent.sh --num-ctx` passes it. Without the option, the variable is unset even when it is set in the shell. `summary.tsv` records `numCtx`.
-- AC4: `cd evals && .venv/bin/python -m pytest -q` passes, and `./gradlew test` passes in `agent/`.
+- AC4: `cd evals && .venv/bin/python -m pytest -q` passes, and `./mvnw test` passes in `agent/`.
 - AC5: the rerun follows its committed plan, and its results are committed under `evals/results/`.
 
 ## Tasks
 
-- [ ] T1 This document. Route: inline (one file).
+- [x] T1 This document. Route: inline (one file).
 - [x] T2 Context-full message, test-first (`AgentLoop`, `ModelRoute`/`OllamaRoute`, `ScriptedChatModel`, `AgentLoopTest`). Route: delegated writer, T2 and T3 together (2+ non-trivial files).
 - [x] T3 The `--num-ctx` override and the `numCtx` column (`replay-agent.sh`, `ReplayDriver`, `LocalRouteSettingsTest`, `ReplayDriverTest`, evals reader if needed, `openspec/specs/agent/spec.md`, `docs/setup.md`).
 - [ ] T4 Plan, rerun, score, notes.
@@ -61,4 +61,11 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2–
 - T1: created.
 - T2: `8207f37` fix(agent): name a full context window instead of the report cap. `ModelRoute.contextWindow()` (empty by default, `num-ctx` on `OllamaRoute`); a cut answer with prompt + completion ≥ the window names the window in the report error and the ACT note, otherwise the cap as before. RED observed first: `aReportCutByAFullContextWindowNamesTheWindowNotTheCap` and `anActAnswerCutByAFullContextWindowNotesTheWindow` failed, the below-window and cloud tests passed; then GREEN, `AgentLoopTest` 62/62, agent suite 780/780 (`./mvnw test`). AC1 met.
 - T3: `461e2c5` feat(replay): set and record the context window per run. `--num-ctx N` (1 to 999999) exports `KINTSUGI_AGENT_MODEL_NUM_CTX`, cleared otherwise, refused off the local route (exit 2, checked by hand). `LocalRouteSettingsTest` proves the env var reaches the calls and the warm-up (12288; 8192 without it): Spring's relaxed binding needed no code. `numCtx` sits after `reportTimeout` in `summary.tsv` and `aggregate.tsv` (`-` on cloud and rules). RED: `ReplayDriverTest` did not compile against the 4-field `Settings`; GREEN after. Agent suite 782/782; evals 409 passed, including a new reader test with `numCtx`. AC2, AC3 (script part) and AC4 met.
-- Next: T4, the measurement plan, then the HT rerun with `--num-ctx 12288`.
+- T1: `fad68f3`.
+- Review of `fad68f3..5399538` (T2 and T3): high risk, four lenses, consent granted by standing preference, approved and acknowledged (`review-5062840a9a5835e0`). Advisories:
+  - R2: `docs/setup.md` said "four route-setting columns" for `aggregate.tsv`. Fixed.
+  - R2: a test comment named the test's 512 cap as HT's cap. Fixed.
+  - R3-001: if Ollama's prompt count left out a cached prefix, a full window would be reported as a cap cut again. The fallback is today's message. In HT all 5 cut attempts, the retries included, summed to exactly 8192. Follow-up.
+  - R3-002: the `--num-ctx` bounds and its refusal on other routes are checked by hand only, like the earlier override options. Follow-up.
+- T4: plan `evals/plans/2026-11-05-hybrid-ctx12k-re2ob-dev.md` (label HC).
+- Next: T4, the rules replays, then the HC run.
