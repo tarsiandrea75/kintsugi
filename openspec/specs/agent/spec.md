@@ -1675,6 +1675,7 @@ Every stored report MUST carry its `verification` **(verification-levels T4; [AD
 - GIVEN a plain report naming `order-service|CONFIGURATION`
 - WHEN its alternatives repeat `order-service`, name one service twice, hold an item `UNKNOWN` in either field, hold five items, or are missing
 - THEN the report is invalid, its error names the breach and the item, and it gets the one retry
+- AND a report naming `UNKNOWN|UNKNOWN` whose suspects break one of these rules is invalid in the same way
 
 #### Scenario: A decoy category is a valid cause and alternative (decoy-categories T2)
 - GIVEN a plain decision report naming `payment-service|CODE_DEFECT`, with the alternative `gateway-mock|NETWORK`, citing a dossier line
@@ -1685,7 +1686,6 @@ Every stored report MUST carry its `verification` **(verification-levels T4; [AD
 #### Scenario: An unknown category lists the seven values (decoy-categories T2)
 - WHEN a report's `rootCauseCategory`, or an alternative's, is `SLOW`
 - THEN the report is invalid with `rootCauseCategory must be one of DEPENDENCY_LATENCY, DEPENDENCY_REJECTING, CONFIGURATION, RESOURCE_EXHAUSTION, NETWORK, CODE_DEFECT, UNKNOWN; got "SLOW"`, prefixed by `alternatives[<i>].` for an alternative
-- AND a report naming `UNKNOWN|UNKNOWN` whose suspects break one of these rules is invalid in the same way
 
 #### Scenario: An abstention may list suspects (ranked-report T6)
 - GIVEN a plain report naming `UNKNOWN|UNKNOWN` with no evidence and the suspects `payment-service|DEPENDENCY_LATENCY` then `order-service|CONFIGURATION`

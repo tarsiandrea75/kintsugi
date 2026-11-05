@@ -56,3 +56,6 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 is
   - AC1: `theDecoyCategoriesAreValidCausesAndAlternatives` and `aReportNamingTheDecoyCategoriesIsStored`; the enum errors list the six values plus `UNKNOWN`.
   - AC2: each schema pin changes by `"NETWORK","CODE_DEFECT"` in its category enums only; each system pin gains the two definition lines before `UNKNOWN`.
   - The rules are untouched. AC3 (the Config 0 replays) is left to T3.
+- Review of `aa25d35`: medium risk, one lens (reliability), consent granted by standing preference. Approved and acknowledged (`review-d5e282973f7fef38`). Advisories:
+  - R3: the new spec scenarios had split the alternatives scenario from its last AND line. Fixed in the next commit.
+  - R3: no test accepts an assessed report naming a decoy. That path is covered only by the enum error string and the schema pin. Follow-up.
