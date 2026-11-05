@@ -91,9 +91,9 @@ class AgentLoopDossierApiTest {
 		JsonNode verification = incident.get("report").get("verification");
 		assertThat(verification.get("level").asString()).isEqualTo("L1");
 		assertThat(verification.get("checks")).extracting(check -> check.get("name").asString())
-			.containsExactly("schema", "citations", "owners-on-path", "cause-fact-changed");
+			.containsExactly("schema", "citations", "owners-on-path", "cause-fact-changed", "no-changed-callee");
 		assertThat(verification.get("checks")).extracting(check -> check.get("pass").isNull())
-			.containsExactly(false, false, true, true);
+			.containsExactly(false, false, true, true, true);
 		JsonNode dossier = incident.get("steps").get(0);
 		assertThat(dossier.get("kind").asString()).isEqualTo("DOSSIER");
 		assertThat(dossier.get("phase").asString()).isEqualTo("DOSSIER");

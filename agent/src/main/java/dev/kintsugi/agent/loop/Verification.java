@@ -14,7 +14,8 @@ import java.util.Optional;
  * passes here); L1 {@value #CITATIONS}, no evidence item was dropped (a summary cut is not a dropped item); L2
  * {@value #OWNERS_ON_PATH}, every cited line's owner is the cause or on its call path, and on the assessed report also
  * {@value #ONE_ORIGIN}, {@value #GRAPH} and {@value #ANSWER}; L3 {@value #CAUSE_FACT_CHANGED}, at least one cited line
- * is owned by the cause and its fact changed between the windows.
+ * is owned by the cause and its fact changed between the windows, and {@value #NO_CHANGED_CALLEE}, no direct callee of
+ * the cause has a changed latency or resources line in the dossier.
  * @param level the highest {@code k} such that every check at levels 0 to {@code k} passes
  * @param checks every check, in level order
  */
@@ -40,6 +41,12 @@ record Verification(int level, List<Check> checks) {
 
 	/** L3: at least one cited line is owned by the cause and its fact changed. */
 	static final String CAUSE_FACT_CHANGED = "cause-fact-changed";
+
+	/**
+	 * L3: no service the cause calls directly has a changed latency or resources line anywhere in the dossier, cited or
+	 * not (ADR-028, Decision 5, amended 2026-11-05), so a caller of the true cause does not pass on its own latency.
+	 */
+	static final String NO_CHANGED_CALLEE = "no-changed-callee";
 
 	/** The highest level this code computes; L4 (live probes) is out of scope. */
 	static final int MAX_LEVEL = 3;

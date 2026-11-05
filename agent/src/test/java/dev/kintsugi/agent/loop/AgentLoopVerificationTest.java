@@ -57,7 +57,7 @@ class AgentLoopVerificationTest {
 			"stepsUsed");
 
 	private static final List<String> PLAIN_CHECKS = List.of("schema", "citations", "owners-on-path",
-			"cause-fact-changed");
+			"cause-fact-changed", "no-changed-callee");
 
 	/** The report string the loop last stored, as it wrote it, before jsonb reorders its fields. */
 	private final AtomicReference<String> completed = new AtomicReference<>();
@@ -115,7 +115,7 @@ class AgentLoopVerificationTest {
 		assertThat(verification.get("checks")).extracting(check -> check.get("name").asString())
 			.containsExactlyElementsOf(PLAIN_CHECKS);
 		assertThat(verification.get("checks")).extracting(check -> check.get("level").asString())
-			.containsExactly("L0", "L1", "L2", "L3");
+			.containsExactly("L0", "L1", "L2", "L3", "L3");
 		assertThat(verification.get("checks")).allSatisfy(check -> {
 			assertThat(check.propertyNames()).containsExactlyInAnyOrder("level", "name", "pass", "detail");
 			assertThat(check.get("pass").asBoolean()).isTrue();
@@ -204,7 +204,7 @@ class AgentLoopVerificationTest {
 		assertThat(verification.get("level").asString()).isEqualTo("L3");
 		assertThat(verification.get("checks")).extracting(check -> check.get("name").asString())
 			.containsExactly("schema", "citations", "owners-on-path", "one-origin", "graph", "answer",
-					"cause-fact-changed");
+					"cause-fact-changed", "no-changed-callee");
 	}
 
 	/**
@@ -226,7 +226,7 @@ class AgentLoopVerificationTest {
 		assertThat(verification.get("checks")).extracting(check -> check.get("name").asString())
 			.containsExactlyElementsOf(PLAIN_CHECKS);
 		assertThat(verification.get("checks")).extracting(check -> check.get("pass").isNull())
-			.containsExactly(false, false, true, true);
+			.containsExactly(false, false, true, true, true);
 		assertThat(check(verification, "cause-fact-changed").get("detail").asString())
 			.isEqualTo("both causes are UNKNOWN: the report names no cause to check");
 	}

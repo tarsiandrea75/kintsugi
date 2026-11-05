@@ -12,6 +12,7 @@ import static dev.kintsugi.agent.loop.ScriptedChatModel.report;
 import static java.util.stream.Collectors.joining;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -124,12 +125,12 @@ class ReportCheckTest {
 
 	/** The checks of a plain or hybrid report, in level order. */
 	private static final List<String> PLAIN_CHECKS = List.of(Verification.SCHEMA, Verification.CITATIONS,
-			Verification.OWNERS_ON_PATH, Verification.CAUSE_FACT_CHANGED);
+			Verification.OWNERS_ON_PATH, Verification.CAUSE_FACT_CHANGED, Verification.NO_CHANGED_CALLEE);
 
 	/** The checks of an assessed report, in level order. */
 	private static final List<String> ASSESSED_CHECKS = List.of(Verification.SCHEMA, Verification.CITATIONS,
 			Verification.OWNERS_ON_PATH, Verification.ONE_ORIGIN, Verification.GRAPH, Verification.ANSWER,
-			Verification.CAUSE_FACT_CHANGED);
+			Verification.CAUSE_FACT_CHANGED, Verification.NO_CHANGED_CALLEE);
 
 	private static final String ABSTAINED = "both causes are UNKNOWN: the report names no cause to check";
 
@@ -815,7 +816,7 @@ class ReportCheckTest {
 		assertThat(result.verification().checks()).extracting(Verification.Check::name)
 			.containsExactlyElementsOf(ASSESSED_CHECKS);
 		assertThat(result.verification().checks()).extracting(Verification.Check::level)
-			.containsExactly(0, 1, 2, 2, 2, 2, 3);
+			.containsExactly(0, 1, 2, 2, 2, 2, 3, 3);
 		assertThat(result.verification().checks()).allSatisfy(check -> {
 			assertThat(check.pass()).as(check.name()).isTrue();
 			assertThat(check.detail()).as(check.name()).isNull();
@@ -832,7 +833,7 @@ class ReportCheckTest {
 		assertThat(result.verification().checks()).filteredOn(check -> check.level() >= 2)
 			.extracting(Verification.Check::name)
 			.containsExactly(Verification.OWNERS_ON_PATH, Verification.ONE_ORIGIN, Verification.GRAPH,
-					Verification.ANSWER, Verification.CAUSE_FACT_CHANGED);
+					Verification.ANSWER, Verification.CAUSE_FACT_CHANGED, Verification.NO_CHANGED_CALLEE);
 		assertThat(result.verification().checks()).filteredOn(check -> check.level() >= 2).allSatisfy(check -> {
 			assertThat(check.pass()).as(check.name()).isNull();
 			assertThat(check.detail()).as(check.name()).isEqualTo(ABSTAINED);
@@ -1037,7 +1038,7 @@ class ReportCheckTest {
 
 		assertThat(result.verification().checks()).extracting(Verification.Check::name)
 			.containsExactlyElementsOf(PLAIN_CHECKS);
-		assertThat(result.verification().checks()).extracting(Verification.Check::level).containsExactly(0, 1, 2, 3);
+		assertThat(result.verification().checks()).extracting(Verification.Check::level).containsExactly(0, 1, 2, 3, 3);
 		assertThat(result.verification().checks()).allSatisfy(check -> assertThat(check.pass()).isTrue());
 		assertThat(result.verification().level()).isEqualTo(3);
 	}
@@ -1086,7 +1087,8 @@ class ReportCheckTest {
 		assertThat(result.verification().checks()).containsExactly(
 				Verification.Check.passed(0, Verification.SCHEMA), Verification.Check.passed(1, Verification.CITATIONS),
 				Verification.Check.notApplicable(2, Verification.OWNERS_ON_PATH, ABSTAINED),
-				Verification.Check.notApplicable(3, Verification.CAUSE_FACT_CHANGED, ABSTAINED));
+				Verification.Check.notApplicable(3, Verification.CAUSE_FACT_CHANGED, ABSTAINED),
+				Verification.Check.notApplicable(3, Verification.NO_CHANGED_CALLEE, ABSTAINED));
 		assertThat(result.verification().level()).isEqualTo(1);
 		// An abstention with no evidence too.
 		assertThat(checkWithFacts(report("UNKNOWN", "UNKNOWN")).verification().level()).isEqualTo(1);
@@ -1143,6 +1145,89 @@ class ReportCheckTest {
 		assertThat(ReportCheck.checkHybrid(Answers.json(hybridReport("gateway-mock", "DEPENDENCY_LATENCY",
 				dossierEvidence(2))), STEPS, AgentMode.DECISION, TABLES, TABLES_FACTS, CANDIDATES, LAB).verification())
 			.isNull();
+	}
+
+	@Test
+	void aCalleesChangedLatencyLineFailsNoChangedCalleeEvenWhenItIsNotCited() {
+		// ADR-028, Decision 5 amended 2026-11-05: payment-service's own client row changed, so cause-fact-changed passes,
+		// but gateway-mock, which payment-service calls, has a changed latency line (D2) the report does not cite.
+		ReportCheck.Result result = checkWithFacts(report("payment-service", "DEPENDENCY_LATENCY", dossierEvidence(3)));
+
+		assertThat(check(result, Verification.CAUSE_FACT_CHANGED).pass()).isTrue();
+		assertThat(check(result, Verification.NO_CHANGED_CALLEE)).isEqualTo(Verification.Check.failed(3,
+				Verification.NO_CHANGED_CALLEE, "D2 is a changed latency line of gateway-mock, which payment-service calls"));
+		assertThat(result.verification().level()).isEqualTo(2);
+		// The hybrid report is annotated the same way.
+		ReportCheck.Result hybrid = ReportCheck.checkHybrid(Answers.json(hybridReport("payment-service",
+				"DEPENDENCY_LATENCY", dossierEvidence(3))), STEPS, AgentMode.DECISION, TABLES, TABLES_FACTS, CANDIDATES, LAB);
+		assertThat(check(hybrid, Verification.NO_CHANGED_CALLEE).pass()).isFalse();
+		assertThat(hybrid.verification().level()).isEqualTo(2);
+	}
+
+	@Test
+	void aCalleesChangedResourcesLineFailsNoChangedCallee() {
+		ReportCheck.Result result = checkWithFacts(report("payment-service", "DEPENDENCY_LATENCY", dossierEvidence(3)),
+				withD2(fact("gateway-mock", Section.RESOURCES, Change.YES)));
+
+		assertThat(check(result, Verification.NO_CHANGED_CALLEE).detail())
+			.isEqualTo("D2 is a changed resources line of gateway-mock, which payment-service calls");
+		assertThat(result.verification().level()).isEqualTo(2);
+	}
+
+	@Test
+	void aCalleesLatencyLineUnchangedOrNeverComparedKeepsL3() {
+		for (Change changed : List.of(Change.NO, Change.NOT_COMPARED)) {
+			ReportCheck.Result result = checkWithFacts(report("payment-service", "DEPENDENCY_LATENCY",
+					dossierEvidence(3)), withD2(fact("gateway-mock", Section.LATENCY, changed)));
+
+			assertThat(check(result, Verification.NO_CHANGED_CALLEE).pass()).as(changed.name()).isTrue();
+			assertThat(result.verification().level()).as(changed.name()).isEqualTo(3);
+		}
+	}
+
+	@Test
+	void aCalleesChangedLineOfAnotherSectionKeepsL3() {
+		// Only latency and resources lines count: a callee's changed traffic or status line does not fail the check.
+		for (Section section : List.of(Section.TRAFFIC, Section.STATUS, Section.STATES, Section.EVENTS)) {
+			ReportCheck.Result result = checkWithFacts(report("payment-service", "DEPENDENCY_LATENCY",
+					dossierEvidence(3)), withD2(fact("gateway-mock", section, Change.YES)));
+
+			assertThat(check(result, Verification.NO_CHANGED_CALLEE).pass()).as(section.name()).isTrue();
+			assertThat(result.verification().level()).as(section.name()).isEqualTo(3);
+		}
+	}
+
+	@Test
+	void aChangedLatencyLineOfACalleesCalleeKeepsL3() {
+		// Direct callees only: gateway-mock is called by payment-service, which order-service calls.
+		List<LineFact> facts = List.of(TABLES_FACTS.get(0), TABLES_FACTS.get(1),
+				fact("payment-service", Section.TRAFFIC, Change.NO), fact("order-service", Section.STATUS, Change.YES),
+				TABLES_FACTS.get(4), TABLES_FACTS.get(5));
+
+		ReportCheck.Result result = checkWithFacts(report("order-service", "CONFIGURATION", dossierEvidence(4)), facts);
+
+		assertThat(check(result, Verification.NO_CHANGED_CALLEE).pass()).isTrue();
+		assertThat(result.verification().level()).isEqualTo(3);
+	}
+
+	@Test
+	void anAssessedReportNamingACallerOfAChangedLeafFailsNoChangedCallee() {
+		ReportCheck.Result result = checkAssessed(assessedReport("payment-service", "DEPENDENCY_LATENCY", SLOW_LEAF));
+
+		assertThat(check(result, Verification.NO_CHANGED_CALLEE)).isEqualTo(Verification.Check.failed(3,
+				Verification.NO_CHANGED_CALLEE, "D3 is a changed latency line of gateway-mock, which payment-service calls"));
+	}
+
+	/** {@link #TABLES_FACTS} with D2's fact replaced by {@code d2}. */
+	private static List<LineFact> withD2(LineFact d2) {
+		List<LineFact> facts = new ArrayList<>(TABLES_FACTS);
+		facts.set(1, d2);
+		return facts;
+	}
+
+	/** Checks a decision-mode report against {@link #TABLES} and {@code facts}. */
+	private static ReportCheck.Result checkWithFacts(String answer, List<LineFact> facts) {
+		return ReportCheck.check(Answers.json(answer), STEPS, AgentMode.DECISION, TABLES, facts, LAB);
 	}
 
 	/** The candidates of the hybrid checks: two, in the order the rules propose them. */

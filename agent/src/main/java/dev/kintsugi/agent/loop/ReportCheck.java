@@ -10,11 +10,11 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.IntFunction;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -23,6 +23,7 @@ import tools.jackson.databind.node.ObjectNode;
 import dev.kintsugi.agent.dossier.Change;
 import dev.kintsugi.agent.dossier.DossierRenderer;
 import dev.kintsugi.agent.dossier.LineFact;
+import dev.kintsugi.agent.dossier.Section;
 import dev.kintsugi.agent.dossier.ServiceSheets;
 import dev.kintsugi.agent.dossier.Topology;
 import dev.kintsugi.agent.loop.Verification.Check;
@@ -88,6 +89,9 @@ final class ReportCheck {
 	static final List<String> ASSESSMENT_FIELDS = List.of("role", "line", "why");
 
 	private static final String NOT_AN_OBJECT = "the answer is not a JSON object";
+
+	/** The sections whose changed line of a direct callee fails {@link Verification#NO_CHANGED_CALLEE}. */
+	private static final Set<Section> CALLEE_SECTIONS = Set.of(Section.LATENCY, Section.RESOURCES);
 
 	/** Why an abstention's L2 and L3 checks do not apply (ADR-028, Decision 6). */
 	static final String ABSTAINED = "both causes are UNKNOWN: the report names no cause to check";
@@ -258,8 +262,7 @@ final class ReportCheck {
 			return invalid(errors);
 		}
 		// L1 reads the dropped items only: the summary cut storedSummary records next is not one.
-		Verification verification = verification(report, verified, dropped, line -> fact(facts, line), topology,
-				List.of());
+		Verification verification = verification(report, verified, dropped, facts, topology, List.of());
 		String text = storedSummary(report, dropped);
 		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text, verification);
 	}
@@ -344,7 +347,7 @@ final class ReportCheck {
 			}
 		}
 		// Valid, so every service is assessed: the graph rules read every role.
-		Verification verification = verification(report, evidence, List.of(), sheets::fact, topology,
+		Verification verification = verification(report, evidence, List.of(), sheets.facts(), topology,
 				graphRules(assessments, report, topology));
 		List<String> dropped = new ArrayList<>();
 		String text = storedSummary(report, dropped);
@@ -471,15 +474,17 @@ final class ReportCheck {
 	 * The verification of an accepted report (ADR-028): L0 its schema, passed, since the report is accepted; L1 no
 	 * evidence item was dropped; L2 every stored item's line is owned by the cause or a service on its call path, then
 	 * {@code graphRules}, the assessed report's; L3 at least one stored item cites a line of the cause whose fact
-	 * changed. A report naming {@code UNKNOWN|UNKNOWN} claims no cause, so its L2 and L3 checks do not apply ({@code pass}
+	 * changed, and no service the cause calls directly has a changed latency or resources line anywhere in the dossier
+	 * (Decision 5, amended 2026-11-05). A report naming {@code UNKNOWN|UNKNOWN} claims no cause, so its L2 and L3 checks do not apply ({@code pass}
 	 * null), and a graph rule its roles break keeps that in its detail. The alternatives being causes of the topology is
 	 * an L0 rule of the plain report already ({@link #alternatives}), so L2 does not check it again.
 	 * @param evidence the stored evidence items, each {@code {toolCallId, tool, line, quote, why}}
 	 * @param dropped the evidence items dropped, as {@link Result#dropped} names them, without a summary cut
-	 * @param facts the fact of a dossier line by its number, empty when it has none
+	 * @param facts the fact of each numbered dossier line, {@code facts.get(n - 1)} line {@code D<n>}'s; empty when
+	 * the dossier indexes none
 	 */
 	private static Verification verification(JsonNode report, List<JsonNode> evidence, List<String> dropped,
-			IntFunction<Optional<LineFact>> facts, Topology topology, List<Check> graphRules) {
+			List<LineFact> facts, Topology topology, List<Check> graphRules) {
 		List<Check> checks = new ArrayList<>();
 		checks.add(Check.passed(0, Verification.SCHEMA));
 		checks.add(Check.of(1, Verification.CITATIONS, dropped.isEmpty() ? null : String.join("; ", dropped)));
@@ -489,6 +494,7 @@ final class ReportCheck {
 			graphRules.forEach(rule -> checks.add(Check.notApplicable(2, rule.name(),
 					rule.detail() == null ? ABSTAINED : ABSTAINED + "; the roles break it: " + rule.detail())));
 			checks.add(Check.notApplicable(3, Verification.CAUSE_FACT_CHANGED, ABSTAINED));
+			checks.add(Check.notApplicable(3, Verification.NO_CHANGED_CALLEE, ABSTAINED));
 			return Verification.of(checks);
 		}
 		Set<String> path = callPath(cause, topology);
@@ -502,7 +508,7 @@ final class ReportCheck {
 						+ " is a tool step's output, which has no line fact");
 				continue;
 			}
-			Optional<LineFact> fact = facts.apply(line);
+			Optional<LineFact> fact = fact(facts, line);
 			if (fact.isEmpty()) {
 				offPath.add("D" + line + " has no line fact");
 				continue;
@@ -523,7 +529,29 @@ final class ReportCheck {
 				: "no cited line is a line of " + cause + " whose fact changed between the windows; "
 						+ (causeLines.isEmpty() ? "none of its lines is cited"
 								: "its cited lines: " + String.join(", ", causeLines))));
+		checks.add(Check.of(3, Verification.NO_CHANGED_CALLEE, changedCallees(cause, facts, topology)));
 		return Verification.of(checks);
+	}
+
+	/**
+	 * The L3 check {@link Verification#NO_CHANGED_CALLEE} (ADR-028, Decision 5, amended 2026-11-05): every line of the
+	 * dossier, cited or not, that a service {@code cause} calls directly owns, of section {@code latency} or
+	 * {@code resources}, whose fact changed. A caller's latency rises with its callee's, so such a line says the problem
+	 * may start below the cause. Transitive callees and the other sections do not count.
+	 * @return the failure detail naming each such line, or null when there is none
+	 */
+	private static String changedCallees(String cause, List<LineFact> facts, Topology topology) {
+		Set<String> callees = Set.copyOf(topology.calls(cause));
+		List<String> changed = new ArrayList<>();
+		for (int i = 0; i < facts.size(); i++) {
+			LineFact fact = facts.get(i);
+			if (callees.contains(fact.owner()) && CALLEE_SECTIONS.contains(fact.section())
+					&& fact.changed() == Change.YES) {
+				changed.add("D" + (i + 1) + " is a changed " + fact.section().name().toLowerCase(Locale.ROOT)
+						+ " line of " + fact.owner() + ", which " + cause + " calls");
+			}
+		}
+		return changed.isEmpty() ? null : String.join("; ", changed);
 	}
 
 	/**
@@ -531,7 +559,7 @@ final class ReportCheck {
 	 * candidate stores such a report, both causes UNKNOWN, so it is at L1.
 	 */
 	static Verification withoutEvidence(JsonNode report, Topology topology) {
-		return verification(report, List.of(), List.of(), line -> Optional.empty(), topology, List.of());
+		return verification(report, List.of(), List.of(), List.of(), topology, List.of());
 	}
 
 	/**
