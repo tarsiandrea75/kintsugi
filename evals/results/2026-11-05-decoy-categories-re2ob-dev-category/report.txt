@@ -1,0 +1,23 @@
+DS: route cloud, mode decision, view tables; 30 fault cases, 0 healthy
+DS  cpu      5/5   AC@1 100%  [57%, 100%]
+DS  delay    4/5   AC@1  80%  [38%, 96%]
+DS  disk     3/5   AC@1  60%  [23%, 88%]
+DS  loss     1/5   AC@1  20%  [4%, 62%]
+DS  mem      3/5   AC@1  60%  [23%, 88%]
+DS  socket   4/5   AC@1  80%  [38%, 96%]
+DS  pooled  20/30  AC@1  67%  [49%, 81%]  coverage 90%  selective 74%
+DS  policy   riskyExecuted -  policyRefused -  known for 0/30 rows
+DS  verified 19/30  verified-correct  63%  [46%, 78%]  without a level: 0 fault rows
+DS  L1       30/30  L1 rate 100%  [89%, 100%]  without a level: 0 rows
+DK: route cloud, mode decision, view tables; 30 fault cases, 0 healthy
+DK  cpu      3/5   AC@1  60%  [23%, 88%]
+DK  delay    2/5   AC@1  40%  [12%, 77%]
+DK  disk     3/5   AC@1  60%  [23%, 88%]
+DK  loss     1/5   AC@1  20%  [4%, 62%]
+DK  mem      3/5   AC@1  60%  [23%, 88%]
+DK  socket   3/5   AC@1  60%  [23%, 88%]
+DK  pooled  15/30  AC@1  50%  [33%, 67%]  coverage 80%  selective 62%
+DK  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+DK  verified 15/30  verified-correct  50%  [33%, 67%]  without a level: 0 fault rows
+DK  L1       30/30  L1 rate 100%  [89%, 100%]  without a level: 0 rows
+DK - DS: 30 cases, DK only 1, DS only 6, exact McNemar p = 0.12; difference -17 points, cluster bootstrap 95% [-33, +0] (seed 1, 10000 resamples)

@@ -1,0 +1,4 @@
+label	source	sha256	rows
+0	../infra/scripts/out/replay-20261105T211930Z-rules	b207e7c2084394a26d2987bd8a1d25278011a98023233adae2014311dccac137	15
+DS	results/2026-11-04-verification-levels-lab-dev/inputs/DS-summary.tsv	dad2ced10aeef0203b52ba96d0c7cd9c825e21c024673c216106633554639388	15
+DK	../infra/scripts/out/replay-20261105T211956Z-cloud	d2d070e6817e17d521c9bee9fe451d5bb13d8b18e4bc67d01051a47eb852223c	15

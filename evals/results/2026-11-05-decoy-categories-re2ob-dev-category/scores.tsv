@@ -1,0 +1,15 @@
+config	fault	n	correct	abstained	ac1	wilson_low	wilson_high	coverage	selective	false_alarms	false_alarm_rate	fa_wilson_low	fa_wilson_high	candidate_recall
+DS	cpu	5	5	0	1.0000	0.5655	1.0000	1.0000	1.0000					
+DS	delay	5	4	0	0.8000	0.3755	0.9638	1.0000	0.8000					
+DS	disk	5	3	2	0.6000	0.2307	0.8824	0.6000	1.0000					
+DS	loss	5	1	0	0.2000	0.0362	0.6245	1.0000	0.2000					
+DS	mem	5	3	0	0.6000	0.2307	0.8824	1.0000	0.6000					
+DS	socket	5	4	1	0.8000	0.3755	0.9638	0.8000	1.0000					
+DS	pooled	30	20	3	0.6667	0.4878	0.8077	0.9000	0.7407					
+DK	cpu	5	3	2	0.6000	0.2307	0.8824	0.6000	1.0000					
+DK	delay	5	2	1	0.4000	0.1176	0.7693	0.8000	0.5000					
+DK	disk	5	3	1	0.6000	0.2307	0.8824	0.8000	0.7500					
+DK	loss	5	1	0	0.2000	0.0362	0.6245	1.0000	0.2000					
+DK	mem	5	3	0	0.6000	0.2307	0.8824	1.0000	0.6000					
+DK	socket	5	3	2	0.6000	0.2307	0.8824	0.6000	1.0000					
+DK	pooled	30	15	6	0.5000	0.3315	0.6685	0.8000	0.6250					

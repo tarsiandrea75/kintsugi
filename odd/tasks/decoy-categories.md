@@ -41,7 +41,7 @@ Out of scope:
 
 - [x] T1 This document and ADR-029. Route: inline.
 - [x] T2 The taxonomy, the prompt, the pins and the spec. Route: delegated writer (2+ non-trivial files).
-- [ ] T3 The plan, the runs, the results and notes; STATE.
+- [x] T3 The plan, the runs, the results and notes; STATE.
 
 ## Delivery
 
@@ -59,3 +59,9 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 is
 - Review of `aa25d35`: medium risk, one lens (reliability), consent granted by standing preference. Approved and acknowledged (`review-d5e282973f7fef38`). Advisories:
   - R3: the new spec scenarios had split the alternatives scenario from its last AND line. Fixed in the next commit.
   - R3: no test accepts an assessed report naming a decoy. That path is covered only by the enum error string and the schema pin. Follow-up.
+- T3: plan `57340ed`; runs `replay-20261105T211956Z-cloud` (lab) and `replay-20261105T212143Z-cloud` (RE2-OB), $0.060 in all. Config 0 is unchanged, so AC3 holds.
+  - No answer names a decoy as its cause.
+  - Lab: 13/15 against DS's 14/15, p = 1.
+  - RE2-OB service: 21/30 against 26/30, p = 0.062, mostly through more abstentions (6 against 3).
+  - Results: `evals/results/2026-11-05-decoy-categories-*`. AC5 met.
+- Open, the human's call: whether the RE2-OB drop is the taxonomy or sampling noise. One run per configuration cannot tell.
