@@ -6,6 +6,7 @@ The limits `docs/benchmark.md` must state next to H1–H3 (vision §7, M4). `ben
 
 - **Commit times are self-asserted.** `check-freeze.sh` proves the order of the history as written, not that it was written honestly: the repository is local, with no remote and no posts, so nothing outside the author attests when the seed was drawn or a recording made. The backup bundles kept outside the laptop are the only independent dates. A public timestamp of the seed's hash would close it (ADR-026, amendment of 2026-11-03).
 - **Lab holdout-1 was read by two configurations' runs**, each config once, as their plans fixed (`2026-10-30-holdout1-lab`, `2026-10-31-qwen-holdout1`).
+- **TT has been seen.** BARO's reproduction read every RE2-TT case's truth label and BARO's ranks on it ([ADR-024](adr/ADR-024-baro-port.md), `evals/plans/2026-11-03-baro-re2tt-reproduction.md`) before RE2-TT became holdout TT. Neither the agent nor the rules were run or tuned on it, but TT is not as unseen as holdout B ([ADR-032](adr/ADR-032-m4-holdout-coverage.md)).
 
 ## The lab
 
