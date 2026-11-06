@@ -172,7 +172,7 @@ The agent never calls a model directly: it goes through a `ModelRouter` interfac
 | 0R | Config 0's rules plus R-RES, the resource rule (ADR-021) | what do the rules alone get from the same facts, resources included? H1's baseline (ADR-022) |
 | A | Local 8B; report deadline 600 s on the lab, 2100 s on RCAEval (ADR-023) | is laptop hardware enough? |
 | B | Local 14B, on a paired subset of about 60 cases | how much does a bigger local model buy? |
-| C | Local first, escalating to D on abstention, an L2/L3 failure or low confidence (threshold set on dev). Computed from the paired A and D outputs, with no extra runs | near-D quality at a fraction of the cost? |
+| C | Local first, escalating to D on no answer, abstention, a verification level below `k`, or a confidence below `t` (`(k, t)` set on dev by a stated rule, [ADR-030](adr/ADR-030-config-c-escalation-rule.md)). Computed from the paired A and D outputs, with no extra runs | near-D quality at a fraction of the cost? |
 | D | `claude-haiku-5-5`, the cheapest API model (ADR-012) | the API reference, and its price |
 | H | Hybrid (ADR-019): Config 0's rules propose up to 5 candidates, local qwen3.5:9b with thinking (ADR-018) picks one or UNKNOWN and explains, with no fallback | does the LLM add anything over the rules once it sees them? (H − 0 on RCAEval dev) |
 | HR | H over 0R's candidates (ADR-021) | the same question, resources included (HR − 0R on RCAEval dev) |
