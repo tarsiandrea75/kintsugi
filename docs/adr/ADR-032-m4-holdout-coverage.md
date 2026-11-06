@@ -25,7 +25,7 @@ The check for M4 (vision §8) requires that A covers at least 200 holdout cases 
 1. **RE2-TT is the RCAEval holdout TT**, 90 cases, for Config 0, Config 0R and D only.
    - It is read once, under a committed plan, from 2026-12-07.
    - The converter is enabled for it behind `--allow-holdout TT`, as for A and B. That is `evals/` code, not frozen.
-   - TT enters H1 (D − 0R, RCAEval holdouts) with holdouts A and B. It enters neither H2 nor H3, because A does not run on it (64 services, beyond the local context).
+   - TT enters H1 (D − 0R, RCAEval holdouts) with holdouts A and B. It enters neither H2 nor H3, because A does not run on it (68 services, beyond the local context).
    - D then covers 75 + 60 + 90 + 90 = 315 cases.
 2. **Holdout-2 runs Config 0, Config 0R, A and D.** C is computed from A and D under ADR-030's fixed rule.
    - A's holdout-2 run is the first levelled lab A run, so C exists on the lab from it.
@@ -52,5 +52,5 @@ The check for M4 (vision §8) requires that A covers at least 200 holdout cases 
 ### Negative
 
 - **TT has been seen.** BARO's reproduction read TT's truth labels and BARO's ranks on it (ADR-024). Neither the agent nor the rules were tuned on it, but TT is not as unseen as holdout B. `docs/benchmark-limits.md` states this.
-- **Converter risk.** The converter's holdout and RE2-SS paths are untested (STATE follow-up), and TT's 64 services are new to it. A dry check of headers and counts, with no scoring, runs before 2026-12-07 (`odd/tasks/m4-plans.md` T4).
+- **Converter risk.** The converter's holdout and RE2-SS paths are untested (STATE follow-up), and TT's 68 services are new to it. A dry check of headers and counts, with no scoring, runs before 2026-12-07 (`odd/tasks/m4-plans.md` T4).
 - **CPU time.** About 40 CPU hours of A become fixed in M4's three weeks.

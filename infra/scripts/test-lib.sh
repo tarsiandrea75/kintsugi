@@ -915,13 +915,6 @@ expect "re2-tt replays decision mode only" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-tt --mode dossier; echo "exit $?")" \
   "--dataset re2-tt replays decision mode only, not dossier: the converter writes one decision case per RCAEval\
  case and no stress recordings"$'\n'"exit 2"
-# RE2-TT's topology (ADR-032) is not written yet: until it is, re2-tt exits 2 naming the missing file.
-if [[ ! -f "$REPO_DIR/agent/src/main/resources/topology/re2-tt.json" ]]; then
-  expect "re2-tt exits 2 while its topology file is missing" \
-    "$(replay_agent_over "$rcaeval_dir" --dataset re2-tt --mode decision; echo "exit $?")" \
-    "--dataset re2-tt needs its topology, agent/src/main/resources/topology/re2-tt.json, which does not exist yet"\
-$'\n'"exit 2"
-fi
 expect "the lab dataset keeps the lab's faults" \
   "$(replay_agent --dataset lab --mode decision --faults cpu; echo "exit $?")" \
   "Unknown fault 'cpu'; choose from F1 F2 F3 healthy"$'\n'"exit 2"

@@ -296,6 +296,60 @@ class TopologyTest {
 			.isEqualTo(displayOrder("front-end", normalized(prefixes)));
 	}
 
+	@Test
+	void theRe2TtFileHasTrainTicketsServicesAndSourceEdges() {
+		Topology tt = Topology.load(new ClassPathResource("topology/re2-tt.json"));
+		assertThat(tt.services()).hasSize(68);
+		assertThat(tt.datastores()).isEmpty();
+		assertThat(tt.edges()).hasSize(153).allSatisfy(edge -> {
+			assertThat(edge.method()).isEqualTo("CALL");
+			assertThat(edge.uri()).isEqualTo("/");
+		});
+		assertThat(tt.edges().getFirst()).isEqualTo(new Edge(null, "ts-ui-dashboard", "CALL", "/"));
+		assertThat(tt.calls("ts-travel-service")).containsExactly("ts-order-service", "ts-route-service",
+				"ts-seat-service", "ts-ticketinfo-service", "ts-train-service", "ts-travel-mongo");
+		assertThat(tt.calls("ts-travel2-service")).containsExactly("ts-order-other-service", "ts-route-service",
+				"ts-seat-service", "ts-ticketinfo-service", "ts-train-service", "ts-travel2-mongo");
+		// Train Ticket's seat service calls back into the travel services, a cycle Topology rejects: the back edges
+		// seat -> travel and seat -> travel2 are dropped (ADR-033), the main request direction travel -> seat is kept.
+		assertThat(tt.calls("ts-seat-service")).containsExactly("ts-config-service", "ts-order-other-service",
+				"ts-order-service");
+		assertThat(tt.edges()).doesNotContain(new Edge("ts-seat-service", "ts-travel-service", "CALL", "/"),
+				new Edge("ts-seat-service", "ts-travel2-service", "CALL", "/"));
+		// Deployed and measured, but no source at v0.1.0 connects to them (ADR-033): services with no edge.
+		for (String store : List.of("ts-food-mysql", "ts-notification-mongo", "ts-preserve-mongo",
+				"ts-preserve-other-mongo")) {
+			assertThat(tt.calls(store)).as(store).isEmpty();
+			assertThat(tt.calledBy(store)).as(store).isEmpty();
+		}
+		assertThat(tt.statusTables()).isEmpty();
+		assertThat(tt.eventSources()).isEmpty();
+	}
+
+	@Test
+	void theRe2TtServicesAreTheNormalizedMetricPrefixes() {
+		// The prefixes of the simple_metrics.csv headers of RE2-TT (the union over its 90 files, header lines only).
+		List<String> prefixes = List.of("istio-init", "ts-admin-basic-info-service", "ts-admin-order-service",
+				"ts-admin-route-service", "ts-admin-travel-service", "ts-admin-user-service", "ts-assurance-mongo",
+				"ts-assurance-service", "ts-auth-mongo", "ts-auth-service", "ts-avatar-service", "ts-basic-service",
+				"ts-cancel-service", "ts-config-mongo", "ts-config-service", "ts-consign-mongo",
+				"ts-consign-price-mongo", "ts-consign-price-service", "ts-consign-service", "ts-contacts-mongo",
+				"ts-contacts-service", "ts-execute-service", "ts-food-map-mongo", "ts-food-map-service", "ts-food-mongo",
+				"ts-food-mysql", "ts-food-service", "ts-inside-payment-mongo", "ts-inside-payment-service",
+				"ts-news-service", "ts-notification-mongo", "ts-notification-service", "ts-order-mongo",
+				"ts-order-other-mongo", "ts-order-other-service", "ts-order-service", "ts-payment-mongo",
+				"ts-payment-service", "ts-preserve-mongo", "ts-preserve-other-mongo", "ts-preserve-other-service",
+				"ts-preserve-service", "ts-price-mongo", "ts-price-service", "ts-rebook-service", "ts-route-mongo",
+				"ts-route-plan-service", "ts-route-service", "ts-seat-service", "ts-security-mongo",
+				"ts-security-service", "ts-station-mongo", "ts-station-service", "ts-ticket-office-mongo",
+				"ts-ticket-office-service", "ts-ticketinfo-service", "ts-train-mongo", "ts-train-service",
+				"ts-travel-mongo", "ts-travel-plan-service", "ts-travel-service", "ts-travel2-mongo",
+				"ts-travel2-service", "ts-ui-dashboard", "ts-user-mongo", "ts-user-service",
+				"ts-verification-code-service", "ts-voucher-mysql", "ts-voucher-service");
+		assertThat(Topology.load(new ClassPathResource("topology/re2-tt.json")).services())
+			.isEqualTo(displayOrder("ts-ui-dashboard", normalized(prefixes)));
+	}
+
 	/**
 	 * The services RCAEval's evaluator names for {@code prefixes} ({@code to_service}: the part before the first
 	 * underscore, {@code -db} folded), minus the prefixes that are no component of the application: a Kubernetes
