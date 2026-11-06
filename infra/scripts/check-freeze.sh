@@ -44,10 +44,11 @@ the file or commit, then a RESULT line:
    so this proves the order of the history as written, not that it was written honestly (ADR-026, amendment).
 4. results: no .tsv under evals/results/, in any commit of HEAD's history before the M4 date, holds a row of lab
    holdout-2 or of an RCAEval holdout: holdout A (RE2-OB repetitions 2-3) or holdout B (RE2-SS). A row is found by
-   its split (holdout-2; holdout on a recording that is not a lab verify-agent-* one) or by its recording id, which
-   is recomputed from the row's fault and truth as the converter blinds it, in every table with a fault, a truth and
-   a recording or file column, split column or not. Lab holdout-1 rows (split holdout on a verify-agent-* recording)
-   are allowed: they were read once in M2 by plan.
+   its split (holdout-2; holdout on a recording that is not one of the manifest's holdout-1 files at HEAD), by its
+   recording (or its file's name with no .json) being one of the manifest's holdout-2 files at HEAD, or by its
+   recording id, recomputed from the row's fault and truth as the converter blinds it. Every table with a recording,
+   file or split column is read, split column or not. Lab holdout-1 rows (split holdout on one of the manifest's
+   holdout-1 files) are allowed: they were read once in M2 by plan.
 Exits 0 only when all four hold, 1 when one fails, 2 on a wrong argument or an older python3. Read-only: it never
 writes to the repository. Needs git and python3 3.11 or later.
 EOF
@@ -310,17 +311,38 @@ EOF
 
 # Condition 4: no result committed before the M4 date read a holdout other than lab holdout-1.
 check_results() {
-  python3 -I - "$repo" "$M4_DATE" "$RESULTS_DIR" "$HOLDOUT2_SPLIT" <<'EOF'
+  python3 -I - "$repo" "$M4_DATE" "$RESULTS_DIR" "$HOLDOUT2_SPLIT" "$MANIFEST" <<'EOF'
 import csv
 import hashlib
 import subprocess
 import sys
 
-repo, m4_date, results_dir, holdout2 = sys.argv[1:]
+repo, m4_date, results_dir, holdout2, manifest = sys.argv[1:]
 
 
 def git(*args):
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, check=True).stdout
+
+
+def stem(file):
+    """A recording's id as result rows name it: its file name with no directory and no .json."""
+    return file.rsplit("/", 1)[-1].removesuffix(".json")
+
+
+def manifest_recordings():
+    """The manifest's recordings at HEAD by split, as {split: {recording id}}; none when HEAD has no manifest."""
+    done = subprocess.run(["git", "-C", repo, "show", "HEAD:" + manifest], capture_output=True, text=True)
+    by_split = {}
+    if done.returncode == 0:
+        for row in csv.DictReader(done.stdout.splitlines(), delimiter="\t"):
+            if row.get("file"):
+                by_split.setdefault(row.get("split"), set()).add(stem(row["file"]))
+    return by_split
+
+
+recordings = manifest_recordings()
+# Lab holdout-2 and holdout-1 rows are found by the manifest at HEAD, not by a split column or a name prefix.
+holdout2_recordings, holdout1_recordings = recordings.get(holdout2, set()), recordings.get("holdout", set())
 
 
 def blinded(system, service, fault, rep):
@@ -352,9 +374,9 @@ def holdout_of(row):
     if found:
         return found
     split, recording = row.get("split"), row.get("recording") or ""
-    if split == holdout2:
+    if split == holdout2 or recording in holdout2_recordings:
         return "lab " + holdout2
-    if split == "holdout" and not recording.startswith("verify-agent-"):
+    if split == "holdout" and recording not in holdout1_recordings:
         return "split holdout on a recording that is not a lab holdout-1 one (an RCAEval holdout)"
     return None
 
@@ -376,15 +398,14 @@ for short, day, path in versions:
     text = git("show", "%s:%s" % (short, path))
     reader = csv.DictReader(text.splitlines(), delimiter="\t")
     columns = set(reader.fieldnames or [])
-    # The recording-id check needs a fault, a truth and a recording or file; the split checks need a split.
-    by_id = {"fault", "truth"} <= columns and bool({"recording", "file"} & columns)
-    if not by_id and "split" not in columns:
+    # The recording checks (RCAEval ids, lab recordings) need a recording or file column; the split checks a split.
+    if not {"recording", "file", "split"} & columns:
         continue
     rows = list(reader)
     found = {}
     for row in rows:
         if not row.get("recording") and row.get("file"):
-            row["recording"] = row["file"].rsplit("/", 1)[-1].removesuffix(".json")
+            row["recording"] = stem(row["file"])
         holdout = holdout_of(row)
         if holdout:
             found.setdefault(holdout, []).append(row.get("recording") or "?")

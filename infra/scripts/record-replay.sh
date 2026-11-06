@@ -25,7 +25,8 @@ agent/src/test/resources/replay/<fault>/<run dir name>-<fault>.json, or <run dir
 fault, mode, route, truth, file, incident, split, case; the recorded mode and route; file relative to the replay
 directory; a healthy control's fault is healthy and its truth NONE|NONE). The case column is holdout-2's schedule case,
 taken from the file name, and is empty in every other split; a holdout-2 recording that names no case is refused
-(ADR-026, Decision 3). --rounds selects rounds only, so it skips a schedule run's files. Re-running it on the same run with the same split is
+(ADR-026, Decision 3). A recording that names a case joins only holdout-2, or dev with its case dropped: it is refused
+into holdout, stress and probe. --rounds selects rounds only, so it skips a schedule run's files. Re-running it on the same run with the same split is
 idempotent: the copy is replaced and the file's manifest line is replaced with the new values (unchanged when they are
 the same), never duplicated.
 
@@ -195,6 +196,14 @@ for run_dir in "${run_dirs[@]}"; do
     if [[ "$split" == holdout-2 && -z "$schedule_case" ]]; then
       echo "FAIL  $run $label: refused, a holdout-2 recording must name its schedule case" \
         "(<class>-c<case>-incident.json, from verify-agent.sh --schedule); nothing written"
+      refused=$((refused + 1))
+      continue
+    fi
+    # A schedule run's file joins holdout-2, or dev with its case dropped. In holdout, stress or probe it would pass for
+    # another split's recording, as condition 4 of check-freeze.sh would take a holdout one for holdout-1.
+    if [[ -n "$schedule_case" && "$split" != holdout-2 && "$split" != dev ]]; then
+      echo "FAIL  $run $label: refused, a recording that names a schedule case (<class>-c<case>-incident.json) joins" \
+        "only holdout-2 or dev, not $split; nothing written"
       refused=$((refused + 1))
       continue
     fi

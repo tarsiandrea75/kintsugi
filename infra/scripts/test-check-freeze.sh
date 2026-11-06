@@ -395,6 +395,31 @@ expect_line "a holdout read under a non-ASCII directory name fails condition 4" 
 expect_line "a holdout read in a table with no split column fails condition 4" "$out" \
   "FAIL  results: evals/results/no-split/inputs/A-summary.tsv at $commit (2026-12-04): 1 row(s) of RCAEval holdout A (RE2-OB repetition 2), first $rep2"
 
+# Condition 4 finds lab holdout-2 and holdout-1 rows by the manifest at HEAD, not by a split column or a name prefix.
+repo="$WORK/manifest-splits"
+make_repo "$repo" 2026-12-02T10:00:00Z
+mkdir -p "$repo/evals/results/h2-no-split" "$repo/evals/results/h2-by-file" "$repo/evals/results/not-holdout1" \
+  "$repo/evals/results/no-recording"
+printf 'fault\ttruth\treported\trecording\nF1\tx|y\tx|y\tverify-agent-20261202T100000Z-r1-F1\n' \
+  >"$repo/evals/results/h2-no-split/scores.tsv"
+printf 'fault\tfile\nF1\tF1/verify-agent-20261202T100000Z-r1-F1.json\n' >"$repo/evals/results/h2-by-file/copy.tsv"
+printf '%s\nF1\tx|y\tx|y\tholdout\tverify-agent-20261024T162555Z-r4-F1\n' "$summary_header" \
+  >"$repo/evals/results/not-holdout1/A-summary.tsv"
+printf 'label\tsource\nF1\tverify-agent-20261202T100000Z-r1-F1\n' >"$repo/evals/results/no-recording/inputs.tsv"
+commit_at "$repo" 2026-12-04T10:00:00Z "read holdout-2 with no split column"
+commit=$(git -C "$repo" rev-parse --short HEAD)
+out=$(run_check --repo "$repo")
+expect_line "a holdout-2 recording in a table with no split column fails condition 4" "$out" \
+  "FAIL  results: evals/results/h2-no-split/scores.tsv at $commit (2026-12-04): 1 row(s) of lab holdout-2, first verify-agent-20261202T100000Z-r1-F1"
+expect_line "a holdout-2 recording named by its file fails condition 4" "$out" \
+  "FAIL  results: evals/results/h2-by-file/copy.tsv at $commit (2026-12-04): 1 row(s) of lab holdout-2, first verify-agent-20261202T100000Z-r1-F1"
+expect_line "a holdout row on a verify-agent- recording that is not a manifest holdout-1 file fails condition 4" "$out" \
+  "FAIL  results: evals/results/not-holdout1/A-summary.tsv at $commit (2026-12-04): 1 row(s) of split holdout on a recording that is not a lab holdout-1 one (an RCAEval holdout), first verify-agent-20261024T162555Z-r4-F1"
+expect_no_line "a row on a manifest holdout-1 file still passes condition 4" "$out" \
+  "FAIL  results: evals/results/m2/"
+expect_no_line "a table with no recording or file column is not read for lab recordings" "$out" \
+  "FAIL  results: evals/results/no-recording/"
+
 # Options.
 out=$(run_check --m4-date 2026-13-01)
 expect_line "a wrong --m4-date exits 2" "$out" "exit 2"

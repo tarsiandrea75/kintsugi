@@ -39,8 +39,8 @@ import dev.kintsugi.agent.incident.IncidentRepository;
  * {@code replay.faults} ({@code F1,F2,F3}), {@code replay.recordings} (the committed {@code replay/} directory) and
  * {@code replay.out} ({@code infra/scripts/out/replay-<UTC time>-<route>/}). Explorer and dossier replay each fault
  * {@code replay.samples} (1) times per mode, over the fault's {@code stress} recordings. Decision mode replays each
- * recording of the split {@code replay.split} ({@code dev}, the default, {@code holdout}, {@code stress} or
- * {@code probe}) made in decision or dossier mode, alone, {@code replay.repeats} (1) times: the dossier's recorded calls
+ * recording of the split {@code replay.split} ({@code dev}, the default, {@code holdout}, {@code stress},
+ * {@code probe} or {@code holdout-2}) made in decision or dossier mode, alone, {@code replay.repeats} (1) times: the dossier's recorded calls
  * and the report call. {@link ReplayCases} picks the recordings. A property of the other kind of run is refused rather
  * than ignored ({@link ReplayDriver#refuseIgnoredProperties}), so a run is never other than the one asked for. A
  * decision run writes its dossier in the view of {@code kintsugi.agent.decision.view} ({@code tables}, the default, or

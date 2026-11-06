@@ -1047,6 +1047,22 @@ cp "$schedule_run"/healthy-c2-* "$dev_schedule_run/"
 expect "a schedule run into dev leaves the case column empty" \
   "$(record --split dev "$dev_schedule_run" >/dev/null; grep -F 'verify-agent-20261103T220000Z' "$replay_dir/recordings.tsv" | cut -f 7-)" \
   "dev${tab}"
+# A schedule run's file joins holdout-2, or dev with its case dropped; never holdout, stress or probe, where it would
+# pass for a holdout-1 or another split's recording.
+case_run="$KEY_DIR/runs/verify-agent-20261103T230000Z"
+mkdir -p "$case_run"
+cp "$schedule_run"/healthy-c2-* "$case_run/"
+for other_split in holdout stress probe; do
+  expect "a schedule run into $other_split is refused" "$(record --split "$other_split" "$case_run"; echo "exit $?")" \
+    "FAIL  verify-agent-20261103T230000Z healthy-c2: refused, a recording that names a schedule case\
+ (<class>-c<case>-incident.json) joins only holdout-2 or dev, not $other_split; nothing written
+0 recorded, 1 refused, manifest $replay_dir/recordings.tsv
+exit 1"
+done
+expect "nothing is written for a refused schedule run" \
+  "$(grep -cF 'verify-agent-20261103T230000Z' "$replay_dir/recordings.tsv"; \
+    if [[ -e "$replay_dir/healthy/verify-agent-20261103T230000Z-c2-healthy.json" ]]; then echo written; else echo none; fi)" \
+  "0"$'\n'"none"
 expect "holdout-2 refuses a recording that names no schedule case" \
   "$(record --split holdout-2 --rounds 1 "$new_run" | grep -F 'F3-r1')" \
   "FAIL  verify-agent-20261024T162600Z F3-r1: refused, a holdout-2 recording must name its schedule case\
