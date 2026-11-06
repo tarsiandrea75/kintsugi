@@ -761,7 +761,7 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		write(run, new StepRow(run.steps + 1, "REPORT", Phase.CONCLUDE.name(), null, null, null, null, null, null, null,
 				null, NO_CANDIDATE, null, 0, now()));
 		ReportCheck.Result checked = new ReportCheck.Result(List.of(), List.of(), List.of(), NO_CANDIDATE_SUMMARY,
-				ReportCheck.withoutEvidence(report, this.topology));
+				ReportCheck.withoutEvidence(report, this.topology), null);
 		return stored(run, report, checked, false, ReportCheck.HYBRID_FIELDS);
 	}
 
@@ -774,7 +774,9 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 	 * The summary is stored as {@link ReportCheck} kept it, cut when it was too long (report-field-order). An assessed
 	 * report (T2) also keeps its checked assessments, first, and its evidence is the one code derived from them, so
 	 * that storage and scoring read it as they read a plain report. Only the plain report keeps the model's checked
-	 * {@code alternatives}, after the cause (ranked-report T2; ADR-025); the hybrid and assessed reports have none. Every
+	 * {@code alternatives}, after the cause (ranked-report T2; ADR-025), as {@link ReportCheck} kept them: a repeated
+	 * service is dropped there, and the step's summary names it (ADR-025, amendment 2026-11-06); the hybrid and
+	 * assessed reports have none. Every
 	 * stored report carries its {@code verification}, after the model's fields and before {@code stepsUsed}
 	 * (verification-levels T4; ADR-028): an annotation code computed, which caused no model call.
 	 * @param fields the model's fields, in order: {@link ReportCheck#MODEL_FIELDS} for the plain report,
@@ -791,6 +793,10 @@ public class AgentLoop implements IncidentRunner, AutoCloseable {
 		}
 		// An assessed report has no evidence of its own: its place is kept for the derived one, set below.
 		fields.forEach(field -> stored.set(field, report.get(field)));
+		if (checked.alternatives() != null) {
+			// In its place after the cause: each service's first occurrence only (ADR-025, amendment 2026-11-06).
+			stored.putArray("alternatives").addAll(checked.alternatives());
+		}
 		stored.put("summary", checked.summary());
 		stored.putArray("evidence").addAll(checked.evidence());
 		stored.set("verification", verification(checked.verification()));

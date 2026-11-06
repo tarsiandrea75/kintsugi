@@ -133,9 +133,12 @@ final class ReportCheck {
 	 * when it was longer; null otherwise
 	 * @param verification when the report is valid, its level and the checks that decide it (ADR-028), an annotation
 	 * that never adds to {@code errors}; null otherwise
+	 * @param alternatives when a plain report is valid, its alternatives as stored: the model's, in its order, each
+	 * service's first occurrence only (ADR-025, amendment 2026-11-06), the repeats named in {@code dropped} after the
+	 * evidence items; null for the other reports and for an invalid one
 	 */
 	record Result(List<String> errors, List<String> dropped, List<JsonNode> evidence, String summary,
-			Verification verification) {
+			Verification verification, List<JsonNode> alternatives) {
 	}
 
 	/**
@@ -227,9 +230,9 @@ final class ReportCheck {
 		causesAndConfidence(report, topology, errors);
 		boolean unknown = Causes.UNKNOWN.equals(report.path("rootCauseService").asString(""))
 				&& Causes.UNKNOWN.equals(report.path("rootCauseCategory").asString(""));
-		if (ranked) {
-			alternatives(report, topology, errors);
-		}
+		// The repeats dropped from the alternatives: named in the verdict, but no evidence item, so L1 does not read them.
+		List<String> repeats = new ArrayList<>();
+		List<JsonNode> alternatives = ranked ? alternatives(report, topology, errors, repeats) : null;
 		JsonNode evidence = report.get("evidence");
 		if (evidence == null || !evidence.isArray()) {
 			errors.add("evidence must be an array of at most 5 items");
@@ -263,8 +266,9 @@ final class ReportCheck {
 		}
 		// L1 reads the dropped items only: the summary cut storedSummary records next is not one.
 		Verification verification = verification(report, verified, dropped, facts, topology, List.of());
+		dropped.addAll(repeats);
 		String text = storedSummary(report, dropped);
-		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text, verification);
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(verified), text, verification, alternatives);
 	}
 
 	/**
@@ -351,7 +355,7 @@ final class ReportCheck {
 				graphRules(assessments, report, topology));
 		List<String> dropped = new ArrayList<>();
 		String text = storedSummary(report, dropped);
-		return new Result(List.of(), List.copyOf(dropped), List.copyOf(evidence), text, verification);
+		return new Result(List.of(), List.copyOf(dropped), List.copyOf(evidence), text, verification, null);
 	}
 
 	/**
@@ -634,23 +638,27 @@ final class ReportCheck {
 	}
 
 	/**
-	 * Adds to {@code errors} each rule the plain report's alternatives break (ranked-report T2; ADR-025): an array of
-	 * at most {@value #MAX_ALTERNATIVES} items {@code {rootCauseService, rootCauseCategory}}, from the cause's enums,
-	 * none UNKNOWN in either field, each service named once, the first cause's included. When both causes are UNKNOWN
-	 * the same rules hold, and the list is the causes the model suspects but cannot support (ADR-025, amendment
-	 * 2026-11-03): an UNKNOWN first cause names no service, so it blocks none. Every breach rejects the report, for the
-	 * one retry: no alternative is dropped, since the list is the model's ranking and a list code had cut would be a
-	 * ranking nobody made.
+	 * The plain report's alternatives as stored (ranked-report T2; ADR-025), adding to {@code errors} each rule they
+	 * break: an array of items {@code {rootCauseService, rootCauseCategory}}, from the cause's enums, none UNKNOWN in
+	 * either field. An item that breaks none of these but names a service already named, the first cause's included,
+	 * is dropped and named in {@code repeats}, and the first occurrence is kept (ADR-025, amendment 2026-11-06): the
+	 * model ranks (service, category) pairs, the rule counts services, and the scorer's {@code ranking_of} keeps the
+	 * first occurrence too. The list left must hold at most {@value #MAX_ALTERNATIVES} items. When both causes are
+	 * UNKNOWN the same rules hold, and the list is the causes the model suspects but cannot support (ADR-025, amendment
+	 * 2026-11-03): an UNKNOWN first cause names no service, so it blocks none. Any other breach rejects the report, for
+	 * the one retry.
+	 * @return the items kept, in the model's order; empty when the field is not an array
 	 */
-	private static void alternatives(JsonNode report, Topology topology, List<String> errors) {
+	private static List<JsonNode> alternatives(JsonNode report, Topology topology, List<String> errors,
+			List<String> repeats) {
 		JsonNode alternatives = report.get("alternatives");
 		if (alternatives == null || !alternatives.isArray()) {
 			errors.add(ALTERNATIVES_SHAPE);
-			return;
+			return List.of();
 		}
-		if (alternatives.size() > MAX_ALTERNATIVES) {
-			errors.add("alternatives must hold at most " + MAX_ALTERNATIVES + " items");
-		}
+		// The bound reads the list left after the repeats, which only the loop finds; its error keeps its place first.
+		int boundAt = errors.size();
+		List<JsonNode> kept = new ArrayList<>();
 		Set<String> named = new HashSet<>();
 		named.add(report.path("rootCauseService").asString(""));
 		for (int i = 0; i < alternatives.size(); i++) {
@@ -660,6 +668,7 @@ final class ReportCheck {
 				errors.add(at + " must be an object {rootCauseService, rootCauseCategory}");
 				continue;
 			}
+			int before = errors.size();
 			unexpected(item, ALTERNATIVE_FIELD_SET, at + ".", errors);
 			String service = Causes.enumError(at + ".rootCauseService", item.get("rootCauseService"),
 					topology.causes());
@@ -674,15 +683,26 @@ final class ReportCheck {
 					|| Causes.UNKNOWN.equals(item.get("rootCauseCategory").asString())) {
 				errors.add(at + " must not be UNKNOWN: leave out a cause you cannot name");
 			}
+			else if (errors.size() > before) {
+				// An unexpected field: the item is rejected, so it is neither kept nor dropped as a repeat.
+				continue;
+			}
 			else if (!named.add(item.get("rootCauseService").asString())) {
-				errors.add(at + ".rootCauseService " + Causes.shown(item.get("rootCauseService"))
-						+ " is already named; name each service once, rootCauseService included");
+				repeats.add(at + ": " + item.get("rootCauseService").asString()
+						+ " is already named, so it is dropped and its first occurrence kept");
+			}
+			else {
+				kept.add(item);
 			}
 		}
+		if (alternatives.size() - repeats.size() > MAX_ALTERNATIVES) {
+			errors.add(boundAt, "alternatives must hold at most " + MAX_ALTERNATIVES + " items");
+		}
+		return List.copyOf(kept);
 	}
 
 	private static Result invalid(List<String> errors) {
-		return new Result(List.copyOf(errors), List.of(), null, null, null);
+		return new Result(List.copyOf(errors), List.of(), null, null, null, null);
 	}
 
 	/**

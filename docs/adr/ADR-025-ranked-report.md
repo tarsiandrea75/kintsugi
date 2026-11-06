@@ -37,6 +37,14 @@ Two constraints from the routes: the local report cap is 512 tokens, sized for o
 
 **Risk:** with suspects allowed, abstaining may become the easier answer, and AC@1 fall. The plan's rule tests it.
 
+### Amendment, 2026-11-06: a repeated service keeps its first occurrence
+
+**Status:** accepted. It is post hoc: it was written after seeing the three dev cases below.
+
+**Context:** three lab F2 runs ended `INVALID_REPORT` on Decision 3's "no service twice" rule: DS `r7` (2026-11-04) and DK `r3` and `r9` (2026-11-05). In all six attempts the cause was the truth, `gateway-mock|DEPENDENCY_REJECTING`. Attempt 1 named the cause's service again, as `gateway-mock|RESOURCE_EXHAUSTION`. The retry moved that category to a service already listed, and made a new repeat. The model ranks (service, category) pairs, while the rule counts services. The scorer's `ranking_of` (REQ-13) already keeps each service's first occurrence.
+
+**Decision:** Decision 3's "no service twice" rule changes. An alternative that breaks no other rule but names a service already named, the first cause's included, is dropped, not fatal, and the first occurrence is kept. The bound of 4 reads the list left after the drops. The stored report holds that list; the `REPORT` step keeps the raw answer and its verdict names each drop by index and service. The same holds for an abstention's suspects. The prompt is unchanged: it still asks for no service twice. Since the scorer reduces the ranking the same way, no score changes. The rule is deterministic, while a better retry message would be probabilistic, and the model already worked around the current one (`odd/tasks/repeated-service-first.md`).
+
 ## Alternatives considered
 
 - **An array of candidates replacing the two cause fields.** Rejected: every consumer of `reported` would change, and AC@1 would move from a field the model fills to an index we choose.

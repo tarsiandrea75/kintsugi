@@ -558,15 +558,43 @@ class ReportCheckTest {
 				List.of("payment-service|NETWORK", "postgres|CODE_DEFECT"), evidence(4, "search_logs", 2)))).isEmpty();
 	}
 
+	/**
+	 * ADR-025, amendment 2026-11-06: an alternative naming the first cause's service again is dropped, not fatal. This
+	 * is DS r7's attempt 1 (2026-11-04), as recorded, which ended INVALID_REPORT under the old rule. The drop is named
+	 * with the evidence drops, but it is no evidence item, so L1 still passes.
+	 */
 	@Test
-	void aServiceNamedTwiceCountingTheFirstCauseIsInvalid() {
-		assertThat(errors(rankedReport("order-service", "CONFIGURATION", List.of("order-service|DEPENDENCY_LATENCY"),
-				evidence(4, "search_logs", 2)))).containsExactly("alternatives[0].rootCauseService \"order-service\" is "
-						+ "already named; name each service once, rootCauseService included");
-		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
-				List.of("postgres|CONFIGURATION", "postgres|RESOURCE_EXHAUSTION"), evidence(4, "search_logs", 2))))
-			.containsExactly("alternatives[1].rootCauseService \"postgres\" is already named; name each service once, "
-					+ "rootCauseService included");
+	void anAlternativeNamingTheFirstCausesServiceAgainIsDropped() {
+		ReportCheck.Result result = check(rankedReport("gateway-mock", "DEPENDENCY_REJECTING",
+				List.of("payment-service|CONFIGURATION", "gateway-mock|RESOURCE_EXHAUSTION"),
+				evidence(4, "search_logs", 2)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(pairs(result.alternatives())).containsExactly("payment-service|CONFIGURATION");
+		assertThat(result.dropped()).containsExactly(
+				"alternatives[1]: gateway-mock is already named, so it is dropped and its first occurrence kept");
+		assertThat(check(result, Verification.CITATIONS).pass()).isTrue();
+	}
+
+	@Test
+	void aServiceNamedTwiceInTheAlternativesKeepsItsFirstOccurrence() {
+		ReportCheck.Result result = check(rankedReport("order-service", "CONFIGURATION",
+				List.of("payment-service|CONFIGURATION", "payment-service|RESOURCE_EXHAUSTION"),
+				evidence(4, "search_logs", 2)));
+
+		assertThat(result.errors()).isEmpty();
+		assertThat(pairs(result.alternatives())).containsExactly("payment-service|CONFIGURATION");
+		assertThat(result.dropped()).containsExactly(
+				"alternatives[1]: payment-service is already named, so it is dropped and its first occurrence kept");
+	}
+
+	@Test
+	void validAlternativesAreKeptInOrder() {
+		ReportCheck.Result result = check(rankedReport("order-service", "CONFIGURATION",
+				List.of("postgres|CONFIGURATION", "gateway-mock|NETWORK"), evidence(4, "search_logs", 2)));
+
+		assertThat(pairs(result.alternatives())).containsExactly("postgres|CONFIGURATION", "gateway-mock|NETWORK");
+		assertThat(result.dropped()).isEmpty();
 	}
 
 	@Test
@@ -578,12 +606,28 @@ class ReportCheckTest {
 	}
 
 	@Test
-	void fiveAlternativesAreInvalid() {
-		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+	void fiveAlternativesAreInvalidUnlessARepeatIsDropped() {
+		// Five distinct services fit only an abstention, whose first cause names none.
+		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN",
+				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION",
+						"inventory-service|RESOURCE_EXHAUSTION", "order-service|CONFIGURATION"))))
+			.containsExactly("alternatives must hold at most 4 items");
+		// The bound reads the list once its repeats are dropped: four distinct services are left.
+		ReportCheck.Result result = check(rankedReport("order-service", "CONFIGURATION",
 				List.of("payment-service|DEPENDENCY_LATENCY", "gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION",
 						"inventory-service|RESOURCE_EXHAUSTION", "postgres|RESOURCE_EXHAUSTION"),
-				evidence(4, "search_logs", 2))))
-			.contains("alternatives must hold at most 4 items");
+				evidence(4, "search_logs", 2)));
+		assertThat(result.errors()).isEmpty();
+		assertThat(pairs(result.alternatives())).containsExactly("payment-service|DEPENDENCY_LATENCY",
+				"gateway-mock|DEPENDENCY_LATENCY", "postgres|CONFIGURATION", "inventory-service|RESOURCE_EXHAUSTION");
+	}
+
+	@Test
+	void anUnknownAlternativeIsNotDroppedAsARepeat() {
+		// A repeat is dropped only when the item breaks no other rule.
+		assertThat(errors(rankedReport("order-service", "CONFIGURATION",
+				List.of("postgres|CONFIGURATION", "postgres|UNKNOWN"), evidence(4, "search_logs", 2))))
+			.containsExactly("alternatives[1] must not be UNKNOWN: leave out a cause you cannot name");
 	}
 
 	@Test
@@ -597,10 +641,13 @@ class ReportCheckTest {
 
 	@Test
 	void anAbstentionsSuspectsKeepEveryOtherRule() {
-		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN",
-				List.of("postgres|CONFIGURATION", "postgres|RESOURCE_EXHAUSTION"))))
-			.containsExactly("alternatives[1].rootCauseService \"postgres\" is already named; name each service once, "
-					+ "rootCauseService included");
+		// ADR-025, amendment 2026-11-06: a repeated suspect is dropped as a repeated alternative is.
+		ReportCheck.Result result = check(rankedReport("UNKNOWN", "UNKNOWN",
+				List.of("postgres|CONFIGURATION", "payment-service|NETWORK", "postgres|RESOURCE_EXHAUSTION")));
+		assertThat(result.errors()).isEmpty();
+		assertThat(pairs(result.alternatives())).containsExactly("postgres|CONFIGURATION", "payment-service|NETWORK");
+		assertThat(result.dropped()).containsExactly(
+				"alternatives[2]: postgres is already named, so it is dropped and its first occurrence kept");
 		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN", List.of("UNKNOWN|CONFIGURATION"))))
 			.containsExactly("alternatives[0] must not be UNKNOWN: leave out a cause you cannot name");
 		assertThat(errors(rankedReport("UNKNOWN", "UNKNOWN",
@@ -1283,6 +1330,13 @@ class ReportCheckTest {
 
 	private static ReportCheck.Result checkAssessed(String answer) {
 		return ReportCheck.checkAssessed(Answers.json(answer), SHEETS, LAB);
+	}
+
+	/** Each stored alternative as {@code service|category}, in order. */
+	private static List<String> pairs(List<JsonNode> alternatives) {
+		return alternatives.stream()
+			.map(item -> item.get("rootCauseService").asString() + "|" + item.get("rootCauseCategory").asString())
+			.toList();
 	}
 
 	private static List<String> errors(String answer) {

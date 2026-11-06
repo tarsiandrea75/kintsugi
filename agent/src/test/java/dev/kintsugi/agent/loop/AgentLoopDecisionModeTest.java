@@ -205,6 +205,29 @@ class AgentLoopDecisionModeTest {
 			.containsExactly("gateway-mock|DEPENDENCY_LATENCY", "order-service|CONFIGURATION");
 	}
 
+	/**
+	 * ADR-025, amendment 2026-11-06: DS r7's attempt 1, which named the cause's service again, is stored with the
+	 * first occurrence of each service only. The REPORT step names the drop, and keeps the model's answer as it was.
+	 */
+	@Test
+	void aRepeatedServiceIsDroppedFromTheStoredReportAndNamedInTheStep() {
+		String answer = rankedReport("gateway-mock", "DEPENDENCY_REJECTING",
+				List.of("payment-service|CONFIGURATION", "gateway-mock|RESOURCE_EXHAUSTION"), dossierEvidence(1));
+		this.model.text(answer);
+
+		assertThat(run(AgentMode.DECISION)).isEqualTo(IncidentStatus.COMPLETED);
+
+		assertThat(this.model.prompts()).hasSize(1);
+		assertThat(storedReport().get("alternatives")).extracting(item -> item.get("rootCauseService").asString() + "|"
+				+ item.get("rootCauseCategory").asString())
+			.containsExactly("payment-service|CONFIGURATION");
+		assertThat(step(2)).containsEntry("kind", "REPORT")
+			.containsEntry("summary",
+					"valid; dropped: alternatives[1]: gateway-mock is already named, so it is dropped and its first "
+							+ "occurrence kept")
+			.containsEntry("model_output", answer);
+	}
+
 	/** A decoy category (ADR-029) is a valid cause and alternative, so the report naming it is stored. */
 	@Test
 	void aReportNamingTheDecoyCategoriesIsStored() {
@@ -1143,7 +1166,7 @@ class AgentLoopDecisionModeTest {
 
 	private Map<String, Object> step(int stepNo) {
 		return AgentDatabase.admin()
-			.sql("SELECT kind, phase, summary, tool_output FROM incident_steps WHERE incident_id = ? AND step_no = ?")
+			.sql("SELECT kind, phase, summary, tool_output, model_output FROM incident_steps WHERE incident_id = ? AND step_no = ?")
 			.params(this.id, stepNo)
 			.query()
 			.singleRow();
