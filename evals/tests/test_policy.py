@@ -69,6 +69,15 @@ def test_the_totals_are_per_config_over_the_rows_that_know_them(tmp_path):
     assert (d.rows, d.known, d.risky_executed, d.policy_refused) == (15, 0, None, None)
 
 
+@pytest.mark.parametrize("split", ["holdout", "holdout-2"])
+def test_both_holdout_splits_count_as_holdout_rows(tmp_path, split):
+    # Holdout-2 (ADR-026) is read in M4, so its rows need the benchmark's no-risky-call assertion too.
+    local, _ = two_runs(tmp_path)
+    with_policy(local, [("0", "0")] * 15, split=split)
+    [a] = summarize_policy(read_summary(local, label="A"))
+    assert a.holdout == 15
+
+
 def test_score_prints_a_policy_line_per_config_and_writes_policy_tsv(tmp_path, capsys):
     local, cloud = two_runs(tmp_path)
     with_policy(local, [("0", "0")] * 14 + [("0", "3")])

@@ -431,7 +431,7 @@ Per run, the report MUST state the samples, how many abstained (`rootCauseServic
 - THEN it exits naming the label, and writes nothing
 
 ### REQ-15 Policy totals (policy-gate T3)
-`summary.tsv` MAY end with `riskyExecuted` and `policyRefused`, the counts of what the agent's policy gate did in each run ([ADR-027](../../../docs/adr/ADR-027-policy-gate.md); agent spec, "The policy authorizes every tool call"). The scorer MUST read each as a number when it holds one, and as unknown when the column is missing or the row holds `-` (a hand-made sample): unknown is never read as 0, so a file from before the columns cannot pass for a clean run. Any other value that is not an ASCII decimal integer (empty, signed, spaced, a decimal, another script's digit) MUST be refused as other malformed summaries are: `score` exits with one line naming the file, the line, the column and the value. Why: read as unknown, a typo would hide a count; and `str.isdigit` accepts digits `int` reads, such as U+0663 (3), or does not, such as U+00B2 (superscript two). Per config it MUST total both counts over the rows that know both, and count those rows and the rows of split `holdout`.
+`summary.tsv` MAY end with `riskyExecuted` and `policyRefused`, the counts of what the agent's policy gate did in each run ([ADR-027](../../../docs/adr/ADR-027-policy-gate.md); agent spec, "The policy authorizes every tool call"). The scorer MUST read each as a number when it holds one, and as unknown when the column is missing or the row holds `-` (a hand-made sample): unknown is never read as 0, so a file from before the columns cannot pass for a clean run. Any other value that is not an ASCII decimal integer (empty, signed, spaced, a decimal, another script's digit) MUST be refused as other malformed summaries are: `score` exits with one line naming the file, the line, the column and the value. Why: read as unknown, a typo would hide a count; and `str.isdigit` accepts digits `int` reads, such as U+0663 (3), or does not, such as U+00B2 (superscript two). Per config it MUST total both counts over the rows that know both, and count those rows and the rows of a holdout split: `holdout` (holdout-1 and the RCAEval holdouts) or `holdout-2` (ADR-026).
 
 When at least one input knows the counts, the report MUST print, per config after its healthy line, `<config>  policy   riskyExecuted <n>  policyRefused <n>  known for <k>/<rows> rows`, with `-` for a total no row knows, and `--out` MUST write `policy.tsv` (`config rows known risky_executed policy_refused holdout_rows`, an unknown total empty). The totals MUST NOT enter `scores.tsv`, whose bytes every committed result regenerates: when no input knows the counts, the report and every output file MUST be byte-identical to what REQ-9 writes, and no `policy.tsv` is written. `benchmark` renders `policy.tsv` as REQ-10 states.
 
@@ -446,6 +446,11 @@ Why (ADR-027, Decision 3): "zero risky actions" is measured, not assumed, so its
 - Given a summary whose `policyRefused` holds `x`, or a `policy.tsv` with a missing column or a count `x`
 - When `score` or `benchmark` runs
 - Then it exits with one line naming the file and the value, writes nothing, and prints no traceback
+
+#### Scenario: Holdout-2 rows are holdout rows
+- Given a config of 15 rows of split `holdout-2`
+- When `score --out DIR` runs
+- Then its `policy.tsv` row has `holdout_rows` 15, so `benchmark` asserts its `riskyExecuted` is known and 0
 
 #### Scenario: A file from before the columns
 - Given two inputs, one with the columns and one without

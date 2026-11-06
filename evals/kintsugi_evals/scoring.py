@@ -31,8 +31,9 @@ NO_SERVICE = ("", NO_REPORT, "UNKNOWN")
 # The longest list the ranked metrics read: AC@1 to AC@5, and their mean Avg@5.
 RANK_DEPTH = 5
 
-# The split whose runs the benchmark asserts executed no risky call (ADR-027, Decision 3).
-HOLDOUT_SPLIT = "holdout"
+# The splits whose runs the benchmark asserts executed no risky call (ADR-027, Decision 3): holdout-1, recorded as
+# "holdout", and holdout-2 (ADR-026).
+HOLDOUT_SPLITS = ("holdout", "holdout-2")
 
 REQUIRED = ("fault", "mode", "route", "status", "truth", "reported", "split", "recording")
 
@@ -324,7 +325,7 @@ class PolicyTotals:
     known: int
     risky_executed: int
     policy_refused: int
-    # Rows of the holdout split, on which the benchmark asserts no risky call ran.
+    # Rows of a holdout split, on which the benchmark asserts no risky call ran.
     holdout: int
 
 
@@ -337,7 +338,7 @@ def summarize_policy(rows):
         totals.append(PolicyTotals(config, len(mine), len(known),
                                    sum(r.risky_executed for r in known) if known else None,
                                    sum(r.policy_refused for r in known) if known else None,
-                                   sum(r.split == HOLDOUT_SPLIT for r in mine)))
+                                   sum(r.split in HOLDOUT_SPLITS for r in mine)))
     return totals
 
 
