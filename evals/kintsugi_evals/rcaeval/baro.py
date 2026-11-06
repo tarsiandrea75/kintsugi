@@ -35,7 +35,8 @@ NEAR_ZERO_SCALE = 10 * sys.float_info.epsilon
 TOP_SERVICES = 5
 
 # Upstream pools every repetition of RE2-TT and the published table is over all of them. RE2-TT is in no split of vision
-# §2, so reading it spends nothing, and it is no dev either. convert.SYSTEM_DIRS stays without it: the converter refuses it.
+# §2 when BARO ran, so reading it spent nothing, and it is no dev either. ADR-032 later made it holdout TT, which the
+# converter reads behind --allow-holdout TT; BARO keeps its own split for it.
 SYSTEM_DIRS = {**convert.SYSTEM_DIRS, "re2-tt": "RE2-TT"}
 REFERENCE_SYSTEM = "re2-tt"
 REFERENCE_SPLIT = "reference"

@@ -102,16 +102,19 @@ def _parser():
     bench.add_argument("--out", required=True, help="the Markdown file to write")
     bench.add_argument("dirs", nargs="+", help="result dirs written by score --out, in document order")
     rca = commands.add_parser("convert-rcaeval", help="convert RCAEval RE2 cases into replay recordings")
-    rca.add_argument("--root", help="the extracted dataset, holding RE2-OB/ and RE2-SS/ "
+    rca.add_argument("--root", help="the extracted dataset, holding RE2-OB/, RE2-SS/ and RE2-TT/ "
                                     "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
-    rca.add_argument("--system", required=True, choices=["re2-ob", "re2-ss"])
+    rca.add_argument("--system", required=True, choices=["re2-ob", "re2-ss", "re2-tt"])
     rca.add_argument("--rep", required=True, type=int, help="the repetition, 1 to 3")
     rca.add_argument("--out", help="the recordings directory (default: evals/out/rcaeval/<system>-rep<rep>/)")
     rca.add_argument("--allow-holdout", metavar="NAME", help="convert holdout NAME (A: RE2-OB repetitions 2-3, "
-                                                              "B: RE2-SS), only under its committed plan")
+                                                              "B: RE2-SS, TT: RE2-TT), only under its committed plan")
     rca.add_argument("--case", action="append", dest="cases", metavar="NAME",
                      help="convert only this case directory, e.g. checkoutservice_cpu; repeatable")
     rca.add_argument("--topology", help="the topology file (default: the agent's topology/<system>.json)")
+    rca.add_argument("--check-only", action="store_true",
+                     help="validate case discovery, file headers and inject times; print counts per fault and "
+                          "anomalies, naming no case; write nothing (a holdout still needs --allow-holdout)")
     bar = commands.add_parser("baro-rcaeval", help="rank RCAEval RE2 cases with BARO into a summary.tsv")
     bar.add_argument("--root", help="the extracted dataset, holding RE2-OB/, RE2-SS/ and RE2-TT/ "
                                     "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
@@ -385,6 +388,16 @@ def convert_rcaeval(args):
     from .rcaeval import convert, leakage
 
     root = args.root or os.environ.get("KINTSUGI_RCAEVAL_DIR") or "~/data/rcaeval"
+    if args.check_only:
+        if args.out or args.cases:
+            raise SystemExit("convert-rcaeval: --check-only checks every case and writes nothing: drop --out and --case")
+        try:
+            result = convert.check(root, args.system, args.rep, allow_holdout=args.allow_holdout,
+                                   topology=args.topology)
+        except (convert.HoldoutRefused, ValueError, OSError) as error:
+            raise SystemExit(f"convert-rcaeval: {error}") from None
+        _print_check(result, convert)
+        return 0
     out = args.out or convert.REPO / "evals" / "out" / "rcaeval" / f"{args.system}-rep{args.rep}"
     try:
         summary = convert.convert(root, args.system, args.rep, out, allow_holdout=args.allow_holdout,
@@ -395,6 +408,17 @@ def convert_rcaeval(args):
           f"(split {summary.split}) to {summary.out}; fault words in untrustedText: {summary.untrusted_hits} "
           f"(converter-report.tsv)")
     return 0
+
+
+def _print_check(result, convert):
+    """The check's counts and anomalies: per fault, never per case, so no case name or root cause is printed."""
+    split = f"holdout {result.holdout}" if result.holdout else result.split
+    faults = ", ".join(f"{fault} {result.faults[fault]}" for fault in convert.CATEGORIES if result.faults[fault])
+    print(f"checked {result.cases} cases of {convert.SYSTEM_DIRS[result.system]} repetition {result.rep} "
+          f"(split {split}): {faults or 'no case'}; {result.stray} other folders; "
+          f"{len(result.anomalies)} anomalies; nothing written")
+    for kind, detail, n in result.anomalies:
+        print(f"anomaly\t{kind}\t{detail}\t{n}")
 
 
 def baro_rcaeval(args):

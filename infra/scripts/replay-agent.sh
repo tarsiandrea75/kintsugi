@@ -27,7 +27,9 @@ recorded tool outputs").
   REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules \
     --mode decision   # Config 0 on the RCAEval converter's RE2-OB recordings
 
-  --dataset lab|re2-ob           the recorded system (default lab); re2-ob needs REPLAY_DIR and decision mode
+  --dataset lab|re2-ob|re2-ss|re2-tt
+                                 the recorded system (default lab); the re2-* datasets need REPLAY_DIR and
+                                 decision mode
   --route cloud|local|rules      the model's route (default cloud), or rules: Config 0, decision mode only
   --mode MODE                    the loop's mode: dossier (default), explorer, decision, or both (explorer and dossier)
   --samples N                    explorer and dossier: samples per fault and mode, 1 to 999 (default 1)
@@ -40,7 +42,7 @@ recorded tool outputs").
   --rules v1|v2                  decision, --route rules or --report hybrid: the rules version (default v1), v1
                                  Config 0 (ADR-016), v2 Config 0R (ADR-021)
   --faults F1,F2,F3              the recorded faults to replay (default: the dataset's, F1,F2,F3 for lab and
-                                 cpu,mem,disk,delay,loss,socket for re2-ob); lab also takes healthy, the healthy
+                                 cpu,mem,disk,delay,loss,socket for re2-*); lab also takes healthy, the healthy
                                  controls, in decision mode, and on --split holdout-2 the default adds it
   --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
   --think on|off                 local: send Ollama's think field with this value (default: no think field)
@@ -120,6 +122,9 @@ converter's output directory (convert-rcaeval --out); there is no default. The t
 -Dkintsugi.agent.topology=classpath:topology/re2-ob.json, so the gatherer, the rules and the loop read Online
 Boutique's topology; lab runs get classpath:topology/lab.json, the agent's default, whatever KINTSUGI_AGENT_TOPOLOGY
 holds. The converter writes decision cases only (dev, or holdout under its plan), so re2-ob takes decision mode only.
+--dataset re2-ss and re2-tt do the same for RE2-SS (holdout B) and RE2-TT (holdout TT; ADR-032), with their own
+topology, classpath:topology/re2-ss.json and classpath:topology/re2-tt.json; a dataset whose topology file is not in
+agent/src/main/resources/topology/ exits 2 before anything runs.
 RCAEval's AC@1 names the service only: score its runs with python -m kintsugi_evals score --service-only.
 
 Explorer and dossier samples pool the fault's stress recordings, the ones they were measured on, the first one in the
@@ -150,7 +155,6 @@ HEALTHY=healthy
 HEALTHY_SPLIT=holdout-2
 RE2_FAULTS=(cpu mem disk delay loss socket)
 LAB_TOPOLOGY=classpath:topology/lab.json
-RE2_OB_TOPOLOGY=classpath:topology/re2-ob.json
 # The most samples one cloud run may make (about $0.005 each on claude-haiku-5-5, ADR-012).
 MAX_CLOUD_SAMPLES=60
 
@@ -188,8 +192,9 @@ while (( $# )); do
 done
 case "$dataset" in
   lab) ALL_FAULTS=("${LAB_FAULTS[@]}" "$HEALTHY"); DEFAULT_FAULTS=("${LAB_FAULTS[@]}"); topology=$LAB_TOPOLOGY ;;
-  re2-ob) ALL_FAULTS=("${RE2_FAULTS[@]}"); DEFAULT_FAULTS=("${RE2_FAULTS[@]}"); topology=$RE2_OB_TOPOLOGY ;;
-  *) echo "Unknown dataset '$dataset'; choose lab or re2-ob" >&2; exit 2 ;;
+  re2-ob|re2-ss|re2-tt) ALL_FAULTS=("${RE2_FAULTS[@]}"); DEFAULT_FAULTS=("${RE2_FAULTS[@]}")
+    topology=classpath:topology/$dataset.json ;;
+  *) echo "Unknown dataset '$dataset'; choose lab, re2-ob, re2-ss or re2-tt" >&2; exit 2 ;;
 esac
 [[ "$route" == cloud || "$route" == local || "$route" == rules ]] \
   || { echo "Unknown route '$route'; choose cloud, local or rules" >&2; exit 2; }
@@ -285,6 +290,10 @@ done
 
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+topology_file="$REPO_DIR/agent/src/main/resources/topology/${topology#classpath:topology/}"
+[[ -f "$topology_file" ]] || { echo "--dataset $dataset needs its topology, ${topology_file#"$REPO_DIR"/}, which does" \
+  "not exist yet" >&2; exit 2; }
 
 REPLAY_DIR="${REPLAY_DIR:-$REPO_DIR/agent/src/test/resources/replay}"
 MANIFEST="$REPLAY_DIR/recordings.tsv"

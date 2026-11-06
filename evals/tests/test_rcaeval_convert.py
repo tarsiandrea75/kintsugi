@@ -508,7 +508,8 @@ def test_case_discovery_skips_the_stray_folder_and_can_pick_cases():
 # Holdouts
 
 
-@pytest.mark.parametrize("system, rep, name", [("re2-ob", 2, "A"), ("re2-ob", 3, "A"), ("re2-ss", 1, "B")])
+@pytest.mark.parametrize("system, rep, name", [("re2-ob", 2, "A"), ("re2-ob", 3, "A"), ("re2-ss", 1, "B"),
+                                               ("re2-tt", 1, "TT"), ("re2-tt", 2, "TT"), ("re2-tt", 3, "TT")])
 def test_a_holdout_is_refused_unless_named(system, rep, name, tmp_path):
     with pytest.raises(convert.HoldoutRefused, match=f"--allow-holdout {name}"):
         convert.split_of(system, rep, None)
@@ -650,3 +651,177 @@ def test_the_agents_copy_is_the_converters_output(tmp_path):
     for name in ("recordings.tsv", row["file"]):
         assert (AGENT_COPY / name).read_bytes() == (tmp_path / name).read_bytes(), (
             f"{name} drifted: regenerate it with the converter (see odd/tasks/rcaeval-converter.md T3)")
+
+
+# Holdout TT (ADR-032 Decision 1): every RE2-TT case, behind --allow-holdout TT
+
+
+TT_SERVICES = ["ts-ui-dashboard", "ts-auth-service", "ts-auth-mongo", "ts-order-service"]
+
+
+def tt_topology(path):
+    edges = [{"caller": None, "target": "ts-ui-dashboard", "method": "CALL", "uri": "/"},
+             {"caller": "ts-ui-dashboard", "target": "ts-auth-service", "method": "CALL", "uri": "/"},
+             {"caller": "ts-auth-service", "target": "ts-auth-mongo", "method": "CALL", "uri": "/"}]
+    path.write_text(json.dumps({"services": TT_SERVICES, "datastores": [], "edges": edges, "tableOwners": {},
+                                "sourceOwners": {}}))
+    return path
+
+
+def tt_case(root, case="ts-auth-service_cpu", rep=1):
+    """A minimal RE2-TT case. TT has traces, but the converter answers no traffic for it (see TRACED_SYSTEMS), so a
+    broken traces.csv must not be read."""
+    case_dir = root / "RE2-TT" / case / str(rep)
+    case_dir.mkdir(parents=True)
+    (case_dir / "inject_time.txt").write_text(f"{INJECT}\n")
+    (case_dir / "simple_metrics.csv").write_text(
+        f"time,ts-auth-service_latency-50,ts-auth-mongo_cpu,ts-ui-dashboard_latency-50\n{INJECT},0.01,0.2,0.03\n")
+    (case_dir / "logs.csv").write_text("time,timestamp,container_name,message,level,req_path,error\n")
+    (case_dir / "traces.csv").write_text("not,a,trace,file\n")
+    return case_dir
+
+
+def test_tt_converts_only_when_named_with_its_symptom_and_no_traffic(tmp_path):
+    tt_case(tmp_path)
+    topology = tt_topology(tmp_path / "re2-tt.json")
+    with pytest.raises(convert.HoldoutRefused, match="--allow-holdout TT"):
+        convert.convert(tmp_path, "re2-tt", 1, tmp_path / "refused", topology=topology)
+    out = tmp_path / "out"
+    summary = convert.convert(tmp_path, "re2-tt", 1, out, allow_holdout="TT", topology=topology)
+    assert (summary.split, summary.cases) == ("holdout", 1)
+    (row,) = manifest(out)
+    assert row["split"] == "holdout" and row["truth"] == "ts-auth-service|RESOURCE_EXHAUSTION"
+    incident = json.loads((out / row["file"]).read_text())
+    assert incident["symptom"] == convert.SYMPTOMS["re2-tt"]
+    assert "ts-ui-dashboard" in convert.SYMPTOMS["re2-tt"]
+    empty = {"outcome": "OK", "returned": 0, "truncated": False, "items": []}
+    assert output(incident, "traffic_counts", sinceMinutes=10) == empty
+    assert output(incident, "query_metric", metric="latency_avg", service="ts-auth-service",
+                  sinceMinutes=20)["returned"] == 1
+
+
+def test_the_cli_offers_tt(tmp_path, capsys):
+    tt_case(tmp_path)
+    topology = tt_topology(tmp_path / "re2-tt.json")
+    with pytest.raises(SystemExit, match="--allow-holdout TT"):
+        main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1",
+              "--topology", str(topology), "--out", str(tmp_path / "refused")])
+    assert main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1", "--allow-holdout",
+                 "TT", "--topology", str(topology), "--out", str(tmp_path / "out")]) == 0
+    assert "split holdout" in capsys.readouterr().out
+
+
+# --check-only: discovery and headers, no recording, no truth printed
+
+
+def checked_tree(root):
+    """Four RE2-TT repetition-1 cases: two clean, one with no logs.csv and a log header without level, one whose
+    root cause is outside the topology and whose inject time is not a number; plus a stray folder."""
+    tt_case(root, "ts-auth-service_cpu")
+    tt_case(root, "ts-order-service_delay")
+    broken = tt_case(root, "ts-auth-service_mem")
+    (broken / "logs.csv").unlink()
+    (broken / "simple_metrics.csv").write_text(f"time,ts-auth-service_cpu,ts-mystery-service_mem\n{INJECT},1,2\n")
+    outside = tt_case(root, "ts-gone-service_loss")
+    (outside / "inject_time.txt").write_text("soon\n")
+    (outside / "logs.csv").write_text("time,timestamp,container_name,message\n")
+    (root / "RE2-TT" / "ts-auth-service_cpu" / "multi-source-data").mkdir()
+    (root / "RE2-TT" / "notes").mkdir()
+
+
+def test_check_only_counts_cases_per_fault_and_reports_header_anomalies(tmp_path):
+    checked_tree(tmp_path)
+    topology = tt_topology(tmp_path / "re2-tt.json")
+    result = convert.check(tmp_path, "re2-tt", 1, allow_holdout="TT", topology=topology)
+    assert (result.split, result.holdout, result.cases) == ("holdout", "TT", 4)
+    assert dict(result.faults) == {"cpu": 1, "mem": 1, "delay": 1, "loss": 1}
+    assert result.stray == 1
+    assert sorted(result.anomalies) == sorted([
+        ("missing_file", "logs.csv", 1),
+        ("missing_column", "logs.csv:level", 1),
+        ("bad_inject_time", "-", 1),
+        ("root_cause_outside_topology", "-", 1),
+        ("unknown_metric_prefix", "ts-mystery-service", 1),
+    ])
+
+
+def test_check_only_names_no_case_and_no_root_cause(tmp_path):
+    checked_tree(tmp_path)
+    topology = tt_topology(tmp_path / "re2-tt.json")
+    result = convert.check(tmp_path, "re2-tt", 1, allow_holdout="TT", topology=topology)
+    text = repr(result)
+    assert "ts-gone-service" not in text and "_cpu" not in text and "_delay" not in text
+
+
+def test_check_only_reads_only_headers_and_writes_nothing(tmp_path, monkeypatch):
+    checked_tree(tmp_path)
+    topology = tt_topology(tmp_path / "re2-tt.json")
+    lines = []
+    real_open = Path.open
+
+    class Counting:
+        def __init__(self, handle, path):
+            self.handle, self.path = handle, path
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self.handle.__exit__(*exc)
+
+        def __iter__(self):
+            for line in self.handle:
+                lines.append(self.path.name)
+                yield line
+
+        def readline(self, *a):
+            lines.append(self.path.name)
+            return self.handle.readline(*a)
+
+        def read(self, *a):
+            lines.append(self.path.name)
+            return self.handle.read(*a)
+
+    def counting_open(self, mode="r", *args, **kwargs):
+        if "w" in mode or "a" in mode or "x" in mode:
+            raise AssertionError(f"check wrote {self}")
+        handle = real_open(self, mode, *args, **kwargs)
+        return Counting(handle, self) if self.suffix == ".csv" else handle
+
+    for name in ("simple_metrics.csv", "logs.csv"):  # make the data rows many, so a full read would show
+        for path in (tmp_path / "RE2-TT").glob(f"*/1/{name}"):
+            path.write_text(path.read_text() + "x\n" * 50)
+    monkeypatch.setattr(Path, "open", counting_open)
+    before = sorted(p for p in tmp_path.rglob("*"))
+    convert.check(tmp_path, "re2-tt", 1, allow_holdout="TT", topology=topology)
+    assert sorted(p for p in tmp_path.rglob("*")) == before
+    assert len(lines) <= 2 * 4  # one header line per csv file read, at most two files per case
+
+
+def test_check_only_refuses_a_holdout_unless_named(tmp_path):
+    checked_tree(tmp_path)
+    with pytest.raises(convert.HoldoutRefused, match="--allow-holdout TT"):
+        convert.check(tmp_path, "re2-tt", 1, topology=tt_topology(tmp_path / "re2-tt.json"))
+
+
+def test_check_only_on_the_fixture_dev_tree_is_clean():
+    result = convert.check(FIXTURE, "re2-ob", 1)
+    assert (result.split, result.holdout, result.cases) == ("dev", None, 2)
+    assert dict(result.faults) == {"cpu": 1, "delay": 1}
+    assert [a for a in result.anomalies if a[0] != "unknown_metric_prefix"] == []
+
+
+def test_the_cli_check_only_prints_counts_and_no_case(tmp_path, capsys):
+    checked_tree(tmp_path)
+    topology = tt_topology(tmp_path / "re2-tt.json")
+    assert main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1",
+                 "--allow-holdout", "TT", "--topology", str(topology), "--check-only"]) == 0
+    printed = capsys.readouterr().out
+    assert "4 cases" in printed and "cpu 1" in printed and "loss 1" in printed
+    assert "missing_column\tlogs.csv:level\t1" in printed
+    assert "ts-gone-service" not in printed and "_cpu" not in printed
+    with pytest.raises(SystemExit, match="--out"):
+        main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1", "--allow-holdout",
+              "TT", "--topology", str(topology), "--check-only", "--out", str(tmp_path / "out")])
+    assert not (tmp_path / "out").exists()

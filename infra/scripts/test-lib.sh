@@ -905,9 +905,23 @@ expect "re2-ob has no healthy class" \
 # RCAEval's, from a recordings directory that must be named, in decision mode only. The committed converter output
 # (agent/src/test/resources/rcaeval/) holds one dev case of cpu. Checked before Maven, as above.
 rcaeval_dir="$REPO_DIR/agent/src/test/resources/rcaeval"
-expect "an unknown dataset exits 2 and names the two datasets" \
-  "$(replay_agent --dataset re2-tt --mode decision; echo "exit $?")" \
-  "Unknown dataset 're2-tt'; choose lab or re2-ob"$'\n'"exit 2"
+expect "an unknown dataset exits 2 and names the four datasets" \
+  "$(replay_agent --dataset re2-xx --mode decision; echo "exit $?")" \
+  "Unknown dataset 're2-xx'; choose lab, re2-ob, re2-ss or re2-tt"$'\n'"exit 2"
+expect "re2-ss takes RCAEval's faults, not the lab's" \
+  "$(replay_agent_over "$rcaeval_dir" --dataset re2-ss --mode decision --faults F1; echo "exit $?")" \
+  "Unknown fault 'F1'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"
+expect "re2-tt replays decision mode only" \
+  "$(replay_agent_over "$rcaeval_dir" --dataset re2-tt --mode dossier; echo "exit $?")" \
+  "--dataset re2-tt replays decision mode only, not dossier: the converter writes one decision case per RCAEval\
+ case and no stress recordings"$'\n'"exit 2"
+# RE2-TT's topology (ADR-032) is not written yet: until it is, re2-tt exits 2 naming the missing file.
+if [[ ! -f "$REPO_DIR/agent/src/main/resources/topology/re2-tt.json" ]]; then
+  expect "re2-tt exits 2 while its topology file is missing" \
+    "$(replay_agent_over "$rcaeval_dir" --dataset re2-tt --mode decision; echo "exit $?")" \
+    "--dataset re2-tt needs its topology, agent/src/main/resources/topology/re2-tt.json, which does not exist yet"\
+$'\n'"exit 2"
+fi
 expect "the lab dataset keeps the lab's faults" \
   "$(replay_agent --dataset lab --mode decision --faults cpu; echo "exit $?")" \
   "Unknown fault 'cpu'; choose from F1 F2 F3 healthy"$'\n'"exit 2"

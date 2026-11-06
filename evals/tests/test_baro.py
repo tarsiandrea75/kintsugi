@@ -449,13 +449,12 @@ def test_a_rep_that_is_neither_a_number_nor_all_is_refused(tmp_path, capsys):
     assert "--rep" in capsys.readouterr().err
 
 
-def test_the_converter_still_refuses_re2_tt(tmp_path, capsys):
-    assert "re2-tt" not in convert.SYSTEM_DIRS
-    with pytest.raises(ValueError, match="re2-tt"):
+def test_the_converter_refuses_re2_tt_without_its_holdout_flag(tmp_path):
+    # ADR-032 Decision 1: RE2-TT is holdout TT whole, converted only under --allow-holdout TT.
+    with pytest.raises(convert.HoldoutRefused, match="--allow-holdout TT"):
         convert.convert(tmp_path, "re2-tt", 1, tmp_path / "out")
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="--allow-holdout TT"):
         main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1", "--out", str(tmp_path / "out")])
-    assert "re2-tt" in capsys.readouterr().err
     assert not (tmp_path / "out").exists()
 
 

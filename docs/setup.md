@@ -560,7 +560,7 @@ It gathers each dev incident's dossier again from its recording, refuses the inc
 
 ### Convert RCAEval cases
 
-The offline track reads the RCAEval RE2 dataset ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md)). The data stays outside the repository, about 11 GB extracted for RE2-OB and RE2-SS; `RE2-TT.zip`, 2.8 GB more, is read only by BARO's reproduction. Download Zenodo record [14590730](https://doi.org/10.5281/zenodo.14590730) and check the md5s before unzipping:
+The offline track reads the RCAEval RE2 dataset ([ADR-020](adr/ADR-020-rcaeval-dataset-converter.md)). The data stays outside the repository, about 11 GB extracted for RE2-OB and RE2-SS; `RE2-TT.zip`, 2.8 GB more (22 GB extracted), was read by BARO's reproduction and is holdout TT since ADR-032. Download Zenodo record [14590730](https://doi.org/10.5281/zenodo.14590730) and check the md5s before unzipping:
 
 ```bash
 mkdir -p ~/data/rcaeval && cd ~/data/rcaeval
@@ -584,7 +584,9 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
 ```
 
 - It writes one blinded `<hash>.json` per case, `recordings.tsv` (the truth is only there) and `converter-report.tsv` to `evals/out/rcaeval/re2-ob-rep1/` (git-ignored); `--out` sets another directory, `--case NAME` converts only that case (repeatable).
-- Only RE2-OB repetition 1 is `dev`. Repetitions 2-3 (holdout A) and RE2-SS (holdout B) are refused unless `--allow-holdout A` or `--allow-holdout B` names them, which only a committed holdout plan may do.
+- Only RE2-OB repetition 1 is `dev`. Repetitions 2-3 (holdout A), RE2-SS (holdout B) and RE2-TT (holdout TT, ADR-032) are refused unless `--allow-holdout A`, `B` or `TT` names them, which only a committed holdout plan may do.
+- `--check-only` validates a repetition without converting it: the case directories counted per fault, the files and header columns the conversion reads, the inject time, root causes and metric prefixes against the topology. It reads only directory names, header lines and inject times, prints counts and `anomaly` lines that name no case, and writes nothing. A holdout still needs its `--allow-holdout`, e.g. `convert-rcaeval --system re2-ss --rep 1 --allow-holdout B --check-only`.
+- RE2-TT has no topology file yet (`odd/tasks/m4-plans.md` T4), so its conversion and check need `--topology`.
 - The conversion fails if a recording holds a fault word, a case name or a category outside the logs' own text; fault words in log text are counted in `converter-report.tsv`. A failed run leaves nothing in `--out`: the files are written to a staging directory beside it and moved in only after the check.
 - RE2-OB traffic comes from `traces.csv`. To check that every caller -> callee pair in the dev traces is an edge of the topology file (AC3 of `odd/tasks/rcaeval-converter.md`; about 75 s, 70 MB), run from the repository root:
 
@@ -607,7 +609,7 @@ python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli impo
 
 - It writes one `summary.tsv` to `evals/out/rcaeval/baro-re2-ob-rep1/` (git-ignored; `--out` sets another directory), which `score --service-only` reads next to the replayed configs on the same recording ids, and `services.json`, the services ranked over the run, which `score --topology` accepts.
 - Only RE2-OB repetition 1 and `--system re2-tt --rep all` are accepted. Every other repetition or system is refused before any case file is read.
-- `--system re2-tt --rep all` writes every repetition of RE2-TT into one `summary.tsv` of split `reference`, to `evals/out/rcaeval/baro-re2-tt-repall/`. RE2-TT is in no split of the vision, so this spends no holdout, and the converter refuses it.
+- `--system re2-tt --rep all` writes every repetition of RE2-TT into one `summary.tsv` of split `reference`, to `evals/out/rcaeval/baro-re2-tt-repall/`. RE2-TT was in no split of the vision when BARO's reproduction ran; it is holdout TT since ADR-032, which the converter reads only behind `--allow-holdout TT`.
 - Before ranking it drops `time.1` and `_latency-50`, turns infinities into empty cells, fills every column forward over the whole file and then with 0, keeps the last 600 rows before `inject_time` and the first 600 from it, and renames `_latency-90` to `_latency`. These are row counts, so a side is 600 s only on a case without gaps. BARO has no window of its own, and a case with a non-numeric cell anywhere is refused.
 - The port's goldens are in `evals/tests/fixtures/baro/`, written by `generate_goldens.py` in a throwaway virtual environment; its header holds the versions and the steps, and it holds a copy of the pipeline's lines from `main.py`, which cannot be imported.
 - `compare_dev.py` in the same directory compares the port with that pipeline on the 30 dev cases, in the same environment, and exits 1 on any difference or any other number of cases. `--system re2-tt` does so on the 90 cases of RE2-TT, and refuses a directory of another name. It reads case files, so it needs the same committed plan.
@@ -625,9 +627,10 @@ cd evals
 python3 -m kintsugi_evals score --service-only --label 0 ../infra/scripts/out/replay-<time>-rules
 ```
 
-- `REPLAY_DIR` is required for `re2-ob`: it names the converter's output directory, which stays outside the repository. Without it the script exits 2.
+- `REPLAY_DIR` is required for `re2-ob` (and every `re2-*` dataset): it names the converter's output directory, which stays outside the repository. Without it the script exits 2.
 - The faults are RCAEval's fault types, `cpu`, `mem`, `disk`, `delay`, `loss` and `socket` (all six by default; `--faults cpu,delay` chooses), and the truth in `recordings.tsv` is `<service>|<category>` by ADR-020's map.
 - The test JVM gets `-Dkintsugi.agent.topology=classpath:topology/re2-ob.json`, so the gatherer, the rules and the loop read Online Boutique's topology. A lab run (`--dataset lab`, the default) gets the lab's file, as before.
+- `--dataset re2-ss` and `--dataset re2-tt` replay RE2-SS (holdout B) and RE2-TT (holdout TT, [ADR-032](adr/ADR-032-m4-holdout-coverage.md)) the same way, each with its own `classpath:topology/<dataset>.json`, and `recheck-levels.sh` takes the same values. A dataset whose topology file is not in `agent/src/main/resources/topology/` exits 2 before anything runs; `re2-tt.json` does not exist yet.
 - Decision mode only: the converter writes one decision case per RCAEval case, in `dev` (repetition 1), or in `holdout` only under a committed holdout plan.
 - `score --service-only` counts a report correct when its service is the truth's, whatever its category, still with Wilson 95% CIs; the report's first line per config ends with `; AC@1 on the service only`. Without the flag the scorer compares the whole `service|category`.
 - `score --service-only --topology agent/src/main/resources/topology/re2-ob.json`, with the path relative to where it runs, adds AC@1, AC@3, AC@5, Avg@5 and their chance levels over that topology's services to the report, and `--out` also writes `ranked.tsv` (REQ-13). The lab never passes it. Without `--service-only` it is refused.

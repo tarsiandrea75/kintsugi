@@ -19,6 +19,10 @@ Choices, with their evidence in the feature document's T3 entry:
 - Every input is read as UTF-8, whatever the locale. `logs.csv` decodes with `errors="replace"`: it is the system's
   free text, and a bad byte becomes U+FFFD in `untrustedText` instead of failing the case. The structured files
   (metrics, traces, inject time, topology) decode strictly, so a bad byte there fails the conversion.
+- RE2-TT is holdout TT whole (ADR-032 Decision 1). It has traces, but its spans are HTTP, not gRPC, and `traffic.py`
+  reads Online Boutique's gRPC names and status codes only, so TT's traffic is an empty answer, as Sock Shop's.
+- `check` (`--check-only`) validates discovery and headers without converting: it reads directory names, the first
+  line of each CSV and the inject time, prints counts per fault and anomalies with no case name, and writes nothing.
 - A refused holdout reads no data file and writes nothing. A conversion writes into a staging directory beside
   `--out` and moves its files into `--out` only after the leakage scan passed; a run that fails leaves nothing.
 """
@@ -42,9 +46,13 @@ from .trace_edges import normalize
 
 REPO = Path(__file__).resolve().parents[3]
 
-SYSTEM_DIRS = {"re2-ob": "RE2-OB", "re2-ss": "RE2-SS"}
+SYSTEM_DIRS = {"re2-ob": "RE2-OB", "re2-ss": "RE2-SS", "re2-tt": "RE2-TT"}
 
-# Systems whose cases carry `traces.csv` (ADR-020): Sock Shop has none.
+# The holdout name of each system's non-dev repetitions (ADR-020 §7, ADR-032 Decision 1).
+HOLDOUTS = {"re2-ob": "A", "re2-ss": "B", "re2-tt": "TT"}
+
+# Systems whose traffic the converter answers from `traces.csv` (ADR-020): Sock Shop has none, and Train Ticket's are
+# HTTP spans that `traffic.py`'s gRPC names and status codes do not read.
 TRACED_SYSTEMS = {"re2-ob"}
 
 # One sentence per system, defined here only. It names the entry service, which is the entry of every case, and no
@@ -52,6 +60,7 @@ TRACED_SYSTEMS = {"re2-ob"}
 SYMPTOMS = {
     "re2-ob": "Users of the online shop see degraded responses from frontend.",
     "re2-ss": "Users of the online shop see degraded responses from front-end.",
+    "re2-tt": "Users of the ticket booking site see degraded responses from ts-ui-dashboard.",
 }
 
 # ADR-020 §5, pre-registered. Used only for category accuracy: AC@1 on RCAEval is service-level.
@@ -116,14 +125,14 @@ class Summary:
 
 def split_of(system, rep, allow_holdout):
     """The manifest split of `system` repetition `rep`: `dev` for RE2-OB repetition 1, else `holdout`, which is
-    refused unless `allow_holdout` names it (A: RE2-OB repetitions 2-3; B: RE2-SS)."""
+    refused unless `allow_holdout` names it (A: RE2-OB repetitions 2-3; B: RE2-SS; TT: RE2-TT)."""
     if system not in SYSTEM_DIRS:
         raise ValueError(f"unknown system {system!r}: choose {', '.join(SYSTEM_DIRS)}")
     if rep not in (1, 2, 3):
         raise ValueError(f"repetition {rep} does not exist: RE2 has repetitions 1 to 3")
     if system == "re2-ob" and rep == 1:
         return "dev"
-    name = "A" if system == "re2-ob" else "B"
+    name = HOLDOUTS[system]
     if allow_holdout != name:
         raise HoldoutRefused(f"{SYSTEM_DIRS[system]} repetition {rep} is holdout {name}, read once under its "
                              f"committed plan: pass --allow-holdout {name} to convert it")
@@ -321,6 +330,11 @@ def _write_tsv(path, header, rows):
         writer.writerows(rows)
 
 
+def _services(system, topology):
+    topology = Path(topology) if topology else REPO / "agent/src/main/resources/topology" / f"{system}.json"
+    return json.loads(topology.read_text(encoding="utf-8"))["services"]
+
+
 def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=None):
     """Converts repetition `rep` of `system` under `root` into `out`: one recording per case, `recordings.tsv` and
     `converter-report.tsv`. Refuses a holdout before reading anything. Everything is written to a staging directory
@@ -328,8 +342,7 @@ def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=Non
     file behind; other files already in `out` are kept."""
     split = split_of(system, rep, allow_holdout)
     system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
-    topology = Path(topology) if topology else REPO / "agent/src/main/resources/topology" / f"{system}.json"
-    services = json.loads(topology.read_text(encoding="utf-8"))["services"]
+    services = _services(system, topology)
     chosen = discover(system_dir, rep, cases)
     if not chosen:
         raise ValueError(f"no case with repetition {rep} in {system_dir}")
@@ -369,3 +382,72 @@ def _convert_into(out, chosen, system, rep, split, services, case_names):
     _write_tsv(out / "recordings.tsv", ["fault", "mode", "route", "truth", "file", "incident", "split"], rows)
     _write_tsv(out / "converter-report.tsv", ["file", "kind", "detail", "count"], report)
     return Summary(system, rep, split, out, len(rows), hits)
+
+
+# The columns `convert_case` reads from each file; traces only for `TRACED_SYSTEMS`.
+REQUIRED_COLUMNS = {"simple_metrics.csv": ("time",),
+                    "logs.csv": ("timestamp", "container_name", "message", "level"),
+                    "traces.csv": ("spanID", "parentSpanID", "serviceName", "operationName", "startTime",
+                                   "statusCode")}
+
+
+@dataclass
+class Check:
+    """What `check` found. `faults` counts cases per fault; `anomalies` are `(kind, detail, cases)` and never name a
+    case or a root-cause service: a detail is a file, a column or a metric prefix, or "-"."""
+    system: str
+    rep: int
+    split: str
+    holdout: str | None
+    cases: int
+    faults: Counter
+    stray: int
+    anomalies: list
+
+
+def _header(path):
+    """The first line of a CSV, each name stripped; nothing past it is read."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        line = handle.readline()
+    return [name.strip() for name in next(csv.reader([line]), [])]
+
+
+def check(root, system, rep, allow_holdout=None, topology=None):
+    """Validates repetition `rep` of `system` without converting it: the case directories (counted per fault), the
+    files `convert_case` opens, their header columns, the inject time, the metric prefixes against the topology, and
+    whether each root cause is a topology service. It reads only directory names, the first line of each CSV and
+    `inject_time.txt`, writes nothing, and refuses a holdout unless named, like `convert`."""
+    split = split_of(system, rep, allow_holdout)
+    services = set(_services(system, topology))
+    system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
+    chosen = discover(system_dir, rep)
+    stray = sum(1 for p in system_dir.iterdir() if p.is_dir() and not CASE_NAME.match(p.name))
+    files = ["simple_metrics.csv", "logs.csv", "inject_time.txt"] + (["traces.csv"] if system in TRACED_SYSTEMS
+                                                                     else [])
+    faults, anomalies = Counter(), Counter()
+    for case, case_dir in chosen:
+        service, fault = CASE_NAME.match(case).group("service", "fault")
+        faults[fault] += 1
+        if normalize(service) not in services:
+            anomalies[("root_cause_outside_topology", "-")] += 1
+        for name in files:
+            path = case_dir / name
+            if not path.is_file():
+                anomalies[("missing_file", name)] += 1
+            elif name == "inject_time.txt":
+                if not re.fullmatch(r"\d+", path.read_text(encoding="utf-8").strip()):
+                    anomalies[("bad_inject_time", "-")] += 1
+            else:
+                header = _header(path)
+                if name == "simple_metrics.csv":  # `_metrics` lowercases this header; the others are read as is
+                    header = [column.lower() for column in header]
+                for column in REQUIRED_COLUMNS[name]:
+                    if column not in header:
+                        anomalies[("missing_column", f"{name}:{column}")] += 1
+                if name == "simple_metrics.csv":
+                    prefixes = {normalize(column) for column in header if column != "time"}
+                    for prefix in prefixes - services - EXTRA_PREFIXES:
+                        anomalies[("unknown_metric_prefix", prefix)] += 1
+    rows = sorted((kind, detail, n) for (kind, detail), n in anomalies.items())
+    return Check(system, rep, split, HOLDOUTS[system] if split == "holdout" else None, len(chosen), faults, stray,
+                 rows)

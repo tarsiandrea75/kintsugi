@@ -12,7 +12,7 @@ call (odd/tasks/verification-levels.md T6, ADR-028).
   REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1-resources infra/scripts/recheck-levels.sh --dataset re2-ob \
     infra/scripts/out/replay-20261103T150905Z-cloud
 
-  --dataset lab|re2-ob   the recorded system (default lab); re2-ob needs REPLAY_DIR
+  --dataset lab|re2-ob|re2-ss|re2-tt   the recorded system (default lab); the re2-* datasets need REPLAY_DIR
   -h, --help             this text
 
 The argument is a replay run's output directory (replay-agent.sh's out), with its summary.tsv and one incident file
@@ -28,7 +28,8 @@ loop stores it, UNKNOWN|UNKNOWN at L1.
 
 REPLAY_DIR names the replay directory the run read, agent/src/test/resources/replay by default (the lab's); an
 RCAEval run must name it, since its recordings stay outside the repository. --dataset re2-ob reads Online Boutique's
-topology, classpath:topology/re2-ob.json; lab runs read classpath:topology/lab.json.
+topology, classpath:topology/re2-ob.json, re2-ss and re2-tt theirs, classpath:topology/<dataset>.json (a dataset
+whose topology file is missing exits 2); lab runs read classpath:topology/lab.json.
 
 The output, infra/scripts/out/recheck-<UTC time>-<input name>/ (git-ignored):
   recheck.txt        one line per incident, PASS with its level or REFUSED with why, then the RESULT line
@@ -54,8 +55,8 @@ done
 
 case "$dataset" in
   lab) topology=classpath:topology/lab.json ;;
-  re2-ob) topology=classpath:topology/re2-ob.json ;;
-  *) echo "--dataset is lab or re2-ob, not $dataset" >&2; exit 2 ;;
+  re2-ob|re2-ss|re2-tt) topology=classpath:topology/$dataset.json ;;
+  *) echo "--dataset is lab, re2-ob, re2-ss or re2-tt, not $dataset" >&2; exit 2 ;;
 esac
 [[ -n "$input" ]] || { echo "Name the replay run directory to re-check (see --help)" >&2; exit 2; }
 [[ -f "$input/summary.tsv" ]] || { echo "No summary.tsv in $input" >&2; exit 2; }
@@ -64,6 +65,10 @@ esac
 
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+topology_file="$REPO_DIR/agent/src/main/resources/topology/${topology#classpath:topology/}"
+[[ -f "$topology_file" ]] || { echo "--dataset $dataset needs its topology, ${topology_file#"$REPO_DIR"/}, which does" \
+  "not exist yet" >&2; exit 2; }
 
 REPLAY_DIR="${REPLAY_DIR:-$REPO_DIR/agent/src/test/resources/replay}"
 [[ -f "$REPLAY_DIR/recordings.tsv" ]] || { echo "No recordings manifest $REPLAY_DIR/recordings.tsv" >&2; exit 2; }
