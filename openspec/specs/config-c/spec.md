@@ -68,3 +68,21 @@ For the selected rule, `escalate` MUST write `C-summary.tsv` in the scorer's sum
 - Given `C-summary.tsv` written by `escalate`
 - When `score --label C C-summary.tsv` runs
 - Then the report shows C's AC@1 with a Wilson CI, like any other label
+
+### REQ-5 Fixed rule
+With `--rule k=<L2|L3>,t=<off|number>`, `escalate` MUST compute C under that rule alone, with no grid and no selection, and write the same four outputs: `grid.tsv` holds that one rule, marked selected, with its eligibility shown but not applied. The holdout reads MUST use ADR-030's fixed `k = L2, t = off`. A rule that names another `k`, a `t` that is neither `off` nor a number from 0 to 1, a missing or repeated part, or an unknown part MUST be refused, writing nothing.
+
+#### Scenario: The holdout rule
+- Given A and D summaries of a holdout
+- When `escalate --rule k=L2,t=off` runs
+- Then `grid.tsv` has one row, `k = L2, t = off`, selected, and the report says the rule is fixed with no grid selection
+
+#### Scenario: A fixed rule over the cap
+- Given the fixed rule escalates more than 50% of the paired cases
+- When `escalate --rule` runs
+- Then C is still computed under that rule, and the rule is reported as over the cap
+
+#### Scenario: A malformed rule
+- Given `--rule k=L1,t=off`
+- When `escalate` runs
+- Then it refuses and writes nothing

@@ -498,3 +498,157 @@ def test_escalate_topology_needs_service_only(tmp_path):
     a, d = c_inputs(tmp_path)
     with pytest.raises(SystemExit, match="--topology needs --service-only"):
         main(escalate_args(a, d, tmp_path / "c") + ["--topology", str(RE2_OB)])
+
+
+# escalate --rule: ADR-030's fixed rule, no grid selection (openspec/specs/config-c REQ-5).
+
+
+def test_escalate_fixed_rule_computes_c_under_that_rule_only(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    out = tmp_path / "c"
+    assert main(escalate_args(a, d, out) + ["--iterations", "200", "--rule", "k=L2,t=off"]) == 0
+    printed = capsys.readouterr().out
+    assert (out / "escalate.txt").read_text() == printed
+    with (out / "grid.tsv").open() as handle:
+        grid = list(csv.DictReader(handle, delimiter="\t"))
+    assert [(g["k"], g["t"], g["selected"]) for g in grid] == [("L2", "off", "yes")]
+    assert "rule: k=L2, t=off (fixed by --rule; no grid selection)" in printed
+    assert "selected:" not in printed
+    with (out / "escalation.tsv").open() as handle:
+        rows = [(r["recording"], r["source"], r["trigger"]) for r in csv.DictReader(handle, delimiter="\t")]
+    # y is at L1, below L2, so it escalates; z timed out.
+    assert rows == [("x", "A", "-"), ("y", "D", "level"), ("z", "D", "no-answer")]
+    assert (out / "C-summary.tsv").exists()
+
+
+def test_escalate_fixed_rule_keeps_a_rule_over_the_cap(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    out = tmp_path / "c"
+    main(escalate_args(a, d, out) + ["--iterations", "50", "--rule", "k=L3,t=0.9"])
+    printed = capsys.readouterr().out
+    with (out / "grid.tsv").open() as handle:
+        [only] = list(csv.DictReader(handle, delimiter="\t"))
+    assert (only["k"], only["t"], only["eligible"], only["selected"]) == ("L3", "0.9", "no", "yes")
+    assert "over the cap" in printed
+
+
+@pytest.mark.parametrize("text", ["k=L1,t=off", "L2", "k=L2", "k=L2,t=high", "k=L2,t=1.5", "t=off,k=L2,x=1"])
+def test_escalate_refuses_a_malformed_rule(tmp_path, capsys, text):
+    a, d = c_inputs(tmp_path)
+    with pytest.raises(SystemExit):
+        main(escalate_args(a, d, tmp_path / "c") + ["--rule", text])
+    assert not (tmp_path / "c").exists()
+
+
+# verdict: ADR-031's H1-H3 verdict (openspec/specs/verdict).
+
+V_HEADER = ["fault", "mode", "route", "sample", "status", "truth", "reported", "seconds", "split", "recording",
+            "level", "confidence"]
+
+
+def v_summary(path, rows):
+    """A summary.tsv of (recording, truth, reported, seconds, level) rows, all COMPLETED."""
+    lines = ["\t".join(V_HEADER)]
+    for recording, truth, reported, seconds, level in rows:
+        lines.append("\t".join(["cpu", "decision", "local", "1", "COMPLETED", truth, reported, seconds, "holdout",
+                                recording, level, "0.9"]))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def verdict_inputs(tmp_path):
+    """RCAEval track R (D always right, 0R never) and lab track L (A and D right at L3, healthy cases quiet)."""
+    cases = [f"c{i}" for i in range(6)]
+    healthy = [(f"h{i}", "NONE|NONE", "UNKNOWN|UNKNOWN", "300", "-") for i in range(3)]
+    files = {
+        ("R", "D"): v_summary(tmp_path / "R-D.tsv", [(c, C_TRUTH, C_TRUTH, "5", "L3") for c in cases]),
+        ("R", "0R"): v_summary(tmp_path / "R-0R.tsv", [(c, C_TRUTH, C_WRONG, "0", "-") for c in cases]),
+        ("L", "A"): v_summary(tmp_path / "L-A.tsv", [(c, C_TRUTH, C_TRUTH, "300", "L3") for c in cases] + healthy),
+        ("L", "D"): v_summary(tmp_path / "L-D.tsv", [(c, C_TRUTH, C_TRUTH, "5", "L3") for c in cases] + healthy),
+    }
+    args = ["verdict", "--service-only", "R", "--h1-track", "R", "--iterations", "300", "--seed", "3"]
+    for (track, label), path in files.items():
+        args += ["--input", track, label, str(path)]
+    return args, files
+
+
+def test_verdict_prints_and_writes_every_condition_and_hypothesis(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    out = tmp_path / "v"
+    assert main(args + ["--out", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert (out / "verdict.txt").read_text() == printed
+    assert "seed 3, 300 resamples" in printed
+    assert "C under k=L2, t=off" in printed
+    with (out / "verdict.tsv").open() as handle:
+        table = list(csv.DictReader(handle, delimiter="\t"))
+    assert [(r["kind"], r["name"]) for r in table] == [
+        *(("condition", n) for n in ("H1", "H2a", "H2b", "H2c", "H3a", "H3b")),
+        *(("hypothesis", n) for n in ("H1", "H2", "H3"))]
+    rows = {r["name"]: r for r in table if r["kind"] == "condition"}
+    assert (rows["H1"]["cases"], rows["H1"]["estimate"], rows["H1"]["p"]) == ("6", "1.0000", "0.0000")
+    assert (rows["H2c"]["estimate"], rows["H2c"]["margin"]) == ("300.0000", "900.0000")
+    assert rows["H2b"]["cases"] == "3"
+
+
+def test_verdict_rows_name_the_hypotheses_and_their_holm_decision(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    out = tmp_path / "v"
+    main(args + ["--out", str(out)])
+    printed = capsys.readouterr().out
+    with (out / "verdict.tsv").open() as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    hypotheses = [r for r in rows if r["kind"] == "hypothesis"]
+    assert [(h["name"], h["decision"]) for h in hypotheses] == [("H1", "holds"), ("H2", "holds"), ("H3", "holds")]
+    assert all(h["holm_p"] == "0.0000" for h in hypotheses)
+    assert "H1 holds" in printed and "rules are enough: no" in printed
+
+
+def test_verdict_scores_a_track_without_service_only_on_the_full_answer(tmp_path, capsys):
+    # The lab track's A names the right service with the wrong category: wrong on the full answer, as `score` does.
+    args, files = verdict_inputs(tmp_path)
+    v_summary(files[("L", "A")], [(f"c{i}", C_TRUTH, "checkoutservice|NETWORK_DELAY", "300", "L3") for i in range(6)])
+    out = tmp_path / "v"
+    main(args + ["--out", str(out)])
+    capsys.readouterr()
+    with (out / "verdict.tsv").open() as handle:
+        rows = {r["name"]: r for r in csv.DictReader(handle, delimiter="\t") if r["kind"] == "condition"}
+    assert rows["H2a"]["estimate"] == "-1.0000"
+
+
+def test_verdict_never_overwrites_its_outputs(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    out = tmp_path / "v"
+    out.mkdir()
+    (out / "verdict.tsv").write_text("keep\n")
+    with pytest.raises(SystemExit, match="verdict.tsv exists"):
+        main(args + ["--out", str(out)])
+    assert (out / "verdict.tsv").read_text() == "keep\n"
+    assert not (out / "verdict.txt").exists()
+
+
+def test_verdict_refuses_a_label_outside_the_family(tmp_path, capsys):
+    args, files = verdict_inputs(tmp_path)
+    with pytest.raises(SystemExit, match="label C"):
+        main(args + ["--input", "R", "C", str(files[("R", "D")]), "--out", str(tmp_path / "v")])
+
+
+def test_verdict_refuses_a_label_given_twice_on_a_track(tmp_path, capsys):
+    args, files = verdict_inputs(tmp_path)
+    with pytest.raises(SystemExit, match="twice"):
+        main(args + ["--input", "R", "D", str(files[("R", "D")]), "--out", str(tmp_path / "v")])
+
+
+def test_verdict_refuses_an_h1_track_not_scored_on_the_service(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    args.remove("--service-only")
+    args.remove("R")
+    with pytest.raises(SystemExit, match="service"):
+        main(args + ["--out", str(tmp_path / "v")])
+
+
+def test_verdict_refuses_an_a_time_that_is_not_a_number(tmp_path, capsys):
+    args, files = verdict_inputs(tmp_path)
+    v_summary(files[("L", "A")], [("c0", C_TRUTH, C_TRUTH, "-", "L3")])
+    with pytest.raises(SystemExit, match="seconds"):
+        main(args + ["--out", str(tmp_path / "v")])

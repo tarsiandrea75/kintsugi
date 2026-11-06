@@ -48,7 +48,7 @@ ADR-031 is the reference for the verdict procedure. In short:
 
 - [x] T1 ADR-031 H1–H3 verdict procedure, vision §1 pointer. Route: inline (docs only).
 - [x] T2 Open decisions resolved with the human: holdout-2 configs, D budget and repeats, A's 200 cases. Route: inline.
-- [ ] T3 Verdict code: H1–H3 p-values, intersection-union, Holm over the family, pooling over tracks, and `escalate --rule` fixed mode. Tests first. Route: delegated writer.
+- [x] T3 Verdict code: H1–H3 p-values, intersection-union, Holm over the family, pooling over tracks, and `escalate --rule` fixed mode. Tests first. Route: delegated writer.
 - [ ] T4 Converter dry check of the holdout A/B and RE2-SS paths (headers and counts, no scoring). Route: delegated.
 - [ ] T5 Plans: holdout A, holdout B, holdout-2, H1–H3 family. Route: inline (docs only).
 - [ ] T6 `docs/STATE.md` updated. Route: inline.
@@ -77,7 +77,8 @@ ADR-031 is the reference for the verdict procedure. In short:
 - 2026-11-06: D's cost on RE2-OB dev is about $0.0013 a case (DS tokens at ADR-012 prices). The lab's $0.011 was for 9 cases, so 225 cases × 3 repeats costs about $0.9, well inside the ~$3.6 left. The budget is not a constraint; D's 300 cases are.
 - 2026-11-06: T2 decision 2 (human): RE2-TT (90 cases, never seen by the agent) becomes a holdout for 0, 0R and D, so D reaches 315 cases. It needs a short ADR and TT enabled in the converter (`evals/`, not frozen). TT enters H1 only; A does not run on it.
 - 2026-11-06: T2 decision 3 (human): holdout B and TT on 0, 0R and D are never cut; RE3 stays at cut item 4. ADR-032 records the three decisions, and vision §2 and §8 are amended. T2 done (structural readback, docs only). T4 also covers TT behind `--allow-holdout TT`.
+- 2026-11-06: T3 done (delegated writer). RED observed (missing module, 4 stats and 10 CLI failures); GREEN: pytest 523 passed; `agent/` untouched; committed results regenerate byte for byte. The `verdict` subcommand takes `--input TRACK LABEL PATH`, `--service-only TRACK` and `--h1-track TRACK`, and computes C in-process under ADR-030's fixed rule, with D repeats. `escalate --rule` gives the fixed mode. The dev smoke run (scratch) reproduces C 22/30, 11 escalated. Open: `escalate` refuses repeated cases (a holdout C-summary needs one D repeat or a follow-up); the plan must state how the lab track is scored in pooled H2a/H3a.
 
 ## Next step
 
-T3 (slice 2).
+T4, then T5.

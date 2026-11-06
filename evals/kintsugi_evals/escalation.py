@@ -34,6 +34,27 @@ def format_t(t):
     return "off" if t is None else f"{t:g}"
 
 
+def parse_rule(text):
+    """The Rule of `--rule k=L2,t=off` (REQ-5): k in FLOORS, t "off" or a number from 0 to 1, each given once."""
+    parts = {}
+    for item in text.split(","):
+        name, sep, value = item.strip().partition("=")
+        if not sep or name not in ("k", "t") or name in parts:
+            raise ValueError(f"the rule {text!r} must read k=<L2|L3>,t=<off|number>")
+        parts[name] = value.strip()
+    if set(parts) != {"k", "t"} or parts["k"] not in FLOORS:
+        raise ValueError(f"the rule {text!r} must read k=<L2|L3>,t=<off|number>")
+    if parts["t"] == "off":
+        return Rule(parts["k"], None)
+    try:
+        t = float(parts["t"])
+    except ValueError:
+        t = None
+    if t is None or not 0.0 <= t <= 1.0:
+        raise ValueError(f"the rule {text!r} needs t off or a number from 0 to 1")
+    return Rule(parts["k"], t)
+
+
 @dataclass(frozen=True)
 class Choice:
     case: tuple

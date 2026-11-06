@@ -1,6 +1,6 @@
 # Spec: evals (the scorer)
 
-The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`, `convert-rcaeval`, which writes the agent's replay input from RCAEval, REQ-11, and `baro-rcaeval`, which ranks RCAEval cases with the published baseline, REQ-12) from `evals/`.
+The scorer `kintsugi_evals` under `evals/` turns replay results into the protocol's numbers ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md), `docs/vision.md` §6). It is run as `python -m kintsugi_evals score` (and `benchmark`, `convert-rcaeval`, which writes the agent's replay input from RCAEval, REQ-11, `baro-rcaeval`, which ranks RCAEval cases with the published baseline, REQ-12, `escalate`, which computes Config C ([config-c](../config-c/spec.md)), and `verdict`, which decides H1–H3 ([verdict](../verdict/spec.md))) from `evals/`.
 
 ## Requirements
 

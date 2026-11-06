@@ -2,7 +2,18 @@
 
 import pytest
 
-from kintsugi_evals.escalation import Evaluation, Rule, compose, evaluate, grid, pair, select, thresholds, trigger
+from kintsugi_evals.escalation import (
+    Evaluation,
+    Rule,
+    compose,
+    evaluate,
+    grid,
+    pair,
+    parse_rule,
+    select,
+    thresholds,
+    trigger,
+)
 from kintsugi_evals.scoring import Row, UNKNOWN_ANSWER, outcome
 
 TRUTH = "checkoutservice|RESOURCE_EXHAUSTION"
@@ -139,3 +150,19 @@ def test_nothing_fits_selects_the_literal_rule_and_says_the_cap_fails():
     # REQ-3 "Nothing fits".
     chosen, cap_fails = select([scored("L2", None, 16, 20), scored("L3", None, 20, 22), scored("L3", 0.9, 25, 23)])
     assert (chosen.rule, cap_fails) == (Rule("L3", None), True)
+
+
+# REQ-5: a fixed rule, parsed from `--rule`.
+
+
+@pytest.mark.parametrize("text, rule", [("k=L2,t=off", Rule("L2", None)), ("k=L3,t=0.875", Rule("L3", 0.875)),
+                                        (" t=off , k=L3 ", Rule("L3", None))])
+def test_parse_rule_reads_k_and_t(text, rule):
+    assert parse_rule(text) == rule
+
+
+@pytest.mark.parametrize("text", ["k=L1,t=off", "L2", "k=L2", "t=off", "k=L2,t=high", "k=L2,t=1.5", "k=L2,t=off,x=1",
+                                  "k=L2,k=L3,t=off", "k=L2,t=nan"])
+def test_parse_rule_refuses_anything_else(text):
+    with pytest.raises(ValueError, match="rule"):
+        parse_rule(text)

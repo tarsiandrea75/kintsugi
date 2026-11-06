@@ -66,12 +66,52 @@ def cluster_bootstrap_diff(cases, seed, iterations=10000, level=0.95):
     diffs = [second - first for first, second in _case_means(cases)]
     n = len(diffs)
     point = sum(diffs) / n
-    rng = random.Random(seed)
-    stats = sorted(sum(rng.choices(diffs, k=n)) / n for _ in range(iterations))
-    alpha = (1 - level) / 2
-    low = stats[int(math.floor(alpha * (iterations - 1)))]
-    high = stats[int(math.ceil((1 - alpha) * (iterations - 1)))]
+    draws = stratified_bootstrap([diffs], lambda sample: sum(sample) / n, seed, iterations)
+    low, high = percentile_ci(draws, level)
     return point, low, high
+
+
+def stratified_bootstrap(strata, statistic, seed, iterations=10000):
+    """The statistic of each of `iterations` resamples, in draw order.
+
+    strata is a list of lists of per-case values, one list per track. Each resample draws, with replacement, as many
+    cases from each stratum as it holds, so pooling over tracks keeps every track's size (ADR-031 Decision 2); the
+    statistic sees the concatenated resample. Empty strata draw nothing. With one stratum the draws are exactly those
+    cluster_bootstrap_diff makes for the same seed.
+    """
+    if iterations < 1:
+        raise ValueError("the bootstrap needs at least one resample")
+    strata = [list(stratum) for stratum in strata if stratum]
+    if not strata:
+        raise ValueError("the bootstrap needs at least one case")
+    rng = random.Random(seed)
+    draws = []
+    for _ in range(iterations):
+        sample = []
+        for stratum in strata:
+            sample += rng.choices(stratum, k=len(stratum))
+        draws.append(statistic(sample))
+    return draws
+
+
+def percentile_ci(draws, level=0.95):
+    """The two-sided percentile interval of bootstrap draws, as (low, high)."""
+    if not 0 < level < 1:
+        raise ValueError("level must lie strictly between 0 and 1")
+    ordered = sorted(draws)
+    alpha = (1 - level) / 2
+    return (ordered[int(math.floor(alpha * (len(ordered) - 1)))],
+            ordered[int(math.ceil((1 - alpha) * (len(ordered) - 1)))])
+
+
+def one_sided_p(draws, margin, above):
+    """The share of draws on the null side of `margin`, ties included (ADR-031 Decision 2).
+
+    above=True tests "the statistic lies above margin", so the null side is <= margin; above=False tests "below
+    margin", so the null side is >= margin.
+    """
+    null = sum((d <= margin) if above else (d >= margin) for d in draws)
+    return null / len(draws)
 
 
 def holm(pvalues):

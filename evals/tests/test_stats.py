@@ -127,3 +127,45 @@ def test_cluster_bootstrap_rejects_invalid_input(cases, kwargs):
 def test_holm_and_dev_keep_on_empty_lists():
     assert holm([]) == []
     assert not dev_keep([])
+
+
+# The shared resampling helpers (ADR-031 Decision 2).
+
+
+def test_stratified_bootstrap_keeps_each_stratum_size():
+    from kintsugi_evals.stats import stratified_bootstrap
+
+    # Resampling within each stratum keeps 3 ones and 7 zeros, so every resample's mean is exactly 0.3.
+    draws = stratified_bootstrap([[1] * 3, [0] * 7], lambda xs: (len(xs), sum(xs) / len(xs)), seed=1, iterations=200)
+    assert set(draws) == {(10, 0.3)}
+
+
+def test_stratified_bootstrap_of_one_stratum_draws_as_the_cluster_bootstrap():
+    from kintsugi_evals.stats import percentile_ci, stratified_bootstrap
+
+    cases = {i: ([0], [i % 3 == 0]) for i in range(12)}
+    _, low, high = cluster_bootstrap_diff(cases, seed=5, iterations=300)
+    diffs = [int(b[0]) - a[0] for a, b in cases.values()]
+    draws = stratified_bootstrap([diffs], lambda xs: sum(xs) / len(xs), seed=5, iterations=300)
+    assert percentile_ci(draws) == (low, high)
+
+
+def test_stratified_bootstrap_skips_empty_strata_and_refuses_no_case():
+    from kintsugi_evals.stats import stratified_bootstrap
+
+    assert set(stratified_bootstrap([[], [2, 2]], sum, seed=1, iterations=10)) == {4}
+    with pytest.raises(ValueError, match="at least one case"):
+        stratified_bootstrap([[], []], sum, seed=1, iterations=10)
+    with pytest.raises(ValueError, match="at least one resample"):
+        stratified_bootstrap([[1]], sum, seed=1, iterations=0)
+
+
+def test_one_sided_p_counts_ties_on_the_null_side():
+    from kintsugi_evals.stats import one_sided_p
+
+    draws = [-0.1, 0.0, 0.0, 0.1]
+    # Alternative "above 0": the null side is <= 0, ties included.
+    assert one_sided_p(draws, 0.0, above=True) == 0.75
+    # Alternative "below 0": the null side is >= 0, ties included.
+    assert one_sided_p(draws, 0.0, above=False) == 0.75
+    assert one_sided_p(draws, -0.2, above=True) == 0.0

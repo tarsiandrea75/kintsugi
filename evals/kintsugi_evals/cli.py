@@ -14,7 +14,11 @@ it the output is unchanged.
 `python -m kintsugi_evals audit-latency` classifies the latency values a run's evidence cites (REQ-14).
 
 `python -m kintsugi_evals escalate` computes Config C from A's and D's summaries over ADR-030's grid, selects its rule,
-and writes grid.tsv, escalation.tsv, C-summary.tsv and escalate.txt (openspec/specs/config-c).
+and writes grid.tsv, escalation.tsv, C-summary.tsv and escalate.txt (openspec/specs/config-c). With --rule it computes C
+under that rule alone, with no grid selection: the holdout reads use ADR-030's fixed `k=L2,t=off`.
+
+`python -m kintsugi_evals verdict` decides H1-H3 from labelled holdout summaries and writes verdict.tsv and verdict.txt
+(ADR-031, openspec/specs/verdict).
 """
 
 import argparse
@@ -128,6 +132,18 @@ def _parser():
     esc.add_argument("--service-only", action="store_true",
                      help="score AC@1 on the service part of the truth only (RCAEval's AC@1, ADR-020)")
     esc.add_argument("--topology", metavar="PATH", help="with --service-only: add chance AC@1 over this topology")
+    esc.add_argument("--rule", metavar="k=L2,t=off",
+                     help="compute C under this rule only, with no grid selection (the holdout reads, ADR-030)")
+    ver = commands.add_parser("verdict", help="decide H1-H3 from labelled holdout summaries (ADR-031)")
+    ver.add_argument("--input", nargs=3, action="append", default=[], metavar=("TRACK", "LABEL", "DIR"),
+                     help="a track's replay dir (or summary.tsv) under config LABEL (0R, A or D); repeatable")
+    ver.add_argument("--service-only", action="append", default=[], metavar="TRACK",
+                     help="score this track's AC@1 on the service only (an RCAEval track, ADR-020); repeatable")
+    ver.add_argument("--h1-track", action="append", default=[], metavar="TRACK",
+                     help="pool this track into H1 (an RCAEval holdout, scored --service-only); repeatable")
+    ver.add_argument("--out", required=True, help="write verdict.tsv and verdict.txt here")
+    ver.add_argument("--seed", type=int, default=DEFAULT_SEED, help="bootstrap seed, as the plan records it")
+    ver.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
     return parser
 
 
@@ -431,7 +447,9 @@ def _escalate_report(args, pairs, evaluations, chosen, cap_fails, services):
     if services is not None:
         lines.append(_chance_line(args.topology, services))
     cap = f"{round(100 * escalation.CAP)}%"
-    if cap_fails:
+    if args.rule is not None:
+        lines.append(f"rule: {chosen.rule.label} (fixed by --rule; no grid selection)")
+    elif cap_fails:
         lines.append(f"selected: {chosen.rule.label}; the cost cap fails on this split: every rule escalates more "
                      f"than {cap} of the {n} paired cases")
     else:
@@ -489,11 +507,16 @@ def _escalate(args):
     for name in ESCALATE_OUTPUTS:
         if (out / name).exists():
             raise SystemExit(f"escalate: {out / name} exists: escalate never overwrites its outputs")
+    fixed = escalation.parse_rule(args.rule) if args.rule is not None else None
     services = read_service_count(args.topology) if args.topology is not None else None
     pairs = escalation.pair(read_summary(args.a, label="A", service_only=args.service_only),
                             read_summary(args.d, label="D", service_only=args.service_only))
-    evaluations = [escalation.evaluate(pairs, rule, args.seed, args.iterations) for rule in escalation.grid(pairs)]
-    chosen, cap_fails = escalation.select(evaluations)
+    rules = [fixed] if fixed is not None else escalation.grid(pairs)
+    evaluations = [escalation.evaluate(pairs, rule, args.seed, args.iterations) for rule in rules]
+    if fixed is not None:
+        chosen, cap_fails = evaluations[0], False
+    else:
+        chosen, cap_fails = escalation.select(evaluations)
     report = _escalate_report(args, pairs, evaluations, chosen, cap_fails, services)
     sys.stdout.write(report)
     out.mkdir(parents=True, exist_ok=True)
@@ -506,8 +529,129 @@ def _escalate(args):
     return 0
 
 
+VERDICT_OUTPUTS = ("verdict.tsv", "verdict.txt")
+
+
+def _read_seconds(path):
+    """A's time to report per case, from the summary's seconds column: ReplayDriver's wall time of the agent loop."""
+    with summary_path(path).open(newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if "seconds" not in (reader.fieldnames or []):
+            raise ValueError(f"{path} lacks the seconds column H2c reads")
+        seconds = {}
+        for raw in reader:
+            try:
+                value = float(raw["seconds"])
+            except ValueError:
+                value = None
+            if value is None or not value >= 0:
+                raise ValueError(f"{path}: line {reader.line_num}: seconds {raw['seconds']!r} is not a time")
+            seconds.setdefault((raw["split"], raw["recording"]), []).append(value)
+    return seconds
+
+
+def _verdict_tracks(args):
+    from .verdict import LABELS, Track
+
+    tracks, sources = {}, []
+    for name, label, path in args.input:
+        if label not in LABELS:
+            raise SystemExit(f"verdict: label {label} is not one of {', '.join(LABELS)}: C is computed from A and D, "
+                             f"and secondary configs are scored with `score`")
+        track = tracks.setdefault(name, Track(name, {}, service_only=name in args.service_only))
+        if label in track.rows:
+            raise SystemExit(f"verdict: track {name} has the label {label} twice")
+        rows = read_summary(path, label=label, service_only=track.service_only)
+        if not rows:
+            raise SystemExit(f"verdict: {path} holds no rows")
+        track.rows[label] = rows
+        if label == "A":
+            track.seconds = _read_seconds(path)
+        sources.append((name, label, path, hashlib.sha256(summary_path(path).read_bytes()).hexdigest(), len(rows)))
+    unknown = sorted(set(args.service_only) - set(tracks))
+    if unknown:
+        raise SystemExit(f"verdict: --service-only names the track {unknown[0]}, which has no --input")
+    return list(tracks.values()), sources
+
+
+def _value(x, scale=1.0, fmt="{:.4f}"):
+    return "" if x is None else fmt.format(x * scale)
+
+
+def _condition_line(c, spec):
+    side = ">" if c.above else "<"
+    minutes = c.name == "H2c"
+    show = (lambda x: f"{x / 60:.1f} min") if minutes else (lambda x: f"{100 * x:+.1f} pts" if c.name != "H3b"
+                                                             else f"{100 * x:.1f}%")
+    margin = show(c.margin)
+    if c.estimate is None:
+        return f"{c.name}  {spec.statistic} {side} {margin}: no case; p = 1, does not hold"
+    return (f"{c.name}  {spec.statistic} {side} {margin}: {c.cases} cases, estimate {show(c.estimate)}, "
+            f"95% [{show(c.low)}, {show(c.high)}], one-sided p = {c.p:.4f} ({'clears' if c.passes else 'fails'} "
+            f"at 0.025 unadjusted)")
+
+
+def _verdict_report(result, sources, args, rule):
+    from .verdict import SPECS
+
+    lines = [f"H1-H3 verdict (ADR-031): seed {result.seed}, {result.iterations} resamples; C under {rule.label} "
+             f"(ADR-030); alpha 0.025 one-sided, Holm over H1-H3"]
+    for name, label, path, digest, rows in sources:
+        scope = "service AC@1" if name in args.service_only else "full-answer AC@1"
+        lines.append(f"input {name} {label}: {path} ({rows} rows, {scope}, sha256 {digest})")
+    lines.append(f"H1 tracks: {', '.join(args.h1_track) or 'none'}")
+    lines += [_condition_line(c, s) for c, s in zip(result.conditions, SPECS)]
+    for h in result.hypotheses:
+        lines.append(f"{h.name} {'holds' if h.holds else 'is not supported'}: intersection-union p = {h.p:.4f} "
+                     f"(max of {', '.join(h.conditions)}), Holm-adjusted p = {h.holm_p:.4f}")
+    lines.append(f"H1 rules are enough: {'yes' if result.rules_enough else 'no'} (H1's 95% upper bound below +5 pts)")
+    return "\n".join(lines) + "\n"
+
+
+def _write_verdict(out, result):
+    from .verdict import SPECS
+
+    rows = []
+    for c, spec in zip(result.conditions, SPECS):
+        rows.append(["condition", c.name, spec.hypothesis, spec.statistic, "above" if c.above else "below",
+                     f"{c.margin:.4f}", c.cases, _value(c.estimate), _value(c.low), _value(c.high), f"{c.p:.4f}", "",
+                     "clears" if c.passes else "fails", ""])
+    for h in result.hypotheses:
+        reading = ("rules are enough" if result.rules_enough else "-") if h.name == "H1" else ""
+        rows.append(["hypothesis", h.name, h.name, f"max of {' '.join(h.conditions)}", "", "", "", "", "", "",
+                     f"{h.p:.4f}", f"{h.holm_p:.4f}", "holds" if h.holds else "not supported", reading])
+    _write_tsv(out / "verdict.tsv", ["kind", "name", "hypothesis", "statistic", "side", "margin", "cases", "estimate",
+                                     "ci_low", "ci_high", "p", "holm_p", "decision", "reading"], rows)
+
+
+def verdict(args):
+    try:
+        return _verdict(args)
+    except ValueError as error:
+        raise SystemExit(f"verdict: {error}") from None
+
+
+def _verdict(args):
+    from .verdict import FIXED_RULE, verdict as decide
+
+    out = Path(args.out)
+    for name in VERDICT_OUTPUTS:
+        if (out / name).exists():
+            raise SystemExit(f"verdict: {out / name} exists: verdict never overwrites its outputs")
+    if not args.input:
+        raise SystemExit("verdict needs at least one --input")
+    tracks, sources = _verdict_tracks(args)
+    result = decide(tracks, args.h1_track, args.seed, args.iterations, FIXED_RULE)
+    report = _verdict_report(result, sources, args, FIXED_RULE)
+    sys.stdout.write(report)
+    out.mkdir(parents=True, exist_ok=True)
+    _write_verdict(out, result)
+    (out / "verdict.txt").write_text(report)
+    return 0
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
     commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval, "baro-rcaeval": baro_rcaeval,
-                "audit-latency": audit_latency, "escalate": escalate}
+                "audit-latency": audit_latency, "escalate": escalate, "verdict": verdict}
     return commands.get(args.command, score)(args)
