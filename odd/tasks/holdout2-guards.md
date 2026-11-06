@@ -68,9 +68,14 @@ Out of scope:
 
 ## Follow-ups
 
+- Review WARNING R4/R3 (`check-freeze.sh:332-338`): `manifest_recordings` reads any failure of `git show HEAD:<manifest>` as no manifest, silently. The holdout-1 side fails closed, but the holdout-2 set is then empty, so G1 would find nothing.
+- Review WARNING R2/R3 (`test-check-freeze.sh:420-421`): the "table with no recording or file column" test passes whether or not that table is read.
+- Review SUGGESTIONs: the stale "split column or not" wording (`check-freeze.sh:50`); no test of `policy.tsv`'s `holdout_rows` for holdout-2 through `score --out`; the HEAD-versus-tag manifest (below).
 - The holdout-1 set is read at HEAD, so a later `holdout` import that names no schedule case (a `--rounds` run) would join it and be exempt. Reading the set at the tag closes it; it is not in this feature's scope.
 - "Read once" has no code guard in the lab replay path, for `holdout` and `holdout-2` alike; only the plans and condition 4 hold it.
 
 ## Progress
+
+- 2026-11-06: T2–T4 in `d226666`. Assessed high (`high_risk`), consent granted; four lenses, approved and acknowledged, with 2 WARNINGs and 4 SUGGESTIONs (Follow-ups), none blocking.
 
 - 2026-11-06: the audit (read-only explorer, 32 places) found G1 and G2; the parent re-read `check-freeze.sh:349-359` and `record-replay.sh:195-201`. The human authorized T2 to T4.
