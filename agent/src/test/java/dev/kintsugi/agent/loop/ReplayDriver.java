@@ -104,7 +104,7 @@ final class ReplayDriver {
 	static final String SUMMARY_HEADER = String.join("\t", "fault", "mode", "route", "sample", "status", "truth",
 			"reported", "verdict", "recorded", "unrecorded", "coverage", "conflicts", "promptTokens",
 			"completionTokens", "seconds", "split", "recording", "view", "report", "model", "think", "reportCap",
-			"reportTimeout", "numCtx", "candidates", "ranked", "riskyExecuted", "policyRefused", "level");
+			"reportTimeout", "numCtx", "candidates", "ranked", "riskyExecuted", "policyRefused", "level", "confidence");
 
 	static final String AGGREGATE_HEADER = String.join("\t", "fault", "mode", "route", "split", "view", "report",
 			"recordings", "samples", "matches", "meanCoverage", "coveredSamples", "matchesCovered", "dossierCovered",
@@ -509,7 +509,7 @@ final class ReplayDriver {
 
 	/**
 	 * Records in the sample's incident what the policy did (ADR-027): {@code riskyExecuted} and {@code policyRefused},
-	 * the last two columns of {@code summary.tsv}.
+	 * the two columns of {@code summary.tsv} before the level.
 	 */
 	private static void policy(ObjectNode incident, PolicyCounts counts) {
 		incident.put("riskyExecuted", counts.riskyExecuted());
@@ -820,11 +820,12 @@ final class ReplayDriver {
 					String.valueOf(this.unrecorded), format("%.2f", this.coverage), String.valueOf(this.conflicts),
 					shown(this.promptTokens), shown(this.completionTokens), format("%.1f", this.seconds), this.split,
 					this.recording, viewColumn(), reportColumn(), this.settings.columns(), candidatesColumn(),
-					rankedColumn(), policyColumn("riskyExecuted"), policyColumn("policyRefused"), levelColumn());
+					rankedColumn(), policyColumn("riskyExecuted"), policyColumn("policyRefused"), levelColumn(),
+					confidenceColumn());
 		}
 
 		/**
-		 * The verification level as {@code summary.tsv} writes it, its last column (verification-levels T5; ADR-028): the
+		 * The verification level as {@code summary.tsv} writes it, before the confidence (verification-levels T5; ADR-028): the
 		 * stored report's {@code verification.level}, {@code L0} to {@code L3}, or {@code -} for a run that stored no
 		 * report and for a rules line, since Config 0 writes no cited evidence to check.
 		 */
@@ -834,6 +835,16 @@ final class ReplayDriver {
 			}
 			JsonNode level = this.incident.path("report").path("verification").path("level");
 			return level.isString() ? level.asString() : NONE;
+		}
+
+		/**
+		 * The top-1 confidence as {@code summary.tsv} writes it, its last column (config-c T2; ADR-030): the stored
+		 * report's {@code confidence}, 0 to 1, so Config C's escalation rule can read it; empty for a run that stored no
+		 * report. A forced abstention stores 0.0.
+		 */
+		String confidenceColumn() {
+			JsonNode confidence = this.incident.path("report").path("confidence");
+			return confidence.isNumber() ? String.valueOf(confidence.asDouble()) : "";
 		}
 
 		/**

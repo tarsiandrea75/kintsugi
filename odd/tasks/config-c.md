@@ -42,7 +42,7 @@ Out of scope: any holdout read; any change to A, D or Config 0's behaviour; H3's
 ## Tasks
 
 - [x] T1 ADR-030 C escalation rule, vision §5 amended, and this document's design confirmed. Route: inline (docs only).
-- [ ] T2 `confidence` column in `ReplayDriver`'s `summary.tsv`, a backfill script for the RE2-OB dev AS/DS inputs, and the scorer reading it optionally. Tests first. Route: delegated writer (Java test-side + Python + script).
+- [x] T2 `confidence` column in `ReplayDriver`'s `summary.tsv`, a backfill script for the RE2-OB dev AS/DS inputs, and the scorer reading it optionally. Tests first. Route: delegated writer (Java test-side + Python + script).
 - [ ] T3 Living spec `openspec/specs/config-c/spec.md` and the plan `evals/plans/2026-11-06-config-c-dev.md`. Route: inline (docs only).
 - [ ] T4 `escalation.py`, the `escalate` CLI subcommand and the tests (RED first). Route: delegated writer.
 - [ ] T5 Dev run per the plan, results under `evals/results/2026-11-06-config-c-dev/`, chosen `(k, t)` recorded in ADR-030. Route: inline.
@@ -69,8 +69,9 @@ Out of scope: any holdout read; any change to A, D or Config 0's behaviour; H3's
 ## Progress
 
 - 2026-11-06: explored. The facts are in Problem; the human chose the level threshold set on dev with an amending ADR.
-- 2026-11-06: T1 done. ADR-030 written; vision §5 C row amended (structural readback, docs only).
+- 2026-11-06: T1 done. ADR-030 written; vision §5 C row amended (structural readback, docs only). Commit bd73bf7; review assess: medium, under_budget (pending in slice 1).
+- 2026-11-06: T2 done (delegated writer). RED observed (Python 7 failed + missing module; Java compile then 13 failures), GREEN: pytest 431 passed, ReplayDriverTest 43/0/0, `agent/src/main` untouched (check-freeze fails only on the missing `freeze-m3` tag, baseline). Backfill dry run: AS and DS 30/30 rows; AS confidences {0.85, 0.9, 0.92, 0.95}, DS {0.2..0.7}. DS JSON is in `replay-20261103T150905Z-cloud`.
 
 ## Next step
 
-T2.
+T3.

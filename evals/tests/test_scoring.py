@@ -1,5 +1,6 @@
 """Tests of the replay TSV reader and the scoring rule (ADR-015, openspec/specs/evals)."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -131,6 +132,42 @@ def test_reader_reads_a_summary_with_the_numctx_column(tmp_path):
     assert row.outcome == CORRECT
     assert row.candidates == (TRUTH, "order-service|CONFIGURATION")
     assert (row.risky_executed, row.policy_refused, row.level) == (0, 1, "L2")
+
+
+def with_confidence(path, values):
+    """Appends a confidence column to the summary.tsv at `path`, one value per row."""
+    lines = path.read_text().splitlines()
+    assert len(lines) - 1 == len(values)
+    out = [lines[0] + "\tconfidence"] + [f"{line}\t{value}" for line, value in zip(lines[1:], values)]
+    path.write_text("\n".join(out) + "\n")
+    return path
+
+
+def test_reader_reads_the_confidence_column_and_an_empty_one_as_none(tmp_path):
+    # The stored report's top-1 confidence (config-c T2; ADR-030): a number from 0 to 1, empty for no report.
+    rows = [("F1", "COMPLETED", TRUTH, TRUTH, "r1"), ("F1", "COMPLETED", TRUTH, "UNKNOWN|UNKNOWN", "r2"),
+            ("F1", "FAILED", TRUTH, "none", "r3")]
+    path = with_confidence(write_tsv(tmp_path / "summary.tsv", rows), ["0.95", "0.0", ""])
+    assert [row.confidence for row in read_summary(path)] == [0.95, 0.0, None]
+
+
+def test_reader_without_the_confidence_column_reads_none_and_scores_as_before(tmp_path):
+    rows = [("F1", "COMPLETED", TRUTH, TRUTH, "r1"), ("F1", "COMPLETED", TRUTH, "UNKNOWN|UNKNOWN", "r2")]
+    without = read_summary(write_tsv(tmp_path / "summary.tsv", rows))
+    assert [row.confidence for row in without] == [None, None]
+    (tmp_path / "with").mkdir()
+    path = with_confidence(write_tsv(tmp_path / "with" / "summary.tsv", rows), ["0.9", "0.0"])
+    with_column = read_summary(path)
+    # Only the confidence differs, so a file from before the column scores exactly as it did.
+    assert [replace(row, confidence=None) for row in with_column] == without
+    assert summarize(with_column) == summarize(without)
+
+
+@pytest.mark.parametrize("raw", ["-", "high", "1.5", "-0.1", "nan"])
+def test_reader_refuses_a_malformed_confidence(tmp_path, raw):
+    path = with_confidence(write_tsv(tmp_path / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1")]), [raw])
+    with pytest.raises(ValueError, match="line 2: confidence"):
+        read_summary(path)
 
 
 def test_reader_rejects_a_file_without_the_needed_columns(tmp_path):

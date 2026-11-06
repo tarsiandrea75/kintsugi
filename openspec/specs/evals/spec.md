@@ -493,3 +493,23 @@ Why: a correct answer that its own citations do not support is a lucky guess, no
 - Given two inputs without `level`, and the same two with it
 - When `score --out DIR` runs on each pair
 - Then the second report is the first plus the four level lines, and `scores.tsv`, `paired.tsv` and the file list are byte-identical
+
+### REQ-17 Confidence column (config-c T2)
+`summary.tsv` MAY end with `confidence`, the stored report's top-1 `confidence` ([ADR-030](../../../docs/adr/ADR-030-config-c-escalation-rule.md); agent spec, "Replay of recorded tool outputs"): a number from 0 to 1, `0.0` for a forced abstention, or empty for a run that stored no report. `REQUIRED` is unchanged: the column is optional. The scorer MUST read a number as it is, and an empty value or a file without the column as having no confidence (`None`). Any other value (`-`, a word, a number outside 0 to 1, `nan`) MUST be refused as a malformed level is (REQ-16): `score` exits with one line naming the file, the line, the column and the value. No score reads it: only Config C's escalation rule does (config-c spec), so every report and output file stays byte-identical with or without the column.
+
+A summary written before the column MAY be backfilled with `infra/scripts/backfill-confidence.sh SUMMARY REPLAY_DIR OUT` (`python -m kintsugi_evals.backfill_confidence`): it MUST copy every row byte for byte with its incident file's `report.confidence` appended, joined on `<fault>-<mode>-<recording>-<sample>.json` in the replay run's directory, and MUST fail, writing nothing, when a `COMPLETED` row has no incident file or its file names another answer than the row's `reported`, when the summary already has the column, or when `OUT` exists. A row that did not complete and has no file gets an empty confidence. Why: the confidence lived only in the gitignored incident files, and a silently empty value would read as "no report" and change C's escalations.
+
+#### Scenario: A summary with the column
+- Given rows whose `confidence` holds `0.95`, `0.0` and empty
+- When `score` reads them
+- Then their confidences are 0.95, 0.0 and none, and the scores equal those of the same rows without the column
+
+#### Scenario: A malformed confidence
+- Given a row whose `confidence` holds `-`, `high`, `1.5`, `-0.1` or `nan`
+- When `score` reads it
+- Then it exits with one line naming the file, the line, `confidence` and the value
+
+#### Scenario: Backfill of a run whose incident file is missing
+- Given a `COMPLETED` row whose `<fault>-<mode>-<recording>-<sample>.json` is not in the replay directory
+- When `backfill-confidence.sh` runs
+- Then it exits 1 naming the line and the missing file, and writes nothing

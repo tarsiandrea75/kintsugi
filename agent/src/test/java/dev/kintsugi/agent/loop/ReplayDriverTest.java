@@ -172,7 +172,7 @@ class ReplayDriverTest {
 		assertThat(summary).hasSize(2);
 		assertThat(summary.get(0)).isEqualTo(ReplayDriver.SUMMARY_HEADER);
 		String[] line = summary.get(1).split("\t", -1);
-		assertThat(line).hasSize(29);
+		assertThat(line).hasSize(30);
 		assertThat(List.of(line).subList(0, 11)).containsExactly("F1", "dossier", "local", "1", "COMPLETED",
 				"gateway-mock|DEPENDENCY_LATENCY", "UNKNOWN|UNKNOWN", "MISS", "33", "12", "1.00");
 		assertThat(line[11]).isEqualTo(String.valueOf(sample.conflicts()));
@@ -192,10 +192,12 @@ class ReplayDriverTest {
 		assertThat(line[25]).isEmpty();
 		// The policy's counts come next (ADR-027): the dossier's calls ran no write and none was refused.
 		assertThat(List.of(line).subList(26, 28)).containsExactly("0", "0");
-		// The stored report's verification level comes last (ADR-028): an abstention stops at L1.
+		// The stored report's verification level comes next (ADR-028): an abstention stops at L1.
 		assertThat(line[28]).isEqualTo("L1");
+		// The stored report's confidence comes last (config-c T2; ADR-030).
+		assertThat(line[29]).isEqualTo("0.1");
 		assertThat(summary.get(0)).endsWith("\tview\treport\tmodel\tthink\treportCap\treportTimeout\tnumCtx\tcandidates\tranked"
-				+ "\triskyExecuted\tpolicyRefused\tlevel");
+				+ "\triskyExecuted\tpolicyRefused\tlevel\tconfidence");
 
 		JsonNode incident = JSON.readTree(this.out.resolve("F1-dossier-" + F1_DOSSIER_STEM + "-1.json").toFile());
 		assertThat(incident.path("status").asString()).isEqualTo("COMPLETED");
@@ -686,9 +688,9 @@ class ReplayDriverTest {
 		assertThat(rules.candidatesColumn())
 			.isEqualTo("gateway-mock|DEPENDENCY_LATENCY;payment-service|DEPENDENCY_REJECTING");
 		// A hand-made sample's incident records no policy counts, so those two columns are "-" (ADR-027), and a rules
-		// line states no level (ADR-028).
+		// line states no level (ADR-028); its incident stores no report, so it states no confidence (ADR-030).
 		assertThat(rules.summaryLine())
-			.endsWith("\trules-v1\t-\t-\t-\t-\t" + rules.candidatesColumn() + "\t\t-\t-\t-");
+			.endsWith("\trules-v1\t-\t-\t-\t-\t" + rules.candidatesColumn() + "\t\t-\t-\t-\t");
 		assertThat(decisionSample("dev", "a", "MATCH").candidatesColumn()).isEmpty();
 	}
 
@@ -895,7 +897,7 @@ class ReplayDriverTest {
 		assertThat(sample.dossierResourceUnrecorded()).isEqualTo(RESOURCE_CALLS);
 
 		String[] line = Files.readAllLines(this.out.resolve("summary.tsv")).get(1).split("\t", -1);
-		assertThat(line).hasSize(29);
+		assertThat(line).hasSize(30);
 		assertThat(List.of(line).subList(0, 8)).containsExactly("F1", "decision", "rules", "1", "COMPLETED", F1_TRUTH,
 				F1_TRUTH, "MATCH");
 		// The rules' candidates on the same dossier (hybrid T4), their verdict first, written service|category in order
@@ -911,8 +913,9 @@ class ReplayDriverTest {
 		assertThat(sample.rankedColumn()).isEmpty();
 		// The gatherer's calls passed the policy gate (ADR-027): no write ran, none was refused.
 		assertThat(List.of(line).subList(26, 28)).containsExactly("0", "0");
-		// Config 0 writes no cited evidence, so its line states no level (ADR-028).
+		// Config 0 writes no cited evidence, so its line states no level (ADR-028), and no confidence (ADR-030).
 		assertThat(line[28]).isEqualTo("-");
+		assertThat(line[29]).isEmpty();
 		assertThat(List.of(line).subList(12, 14)).containsExactly("0", "0");
 		assertThat(List.of(line).subList(15, 19)).containsExactly("dev", r1.stem(), "tables", "plain");
 		// Config 0 calls no model: its model is the rules' version, and it has no thinking, cap, deadline or window.
@@ -1085,8 +1088,8 @@ class ReplayDriverTest {
 	}
 
 	/**
-	 * The level column (verification-levels T5; ADR-028): the stored report's {@code verification.level}, last, so the
-	 * scorer reads verified-correct and the L1 rate from it; {@code -} for a run that stored no report.
+	 * The level column (verification-levels T5; ADR-028): the stored report's {@code verification.level}, before the
+	 * confidence, so the scorer reads verified-correct and the L1 rate from it; {@code -} for a run that stored no report.
 	 */
 	@Test
 	void theLevelColumnIsTheStoredReportsLevelAndADashWithoutAReport() {
@@ -1100,14 +1103,35 @@ class ReplayDriverTest {
 		assertThat(stored).matches("L[0-3]");
 		String[] line = sample.summaryLine().split("\t", -1);
 		assertThat(line).hasSize(ReplayDriver.SUMMARY_HEADER.split("\t").length);
-		assertThat(line[line.length - 1]).isEqualTo(stored);
-		// A run that stored no report, as a failed one, states no level.
-		assertThat(decisionSample("dev", "a", "MISS").summaryLine()).endsWith(NO_POLICY_COLUMNS + "\t-");
+		assertThat(line[line.length - 2]).isEqualTo(stored);
+		// A run that stored no report, as a failed one, states no level and no confidence.
+		assertThat(decisionSample("dev", "a", "MISS").summaryLine()).endsWith(NO_POLICY_COLUMNS + "\t-\t");
 	}
 
-	/** A summary line without its last column, the level, for the tests of the columns before it. */
+	/**
+	 * The confidence column (config-c T2; ADR-030): the stored report's top-1 {@code confidence}, last, so Config C's
+	 * escalation rule can read it from the summary; empty for a run that stored no report.
+	 */
+	@Test
+	void theConfidenceColumnIsTheStoredReportsConfidenceAndEmptyWithoutAReport() {
+		this.model.text(ScriptedChatModel.rankedReport("gateway-mock", "DEPENDENCY_LATENCY",
+				List.of("payment-service|DEPENDENCY_LATENCY"), ScriptedChatModel.dossierEvidence(1)));
+
+		ReplayDriver.Sample sample = this.driver.decisionSample(this.driver.decisionCases("stress", List.of("F1")).get(0),
+				1);
+
+		assertThat(sample.incident().path("report").path("confidence").asDouble(-1)).isEqualTo(0.7);
+		String[] line = sample.summaryLine().split("\t", -1);
+		assertThat(line).hasSize(ReplayDriver.SUMMARY_HEADER.split("\t").length);
+		assertThat(ReplayDriver.SUMMARY_HEADER).endsWith("\tlevel\tconfidence");
+		assertThat(line[line.length - 1]).isEqualTo("0.7");
+		assertThat(decisionSample("dev", "a", "MISS").confidenceColumn()).isEmpty();
+	}
+
+	/** A summary line without its last two columns, the level and the confidence, for the tests of the columns before. */
 	private static String withoutLevel(String line) {
-		return line.substring(0, line.lastIndexOf('\t'));
+		String withoutConfidence = line.substring(0, line.lastIndexOf('\t'));
+		return withoutConfidence.substring(0, withoutConfidence.lastIndexOf('\t'));
 	}
 
 	private static ReplayDriver.Sample decisionSample(String split, String recording, String verdict) {

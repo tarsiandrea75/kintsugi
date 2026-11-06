@@ -105,6 +105,8 @@ class Row:
     policy_refused: int = None
     # The stored report's verification level, L0 to L3 (ADR-028); "-" for none; None when the file lacks the column.
     level: str = None
+    # The stored report's top-1 confidence, 0 to 1 (config-c T2; ADR-030); None for no report or a file without it.
+    confidence: float = None
 
     @property
     def case(self):
@@ -156,6 +158,23 @@ def parse_level(raw):
     raise ValueError(f"{raw!r} is not a level: expected L0 to L3 or -")
 
 
+def parse_confidence(raw):
+    """A confidence of summary.tsv (ADR-030): a number from 0 to 1, or None for an empty value or a missing column.
+
+    Any other value is malformed and raises ValueError, as a malformed level does: read as None, a typo would turn a
+    row's confidence into an escalation trigger unseen.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        value = None
+    if value is None or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{raw!r} is not a confidence: expected a number from 0 to 1 or empty")
+    return value
+
+
 def at_least(level, floor):
     """Whether a row's level is a level at `floor` or above; "-" and None are no level."""
     return level in LEVELS and LEVELS.index(level) >= LEVELS.index(floor)
@@ -188,7 +207,9 @@ def read_summary(path, label=None, service_only=False):
     enters the ranking only, and a file without it ranks as before. The trailing riskyExecuted and policyRefused
     columns (policy-gate T3) are read as numbers; a file without them, or a "-", reads as unknown, never 0, and any
     other value that is not an ASCII decimal integer is refused. The trailing level column (verification-levels T5)
-    is L0 to L3 or "-"; a file without it reads as None, and any other value is refused. With
+    is L0 to L3 or "-"; a file without it reads as None, and any other value is refused. The trailing confidence
+    column (config-c T2) is a number from 0 to 1 or empty; a file without it, or an empty value, reads as None, and
+    any other value is refused. With
     service_only, each row and its candidate recall are scored on the service part of the truth only.
     """
     path = summary_path(path)
@@ -211,6 +232,10 @@ def read_summary(path, label=None, service_only=False):
                 level = parse_level(raw.get("level"))
             except ValueError as error:
                 raise ValueError(f"{path}: line {reader.line_num}: level {error}") from None
+            try:
+                confidence = parse_confidence(raw.get("confidence"))
+            except ValueError as error:
+                raise ValueError(f"{path}: line {reader.line_num}: confidence {error}") from None
             view = raw.get("view") or "-"
             report = raw.get("report") or "-"
             config = label or f"{raw['route']}-{raw['mode']}-{view}" + (f"-{report}" if "report" in raw else "")
@@ -219,7 +244,7 @@ def read_summary(path, label=None, service_only=False):
                             outcome(raw["status"], raw["truth"], raw["reported"], service_only), report,
                             parse_candidates(raw.get("candidates"), raw["route"], report), service_only,
                             ranking_of(raw["status"], raw["reported"], raw.get("candidates"), raw.get("ranked")),
-                            *counts, level))
+                            *counts, level, confidence))
     return rows
 
 
