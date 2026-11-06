@@ -72,6 +72,7 @@ Out of scope: any holdout read; any change to A, D or Config 0's behaviour; H3's
 - 2026-11-06: T1 done. ADR-030 written; vision §5 C row amended (structural readback, docs only). Commit bd73bf7; review assess: medium, under_budget (pending in slice 1).
 - 2026-11-06: T2 done (delegated writer). RED observed (Python 7 failed + missing module; Java compile then 13 failures), GREEN: pytest 431 passed, ReplayDriverTest 43/0/0, `agent/src/main` untouched (check-freeze fails only on the missing `freeze-m3` tag, baseline). Backfill dry run: AS and DS 30/30 rows; AS confidences {0.85, 0.9, 0.92, 0.95}, DS {0.2..0.7}. DS JSON is in `replay-20261103T150905Z-cloud`.
 - 2026-11-06: T3 done. Living spec `openspec/specs/config-c/spec.md` (REQ-1..4) and plan `evals/plans/2026-11-06-config-c-dev.md`, committed before any run (structural readback, docs only).
+- 2026-11-06: slice 1 (main..7bacdc9) native review, 4 lenses, consent granted (standing): approved, acknowledged, authority burned (lineage review-94af93752127156d). Advisory, non-blocking, folded into T4: the spec escalates on a missing level but ADR-030 does not say so (R2); the backfill writes an empty confidence on a COMPLETED row whose JSON has no number, and a short row raises KeyError (R3/R4); `withoutLevel` helper name is stale (R2); Java non-numeric confidence untested (R3).
 
 ## Next step
 
