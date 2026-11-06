@@ -124,6 +124,14 @@ class LevelRecheckTest {
 	}
 
 	@Test
+	void aSummaryWithTheConfidenceAfterTheLevelKeepsTheConfidence() {
+		List<String> withConfidence = List.of("fault", "split", "level", "confidence");
+		assertThat(LevelRecheck.withLevel(withConfidence, "F3\tdev\t-\t0.8", "L2")).isEqualTo("F3\tdev\tL2\t0.8");
+		assertThat(LevelRecheck.withLevel(withConfidence, "F3\tdev\t-\t", "L2")).isEqualTo("F3\tdev\tL2\t");
+		assertThat(LevelRecheck.header(withConfidence)).isEqualTo("fault\tsplit\tlevel\tconfidence");
+	}
+
+	@Test
 	void aRunWritesTheSummaryWithTheLevelAndOneDetailRowPerEvidenceItem(@TempDir Path dir) throws IOException {
 		Fixture f3 = fixture(F3);
 		int line = f3.line("order-service", Section.LOGS, Change.NOT_COMPARED);
@@ -273,12 +281,12 @@ class LevelRecheckTest {
 		return in;
 	}
 
-	/** A summary row of the F3 r1 sample in {@link ReplayDriver#SUMMARY_HEADER}'s columns. */
+	/** A summary row of the F3 r1 sample in {@link ReplayDriver#SUMMARY_HEADER}'s columns, its confidence last. */
 	private static String row(String split, String level) {
 		return String.join("\t", "F3", "decision", "cloud", "1", "COMPLETED", "order-service|CONFIGURATION",
 				"order-service|CONFIGURATION", "MATCH", "33", "12", "1.00", "0", "5000", "500", "5.0", split,
 				"verify-agent-20261024T162555Z-r1-F3", "tables", "plain", "claude-haiku-5-5", "default", "4096", "60s",
-				"-", "", "", "0", "0", level);
+				"-", "", "", "0", "0", level, "0.8");
 	}
 
 	private static Fixture fixture(String file) {
