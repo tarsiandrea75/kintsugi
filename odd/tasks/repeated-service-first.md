@@ -76,3 +76,9 @@ Out of scope:
 ## Progress
 
 - 2026-11-06: the explorer mapped the rule, the three incidents and the scorer; the human chose the first-occurrence rule.
+- 2026-11-06: T1 and T2 in `2690e4f`. Assessed medium (`executable_change`), `under_budget`; the feature closes here, so it was reviewed now, consent granted. One lens (reliability), approved and acknowledged.
+
+## Follow-ups
+
+- R3-001 (SUGGESTION): no test shows that an alternative with an unexpected field is neither kept nor dropped as a repeat (`ReportCheck.java:686-689`). Only the UNKNOWN case is tested.
+- No model run shows the rule yet: the next lab D run will.
