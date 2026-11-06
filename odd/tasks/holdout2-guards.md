@@ -56,7 +56,7 @@ Out of scope:
 - [x] T2 2026-11-06: condition 4, G1 and G2 (route: delegated writer; trigger: 2+ non-trivial files, plus the reading that prepares the write).
   - Condition 4 reads the manifest at HEAD: holdout-2 and holdout-1 recordings, keyed by file stem (a result row's `recording`, or the stem of its `file`).
   - A row is a holdout-2 read when its split is `holdout-2` or its recording is a holdout-2 one. The holdout-1 exemption is membership in the manifest's holdout-1 set. Every table with a `recording`, `file` or `split` column is read.
-  - With no manifest, both sets are empty, so any `holdout` row fails (fails closed).
+  - A manifest that cannot be read at HEAD fails condition 4 in one line (the review's WARNING, fixed below).
   - RED: AC1's case in `test-check-freeze.sh`, and AC2 on a throwaway repository (the runner stops at its first failure). GREEN: `test-check-freeze.sh` 62 cases, the parent's spot check the same.
 - [x] T3 2026-11-06: the import refusal (route: the same writer). RED: `test-lib.sh` "a schedule run into holdout is refused" recorded it. GREEN: `test-lib.sh` 244 cases.
 - [x] T4 2026-11-06: `docs/setup.md` (condition 4, the import rule, "Record holdout-2" step 4) and the `ReplayRunTest` javadoc (route: the same writer).
@@ -68,7 +68,7 @@ Out of scope:
 
 ## Follow-ups
 
-- Review WARNING R4/R3 (`check-freeze.sh:332-338`): `manifest_recordings` reads any failure of `git show HEAD:<manifest>` as no manifest, silently. The holdout-1 side fails closed, but the holdout-2 set is then empty, so G1 would find nothing.
+- Review WARNING R4/R3 (`check-freeze.sh:332-338`): `manifest_recordings` reads any failure of `git show HEAD:<manifest>` as no manifest, silently. The holdout-1 side fails closed, but the holdout-2 set is then empty, so G1 would find nothing. Fixed 2026-11-06: condition 4 fails with `cannot read <manifest> at HEAD, so no lab holdout row can be found`. RED: the line missing, and the holdout-1 row flagged instead; GREEN: `test-check-freeze.sh` 63 cases; `check-freeze.sh` on HEAD, condition 4 passes.
 - Review WARNING R2/R3 (`test-check-freeze.sh:420-421`): the "table with no recording or file column" test passes whether or not that table is read.
 - Review SUGGESTIONs: the stale "split column or not" wording (`check-freeze.sh:50`); no test of `policy.tsv`'s `holdout_rows` for holdout-2 through `score --out`; the HEAD-versus-tag manifest (below).
 - The holdout-1 set is read at HEAD, so a later `holdout` import that names no schedule case (a `--rounds` run) would join it and be exempt. Reading the set at the tag closes it; it is not in this feature's scope.

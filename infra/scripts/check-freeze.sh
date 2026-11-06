@@ -330,13 +330,18 @@ def stem(file):
 
 
 def manifest_recordings():
-    """The manifest's recordings at HEAD by split, as {split: {recording id}}; none when HEAD has no manifest."""
+    """The manifest's recordings at HEAD by split, as {split: {recording id}}.
+
+    A manifest that cannot be read fails the condition: with no holdout-2 recordings known, it could find none.
+    """
     done = subprocess.run(["git", "-C", repo, "show", "HEAD:" + manifest], capture_output=True, text=True)
+    if done.returncode != 0:
+        print("FAIL  results: cannot read %s at HEAD, so no lab holdout row can be found" % manifest)
+        sys.exit(1)
     by_split = {}
-    if done.returncode == 0:
-        for row in csv.DictReader(done.stdout.splitlines(), delimiter="\t"):
-            if row.get("file"):
-                by_split.setdefault(row.get("split"), set()).add(stem(row["file"]))
+    for row in csv.DictReader(done.stdout.splitlines(), delimiter="\t"):
+        if row.get("file"):
+            by_split.setdefault(row.get("split"), set()).add(stem(row["file"]))
     return by_split
 
 

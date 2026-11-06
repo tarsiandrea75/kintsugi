@@ -420,6 +420,13 @@ expect_no_line "a row on a manifest holdout-1 file still passes condition 4" "$o
 expect_no_line "a table with no recording or file column is not read for lab recordings" "$out" \
   "FAIL  results: evals/results/no-recording/"
 
+# Condition 4 fails closed when it cannot read the manifest at HEAD: with no holdout-2 recordings known, it could find none.
+git -C "$repo" rm -q agent/src/test/resources/replay/recordings.tsv
+commit_at "$repo" 2026-12-04T11:00:00Z "drop the manifest"
+out=$(run_check --repo "$repo")
+expect_line "a manifest HEAD does not hold fails condition 4 in one line" "$out" \
+  "FAIL  results: cannot read agent/src/test/resources/replay/recordings.tsv at HEAD, so no lab holdout row can be found"
+
 # Options.
 out=$(run_check --m4-date 2026-13-01)
 expect_line "a wrong --m4-date exits 2" "$out" "exit 2"
