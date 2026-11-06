@@ -76,6 +76,8 @@ Out of scope:
 
 ## Progress
 
+- 2026-11-06: the unreadable-manifest fix in `f8b0f48`. Assessed high, consent granted; four lenses, approved and acknowledged, with 3 WARNINGs and 4 SUGGESTIONs, none blocking. Readability: the reader `manifest_recordings` hides the exit, and the test does not assert that the line is the only condition-4 FAIL, nor the exit status. Reliability claims the exit skips later conditions; it does not, since condition 4 runs in its own `python3` process and the shell still counts every condition (the test run printed `RESULT: FAIL (2 of 4 conditions failed)`). git's stderr is not shown.
+
 - 2026-11-06: T2–T4 in `d226666`. Assessed high (`high_risk`), consent granted; four lenses, approved and acknowledged, with 2 WARNINGs and 4 SUGGESTIONs (Follow-ups), none blocking.
 
 - 2026-11-06: the audit (read-only explorer, 32 places) found G1 and G2; the parent re-read `check-freeze.sh:349-359` and `record-replay.sh:195-201`. The human authorized T2 to T4.
