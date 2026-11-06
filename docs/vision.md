@@ -79,8 +79,9 @@ RCAEval is MIT-licensed: 735 cases on 3 systems written by others, with 17 publi
 | Dev | RE2-OB repetition 1, 30 cases | development and tuning |
 | Holdout A | RE2-OB repetitions 2–3, 60 cases | same system, new runs |
 | Holdout B | RE2-SS, 90 cases | a system never seen |
+| Holdout TT | RE2-TT, 90 cases, Config 0, 0R and D only ([ADR-032](adr/ADR-032-m4-holdout-coverage.md)) | a large system (64 services), for H1 |
 
-- TT has 64 services, beyond the local `num-ctx` of 8192. TT and RE3 run on Config 0, D and BARO (one of the published baselines) only.
+- TT has 64 services, beyond the local `num-ctx` of 8192. TT and RE3 run on Config 0, 0R, D and BARO (one of the published baselines) only.
 - Windows: 10 minutes on each side of `inject_time`, as the published baselines get them. The lab keeps hiding the fault's start (ADR-011); the difference is documented.
 - Healthy pseudo-cases come from windows before the injection.
 - The truth never reaches the agent.
@@ -281,12 +282,11 @@ M4 is never cut.
 1. Config B;
 2. D+ and the cloud repeats;
 3. L4 probes;
-4. TT and RE3;
+4. RE3;
 5. lab parameters beyond F1 and F2;
-6. approved write actions (the policy then refuses every write);
-7. holdout B.
+6. approved write actions (the policy then refuses every write).
 
-Never cut the protocol, Config 0, Config 0R, the freeze, holdout-2, `benchmark.md` or the M4 run.
+Never cut the protocol, Config 0, Config 0R, the freeze, holdout-2, holdout B, holdout TT on Config 0, 0R and D, `benchmark.md` or the M4 run (ADR-032: A's 200 and D's 300 cases depend on them).
 
 Out of scope unless a benchmark justifies it: multi-agent architectures (supervisor + specialist agents). If attempted, only as a final measured experiment.
 
