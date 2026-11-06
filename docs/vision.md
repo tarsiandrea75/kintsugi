@@ -27,7 +27,7 @@ These claims are written before any holdout is read, so the numbers cannot be ch
   - A's false-alarm rate is at most D's plus 10 points;
   - A's median time to report on this laptop is at most 15 minutes.
 - **H3, escalation pays.** C stays within 5 points of D while escalating at most 50% of cases.
-- H1–H3 get a Holm correction, because three tests at once raise the chance of a false win. Everything else is labelled exploratory.
+- H1–H3 get a Holm correction, because three tests at once raise the chance of a false win. Everything else is labelled exploratory. The verdict procedure (one-sided bootstrap p-values against each margin, intersection-union for multi-condition hypotheses, Holm at 0.025) is fixed in [ADR-031](adr/ADR-031-h1-h3-verdict-procedure.md).
 
 The configurations are defined in §5, the metrics and the protocol in §6.
 
