@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-05 (session 01)
+2026-11-06 (session 01)
 
 ## Milestone
 
@@ -16,7 +16,12 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-Latest (journal `docs/journal/2026-11-05-01.md`): HT, a hybrid run with today's agent. Then three features before the freeze, all closed:
+Latest (journal `docs/journal/2026-11-06-01.md`): `main` fast-forwarded to every chain (it had stayed at `49d55bd`), then three fixes before the freeze, each merged into `main` (now `758f46a`):
+- **repeated-service-first** (`odd/tasks/repeated-service-first.md`, ADR-025 amended, post hoc): an alternative that repeats a service, the cause's included, is dropped and its first occurrence kept, as the scorer already ranks. The three lab F2 `INVALID_REPORT`s (DS r7, DK r3 and r9) all named the right cause.
+- **assessed decoy test:** an assessed report naming NETWORK or CODE_DEFECT is valid (the decoy-categories follow-up).
+- **holdout2-guards** (`odd/tasks/holdout2-guards.md`): the scorer's policy check counts `holdout-2` rows; `check-freeze.sh` condition 4 finds holdout-2 and holdout-1 rows by the manifest, and fails when the manifest cannot be read; `record-replay.sh` refuses a schedule run into `holdout`, `stress` or `probe`.
+
+Before that (journal `docs/journal/2026-11-05-01.md`): HT, a hybrid run with today's agent. Then three features before the freeze, all closed:
 - **context-full-cut:** a full context window is named for its cause, and `--num-ctx` can be set per run (ADR-010, amended; the default stays 8192);
 - **l3-callee-check:** `no-changed-callee`, a second L3 check, post hoc (ADR-028, amended);
 - **decoy-categories:** NETWORK and CODE_DEFECT, kept with their probable cost (ADR-029).
@@ -67,9 +72,11 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
     - By the pre-registered rule the CI includes 0, so there is no evidence of a cost, and the rule's recommendation is to keep the decoys.
     - The data lean to a cost through more abstentions: 22 against 15.
   - Settled on 2026-11-05: the human kept the decoys (ADR-029, amended, with the probable cost stated).
-  - Before the tag: the human merges today's chain (`feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`).
+  - Done 2026-11-06: `main` fast-forwarded to the chain's tip; it holds every branch.
   - Settled on 2026-11-05: the default context window stays 8192 (ADR-010, amended). L3 gains `no-changed-callee`, post hoc (ADR-028, amended; `evals/results/2026-11-05-l3-callee-recheck-re2ob/notes.md`): no wrong dev answer is left at L3, at the cost of one recording (`delay/0ed36a9e`).
   - Verified-correct on RE2-OB dev: DS 24/30, HC 20/30, HT 20/27.
+18b. Done 2026-11-06 (Last action): repeated-service-first, the assessed decoy test, holdout2-guards. Write approval stays after M4 (ADR-027, the human's choice of 2026-11-03, confirmed 2026-11-06).
+19. **Next:** Config C (vision §5, H3): its computation from the paired A and D outputs, its confidence threshold fixed on dev, and its plan, all before any holdout is read. `evals/` code, so the freeze does not block it. Then the M4 plans: holdout-2, the RCAEval holdouts, H1–H3 (none exists in `evals/plans/`).
   - On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
 
 ## Local branch chains (not pushed)
@@ -91,7 +98,9 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` → `feat/verification-levels` → `-01-line-facts` → `-02-level-checks` → `-03-stored-level` → `-04-level-report` → `-05-latency-change` → `feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories` (current).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` → `feat/verification-levels` → `-01-line-facts` → `-02-level-checks` → `-03-stored-level` → `-04-level-report` → `-05-latency-change` → `feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`, then from `main`: `fix/f2-repeated-service`, `test/assessed-decoy`, `fix/holdout2-policy-split`, `docs/close-2026-11-06` (current).
+
+Since 2026-11-06 `main` holds every chain (fast-forward, no push).
 
 Each chain starts from the tip of the previous one. The backup bundle is in `C:\Users\andrea.tarsi\kintsugi-backups\`.
 
@@ -113,14 +122,19 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 ## Follow-ups
 
+Session of 2026-11-06 (details in `odd/tasks/repeated-service-first.md`, `odd/tasks/holdout2-guards.md`):
+- **repeated-service-first:** no test shows an alternative with an unexpected field is neither kept nor dropped; no model run shows the rule yet (the next lab D run will).
+- **holdout2-guards:**
+  - the holdout-1 set is read at HEAD, not at the tag, so a later `holdout` import that names no case would be exempt;
+  - "read once" has no code guard in the lab replay path;
+  - review WARNINGs: the manifest reader hides its exit; the unreadable-manifest test asserts neither the only FAIL line nor the exit status; the no-recording-column test is vacuous;
+  - SUGGESTIONs: git's stderr is dropped, stale "split column or not" wording, no `policy.tsv` `holdout_rows` test through `score --out`.
+
 Session of 2026-11-05 (details in `odd/tasks/context-full-cut.md`, `odd/tasks/l3-callee-check.md`, `odd/tasks/decoy-categories.md`):
 - **context-full-cut:**
   - R3-001: a cached prefix Ollama leaves out of its prompt count would make a full window read as a cap cut again.
   - R3-002: the bounds of `--num-ctx` are checked by hand only.
 - **l3-callee-check:** `LevelRecheck` has no test for its no-candidate refusals or its hybrid-row validation. Its three-state `candidates` parameter is a readability WARNING.
-- **decoy-categories:** no test accepts an assessed report that names a decoy.
-- **Lab F2:** two `INVALID_REPORT`s came from the alternatives rule, which refuses a service named twice. The cloud model breaks it on F2.
-- **Freeze:** the four branches of today (`feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`) must be merged before the tag on 2026-12-01, or the agent at the tag lacks them.
 
 Session of 2026-11-04 (02), verification-levels (details in `odd/tasks/verification-levels.md`):
 - `LevelRecheck` catches only `Refused` per incident: a corrupt incident file or an unparseable answer aborts the run with a stack trace (WARNINGs R3-001, R4-001; fails closed).
