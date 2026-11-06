@@ -93,3 +93,34 @@ def test_an_existing_output_is_never_overwritten(run, tmp_path):
     out.write_text("keep\n")
     assert main([str(path), str(replay), str(out)]) == 1
     assert out.read_text() == "keep\n"
+
+
+def test_a_completed_answer_without_a_numeric_confidence_fails(run):
+    # Empty would read as "no confidence", which never triggers C's t: a lost number would change escalations unseen.
+    path, replay = run
+    incident(replay, "cpu", "r1", "1", answer(TRUTH, "high"))
+    with pytest.raises(ValueError, match="line 2: .*cpu-decision-r1-1.json has no numeric report.confidence"):
+        backfill(path, replay)
+
+
+def test_a_completed_answer_whose_incident_has_no_report_fails(run):
+    path, replay = run
+    incident(replay, "cpu", "r1", "1", None)
+    with pytest.raises(ValueError, match="line 2: .*no numeric report.confidence"):
+        backfill(path, replay)
+
+
+def test_an_abstention_without_a_confidence_gets_an_empty_one(run):
+    # An abstention escalates before t is read (ADR-030), so its confidence is legitimately absent.
+    path, replay = run
+    incident(replay, "cpu", "r2", "1", {"rootCauseService": "UNKNOWN", "rootCauseCategory": "UNKNOWN"})
+    assert backfill(path, replay)[2].endswith("\tL1\t")
+
+
+def test_a_row_with_another_number_of_fields_than_the_header_fails(run):
+    path, replay = run
+    lines = path.read_text().splitlines()
+    lines[2] = "\t".join(lines[2].split("\t")[:4])
+    path.write_text("\n".join(lines) + "\n")
+    with pytest.raises(ValueError, match=r"summary.tsv: line 3: 4 fields, the header has 10"):
+        backfill(path, replay)

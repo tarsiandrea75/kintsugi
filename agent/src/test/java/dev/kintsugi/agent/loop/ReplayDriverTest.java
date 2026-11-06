@@ -326,7 +326,7 @@ class ReplayDriverTest {
 		assertThat(sample.view()).hasValue(DossierView.TABLES);
 		// So is its report, the plain one by default (service-assessment T2r).
 		assertThat(sample.report()).hasValue(DecisionReport.PLAIN);
-		assertThat(withoutLevel(sample.summaryLine())).startsWith("F1\tdecision\tlocal\t1\tCOMPLETED\t")
+		assertThat(withoutLevelAndConfidence(sample.summaryLine())).startsWith("F1\tdecision\tlocal\t1\tCOMPLETED\t")
 			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\tplain" + LOCAL_LINE_END);
 	}
 
@@ -345,7 +345,7 @@ class ReplayDriverTest {
 
 		assertThat(sample.reported()).isEqualTo(F1_TRUTH);
 		assertThat(sample.rankedColumn()).isEqualTo("payment-service|DEPENDENCY_LATENCY;order-service|CONFIGURATION");
-		assertThat(withoutLevel(sample.summaryLine())).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn() + NO_POLICY_EVENT);
+		assertThat(withoutLevelAndConfidence(sample.summaryLine())).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn() + NO_POLICY_EVENT);
 		// A sample whose incident holds no report, as a failed run's, writes none.
 		assertThat(decisionSample("dev", "a", "MISS").rankedColumn()).isEmpty();
 	}
@@ -364,7 +364,7 @@ class ReplayDriverTest {
 
 		assertThat(sample.reported()).isEqualTo("UNKNOWN|UNKNOWN");
 		assertThat(sample.rankedColumn()).isEqualTo("payment-service|DEPENDENCY_LATENCY;order-service|CONFIGURATION");
-		assertThat(withoutLevel(sample.summaryLine())).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn() + NO_POLICY_EVENT);
+		assertThat(withoutLevelAndConfidence(sample.summaryLine())).endsWith(LOCAL_COLUMNS + "\t\t" + sample.rankedColumn() + NO_POLICY_EVENT);
 	}
 
 	@Test
@@ -611,7 +611,7 @@ class ReplayDriverTest {
 		assertThat(dossierMessage(decision)).contains("# Evidence dossier, by service\n")
 			.doesNotContain("## Service status (incident window)");
 		assertThat(decision.dossierUnrecorded()).isEqualTo(RESOURCE_CALLS);
-		assertThat(withoutLevel(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tplain" + LOCAL_LINE_END);
+		assertThat(withoutLevelAndConfidence(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tplain" + LOCAL_LINE_END);
 		// Dossier mode reads no view: it shows the tables, and its sample records none.
 		assertThat(dossier.view()).isEmpty();
 		assertThat(dossier.report()).isEmpty();
@@ -641,7 +641,7 @@ class ReplayDriverTest {
 		assertThat(this.model.prompts()).hasSize(2)
 			.allSatisfy(prompt -> assertThat(((StructuredOutputChatOptions) prompt.getOptions()).getOutputSchema())
 				.isEqualTo(Schemas.assessedReport(LAB)));
-		assertThat(withoutLevel(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tassessed" + LOCAL_LINE_END);
+		assertThat(withoutLevelAndConfidence(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM + "\tsheets\tassessed" + LOCAL_LINE_END);
 		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1))
 			.startsWith("F1\tdecision\tlocal\tstress\tsheets\tassessed\t1\t1\t0/1\t");
 	}
@@ -669,7 +669,7 @@ class ReplayDriverTest {
 		assertThat(hybrid.candidates()).isNotEmpty().isEqualTo(rules.candidates());
 		// Its candidates are those of the run's rules version, v1 by default, which its incident names.
 		assertThat(hybrid.incident().path("rules").asString()).isEqualTo("v1");
-		assertThat(withoutLevel(hybrid.summaryLine()))
+		assertThat(withoutLevelAndConfidence(hybrid.summaryLine()))
 			.endsWith("\tstress\t" + F1_DOSSIER_STEM + "\ttables\thybrid" + LOCAL_COLUMNS + "\t"
 					+ rules.candidatesColumn() + "\t" + NO_POLICY_EVENT);
 		// The aggregate keeps its columns: the candidates are per sample.
@@ -760,7 +760,7 @@ class ReplayDriverTest {
 		}
 		List<String> summary = Files.readAllLines(this.out.resolve("summary.tsv"));
 		assertThat(summary).hasSize(5);
-		assertThat(withoutLevel(summary.get(4))).startsWith("F1\tdecision\tlocal\t2\t").endsWith("\tdev\tb\ttables\tplain" + LOCAL_LINE_END);
+		assertThat(withoutLevelAndConfidence(summary.get(4))).startsWith("F1\tdecision\tlocal\t2\t").endsWith("\tdev\tb\ttables\tplain" + LOCAL_LINE_END);
 		// The aggregate tells the 2 distinct recordings from the 4 samples. The coverage and the fully recorded dossiers
 		// leave the resource calls out, so all 4 are covered and fully recorded (resource-facts T4).
 		List<String> aggregate = ReplayDriver.aggregate(samples);
@@ -985,7 +985,7 @@ class ReplayDriverTest {
 
 		assertThat(decision.settings())
 			.isEqualTo(new ReplayDriver.Settings("qwen3.5:9b", "on", "2048", "1800s", "8192"));
-		assertThat(withoutLevel(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM
+		assertThat(withoutLevelAndConfidence(decision.summaryLine())).endsWith("\tstress\t" + F1_DOSSIER_STEM
 				+ "\ttables\tplain\tqwen3.5:9b\ton\t2048\t1800s\t8192\t\t" + NO_POLICY_EVENT);
 		assertThat(ReplayDriver.aggregate(List.of(decision)).get(1)).endsWith("\tqwen3.5:9b\ton\t2048\t1800s\t8192");
 		// The report call carried the thinking setting and the cap the line names.
@@ -1128,8 +1128,25 @@ class ReplayDriverTest {
 		assertThat(decisionSample("dev", "a", "MISS").confidenceColumn()).isEmpty();
 	}
 
-	/** A summary line without its last two columns, the level and the confidence, for the tests of the columns before. */
-	private static String withoutLevel(String line) {
+	/**
+	 * A stored confidence that is not a JSON number is written empty, as no confidence, never as its text: the scorer
+	 * refuses any value but a number from 0 to 1 (ADR-030).
+	 */
+	@Test
+	void aNonNumericConfidenceIsWrittenEmpty() {
+		ObjectNode incident = JSON.createObjectNode();
+		incident.putObject("report").put("confidence", "0.9");
+
+		ReplayDriver.Sample sample = new ReplayDriver.Sample("F1", AgentMode.DECISION, "local", "dev", "a",
+				Optional.of(DossierView.TABLES), Optional.of(DecisionReport.PLAIN), 1, IncidentStatus.COMPLETED, F1_TRUTH,
+				F1_TRUTH, "MATCH", 33, 0, 1.0, 0, null, null, 1.0, 33, 0, incident, LOCAL, List.of());
+
+		assertThat(sample.confidenceColumn()).isEmpty();
+		assertThat(sample.summaryLine()).endsWith("\t");
+	}
+
+	/** A summary line without its last two columns, the level and the confidence, for the tests of the columns before them. */
+	private static String withoutLevelAndConfidence(String line) {
 		String withoutConfidence = line.substring(0, line.lastIndexOf('\t'));
 		return withoutConfidence.substring(0, withoutConfidence.lastIndexOf('\t'));
 	}

@@ -12,6 +12,9 @@ it the output is unchanged.
 `python -m kintsugi_evals baro-rcaeval` ranks RCAEval RE2 dev cases with BARO into a summary.tsv (ADR-024).
 
 `python -m kintsugi_evals audit-latency` classifies the latency values a run's evidence cites (REQ-14).
+
+`python -m kintsugi_evals escalate` computes Config C from A's and D's summaries over ADR-030's grid, selects its rule,
+and writes grid.tsv, escalation.tsv, C-summary.tsv and escalate.txt (openspec/specs/config-c).
 """
 
 import argparse
@@ -23,7 +26,9 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import escalation
 from .scoring import (
+    CORRECT,
     chance_ac,
     chance_avg5,
     paired,
@@ -35,7 +40,7 @@ from .scoring import (
     summarize_ranked,
     summary_path,
 )
-from .stats import holm
+from .stats import holm, wilson
 
 DEFAULT_SEED = 1
 DEFAULT_ITERATIONS = 10000
@@ -114,6 +119,15 @@ def _parser():
     audit.add_argument("--label", nargs=2, action="append", default=[], metavar=("NAME", "DIR"),
                        help="a replay run dir and its label; repeatable")
     audit.add_argument("--out", help="write audit.tsv and report.txt to this directory")
+    esc = commands.add_parser("escalate", help="compute Config C from A's and D's summaries (ADR-030)")
+    esc.add_argument("--a", required=True, metavar="DIR", help="Config A's replay dir (or summary.tsv)")
+    esc.add_argument("--d", required=True, metavar="DIR", help="Config D's replay dir (or summary.tsv)")
+    esc.add_argument("--out", required=True, help="write grid.tsv, escalation.tsv, C-summary.tsv and escalate.txt here")
+    esc.add_argument("--seed", type=int, default=DEFAULT_SEED, help="cluster bootstrap seed")
+    esc.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
+    esc.add_argument("--service-only", action="store_true",
+                     help="score AC@1 on the service part of the truth only (RCAEval's AC@1, ADR-020)")
+    esc.add_argument("--topology", metavar="PATH", help="with --service-only: add chance AC@1 over this topology")
     return parser
 
 
@@ -387,8 +401,113 @@ def audit_latency(args):
     return run(args)
 
 
+ESCALATE_OUTPUTS = ("grid.tsv", "escalation.tsv", "C-summary.tsv", "escalate.txt")
+# A column one side lacks is written with its "unknown" value, so read_summary reads the row as it read the source.
+UNKNOWN_VALUE = {"riskyExecuted": "-", "policyRefused": "-", "level": "-"}
+
+
+def _accuracy_line(name, correct, n):
+    low, high = wilson(correct, n)
+    return f"{name}  AC@1 {correct:>2}/{n:<2} {_pct(correct / n):>4}  [{_pct(low)}, {_pct(high)}]"
+
+
+def _rule_line(e):
+    p = e.pair
+    triggers = " ".join(f"{name} {e.triggers[name]}" for name in escalation.TRIGGERS)
+    return (f"{e.rule.label:<16} escalations {e.escalations:>2}/{e.cases:<2} {_pct(e.rate):>4}  "
+            f"[{_pct(e.rate_ci[0])}, {_pct(e.rate_ci[1])}]  C AC@1 {e.c_correct:>2}/{e.cases:<2} {_pct(e.ac1):>4}  "
+            f"[{_pct(e.ac1_ci[0])}, {_pct(e.ac1_ci[1])}]  C - D {_points(p.diff)} (C only {p.only_second}, "
+            f"D only {p.only_first}, exact McNemar p = {p.mcnemar_p:.2g})  {triggers}  "
+            f"{'eligible' if e.eligible else 'over the cap'}")
+
+
+def _escalate_report(args, pairs, evaluations, chosen, cap_fails, services):
+    n = len(pairs)
+    scope = "; AC@1 on the service only" if args.service_only else ""
+    lines = [f"C from A ({args.a}) and D ({args.d}): {n} paired fault cases{scope}",
+             _accuracy_line("A", sum(a.outcome == CORRECT for a, _ in pairs), n),
+             _accuracy_line("D", sum(d.outcome == CORRECT for _, d in pairs), n)]
+    lines += [_rule_line(e) for e in evaluations]
+    if services is not None:
+        lines.append(_chance_line(args.topology, services))
+    cap = f"{round(100 * escalation.CAP)}%"
+    if cap_fails:
+        lines.append(f"selected: {chosen.rule.label}; the cost cap fails on this split: every rule escalates more "
+                     f"than {cap} of the {n} paired cases")
+    else:
+        lines.append(f"selected: {chosen.rule.label} (the highest C AC@1 among the rules escalating at most {cap} of "
+                     f"the {n} paired cases)")
+    return "\n".join(lines) + "\n"
+
+
+def _write_grid(out, evaluations, chosen):
+    rows = []
+    for e in evaluations:
+        p = e.pair
+        rows.append([e.rule.k, escalation.format_t(e.rule.t), e.cases, e.escalations, f"{e.rate:.4f}",
+                     f"{e.rate_ci[0]:.4f}", f"{e.rate_ci[1]:.4f}", e.c_correct, f"{e.ac1:.4f}", f"{e.ac1_ci[0]:.4f}",
+                     f"{e.ac1_ci[1]:.4f}", p.only_second, p.only_first, f"{p.diff:.4f}", repr(p.mcnemar_p),
+                     f"{p.boot_low:.4f}", f"{p.boot_high:.4f}", *(e.triggers[name] for name in escalation.TRIGGERS),
+                     "yes" if e.eligible else "no", "yes" if e is chosen else "no"])
+    _write_tsv(out / "grid.tsv", ["k", "t", "cases", "escalations", "rate", "esc_wilson_low", "esc_wilson_high",
+                                  "c_correct", "c_ac1", "c_wilson_low", "c_wilson_high", "c_only", "d_only",
+                                  "c_minus_d", "mcnemar_p", "boot_low", "boot_high",
+                                  *(name.replace("-", "_") for name in escalation.TRIGGERS), "eligible", "selected"],
+               rows)
+
+
+def _raw_summary(path):
+    """A summary's header and its raw rows by case, so C-summary.tsv copies each chosen row's own values."""
+    with summary_path(path).open(newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        return list(reader.fieldnames), {(raw["split"], raw["recording"]): raw for raw in reader}
+
+
+def _write_c_summary(out, args, choices):
+    """C-summary.tsv: each chosen row as its source wrote it, under the union of both headers, A's order first."""
+    (a_header, a_raw), (d_header, d_raw) = _raw_summary(args.a), _raw_summary(args.d)
+    header = list(dict.fromkeys(a_header + d_header))
+    raws = {"A": a_raw, "D": d_raw}
+    rows = []
+    for choice in choices:
+        raw = raws[choice.source][choice.case]
+        rows.append([raw[column] if column in raw else UNKNOWN_VALUE.get(column, "") for column in header])
+    _write_tsv(out / "C-summary.tsv", header, rows)
+
+
+def escalate(args):
+    try:
+        return _escalate(args)
+    except ValueError as error:
+        raise SystemExit(f"escalate: {error}") from None
+
+
+def _escalate(args):
+    if args.topology is not None and not args.service_only:
+        raise SystemExit("escalate: --topology needs --service-only: chance names the service alone")
+    out = Path(args.out)
+    for name in ESCALATE_OUTPUTS:
+        if (out / name).exists():
+            raise SystemExit(f"escalate: {out / name} exists: escalate never overwrites its outputs")
+    services = read_service_count(args.topology) if args.topology is not None else None
+    pairs = escalation.pair(read_summary(args.a, label="A", service_only=args.service_only),
+                            read_summary(args.d, label="D", service_only=args.service_only))
+    evaluations = [escalation.evaluate(pairs, rule, args.seed, args.iterations) for rule in escalation.grid(pairs)]
+    chosen, cap_fails = escalation.select(evaluations)
+    report = _escalate_report(args, pairs, evaluations, chosen, cap_fails, services)
+    sys.stdout.write(report)
+    out.mkdir(parents=True, exist_ok=True)
+    _write_grid(out, evaluations, chosen)
+    choices = escalation.compose(pairs, chosen.rule)
+    _write_tsv(out / "escalation.tsv", ["split", "recording", "source", "trigger"],
+               [[*c.case, c.source, c.trigger or "-"] for c in choices])
+    _write_c_summary(out, args, choices)
+    (out / "escalate.txt").write_text(report)
+    return 0
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
     commands = {"benchmark": benchmark, "convert-rcaeval": convert_rcaeval, "baro-rcaeval": baro_rcaeval,
-                "audit-latency": audit_latency}
+                "audit-latency": audit_latency, "escalate": escalate}
     return commands.get(args.command, score)(args)

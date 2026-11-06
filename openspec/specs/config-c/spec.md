@@ -62,7 +62,7 @@ It MUST select the rule with the highest C AC@1 among the rules escalating at mo
 - Then `k = L3, t = off` is selected and the report says the cost cap fails on this split
 
 ### REQ-4 C as an ordinary summary
-For the selected rule, `escalate` MUST write `C-summary.tsv` in the scorer's summary format, one row per paired case taken from A or D, so that `score` reports C like any other config. It MUST also write `escalation.tsv`, with one row per case giving the case, the source (A or D) and the trigger, and `grid.tsv`, with one row per rule.
+For the selected rule, `escalate` MUST write `C-summary.tsv` in the scorer's summary format, one row per paired case taken from A or D, so that `score` reports C like any other config. It MUST also write `escalation.tsv`, with one row per case giving the case, the source (A or D) and the trigger (`-` when C keeps A's row), `grid.tsv`, with one row per rule, and `escalate.txt`, the printed report. It MUST refuse, writing nothing, when any of these four files already exists in `--out`: the calibration is pre-registered and its result is never silently replaced.
 
 #### Scenario: C scores like a config
 - Given `C-summary.tsv` written by `escalate`

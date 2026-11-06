@@ -24,7 +24,7 @@ The vision already says that a threshold is "set on dev". The open question is w
 1. **Triggers.** C escalates a case to D when any of these holds for A's row:
    - A did not complete, i.e. any status other than `COMPLETED` (no answer, treated like an abstention);
    - A abstained (`UNKNOWN|UNKNOWN`);
-   - A's verification level is below `k`;
+   - A's verification level is below `k`, or A's row has no level;
    - A's top-1 confidence is below `t`.
 
    Otherwise C keeps A's answer. A case with no A row or no D row is not part of C.

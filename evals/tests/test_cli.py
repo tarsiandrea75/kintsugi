@@ -364,3 +364,137 @@ def test_ranked_ac1_equals_the_committed_ac1_on_every_committed_input():
         [score] = summarize(rows)
         [ranks] = summarize_ranked(rows)
         assert ranks.pooled.hits[0] == score.pooled.correct, label
+
+
+# The escalate subcommand (openspec/specs/config-c; ADR-030).
+
+C_HEADER = ["fault", "mode", "route", "sample", "status", "truth", "reported", "split", "recording", "level",
+            "confidence"]
+C_TRUTH = "checkoutservice|RESOURCE_EXHAUSTION"
+C_WRONG = "frontend|RESOURCE_EXHAUSTION"
+
+
+def c_summary(path, route, rows, extra=None):
+    """A summary.tsv of (recording, status, reported, level, confidence) rows; extra adds one column to every row."""
+    header = C_HEADER + ([extra[0]] if extra else [])
+    lines = ["\t".join(header)]
+    for recording, status, reported, level, confidence in rows:
+        values = ["cpu", "decision", route, "1", status, C_TRUTH, reported, "dev", recording, level, confidence]
+        lines.append("\t".join(values + ([extra[1]] if extra else [])))
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def c_inputs(tmp_path):
+    """A on four cases (one only A ran) and D on three: x stays local, y escalates on level, z on no answer."""
+    a = c_summary(tmp_path / "A.tsv", "local", [
+        ("x", "COMPLETED", C_TRUTH, "L3", "0.95"),
+        ("y", "COMPLETED", C_WRONG, "L1", "0.85"),
+        ("z", "TIMED_OUT", "none", "-", ""),
+        ("only-a", "COMPLETED", C_TRUTH, "L3", "0.9")])
+    d = c_summary(tmp_path / "D.tsv", "cloud", [
+        ("x", "COMPLETED", C_WRONG, "L3", "0.5"),
+        ("y", "COMPLETED", C_TRUTH, "L2", "0.6"),
+        ("z", "COMPLETED", C_TRUTH, "L3", "0.7")], extra=("model", "haiku"))
+    return a, d
+
+
+def escalate_args(a, d, out):
+    return ["escalate", "--a", str(a), "--d", str(d), "--out", str(out)]
+
+
+def test_escalate_reports_every_grid_rule_and_the_selected_one(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    out = tmp_path / "c"
+    assert main(escalate_args(a, d, out) + ["--iterations", "200"]) == 0
+    printed = capsys.readouterr().out
+    assert (out / "escalate.txt").read_text() == printed
+    assert "3 paired fault cases" in printed
+    with (out / "grid.tsv").open() as handle:
+        grid = list(csv.DictReader(handle, delimiter="\t"))
+    # Distinct A confidences on the paired cases are 0.85 and 0.95, so t is off or their midpoint 0.9.
+    assert [(g["k"], g["t"]) for g in grid] == [("L2", "off"), ("L2", "0.9"), ("L3", "off"), ("L3", "0.9")]
+    first = grid[0]
+    assert (first["cases"], first["escalations"], first["c_correct"], first["no_answer"], first["level"]) == (
+        "3", "2", "3", "1", "1")
+    assert first["c_wilson_low"] and first["esc_wilson_high"] and first["mcnemar_p"]
+    # Every rule escalates 2 of 3 here, over the 50% cap: none is eligible and the literal rule is selected.
+    assert [g["eligible"] for g in grid] == ["no"] * 4
+    assert [g["selected"] for g in grid] == ["no", "no", "yes", "no"]
+    assert "selected: k=L3, t=off" in printed
+    assert "the cost cap fails on this split" in printed
+
+
+def test_escalate_writes_the_choice_per_case(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    out = tmp_path / "c"
+    main(escalate_args(a, d, out) + ["--iterations", "200"])
+    capsys.readouterr()
+    with (out / "escalation.tsv").open() as handle:
+        rows = [(r["split"], r["recording"], r["source"], r["trigger"]) for r in csv.DictReader(handle, delimiter="\t")]
+    assert rows == [("dev", "x", "A", "-"), ("dev", "y", "D", "level"), ("dev", "z", "D", "no-answer")]
+
+
+def test_c_summary_scores_like_a_config(tmp_path, capsys):
+    # REQ-4 "C scores like a config".
+    a, d = c_inputs(tmp_path)
+    out = tmp_path / "c"
+    main(escalate_args(a, d, out) + ["--iterations", "200"])
+    capsys.readouterr()
+    summary = out / "C-summary.tsv"
+    header = summary.read_text().splitlines()[0].split("\t")
+    # The union of both headers, A's order first, so each row keeps its own columns; A's rows have no model.
+    assert header == C_HEADER + ["model"]
+    rows = read_summary(summary, label="C")
+    assert [(r.recording, r.route) for r in rows] == [("x", "local"), ("y", "cloud"), ("z", "cloud")]
+    assert main(["score", "--label", "C", str(summary)]) == 0
+    assert "C  pooled   3/3   AC@1 100%" in capsys.readouterr().out
+
+
+def test_escalate_selects_under_the_cap(tmp_path, capsys):
+    a = c_summary(tmp_path / "A.tsv", "local", [
+        ("x", "COMPLETED", C_TRUTH, "L3", "0.95"), ("y", "COMPLETED", C_WRONG, "L1", "0.85"),
+        ("v", "COMPLETED", C_TRUTH, "L2", "0.95"), ("w", "COMPLETED", C_WRONG, "L3", "0.95")])
+    d = c_summary(tmp_path / "D.tsv", "cloud", [
+        (r, "COMPLETED", C_TRUTH, "L3", "0.6") for r in ("x", "y", "v", "w")])
+    out = tmp_path / "c"
+    assert main(escalate_args(a, d, out) + ["--iterations", "200"]) == 0
+    printed = capsys.readouterr().out
+    with (out / "grid.tsv").open() as handle:
+        grid = {(g["k"], g["t"]): g for g in csv.DictReader(handle, delimiter="\t")}
+    # k=L2 escalates y (1/4) and is right on x, y, v; k=L3 also escalates v (2/4), with the same 3 right.
+    assert (grid[("L2", "off")]["escalations"], grid[("L2", "off")]["c_correct"]) == ("1", "3")
+    assert (grid[("L3", "off")]["escalations"], grid[("L3", "off")]["c_correct"]) == ("2", "3")
+    assert grid[("L2", "off")]["selected"] == "yes"
+    assert "selected: k=L2, t=off" in printed
+    assert "cost cap fails" not in printed
+
+
+def test_escalate_never_overwrites_its_outputs(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    out = tmp_path / "c"
+    out.mkdir()
+    (out / "grid.tsv").write_text("keep\n")
+    with pytest.raises(SystemExit, match="grid.tsv exists"):
+        main(escalate_args(a, d, out))
+    assert (out / "grid.tsv").read_text() == "keep\n"
+    assert not (out / "C-summary.tsv").exists()
+
+
+def test_escalate_service_only_scores_the_service_part(tmp_path, capsys):
+    a = c_summary(tmp_path / "A.tsv", "local", [("x", "COMPLETED", "checkoutservice|NETWORK_DELAY", "L3", "0.9")])
+    d = c_summary(tmp_path / "D.tsv", "cloud", [("x", "COMPLETED", C_WRONG, "L3", "0.6")])
+    plain, service = tmp_path / "plain", tmp_path / "service"
+    main(escalate_args(a, d, plain) + ["--iterations", "50"])
+    main(escalate_args(a, d, service) + ["--iterations", "50", "--service-only", "--topology", str(RE2_OB)])
+    printed = capsys.readouterr().out
+    assert "chance with" in printed
+    with (plain / "grid.tsv").open() as p, (service / "grid.tsv").open() as s:
+        assert next(csv.DictReader(p, delimiter="\t"))["c_correct"] == "0"
+        assert next(csv.DictReader(s, delimiter="\t"))["c_correct"] == "1"
+
+
+def test_escalate_topology_needs_service_only(tmp_path):
+    a, d = c_inputs(tmp_path)
+    with pytest.raises(SystemExit, match="--topology needs --service-only"):
+        main(escalate_args(a, d, tmp_path / "c") + ["--topology", str(RE2_OB)])

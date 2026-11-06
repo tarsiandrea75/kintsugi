@@ -4,8 +4,10 @@ Each row is joined to the incident file the replay driver stored for it, `<fault
 in the run's directory, and gets that file's top-1 `report.confidence`, as ReplayDriver now writes it: the number, or
 empty when the run stored no report. Every other byte of the row is kept, so the copy scores as its input does.
 
-A COMPLETED row without its incident file, or whose file names another answer than the row's `reported`, fails the
-whole backfill: a silently empty confidence would read as "no report" and change Config C's escalations.
+A COMPLETED row without its incident file, whose file names another answer than the row's `reported`, or that answers
+a cause while its file holds no numeric `report.confidence`, fails the whole backfill: a silently empty confidence would
+read as "no confidence", which never triggers C's cut, and change Config C's escalations. An abstention may lack one:
+it escalates before the cut is read. A row with another number of fields than the header fails too.
 
     python -m kintsugi_evals.backfill_confidence SUMMARY REPLAY_DIR OUT
 """
@@ -14,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from .scoring import parse_confidence
+from .scoring import NO_REPORT, UNKNOWN_ANSWER, parse_confidence
 
 COLUMN = "confidence"
 KEY = ("fault", "mode", "recording", "sample")
@@ -50,7 +52,10 @@ def backfill(summary, replay_dir):
         raise ValueError(f"{summary} lacks the columns {', '.join(missing)}")
     out = [lines[0] + "\t" + COLUMN]
     for number, line in enumerate(lines[1:], start=2):
-        row = dict(zip(header, line.split("\t")))
+        fields = line.split("\t")
+        if len(fields) != len(header):
+            raise ValueError(f"{summary}: line {number}: {len(fields)} fields, the header has {len(header)}")
+        row = dict(zip(header, fields))
         name = "{fault}-{mode}-{recording}-{sample}.json".format(**{column: row[column] for column in KEY})
         path = replay_dir / name
         if not path.is_file():
@@ -63,6 +68,9 @@ def backfill(summary, replay_dir):
         if row["status"] == "COMPLETED" and answer is not None and answer != row["reported"]:
             raise ValueError(f"{summary}: line {number}: {path} answers {answer}, the row reports {row['reported']}")
         value = confidence_of(incident)
+        if value == "" and row["status"] == "COMPLETED" and row["reported"] not in ("", NO_REPORT, UNKNOWN_ANSWER):
+            raise ValueError(f"{summary}: line {number}: {path} has no numeric report.confidence for the answer "
+                             f"{row['reported']}")
         parse_confidence(value)
         out.append(line + "\t" + value)
     return out
