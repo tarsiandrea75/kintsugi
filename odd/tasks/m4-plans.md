@@ -51,7 +51,7 @@ ADR-031 is the reference for the verdict procedure. In short:
 - [x] T3 Verdict code: H1–H3 p-values, intersection-union, Holm over the family, pooling over tracks, and `escalate --rule` fixed mode. Tests first. Route: delegated writer.
 - [x] T4 Converter dry check of the holdout A/B and RE2-SS paths (headers and counts, no scoring). Route: delegated.
 - [x] T5 Plans: holdout A, holdout B, holdout-2, H1–H3 family. Route: inline (docs only).
-- [ ] T6 `docs/STATE.md` updated. Route: inline.
+- [x] T6 `docs/STATE.md` updated. Route: inline.
 
 ## Acceptance criteria
 
@@ -84,8 +84,9 @@ ADR-031 is the reference for the verdict procedure. In short:
 - 2026-11-06: slice 2b (97ab12d..a45c248) native review, four lenses, standing consent: approved, acknowledged, burned. Advisory follow-ups: check-only could print an unknown prefix that names a root cause (convert.py:447-450); zero cases is not refused (:423-424); strict header decoding (:408-412); file list duplicated with convert_case (:387-391); minor duplication and test gaps.
 - 2026-11-06: T4 done. The human chose (on my recommendation) to drop the back edges seat→travel and seat→travel2 (ADR-033). `re2-tt.json` has 68 services and 153 edges, from v0.1.0 sources and metric header prefixes only, with no further cycle. TopologyTest RED (file missing) → GREEN; agent suite 804/0/0, pytest 534, test-lib PASS 246. Vision and ADR-032 corrected to 68 services. Follow-ups: the replay-agent missing-topology refusal is no longer covered by test-lib; `openspec/specs/agent/spec.md`:693 lists only lab and re2-ob; RE2-TT case directory names carry truth labels, so tooling must only glob them.
 - 2026-11-06: T5 done (delegated writer, resumed after an API error). Five plans under `evals/plans/2026-11-06-*` (holdout A, B, TT, holdout-2, H1–H3 family) with every TEMPLATE heading (structural readback). The verdict seed is 20261106. D's repeats are split to respect `MAX_CLOUD_SAMPLES=60`. `docs/benchmark-limits.md` gains 'TT has been seen'. Gaps (follow-ups before 2026-12-07): no committed summary-merge script (the plans use an inline shell function); nothing records the holdout name or plan path in a result dir (a hand-written notes.md); `benchmark` does not render verdicts; check-freeze condition 4 misses TT; the converter writes no healthy pseudo-cases, so H2b rests on holdout-2's 15 healthy controls; the TT plan adds a $1.5 cost check before D's later runs.
+- 2026-11-06: T6 done. `docs/STATE.md` items 20-21 updated.
 - 2026-11-06: found that `agent/src/main/resources/topology/` has no RE2-TT topology, and that path freezes on 2026-12-01. T4 covers what the agent needs for TT, which lands before the freeze.
 
 ## Next step
 
-T6.
+Feature complete. Next: the plan gaps (`docs/STATE.md` item 21).
