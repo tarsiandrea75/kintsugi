@@ -59,6 +59,7 @@ Strategy `feature-branch-chain`, the standing preference. The forecast for T2 is
 - Review of `aa25d35`: medium risk, one lens (reliability), consent granted by standing preference. Approved and acknowledged (`review-d5e282973f7fef38`). Advisories:
   - R3: the new spec scenarios had split the alternatives scenario from its last AND line. Fixed in the next commit.
   - R3: no test accepts an assessed report naming a decoy. That path is covered only by the enum error string and the schema pin. Follow-up.
+    - Closed 2026-11-06: `anAssessedReportNamingADecoyCategoryIsValid` in `ReportCheckTest`. It pins behavior that already existed, so it had no RED; a mutation to an unknown category made it fail, and the mutation was reverted.
 - T3: plan `57340ed`; runs `replay-20261105T211956Z-cloud` (lab) and `replay-20261105T212143Z-cloud` (RE2-OB), $0.060 in all. Config 0 is unchanged, so AC3 holds.
   - No answer names a decoy as its cause.
   - Lab: 13/15 against DS's 14/15, p = 1.

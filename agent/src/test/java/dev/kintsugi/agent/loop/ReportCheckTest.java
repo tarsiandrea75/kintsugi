@@ -726,6 +726,18 @@ class ReportCheckTest {
 	}
 
 	@Test
+	void anAssessedReportNamingADecoyCategoryIsValid() {
+		// ADR-029: the decoys are causes the assessed report may name, as the plain report may.
+		for (String decoy : List.of("NETWORK", "CODE_DEFECT")) {
+			ReportCheck.Result result = checkAssessed(assessedReport("gateway-mock", decoy, SLOW_LEAF));
+
+			assertThat(result.errors()).as(decoy).isEmpty();
+			assertThat(result.evidence()).as(decoy).extracting(item -> item.get("line").intValue())
+				.containsExactly(3, 7, 9);
+		}
+	}
+
+	@Test
 	void anAssessedReportWhoseEveryServiceIsUnaffectedHasNoEvidence() {
 		ReportCheck.Result result = checkAssessed(assessedReport("UNKNOWN", "UNKNOWN",
 				assessment("gateway-mock", "UNAFFECTED", 2), assessment("inventory-service", "UNAFFECTED", 4),
