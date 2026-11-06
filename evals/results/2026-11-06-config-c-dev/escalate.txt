@@ -1,0 +1,13 @@
+C from A (../evals/results/2026-11-06-config-c-dev/backfilled/AS-summary.tsv) and D (../evals/results/2026-11-06-config-c-dev/backfilled/DS-summary.tsv): 30 paired fault cases; AC@1 on the service only
+A  AC@1 20/30  67%  [49%, 81%]
+D  AC@1 26/30  87%  [70%, 95%]
+k=L2, t=off      escalations 11/30  37%  [22%, 54%]  C AC@1 22/30  73%  [56%, 86%]  C - D -13 (C only 2, D only 6, exact McNemar p = 0.29)  no-answer 0 abstain 0 level 11 confidence 0  eligible
+k=L2, t=0.875    escalations 23/30  77%  [59%, 88%]  C AC@1 24/30  80%  [63%, 90%]  C - D -7 (C only 0, D only 2, exact McNemar p = 0.5)  no-answer 0 abstain 0 level 11 confidence 12  over the cap
+k=L2, t=0.91     escalations 25/30  83%  [66%, 93%]  C AC@1 24/30  80%  [63%, 90%]  C - D -7 (C only 0, D only 2, exact McNemar p = 0.5)  no-answer 0 abstain 0 level 11 confidence 14  over the cap
+k=L2, t=0.935    escalations 27/30  90%  [74%, 97%]  C AC@1 25/30  83%  [66%, 93%]  C - D -3 (C only 0, D only 1, exact McNemar p = 1)  no-answer 0 abstain 0 level 11 confidence 16  over the cap
+k=L3, t=off      escalations 20/30  67%  [49%, 81%]  C AC@1 28/30  93%  [79%, 98%]  C - D +7 (C only 2, D only 0, exact McNemar p = 0.5)  no-answer 0 abstain 0 level 20 confidence 0  over the cap
+k=L3, t=0.875    escalations 26/30  87%  [70%, 95%]  C AC@1 26/30  87%  [70%, 95%]  C - D +0 (C only 0, D only 0, exact McNemar p = 1)  no-answer 0 abstain 0 level 20 confidence 6  over the cap
+k=L3, t=0.91     escalations 28/30  93%  [79%, 98%]  C AC@1 26/30  87%  [70%, 95%]  C - D +0 (C only 0, D only 0, exact McNemar p = 1)  no-answer 0 abstain 0 level 20 confidence 8  over the cap
+k=L3, t=0.935    escalations 29/30  97%  [83%, 99%]  C AC@1 26/30  87%  [70%, 95%]  C - D +0 (C only 0, D only 0, exact McNemar p = 1)  no-answer 0 abstain 0 level 20 confidence 9  over the cap
+chance with 11 services (../agent/src/main/resources/topology/re2-ob.json): AC@1 9.09%  AC@3 27.27%  AC@5 45.45%  Avg@5 27.27%
+selected: k=L2, t=off (the highest C AC@1 among the rules escalating at most 50% of the 30 paired cases)

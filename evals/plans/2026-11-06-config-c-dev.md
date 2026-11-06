@@ -7,7 +7,7 @@ Pre-registered. Committed with ADR-030 before the run. This run fixes Config C's
 ## Date and commit
 
 - Written: 2026-11-06
-- Run on commit: <sha, filled at T5>
+- Run on commit: b56a7f5 (2026-11-06)
 
 ## Hypothesis
 

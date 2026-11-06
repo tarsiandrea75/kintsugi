@@ -61,3 +61,12 @@ The vision already says that a threshold is "set on dev". The open question is w
 - The 50% cap is applied on dev, so the holdout escalation rate can still exceed it. H3 then fails on cost, and that result is reported.
 - C exists only on RE2-OB until a lab A run with levels exists (lab C is out of scope here).
 - The vision text changes after its pre-registration commit. This is the same pattern as ADR-022: the change lands before any affected holdout is read.
+
+## Amendment (2026-11-06): the chosen rule
+
+The dev run (`evals/results/2026-11-06-config-c-dev/`, plan `evals/plans/2026-11-06-config-c-dev.md`) selected **`k = L2, t = off`**, which is fixed for every holdout read.
+
+- It escalates 11/30 (37%), and C AC@1 is 22/30 against D's 26/30 (C − D −13 points, McNemar p = 0.29).
+- It was the only grid rule under the 50% cap.
+- No grid rule met both of H3's conditions on dev. The human kept the procedure as pre-registered.
+

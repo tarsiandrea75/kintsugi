@@ -45,7 +45,7 @@ Out of scope: any holdout read; any change to A, D or Config 0's behaviour; H3's
 - [x] T2 `confidence` column in `ReplayDriver`'s `summary.tsv`, a backfill script for the RE2-OB dev AS/DS inputs, and the scorer reading it optionally. Tests first. Route: delegated writer (Java test-side + Python + script).
 - [x] T3 Living spec `openspec/specs/config-c/spec.md` and the plan `evals/plans/2026-11-06-config-c-dev.md`. Route: inline (docs only).
 - [x] T4 `escalation.py`, the `escalate` CLI subcommand and the tests (RED first). Route: delegated writer.
-- [ ] T5 Dev run per the plan, results under `evals/results/2026-11-06-config-c-dev/`, chosen `(k, t)` recorded in ADR-030. Route: inline.
+- [x] T5 Dev run per the plan, results under `evals/results/2026-11-06-config-c-dev/`, chosen `(k, t)` recorded in ADR-030. Route: inline.
 - [ ] T6 `docs/STATE.md` and the M4 plan follow-up updated. Route: inline.
 
 ## Acceptance criteria
@@ -74,7 +74,9 @@ Out of scope: any holdout read; any change to A, D or Config 0's behaviour; H3's
 - 2026-11-06: T3 done. Living spec `openspec/specs/config-c/spec.md` (REQ-1..4) and plan `evals/plans/2026-11-06-config-c-dev.md`, committed before any run (structural readback, docs only).
 - 2026-11-06: slice 1 (main..7bacdc9) native review, 4 lenses, consent granted (standing): approved, acknowledged, authority burned (lineage review-94af93752127156d). Advisory, non-blocking, folded into T4: the spec escalates on a missing level but ADR-030 does not say so (R2); the backfill writes an empty confidence on a COMPLETED row whose JSON has no number, and a short row raises KeyError (R3/R4); `withoutLevel` helper name is stale (R2); Java non-numeric confidence untested (R3).
 - 2026-11-06: T4 done (delegated writer). RED: missing module, 7 CLI failures, 3 backfill failures; GREEN: pytest 462 passed, ReplayDriverTest 44/0/0, `agent/src/main` untouched. Slice-1 advisories fixed (ADR-030 D1 'or has no level', strict backfill, renamed helper, Java test). Scratch smoke run on RE2-OB dev (not a result): only `k = L2, t = off` fits the cap, 11/30 escalated, C 22/30 vs D 26/30 (−13, McNemar p 0.29); `k = L3, t = off` gives 28/30 but escalates 20/30. Plan fix for T5: `score` copies inputs to `<out>/inputs/`, so the backfilled summaries go to `<out>/backfilled/` (SameFileError otherwise).
+- 2026-11-06: slice 2a (7bacdc9..b56a7f5) native review, reliability lens, consent granted (standing): approved, acknowledged, burned (review-59a6c9b772e62776). Advisory: `escalate` can leave partial outputs if a later write fails (cli.py:499-505); no end-to-end test of a confidence cut (test_cli.py:406-427).
+- 2026-11-06: T5 done on b56a7f5 with the human's go-ahead. Selected `k = L2, t = off`: 11/30 escalated, C 22/30 (73%) vs D 26/30, A 20/30, 0R 20/30, 0 4/30. No grid rule meets both H3 conditions on dev (notes.md). Recorded in ADR-030's amendment.
 
 ## Next step
 
-T5, after the human's go-ahead (the scratch smoke run already showed the dev grid).
+T6.
