@@ -7,7 +7,7 @@ Pre-registered. Committed before any pseudo-case is replayed. This run decides w
 ## Date and commit
 
 - Written: 2026-11-07
-- Run on commit: <sha, filled at the run>
+- Run on commit: bfb46ff (replays), e8595a5 (scoring), 2026-11-07
 
 ## Hypothesis
 

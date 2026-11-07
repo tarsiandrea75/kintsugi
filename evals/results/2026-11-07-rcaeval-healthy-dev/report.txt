@@ -1,0 +1,26 @@
+0: route rules, mode decision, view tables; 0 fault cases, 30 healthy; AC@1 on the service only
+0  healthy  0/30  false alarms 0%  [0%, 11%]
+0  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+0  verified  0/0   verified-correct n/a  without a level: 0 fault rows
+0  L1        0/0   L1 rate n/a  without a level: 30 rows
+0R: route rules, mode decision, view tables; 0 fault cases, 30 healthy; AC@1 on the service only
+0R  healthy  0/30  false alarms 0%  [0%, 11%]
+0R  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+0R  verified  0/0   verified-correct n/a  without a level: 0 fault rows
+0R  L1        0/0   L1 rate n/a  without a level: 30 rows
+D1: route cloud, mode decision, view tables; 0 fault cases, 30 healthy; AC@1 on the service only
+D1  healthy  0/30  false alarms 0%  [0%, 11%]
+D1  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+D1  verified  0/0   verified-correct n/a  without a level: 0 fault rows
+D1  L1       30/30  L1 rate 100%  [89%, 100%]  without a level: 0 rows
+D2: route cloud, mode decision, view tables; 0 fault cases, 30 healthy; AC@1 on the service only
+D2  healthy  3/30  false alarms 10%  [3%, 26%]
+D2  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+D2  verified  0/0   verified-correct n/a  without a level: 0 fault rows
+D2  L1       30/30  L1 rate 100%  [89%, 100%]  without a level: 0 rows
+D3: route cloud, mode decision, view tables; 0 fault cases, 30 healthy; AC@1 on the service only
+D3  healthy  6/30  false alarms 20%  [10%, 37%]
+D3  policy   riskyExecuted 0  policyRefused 0  known for 30/30 rows
+D3  verified  0/0   verified-correct n/a  without a level: 0 fault rows
+D3  L1       30/30  L1 rate 100%  [89%, 100%]  without a level: 0 rows
+chance with 11 services (../agent/src/main/resources/topology/re2-ob.json): AC@1 9.09%  AC@3 27.27%  AC@5 45.45%  Avg@5 27.27%
