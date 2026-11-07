@@ -19,6 +19,9 @@ under that rule alone, with no grid selection: the holdout reads use ADR-030's f
 
 `python -m kintsugi_evals verdict` decides H1-H3 from labelled holdout summaries and writes verdict.tsv and verdict.txt
 (ADR-031, openspec/specs/verdict).
+
+`score`, `escalate` and `verdict` refuse an input with holdout rows unless --holdout NAME and --plan PATH are given,
+and then append the read's provenance to provenance.tsv in --out (ADR-015, provenance.py).
 """
 
 import argparse
@@ -30,7 +33,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import escalation
+from . import escalation, provenance
 from .scoring import (
     CORRECT,
     chance_ac,
@@ -83,6 +86,13 @@ def _repetition(text):
     return text if text == "all" else int(text)
 
 
+def _provenance_flags(parser):
+    parser.add_argument("--holdout", metavar="NAME",
+                        help="the holdout this run reads, recorded in provenance.tsv with --plan; required, with "
+                             "--plan, when an input holds holdout rows (ADR-015)")
+    parser.add_argument("--plan", metavar="PATH", help="the committed plan of this holdout read (ADR-015)")
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="python -m kintsugi_evals")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -98,9 +108,11 @@ def _parser():
     score.add_argument("--topology", metavar="PATH",
                        help="with --service-only: add AC@3, AC@5, Avg@5 and their chance levels over this topology's "
                             "services, and write ranked.tsv")
+    _provenance_flags(score)
     bench = commands.add_parser("benchmark", help="render docs/benchmark.md from committed result dirs")
     bench.add_argument("--out", required=True, help="the Markdown file to write")
-    bench.add_argument("dirs", nargs="+", help="result dirs written by score --out, in document order")
+    bench.add_argument("dirs", nargs="+", help="result dirs written by score --out or verdict --out (holding "
+                                               "verdict.tsv), in document order")
     rca = commands.add_parser("convert-rcaeval", help="convert RCAEval RE2 cases into replay recordings")
     rca.add_argument("--root", help="the extracted dataset, holding RE2-OB/, RE2-SS/ and RE2-TT/ "
                                     "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
@@ -141,6 +153,7 @@ def _parser():
     esc.add_argument("--topology", metavar="PATH", help="with --service-only: add chance AC@1 over this topology")
     esc.add_argument("--rule", metavar="k=L2,t=off",
                      help="compute C under this rule only, with no grid selection (the holdout reads, ADR-030)")
+    _provenance_flags(esc)
     ver = commands.add_parser("verdict", help="decide H1-H3 from labelled holdout summaries (ADR-031)")
     ver.add_argument("--input", nargs=3, action="append", default=[], metavar=("TRACK", "LABEL", "DIR"),
                      help="a track's replay dir (or summary.tsv) under config LABEL (0R, A or D); repeatable")
@@ -154,6 +167,7 @@ def _parser():
     ver.add_argument("--out", required=True, help="write verdict.tsv and verdict.txt here")
     ver.add_argument("--seed", type=int, default=DEFAULT_SEED, help="bootstrap seed, as the plan records it")
     ver.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
+    _provenance_flags(ver)
     return parser
 
 
@@ -340,6 +354,9 @@ def score(args):
 def _score(args):
     if args.topology is not None and not args.service_only:
         raise SystemExit("score: --topology needs --service-only: the ranked metrics name the service alone")
+    found = provenance.resolve(args.holdout, args.plan)
+    if found is not None and not args.out:
+        raise SystemExit("score: --holdout and --plan are recorded in --out's provenance.tsv: give --out")
     services = read_service_count(args.topology) if args.topology is not None else None
     sources = [(name, path) for name, path in args.label] + [(None, path) for path in args.dirs]
     if not sources:
@@ -351,6 +368,7 @@ def _score(args):
             raise SystemExit(f"{path} holds no rows")
         inputs.append((rows[0].config, path, rows))
     _check_names(inputs)
+    provenance.guard([(path, rows) for _, path, rows in inputs], found)
     scores = [summarize(rows)[0] if len({r.config for r in rows}) == 1 else None for _, _, rows in inputs]
     if any(s is None for s in scores):
         raise SystemExit("an unlabelled summary.tsv mixes configs; label it with --label")
@@ -375,16 +393,19 @@ def _score(args):
             _write_ranked(Path(args.out), ranked, services)
         if policy:
             _write_policy(Path(args.out), policy)
+        if found is not None:
+            provenance.write(Path(args.out), "score", found)
     return 0
 
 
 def benchmark(args):
-    from .benchmark import FILES, OPTIONAL, BenchmarkError, render
+    from .benchmark import FILES, OPTIONAL, VERDICT_FILES, BenchmarkError, render
 
     results = []
     for directory in args.dirs:
         files = {}
-        for name in FILES:
+        # A verdict directory (verdict --out) holds verdict.tsv; every other is a score directory.
+        for name in VERDICT_FILES if (Path(directory) / "verdict.tsv").is_file() else FILES:
             path = Path(directory) / name
             if not path.is_file():
                 print(f"benchmark: {path} not found", file=sys.stderr)
@@ -557,10 +578,13 @@ def _escalate(args):
     for name in ESCALATE_OUTPUTS:
         if (out / name).exists():
             raise SystemExit(f"escalate: {out / name} exists: escalate never overwrites its outputs")
+    found = provenance.resolve(args.holdout, args.plan)
     fixed = escalation.parse_rule(args.rule) if args.rule is not None else None
     services = read_service_count(args.topology) if args.topology is not None else None
-    pairs = escalation.pair(read_summary(args.a, label="A", service_only=args.service_only),
-                            read_summary(args.d, label="D", service_only=args.service_only))
+    a_rows = read_summary(args.a, label="A", service_only=args.service_only)
+    d_rows = read_summary(args.d, label="D", service_only=args.service_only)
+    provenance.guard([(args.a, a_rows), (args.d, d_rows)], found)
+    pairs = escalation.pair(a_rows, d_rows)
     rules = [fixed] if fixed is not None else escalation.grid(pairs)
     evaluations = [escalation.evaluate(pairs, rule, args.seed, args.iterations) for rule in rules]
     if fixed is not None:
@@ -576,6 +600,8 @@ def _escalate(args):
                [[*c.case, c.source, c.trigger or "-"] for c in choices])
     _write_c_summary(out, args, choices)
     (out / "escalate.txt").write_text(report)
+    if found is not None:
+        provenance.write(out, "escalate", found)
     return 0
 
 
@@ -694,13 +720,18 @@ def _verdict(args):
             raise SystemExit(f"verdict: {out / name} exists: verdict never overwrites its outputs")
     if not args.input:
         raise SystemExit("verdict needs at least one --input")
+    found = provenance.resolve(args.holdout, args.plan)
     tracks, sources = _verdict_tracks(args)
+    by_name = {t.name: t for t in tracks}
+    provenance.guard([(path, by_name[name].rows[label]) for name, label, path in args.input], found)
     result = decide(tracks, args.h1_track, args.seed, args.iterations, FIXED_RULE)
     report = _verdict_report(result, sources, args, FIXED_RULE)
     sys.stdout.write(report)
     out.mkdir(parents=True, exist_ok=True)
     _write_verdict(out, result)
     (out / "verdict.txt").write_text(report)
+    if found is not None:
+        provenance.write(out, "verdict", found)
     return 0
 
 

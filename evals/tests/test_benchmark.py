@@ -129,3 +129,125 @@ def test_benchmark_ignores_the_candidate_recall_column(tmp_path, monkeypatch):
     main(["benchmark", "--out", "new.md", "results/new"])
     old = (tmp_path / "old.md").read_text().replace("old", "X")
     assert (tmp_path / "new.md").read_text().replace("new", "X") == old
+
+
+# A verdict directory (ADR-031): verdict.tsv and verdict.txt as `verdict --out` writes them, and its provenance.
+
+VERDICT = """kind	name	hypothesis	statistic	side	margin	cases	estimate	ci_low	ci_high	p	holm_p	decision	reading
+condition	H1	H1	D - 0R service AC@1, fault cases	above	0.0000	240	0.2500	0.1800	0.3200	0.0000		clears	
+condition	H2a	H2	A - D AC@1, fault cases	above	-0.1000	225	-0.0400	-0.0900	0.0100	0.0004		clears	
+condition	H2b	H2	false-alarm rate A - D, healthy cases	below	0.1000	165	0.0200	-0.0100	0.0500	0.0000		clears	
+condition	H2c	H2	median A time to report (s), all A cases outside H2b-only tracks	below	900.0000	225	420.0000	390.0000	450.0000	0.0000		clears	
+condition	H3a	H3	C - D AC@1, A and D fault cases	above	-0.0500	210	-0.0800	-0.1300	-0.0300	0.8100		fails	
+condition	H3b	H3	C escalation rate, A and D fault cases	below	0.5000	0				1.0000		fails	
+hypothesis	H1	H1	max of H1							0.0000	0.0000	holds	-
+hypothesis	H2	H2	max of H2a H2b H2c							0.0004	0.0008	holds	
+hypothesis	H3	H3	max of H3a H3b							1.0000	1.0000	not supported	
+"""
+
+VERDICT_TXT = ("H1-H3 verdict (ADR-031): seed 20261106, 10000 resamples; C under k=L2, t=off (ADR-030); alpha 0.025 "
+               "one-sided, Holm over H1-H3\n")
+
+PROVENANCE = """command	holdout	plan	plan_sha256	git_commit	written_utc
+verdict	A,B,TT,holdout-2	evals/plans/2026-11-06-h1-h3-verdicts.md	ab12	0123abcd	2026-12-08T10:00:00Z
+"""
+
+
+def verdict_dir(root, name="2026-12-08-h1-h3-verdicts", verdict=VERDICT, provenance=PROVENANCE):
+    path = root / "results" / name
+    path.mkdir(parents=True)
+    (path / "verdict.tsv").write_text(verdict)
+    (path / "verdict.txt").write_text(VERDICT_TXT)
+    if provenance is not None:
+        (path / "provenance.tsv").write_text(provenance)
+    return path
+
+
+def render_verdict(tmp_path, monkeypatch, **kwargs):
+    monkeypatch.chdir(tmp_path)
+    result_dir(tmp_path, "2026-10-30-lab")
+    verdict_dir(tmp_path, **kwargs)
+    assert main(["benchmark", "--out", "b.md", "results/2026-10-30-lab", "results/2026-12-08-h1-h3-verdicts"]) == 0
+    return (tmp_path / "b.md").read_text()
+
+
+def test_benchmark_renders_a_verdict_dir_after_the_score_dirs_in_command_order(tmp_path, monkeypatch):
+    text = render_verdict(tmp_path, monkeypatch)
+    assert text.index("## 2026-10-30-lab\n") < text.index("## 2026-12-08-h1-h3-verdicts\n")
+    assert "### H1–H3 verdicts\n" in text
+    assert "results/2026-10-30-lab results/2026-12-08-h1-h3-verdicts`" in text
+
+
+def test_benchmark_renders_each_hypothesis_with_its_iu_and_holm_p(tmp_path, monkeypatch):
+    text = render_verdict(tmp_path, monkeypatch)
+    assert "| Hypothesis | Conditions | Intersection-union p | Holm-adjusted p | Decision |" in text
+    assert "| H1 | H1 | 0.0000 | 0.0000 | holds |" in text
+    assert "| H2 | H2a, H2b, H2c | 0.0004 | 0.0008 | holds |" in text
+    assert "| H3 | H3a, H3b | 1.0000 | 1.0000 | not supported |" in text
+    assert "H1 rules are enough: no (H1's 95% upper bound below +5 pts)." in text
+
+
+def test_benchmark_renders_each_condition_with_its_estimate_ci_and_unadjusted_p(tmp_path, monkeypatch):
+    text = render_verdict(tmp_path, monkeypatch)
+    assert "| Condition | Statistic | Margin | Cases | Estimate | 95% CI | One-sided p (unadjusted) | At 0.025 |" in text
+    assert "| H1 | D - 0R service AC@1, fault cases | > +0.0 pts | 240 | +25.0 pts | [+18.0 pts, +32.0 pts] | 0.0000 | clears |" in text
+    assert ("| H2c | median A time to report (s), all A cases outside H2b-only tracks | < 15.0 min | 225 | 7.0 min | "
+            "[6.5 min, 7.5 min] | 0.0000 | clears |") in text
+    assert "| H3a | C - D AC@1, A and D fault cases | > -5.0 pts | 210 | -8.0 pts | [-13.0 pts, -3.0 pts] | 0.8100 | fails |" in text
+    assert "| H3b | C escalation rate, A and D fault cases | < 50.0% | 0 | - | - | 1.0000 | fails |" in text
+
+
+def test_benchmark_renders_the_verdict_seed_and_resamples(tmp_path, monkeypatch):
+    text = render_verdict(tmp_path, monkeypatch)
+    assert "Bootstrap: seed 20261106, 10000 resamples; alpha 0.025 one-sided, Holm over H1–H3 (ADR-031)." in text
+
+
+def test_benchmark_renders_the_provenance_when_present(tmp_path, monkeypatch):
+    text = render_verdict(tmp_path, monkeypatch)
+    assert ("Provenance: verdict read holdout `A,B,TT,holdout-2` under plan "
+            "`evals/plans/2026-11-06-h1-h3-verdicts.md` sha256 `ab12` at commit `0123abcd`, "
+            "2026-12-08T10:00:00Z.") in text
+
+
+def test_benchmark_renders_a_verdict_without_provenance_without_the_line(tmp_path, monkeypatch):
+    text = render_verdict(tmp_path, monkeypatch, provenance=None)
+    assert "Provenance" not in text
+
+
+def test_benchmark_renders_a_score_dirs_provenance_after_its_sources(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = result_dir(tmp_path, "r")
+    (path / "provenance.tsv").write_text(PROVENANCE.replace("verdict\tA,B,TT,holdout-2", "score\tA"))
+    assert main(["benchmark", "--out", "b.md", "results/r"]) == 0
+    text = (tmp_path / "b.md").read_text()
+    assert text.index("Sources: ") < text.index("Provenance: score read holdout `A`")
+
+
+def test_benchmark_refuses_a_verdict_tsv_without_a_column(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    broken = "\n".join(line.rsplit("\t", 1)[0] for line in VERDICT.splitlines()) + "\n"
+    verdict_dir(tmp_path, "v", verdict=broken)
+    assert main(["benchmark", "--out", "b.md", "results/v"]) == 2
+    assert "verdict.tsv" in capsys.readouterr().err and "reading" not in (tmp_path / "b.md").name
+    assert not (tmp_path / "b.md").exists()
+
+
+def test_benchmark_refuses_a_verdict_dir_without_verdict_txt(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (verdict_dir(tmp_path, "v") / "verdict.txt").unlink()
+    assert main(["benchmark", "--out", "b.md", "results/v"]) == 2
+    assert "verdict.txt" in capsys.readouterr().err
+
+
+def test_benchmark_renders_what_verdict_out_wrote(tmp_path, monkeypatch, capsys):
+    from test_cli import verdict_inputs
+
+    args, _ = verdict_inputs(tmp_path)
+    assert main(args + ["--out", str(tmp_path / "results" / "v")]) == 0
+    capsys.readouterr()
+    monkeypatch.chdir(tmp_path)
+    assert main(["benchmark", "--out", "b.md", "results/v"]) == 0
+    text = (tmp_path / "b.md").read_text()
+    assert "| H1 | H1 | 0.0000 | 0.0000 | holds |" in text
+    assert "Bootstrap: seed 3, 300 resamples;" in text
+    assert "Provenance: verdict read holdout `H1-H3` under plan `evals/plans/2026-11-06-h1-h3-verdicts.md`" in text

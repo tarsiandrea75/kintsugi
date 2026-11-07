@@ -29,9 +29,9 @@ The items above. Out of scope: any holdout read or run, and any change under `ag
 
 ## Tasks
 
-- [ ] T1 `infra/scripts/merge-summaries.sh`: header equality, a refusal of duplicated `(split, recording, sample)` rows, refusal to overwrite, tests in `test-lib.sh`. The plans use it. Route: delegated writer.
-- [ ] T2 Provenance: `score`, `escalate` and `verdict` take `--holdout NAME --plan PATH`, write `provenance.tsv` (holdout, plan path, plan sha256, git commit) and refuse to run on a holdout without them. The plans are amended. Route: delegated writer.
-- [ ] T3 `benchmark` renders the verdict section from `verdict.tsv` when given a verdict directory. Route: delegated writer.
+- [x] T1 `infra/scripts/merge-summaries.sh`: header equality, a refusal of duplicated `(split, recording, sample)` rows, refusal to overwrite, tests in `test-lib.sh`. The plans use it. Route: delegated writer.
+- [x] T2 Provenance: `score`, `escalate` and `verdict` take `--holdout NAME --plan PATH`, write `provenance.tsv` (holdout, plan path, plan sha256, git commit) and refuse to run on a holdout without them. The plans are amended. Route: delegated writer.
+- [x] T3 `benchmark` renders the verdict section from `verdict.tsv` when given a verdict directory. Route: delegated writer.
 - [ ] T4 `check-freeze.sh` condition 4 covers holdout TT, with an explicit, dated exemption for the BARO TT reproduction (ADR-032). `baro-rcaeval` needs `--allow-holdout TT` for TT. Route: delegated writer.
 - [ ] T5 Advisories: `--check-only` prints only the count of unknown prefixes; the narrow exception in `score`; a test-lib case for the missing-topology refusal; agent spec :693. Route: delegated writer.
 - [ ] T6 `docs/STATE.md`. Route: inline.
@@ -48,7 +48,8 @@ The forecast is about 600 lines, so the strategy is `feature-branch-chain`. Slic
 ## Progress
 
 - 2026-11-07: created from the STATE item 22 gap list (human go-ahead).
+- 2026-11-07: T1–T3 done (delegated writer). RED: 32 failures plus an ImportError, and test-lib failing on the missing script. GREEN: pytest 603 passed, test-lib PASS 261; `docs/benchmark.md` regenerates unchanged. Deviations: merge-summaries refuses rows repeated byte for byte and inputs given twice, not `(split, recording, sample)`, because separate `--repeats 1` runs all write sample 1. `provenance.tsv` has one row per command and is appended to. The provenance guard exempts inputs read from a committed result's own `inputs/` copy (by path), so the holdout-1 results still regenerate; follow-up: require the file to be git-tracked. Twelve holdout commands in five plans carry `--holdout` and `--plan`; the plans are amended (tooling only, before any holdout read).
 
 ## Next step
 
-T1–T3 (one writer).
+T4–T5 (slice 2).

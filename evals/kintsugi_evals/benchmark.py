@@ -4,6 +4,11 @@ It computes nothing: every number is copied from the scores.tsv, paired.tsv and 
 `score --out` wrote, and formatted as report.txt formats it, so the document cannot disagree with them. A result
 whose policy.tsv exists (ADR-027) also gets one policy line per config, and a holdout config whose riskyExecuted total
 is not a known 0 fails the render: it is the check ADR-027, Decision 3, puts on the benchmark.
+
+A directory holding verdict.tsv is a `verdict --out` result (ADR-031): it renders as an "H1–H3 verdicts" section,
+each hypothesis with its intersection-union and Holm-adjusted p-values and decision, each condition with its estimate,
+95% CI and unadjusted one-sided p, and the seed and resamples from verdict.txt. A provenance.tsv (ADR-015), in either
+kind of directory, adds one line per recorded command.
 """
 
 import csv
@@ -16,8 +21,15 @@ from .scoring import is_count
 FILES = ("inputs.tsv", "scores.tsv", "paired.tsv", "report.txt")
 # Read when present: a result scored before the policy's columns (policy-gate T3) has none and renders as before.
 OPTIONAL = ("policy.tsv",)
+# Read when present, in a score or a verdict directory: the holdout read's record (ADR-015).
+OPTIONAL = OPTIONAL + ("provenance.tsv",)
+VERDICT_FILES = ("verdict.tsv", "verdict.txt")
 SPECIAL = ("pooled", "healthy")
 SEED = re.compile(r"\(seed (\d+), (\d+) resamples\)")
+VERDICT_SEED = re.compile(r"seed (\d+), (\d+) resamples")
+VERDICT_COLUMNS = ("kind", "name", "hypothesis", "statistic", "side", "margin", "cases", "estimate", "ci_low",
+                   "ci_high", "p", "holm_p", "decision", "reading")
+PROVENANCE_COLUMNS = ("command", "holdout", "plan", "plan_sha256", "git_commit", "written_utc")
 
 
 def parse_tsv(text):
@@ -125,6 +137,63 @@ def _sources(rows):
     return "Sources: " + "; ".join(f"{r['label']} `{r['source']}` sha256 `{r['sha256']}`" for r in rows) + "."
 
 
+def _columns(directory, name, rows, columns):
+    for row in rows:
+        for column in columns:
+            if row.get(column) is None:
+                raise BenchmarkError(f"{directory}/{name}: a row lacks the column {column}")
+
+
+def _show(name, text):
+    """A verdict value as verdict.txt shows it: minutes for H2c, a rate for H3b, points for the AC@1 differences."""
+    if text == "":
+        return "-"
+    x = float(text)
+    if name == "H2c":
+        return f"{x / 60:.1f} min"
+    if name == "H3b":
+        return f"{100 * x:.1f}%"
+    return f"{100 * x:+.1f} pts"
+
+
+def _verdict(directory, files):
+    rows = parse_tsv(files["verdict.tsv"])
+    _columns(directory, "verdict.tsv", rows, VERDICT_COLUMNS)
+    conditions = [r for r in rows if r["kind"] == "condition"]
+    hypotheses = [r for r in rows if r["kind"] == "hypothesis"]
+    lines = ["### H1–H3 verdicts", ""]
+    header = ["Hypothesis", "Conditions", "Intersection-union p", "Holm-adjusted p", "Decision"]
+    lines += [_row(header), _row(["---"] * len(header))]
+    for h in hypotheses:
+        names = h["statistic"].removeprefix("max of ").split()
+        lines.append(_row([h["name"], ", ".join(names), h["p"], h["holm_p"], h["decision"]]))
+    for h in hypotheses:
+        if h["name"] == "H1" and h["reading"]:
+            enough = "yes" if h["reading"] == "rules are enough" else "no"
+            lines += ["", f"H1 rules are enough: {enough} (H1's 95% upper bound below +5 pts)."]
+    header = ["Condition", "Statistic", "Margin", "Cases", "Estimate", "95% CI", "One-sided p (unadjusted)",
+              "At 0.025"]
+    lines += ["", _row(header), _row(["---"] * len(header))]
+    for c in conditions:
+        name = c["name"]
+        side = ">" if c["side"] == "above" else "<"
+        interval = "-" if c["ci_low"] == "" else f"[{_show(name, c['ci_low'])}, {_show(name, c['ci_high'])}]"
+        lines.append(_row([name, c["statistic"], f"{side} {_show(name, c['margin'])}", c["cases"],
+                           _show(name, c["estimate"]), interval, c["p"], c["decision"]]))
+    seed = VERDICT_SEED.search(files["verdict.txt"])
+    if seed:
+        lines += ["", f"Bootstrap: seed {seed.group(1)}, {seed.group(2)} resamples; alpha 0.025 one-sided, Holm over "
+                      "H1–H3 (ADR-031)."]
+    return lines
+
+
+def _provenance(directory, text):
+    rows = parse_tsv(text)
+    _columns(directory, "provenance.tsv", rows, PROVENANCE_COLUMNS)
+    return [f"Provenance: {r['command']} read holdout `{r['holdout']}` under plan `{r['plan']}` sha256 "
+            f"`{r['plan_sha256']}` at commit `{r['git_commit']}`, {r['written_utc']}." for r in rows]
+
+
 def render(out, results):
     """Markdown for `results`, a list of (dir as given, {file name: text}) in command-line order."""
     command = " ".join(["python3 -m kintsugi_evals benchmark --out", out, *[d for d, _ in results]])
@@ -133,9 +202,14 @@ def render(out, results):
              "change the results and regenerate.", ""]
     for directory, files in results:
         lines += [f"## {PurePath(directory).name}", ""]
-        lines += _scores(parse_tsv(files["scores.tsv"])) + [""]
-        if "policy.tsv" in files:
-            lines += _policy(directory, parse_tsv(files["policy.tsv"])) + [""]
-        lines += _paired(parse_tsv(files["paired.tsv"]), files["report.txt"]) + [""]
-        lines += [_sources(parse_tsv(files["inputs.tsv"])), ""]
+        if "verdict.tsv" in files:
+            lines += _verdict(directory, files) + [""]
+        else:
+            lines += _scores(parse_tsv(files["scores.tsv"])) + [""]
+            if "policy.tsv" in files:
+                lines += _policy(directory, parse_tsv(files["policy.tsv"])) + [""]
+            lines += _paired(parse_tsv(files["paired.tsv"]), files["report.txt"]) + [""]
+            lines += [_sources(parse_tsv(files["inputs.tsv"])), ""]
+        if "provenance.tsv" in files:
+            lines += _provenance(directory, files["provenance.tsv"]) + [""]
     return "\n".join(lines[:-1]) + "\n"

@@ -171,6 +171,23 @@ A result directory that holds a `policy.tsv` (REQ-15) MUST also get, after its s
 - When `benchmark` runs on it
 - Then it exits with status 2, prints `benchmark: <dir>/policy.tsv: holdout config <config> executed 1 risky call; ADR-027 requires 0`, and writes nothing
 
+A directory that holds `verdict.tsv` is a `verdict --out` result (verdict spec): `benchmark` MUST read its `verdict.tsv` and `verdict.txt` instead of the score files, and render, under its heading, an `### H1–H3 verdicts` section: a table of hypotheses (`| Hypothesis | Conditions | Intersection-union p | Holm-adjusted p | Decision |`), H1's "rules are enough" reading, a table of conditions (`| Condition | Statistic | Margin | Cases | Estimate | 95% CI | One-sided p (unadjusted) | At 0.025 |`, the values shown as `verdict.txt` shows them: points for an AC@1 or false-alarm difference, minutes for H2c, a percentage for H3b, `-` for a condition with no case), and `Bootstrap: seed <n>, <k> resamples; alpha 0.025 one-sided, Holm over H1–H3 (ADR-031).` from `verdict.txt`. A missing `verdict.txt`, or a `verdict.tsv` row that lacks a column, MUST fail the render: exit 2 with one line naming the file, and nothing written. Any directory, score or verdict, that holds a `provenance.tsv` (REQ-18) MUST get one line per row after its other lines: ``Provenance: <command> read holdout `<holdout>` under plan `<plan>` sha256 `<sha256>` at commit `<commit>`, <written_utc>.``; a directory without it renders as before. Why: the M4 check reads the verdicts from `docs/benchmark.md`, which must regenerate from committed results alone, not from lines copied by hand.
+
+#### Scenario: A verdict directory
+- Given a directory written by `verdict --out`, where H3 is not supported
+- When `benchmark` runs on it after the track results
+- Then its section follows theirs, with the row `| H3 | H3a, H3b | 1.0000 | 1.0000 | not supported |`, each condition's estimate, 95% CI and unadjusted p, and the seed and resamples of `verdict.txt`
+
+#### Scenario: A verdict directory with its provenance
+- Given a verdict directory whose `provenance.tsv` records holdout `A,B,TT,holdout-2` and the H1–H3 plan
+- When `benchmark` runs on it
+- Then the section ends with the provenance line naming that holdout, the plan, its sha256 and the commit
+
+#### Scenario: A verdict directory without verdict.txt
+- Given a directory with `verdict.tsv` and no `verdict.txt`
+- When `benchmark` runs on it
+- Then it exits with status 2, prints one line naming `verdict.txt`, and writes nothing
+
 ### REQ-11 RCAEval converter
 `python -m kintsugi_evals convert-rcaeval --system re2-ob|re2-ss|re2-tt --rep N` MUST turn each case directory `<root>/RE2-<SYS>/<service>_<fault>/<N>/` into one replay recording the unchanged agent reads, plus one `recordings.tsv` row (`fault mode route truth file incident split`), under `--out` (default `evals/out/rcaeval/<system>-rep<N>/`, git-ignored) ([ADR-020](../../../docs/adr/ADR-020-rcaeval-dataset-converter.md)). The root MUST default to `$KINTSUGI_RCAEVAL_DIR`, else `~/data/rcaeval`. A recording MUST hold `id`, the system's one fixed `symptom`, `sinceMinutes` 10, `startedAt` = inject time + 10 minutes, and one `DOSSIER` step whose calls are exactly those `DossierGatherer` makes for the system's topology file, with the arguments it sends, plus its resource calls of [ADR-021](../../../docs/adr/ADR-021-resource-rules-config.md):
 - `query_metric latency_avg` per service from `<service>_latency-50` (seconds), resampled to the lab's 21 s step for 20 minutes, each point the mean of the rows in (t - 21 s, t], `NaN` when none has a value, and no series for a service without the column;
@@ -545,3 +562,35 @@ A summary written before the column MAY be backfilled with `infra/scripts/backfi
 - Given a `COMPLETED` row whose `<fault>-<mode>-<recording>-<sample>.json` is not in the replay directory
 - When `backfill-confidence.sh` runs
 - Then it exits 1 naming the line and the missing file, and writes nothing
+
+### REQ-18 Provenance of a holdout read (m4-gaps T2)
+`score`, `escalate` and `verdict` MUST take `--holdout NAME` and `--plan PATH` ([ADR-015](../../../docs/adr/ADR-015-evaluation-protocol.md): the result directory records the holdout name and the plan's path). Given both, the command MUST append one row to `provenance.tsv` in `--out`, writing the header first when the file is new: `command holdout plan plan_sha256 git_commit written_utc`, with the plan's path from the repository root, its sha256, `git rev-parse HEAD` (or `unknown` when git cannot run there) and the UTC time as `YYYY-MM-DDTHH:MM:SSZ`. One row per command, so `escalate` and `score` writing into one directory each leave their own record; a `provenance.tsv` with another header MUST be refused, nothing appended.
+
+The command MUST refuse, writing nothing and printing one line that names the file and the split but no recording, when an input holds a row whose split is not `dev`, `stress`, `probe` or `reference` and the flags are not both given. It MUST also refuse one flag without the other, a `--plan` that is not a file, a plan outside the repository, a blank or multi-line name, and, for `score`, the flags without `--out`. An input that is a committed result's own copy (`evals/results/<result>/inputs/<label>-summary.tsv`) is exempt, so every committed result regenerates (REQ-15). Dev runs need neither flag, and without the flags no `provenance.tsv` is written, so every other output stays byte-identical.
+
+Why: a hand-written `notes.md` can be forgotten or drift from the plan it names; the tool that reads the holdout writes the record, and refusing a holdout split it does not know as non-holdout (fail closed) keeps a new split name from slipping a read past it. `notes.md` stays for deviations and the run directories behind merged files.
+
+#### Scenario: A holdout read without its provenance
+- Given A and D summaries whose rows have the split `holdout` or `holdout-2`
+- When `score --out DIR` runs without `--holdout` and `--plan`
+- Then it exits with one line naming the input file and the split, prints no report, and writes nothing
+
+#### Scenario: A holdout read with its provenance
+- Given the same summaries and `--holdout A --plan plans/2026-11-06-holdout-a-re2ob.md`
+- When `escalate --out R` and then `score --out R` run
+- Then `R/provenance.tsv` holds the header and two rows, `escalate` then `score`, each with `A`, `evals/plans/2026-11-06-holdout-a-re2ob.md`, the plan's sha256, the commit and the time
+
+#### Scenario: A dev run
+- Given summaries whose rows all have the split `dev`
+- When `score --out DIR` runs without the flags
+- Then it writes what it wrote before and no `provenance.tsv`
+
+#### Scenario: A committed holdout result regenerates
+- Given `evals/results/2026-10-30-holdout1-lab/`, whose input copies hold `holdout` rows
+- When `score` runs on its `inputs/` copies without the flags
+- Then it regenerates the committed files byte for byte
+
+#### Scenario: A plan that does not exist
+- Given `--holdout A --plan plans/nowhere.md`
+- When `score` runs
+- Then it exits with one line saying the plan does not exist, and writes nothing

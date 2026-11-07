@@ -92,19 +92,20 @@ for R in 1 2 3; do   # repeat R
 done
 ```
 
-Merge D's runs, with the `merge` shell function and header check of `evals/plans/2026-11-06-holdout-a-re2ob.md`, into `$R/merged/` with `R=evals/results/<run date>-holdout2-lab`: `D1.tsv` (repeat 1's two runs) and `D.tsv` (all six). Then, from `evals/`:
+Merge D's runs, with `infra/scripts/merge-summaries.sh` as in `evals/plans/2026-11-06-holdout-a-re2ob.md`, from the repository root, into `$R/merged/` with `R=evals/results/<run date>-holdout2-lab`: `D1.tsv` (repeat 1's two runs) and `D.tsv` (all six). Then, from `evals/`:
 
 ```
 R=../evals/results/<run date>-holdout2-lab
-python3 -m kintsugi_evals escalate --a <A run> --d $R/merged/D1.tsv --rule k=L2,t=off --seed 20261106 --out $R
+P="--holdout holdout-2 --plan plans/2026-11-06-holdout2-lab.md"
+python3 -m kintsugi_evals escalate --a <A run> --d $R/merged/D1.tsv --rule k=L2,t=off --seed 20261106 --out $R $P
 python3 -m kintsugi_evals score --seed 20261106 --iterations 10000 \
   --label 0 <0 run> --label 0R <0R run> --label A <A run> --label D $R/merged/D.tsv --label C $R/C-summary.tsv \
-  --out $R
+  --out $R $P
 python3 -m kintsugi_evals escalate --a <A run> --d $R/merged/D1.tsv --rule k=L2,t=off --service-only \
-  --seed 20261106 --out $R/service-only
+  --seed 20261106 --out $R/service-only $P
 python3 -m kintsugi_evals score --service-only --seed 20261106 --iterations 10000 \
   --label 0 <0 run> --label 0R <0R run> --label A <A run> --label D $R/merged/D.tsv \
-  --label C $R/service-only/C-summary.tsv --out $R/service-only
+  --label C $R/service-only/C-summary.tsv --out $R/service-only $P
 ```
 
 `--topology` is not passed: the lab never takes it. Check each summary first: 75 rows for 0, 0R, A and `merged/D1`, 225 for `merged/D`, split `holdout-2`, view `tables`, report `plain`, A's `reportTimeout` 600.
@@ -112,6 +113,10 @@ python3 -m kintsugi_evals score --service-only --seed 20261106 --iterations 1000
 ## Read once
 
 - Holdout-2 is read once, by the runs above under this plan. A second read is exploratory, labelled in its plan and in `docs/benchmark.md`, and never replaces the first.
-- The result directory's `notes.md` records the holdout name (`lab holdout-2`), this plan's path, the seed commit and the run directories behind each merged file; `score` and `escalate` do not write them.
+- The result directory's `provenance.tsv` records the holdout name (`holdout-2`, the lab's), this plan's path and sha256 and the commit, written by both `escalate` and both `score` runs from `--holdout` and `--plan`; its `notes.md` records the seed commit, the run directories behind each merged file and any deviation.
 - Nothing from this read is committed before 2026-12-07: `check-freeze.sh` condition 4 fails on any committed holdout-2 row dated earlier.
 - M4's case counts: holdout-2 gives A and D 75 cases each, toward A 75 + 60 + 90 = 225 ≥ 200 and D 75 + 60 + 90 + 90 = 315 ≥ 300.
+
+## Amendments
+
+- **2026-11-07, tooling only, before any holdout read ([`odd/tasks/m4-gaps.md`](../../odd/tasks/m4-gaps.md) T1–T2).** The inline `merge` shell function is replaced by `infra/scripts/merge-summaries.sh`, which also refuses an existing output, one input given twice and a row repeated byte for byte across inputs. Both `escalate` and both `score` commands take `--holdout holdout-2 --plan` this plan, so each writes `provenance.tsv` (holdout, plan path, plan sha256, git commit, UTC time) into its result directory, and refuses holdout rows without them (ADR-015). `notes.md` no longer records the holdout name and plan path; it still records the seed commit, the run directories and any deviation. No case, config, rule, margin, seed or count changes.

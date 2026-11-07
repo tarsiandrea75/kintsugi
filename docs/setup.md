@@ -548,6 +548,9 @@ python3 -m kintsugi_evals score \
 - `--seed` (default 1) and `--iterations` (default 10000) set the bootstrap.
 - An input with the `level` column also gets a verified-correct line (fault rows correct at L3, over fault rows with a level) and an L1-rate line (rows at L1 or above, over rows with a level), each with its Wilson 95% CI and the count of `-` rows left out (evals spec, REQ-16); without the column the output is unchanged.
 - Commit the plan to `evals/plans/` before the run (template `evals/plans/TEMPLATE.md`) and the result to `evals/results/<date>-<name>/` after it.
+- A holdout read takes `--holdout NAME --plan PATH` on `score`, `escalate` and `verdict` (evals spec REQ-18, ADR-015): each appends a row to `provenance.tsv` in `--out` (holdout, plan path from the repository root, plan sha256, git commit, UTC time). Without both flags they refuse an input with a row whose split is not `dev`, `stress`, `probe` or `reference`, except a committed result's own `inputs/` copies, which regenerate as before. Dev runs need neither.
+- Several runs of one config (repeats, repetitions) merge into one summary with `infra/scripts/merge-summaries.sh OUT IN IN...`: it refuses differing headers, an existing OUT, one input given twice and a row repeated byte for byte across inputs, naming files and lines but no row. It does not refuse a repeated split, recording and sample, since each `--repeats 1` run numbers its samples from 1.
+- `benchmark` also renders a `verdict --out` directory (one holding `verdict.tsv`) as an H1–H3 verdicts section, and a `provenance.tsv` line in any directory that has one.
 
 A replay run made before its answers stated a level can be re-checked, with no model call (verification-levels T6):
 

@@ -1,6 +1,7 @@
 """Tests of `python -m kintsugi_evals score` (openspec/specs/evals)."""
 
 import csv
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from test_scoring import RANK_TRUTH, TRUTH, pairs, write_ranked_tsv, write_tsv
 EVALS = Path(__file__).resolve().parent.parent
 COMMITTED = EVALS / "results/2026-11-02-baro-pipeline-re2ob-dev"
 RE2_OB = EVALS.parent / "agent/src/main/resources/topology/re2-ob.json"
+PLAN = EVALS / "plans/2026-11-06-h1-h3-verdicts.md"
 
 
 def two_runs(tmp_path):
@@ -582,6 +584,8 @@ def verdict_inputs(tmp_path):
     args = ["verdict", "--service-only", "R", "--h1-track", "R", "--iterations", "300", "--seed", "3"]
     for (track, label), path in files.items():
         args += ["--input", track, label, str(path)]
+    # Its rows are holdout rows, so the verdict records the read (ADR-015).
+    args += ["--holdout", "H1-H3", "--plan", str(PLAN)]
     return args, files
 
 
@@ -712,3 +716,109 @@ def test_verdict_refuses_an_a_time_that_is_not_a_number(tmp_path, capsys):
     v_summary(files[("L", "A")], [("c0", C_TRUTH, C_TRUTH, "-", "L3")])
     with pytest.raises(SystemExit, match="seconds"):
         main(args + ["--out", str(tmp_path / "v")])
+
+
+# Provenance of a holdout read (ADR-015): --holdout and --plan, provenance.tsv, and the refusal without them.
+
+def holdout_runs(tmp_path, split="holdout"):
+    local, cloud = two_runs(tmp_path)
+    for run in (local, cloud):
+        summary = run / "summary.tsv"
+        summary.write_text(summary.read_text().replace("\tdev\t", f"\t{split}\t"))
+    return local, cloud
+
+
+def provenance_rows(out):
+    with (out / "provenance.tsv").open() as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
+@pytest.mark.parametrize("split", ["holdout", "holdout-2"])
+def test_score_refuses_a_holdout_without_its_provenance(tmp_path, capsys, split):
+    local, cloud = holdout_runs(tmp_path, split)
+    out_dir = tmp_path / "out"
+    with pytest.raises(SystemExit, match=f"score: .*split {split}.*--holdout NAME and --plan PATH"):
+        main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(out_dir)])
+    assert capsys.readouterr().out == ""
+    assert not out_dir.exists()
+
+
+def test_score_records_the_holdout_the_plan_and_the_commit(tmp_path, capsys):
+    local, cloud = holdout_runs(tmp_path)
+    out_dir = tmp_path / "out"
+    assert main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(out_dir),
+                 "--holdout", "A", "--plan", str(PLAN)]) == 0
+    [row] = provenance_rows(out_dir)
+    assert (row["command"], row["holdout"], row["plan"]) == ("score", "A", "evals/plans/2026-11-06-h1-h3-verdicts.md")
+    assert row["plan_sha256"] == hashlib.sha256(PLAN.read_bytes()).hexdigest()
+    assert row["git_commit"] and row["written_utc"].endswith("Z")
+
+
+def test_score_on_dev_needs_no_provenance_and_writes_none(tmp_path, capsys):
+    local, cloud = two_runs(tmp_path)
+    out_dir = tmp_path / "out"
+    assert main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(out_dir)]) == 0
+    assert not (out_dir / "provenance.tsv").exists()
+
+
+def test_score_refuses_a_plan_that_does_not_exist(tmp_path, capsys):
+    local, cloud = holdout_runs(tmp_path)
+    with pytest.raises(SystemExit, match="score: --plan .* does not exist"):
+        main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(tmp_path / "out"),
+              "--holdout", "A", "--plan", str(tmp_path / "nowhere.md")])
+
+
+def test_score_refuses_a_holdout_name_without_a_plan(tmp_path, capsys):
+    local, cloud = holdout_runs(tmp_path)
+    with pytest.raises(SystemExit, match="score: --holdout and --plan go together"):
+        main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(tmp_path / "out"),
+              "--holdout", "A"])
+
+
+def test_score_refuses_the_provenance_without_out(tmp_path, capsys):
+    local, cloud = holdout_runs(tmp_path)
+    with pytest.raises(SystemExit, match="score: .*give --out"):
+        main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--holdout", "A", "--plan", str(PLAN)])
+
+
+def test_escalate_refuses_a_holdout_without_its_provenance(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    for path in (a, d):
+        path.write_text(path.read_text().replace("\tdev\t", "\tholdout\t"))
+    with pytest.raises(SystemExit, match="escalate: .*split holdout.*--holdout NAME and --plan PATH"):
+        main(escalate_args(a, d, tmp_path / "c"))
+    assert not (tmp_path / "c").exists()
+
+
+def test_escalate_and_score_into_one_dir_append_one_provenance_row_each(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    for path in (a, d):
+        path.write_text(path.read_text().replace("\tdev\t", "\tholdout\t"))
+    out = tmp_path / "c"
+    flags = ["--holdout", "A", "--plan", str(PLAN)]
+    assert main(escalate_args(a, d, out) + ["--rule", "k=L2,t=off"] + flags) == 0
+    assert main(["score", "--label", "C", str(out / "C-summary.tsv"), "--out", str(out)] + flags) == 0
+    assert [(r["command"], r["holdout"]) for r in provenance_rows(out)] == [("escalate", "A"), ("score", "A")]
+
+
+def test_escalate_on_dev_writes_no_provenance(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    assert main(escalate_args(a, d, tmp_path / "c")) == 0
+    assert not (tmp_path / "c" / "provenance.tsv").exists()
+
+
+def test_verdict_refuses_a_holdout_without_its_provenance(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    args = args[:args.index("--holdout")]
+    with pytest.raises(SystemExit, match="verdict: .*split holdout.*--holdout NAME and --plan PATH"):
+        main(args + ["--out", str(tmp_path / "v")])
+    assert not (tmp_path / "v").exists()
+
+
+def test_verdict_records_its_provenance(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    out = tmp_path / "v"
+    assert main(args + ["--out", str(out)]) == 0
+    [row] = provenance_rows(out)
+    assert (row["command"], row["holdout"], row["plan"]) == ("verdict", "H1-H3",
+                                                             "evals/plans/2026-11-06-h1-h3-verdicts.md")

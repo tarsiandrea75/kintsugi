@@ -109,24 +109,23 @@ infra/scripts/replay-agent.sh --dataset re2-ob --route cloud --mode decision --s
 
 Each D run makes 30 samples, within `MAX_CLOUD_SAMPLES=60`.
 
-Merge each config's runs into one summary per label (no merge tool exists yet; see the feature document). The pseudo-case runs go into separate per-config healthy summaries, `merged/healthy-<label>.tsv`, never into the fault-case files: the family plan reads them as the H2b-only track `A-healthy`. Every merged input must share one header line, checked first:
+Merge each config's runs into one summary per label with `infra/scripts/merge-summaries.sh`, which refuses inputs whose header lines differ, an existing output, one input given twice and a row repeated byte for byte across inputs. The pseudo-case runs go into separate per-config healthy summaries, `merged/healthy-<label>.tsv`, never into the fault-case files: the family plan reads them as the H2b-only track `A-healthy`. From the repository root:
 
 ```
 R=evals/results/<run date>-holdout-a-re2ob
 mkdir -p $R/merged
-merge() { out=$1; shift; [ "$(head -q -n 1 "$@" | sort -u | wc -l)" = 1 ] || { echo "headers differ" >&2; return 1; }
-          { head -n 1 "$1"; tail -q -n +2 "$@"; } >"$out"; }
-merge $R/merged/0.tsv  <0 rep2>/summary.tsv  <0 rep3>/summary.tsv
-merge $R/merged/0R.tsv <0R rep2>/summary.tsv <0R rep3>/summary.tsv
-merge $R/merged/A.tsv  <A rep2>/summary.tsv  <A rep3>/summary.tsv
-merge $R/merged/D1.tsv <D rep2 r1>/summary.tsv <D rep3 r1>/summary.tsv
-merge $R/merged/D.tsv  <D rep2 r1>/summary.tsv <D rep2 r2>/summary.tsv <D rep2 r3>/summary.tsv \
-                       <D rep3 r1>/summary.tsv <D rep3 r2>/summary.tsv <D rep3 r3>/summary.tsv
-merge $R/merged/healthy-0.tsv  <0 rep2 healthy>/summary.tsv  <0 rep3 healthy>/summary.tsv
-merge $R/merged/healthy-0R.tsv <0R rep2 healthy>/summary.tsv <0R rep3 healthy>/summary.tsv
-merge $R/merged/healthy-A.tsv  <A rep2 healthy>/summary.tsv  <A rep3 healthy>/summary.tsv
-merge $R/merged/healthy-D.tsv  <D rep2 healthy r1>/summary.tsv <D rep2 healthy r2>/summary.tsv <D rep2 healthy r3>/summary.tsv \
-                               <D rep3 healthy r1>/summary.tsv <D rep3 healthy r2>/summary.tsv <D rep3 healthy r3>/summary.tsv
+M=infra/scripts/merge-summaries.sh
+$M $R/merged/0.tsv  <0 rep2>/summary.tsv  <0 rep3>/summary.tsv
+$M $R/merged/0R.tsv <0R rep2>/summary.tsv <0R rep3>/summary.tsv
+$M $R/merged/A.tsv  <A rep2>/summary.tsv  <A rep3>/summary.tsv
+$M $R/merged/D1.tsv <D rep2 r1>/summary.tsv <D rep3 r1>/summary.tsv
+$M $R/merged/D.tsv  <D rep2 r1>/summary.tsv <D rep2 r2>/summary.tsv <D rep2 r3>/summary.tsv \
+                    <D rep3 r1>/summary.tsv <D rep3 r2>/summary.tsv <D rep3 r3>/summary.tsv
+$M $R/merged/healthy-0.tsv  <0 rep2 healthy>/summary.tsv  <0 rep3 healthy>/summary.tsv
+$M $R/merged/healthy-0R.tsv <0R rep2 healthy>/summary.tsv <0R rep3 healthy>/summary.tsv
+$M $R/merged/healthy-A.tsv  <A rep2 healthy>/summary.tsv  <A rep3 healthy>/summary.tsv
+$M $R/merged/healthy-D.tsv  <D rep2 healthy r1>/summary.tsv <D rep2 healthy r2>/summary.tsv <D rep2 healthy r3>/summary.tsv \
+                            <D rep3 healthy r1>/summary.tsv <D rep3 healthy r2>/summary.tsv <D rep3 healthy r3>/summary.tsv
 ```
 
 Then, from `evals/`:
@@ -134,14 +133,15 @@ Then, from `evals/`:
 ```
 R=../evals/results/<run date>-holdout-a-re2ob
 T=../agent/src/main/resources/topology/re2-ob.json
+P="--holdout A --plan plans/2026-11-06-holdout-a-re2ob.md"
 python3 -m kintsugi_evals escalate --a $R/merged/A.tsv --d $R/merged/D1.tsv --rule k=L2,t=off \
-  --service-only --topology $T --seed 20261106 --out $R
+  --service-only --topology $T --seed 20261106 --out $R $P
 python3 -m kintsugi_evals score --service-only --topology $T --seed 20261106 --iterations 10000 \
   --label 0 $R/merged/0.tsv --label 0R $R/merged/0R.tsv --label A $R/merged/A.tsv \
-  --label D $R/merged/D.tsv --label C $R/C-summary.tsv --out $R
+  --label D $R/merged/D.tsv --label C $R/C-summary.tsv --out $R $P
 python3 -m kintsugi_evals score --service-only --topology $T --seed 20261106 --iterations 10000 \
   --label 0 $R/merged/healthy-0.tsv --label 0R $R/merged/healthy-0R.tsv --label A $R/merged/healthy-A.tsv \
-  --label D $R/merged/healthy-D.tsv --out $R/healthy
+  --label D $R/merged/healthy-D.tsv --out $R/healthy $P
 ```
 
 Check each summary first: 30 samples a run (60 for `merged/0`, `0R`, `A`, `D1`; 180 for `merged/D`; 60 for `merged/healthy-0`, `healthy-0R`, `healthy-A`; 180 for `merged/healthy-D`), split `holdout`, view `tables`, report `plain`, `model` `rules-v1` / `rules-v2` / `granite4.1:8b` (`reportTimeout` 2100) / `claude-haiku-5-5`. Every row of a `healthy-*` file has fault `healthy` and truth `NONE|NONE`, and no row of the other files does; `verdict` refuses an H2b-only track holding a fault row. The second `score` reports the pseudo-cases' false alarms on its `healthy` line, in `$R/healthy/`.
@@ -149,10 +149,11 @@ Check each summary first: 30 samples a run (60 for `merged/0`, `0R`, `A`, `D1`; 
 ## Read once
 
 - Holdout A is read once, by the runs above under this plan. A second read of any config is exploratory, says so in its own plan and in `docs/benchmark.md`, and never replaces the first.
-- The result directory records the holdout name (`RCAEval holdout A, RE2-OB repetitions 2-3`) and this plan's path in a `notes.md` written with the result, since neither `score` nor `escalate` writes them. It also names the run directories behind each merged file.
+- The result directory records the holdout name (`A`, RCAEval holdout A, RE2-OB repetitions 2-3), this plan's path and sha256 and the commit in `provenance.tsv`, which `escalate` and both `score` runs write from `--holdout` and `--plan`. A `notes.md` written with the result names the run directories behind each merged file and any deviation.
 - Nothing from this read is committed before 2026-12-07: `check-freeze.sh` condition 4 fails on any committed holdout A row dated earlier.
 - M4's case counts, which do not count the pseudo-cases: A runs here on 60 cases, which with holdout B (90) and lab holdout-2 (75) gives 225 ≥ 200; D runs here on 60, which with B (90), TT (90) and holdout-2 (75) gives 315 ≥ 300 (vision §7, ADR-032).
 
 ## Amendments
 
 - **2026-11-07, healthy pseudo-cases ([ADR-034](../../docs/adr/ADR-034-rcaeval-healthy-pseudo-cases.md)).** Written before any holdout was read. The track adds holdout A's 60 healthy pseudo-cases (`convert-rcaeval --healthy --allow-holdout A`, the 12 minutes before each injection as two 6-minute windows, truth `NONE|NONE`). Configs 0, 0R, A and D replay them with `--faults healthy`, D as three `--repeats 1` runs per repetition, and their rows are merged into separate per-config healthy summaries (`merged/healthy-<label>.tsv`), which the family plan reads as the H2b-only track `A-healthy`. Revised the same day, still before any holdout read (human decision): the pseudo-cases enter H2b only, not H2c, so they are not merged into the fault-case summaries and `D1.tsv` holds fault cases only. A's CPU time rises by about 11 h and D's cost by about $0.21. Nothing else in this plan changes.
+- **2026-11-07, tooling only, before any holdout read ([`odd/tasks/m4-gaps.md`](../../odd/tasks/m4-gaps.md) T1–T2).** The inline `merge` shell function is replaced by `infra/scripts/merge-summaries.sh`, which also refuses an existing output, one input given twice and a row repeated byte for byte across inputs. `escalate` and both `score` commands take `--holdout A --plan` this plan, so each writes `provenance.tsv` (holdout, plan path, plan sha256, git commit, UTC time) into its result directory, and refuses holdout rows without them (ADR-015). `notes.md` no longer records the holdout name and plan path; it still names the run directories and any deviation. No case, config, rule, margin, seed or count changes.

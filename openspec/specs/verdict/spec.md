@@ -9,6 +9,7 @@ python -m kintsugi_evals verdict \
   --h1-track <TRACK> ...                              # the RCAEval holdouts H1 pools; repeatable
   --h2b-only <TRACK> ...                              # healthy pseudo-case tracks read by H2b only; repeatable
   --seed <N> --iterations 10000 --out <DIR>
+  --holdout <NAME> --plan <PATH>                      # required on holdout rows (evals spec REQ-18)
 ```
 
 A track is one holdout (e.g. `holdout-2`, `A`, `B`, `TT`). C is not an input: it is computed from each track's A and D under ADR-030's fixed rule.
@@ -150,3 +151,16 @@ A track named by `--h2b-only` MUST enter H2b only, and MUST NOT enter H1, H2a, H
 - Given `--h2b-only P`
 - When the verdict runs
 - Then `verdict.txt` says `H2b-only tracks: P`, H2b only
+
+### REQ-10 Provenance and the benchmark
+The verdict reads holdout rows, so it MUST refuse to run without `--holdout` and `--plan`, writing nothing, and with them MUST append its row to `provenance.tsv` in `--out`, as the evals spec REQ-18 states for every command that reads a holdout. Its directory is rendered by `benchmark` as the evals spec REQ-10 states: each hypothesis with its intersection-union and Holm-adjusted p and decision, each condition with its estimate, 95% CI and unadjusted p, the seed and resamples, and the provenance. Why: the M4 check reads the verdict from `docs/benchmark.md`, so the record of which holdouts and which plan produced it travels with the numbers.
+
+#### Scenario: A verdict without its provenance
+- Given inputs whose rows have the split `holdout`
+- When the verdict runs without `--holdout` and `--plan`
+- Then it refuses with one line naming the input and the split, and writes nothing
+
+#### Scenario: A verdict with its provenance
+- Given the same inputs and `--holdout A,B,TT,holdout-2 --plan plans/2026-11-06-h1-h3-verdicts.md`
+- When the verdict runs
+- Then `provenance.tsv` holds one `verdict` row naming that holdout, `evals/plans/2026-11-06-h1-h3-verdicts.md`, its sha256 and the commit, and `benchmark` renders it after the verdict tables

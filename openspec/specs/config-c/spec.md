@@ -86,3 +86,16 @@ With `--rule k=<L2|L3>,t=<off|number>`, `escalate` MUST compute C under that rul
 - Given `--rule k=L1,t=off`
 - When `escalate` runs
 - Then it refuses and writes nothing
+
+### REQ-6 Provenance of a holdout read
+`escalate` MUST take `--holdout NAME` and `--plan PATH`. On A or D rows of a holdout split it MUST refuse without both, writing nothing; with them it MUST append its `escalate` row to `provenance.tsv` in `--out`, after its four outputs, as the evals spec REQ-18 states. A dev run needs neither and writes no `provenance.tsv`. Why: the holdout reads run `escalate` and then `score` into one result directory, and each leaves its own record of the holdout and the plan (ADR-015).
+
+#### Scenario: The holdout read records itself
+- Given A and D summaries of holdout A and `--rule k=L2,t=off --holdout A --plan plans/2026-11-06-holdout-a-re2ob.md`
+- When `escalate --out R` runs
+- Then `R/provenance.tsv` holds one `escalate` row naming `A`, the plan, its sha256 and the commit
+
+#### Scenario: A holdout read without the flags
+- Given A and D summaries whose rows have the split `holdout`
+- When `escalate` runs without `--holdout` and `--plan`
+- Then it refuses with one line naming the file and the split, and writes nothing

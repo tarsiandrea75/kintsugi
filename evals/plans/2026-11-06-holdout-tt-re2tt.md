@@ -81,13 +81,14 @@ infra/scripts/replay-agent.sh --dataset re2-tt --route cloud --mode decision --s
 infra/scripts/replay-agent.sh --dataset re2-tt --route cloud --mode decision --split holdout --repeats 1   # repeat 3
 ```
 
-Merge each config's runs into one summary per label, with the `merge` shell function and header check of `evals/plans/2026-11-06-holdout-a-re2ob.md`, into `$R/merged/` with `R=evals/results/<run date>-holdout-tt-re2tt`: `0.tsv`, `0R.tsv` (three runs each) and `D.tsv` (all nine D runs). Then, from `evals/`:
+Merge each config's runs into one summary per label, with `infra/scripts/merge-summaries.sh` as in `evals/plans/2026-11-06-holdout-a-re2ob.md`, from the repository root, into `$R/merged/` with `R=evals/results/<run date>-holdout-tt-re2tt`: `0.tsv`, `0R.tsv` (three runs each) and `D.tsv` (all nine D runs). Then, from `evals/`:
 
 ```
 R=../evals/results/<run date>-holdout-tt-re2tt
 python3 -m kintsugi_evals score --service-only --topology ../agent/src/main/resources/topology/re2-tt.json \
   --seed 20261106 --iterations 10000 \
-  --label 0 $R/merged/0.tsv --label 0R $R/merged/0R.tsv --label D $R/merged/D.tsv --out $R
+  --label 0 $R/merged/0.tsv --label 0R $R/merged/0R.tsv --label D $R/merged/D.tsv --out $R \
+  --holdout TT --plan plans/2026-11-06-holdout-tt-re2tt.md
 ```
 
 Check each summary first: 90 rows in `merged/0` and `0R`, 270 in `merged/D`, split `holdout`, view `tables`, report `plain`, `model` `rules-v1` / `rules-v2` / `claude-haiku-5-5`.
@@ -95,6 +96,10 @@ Check each summary first: 90 rows in `merged/0` and `0R`, 270 in `merged/D`, spl
 ## Read once
 
 - Holdout TT is read once by agent configs, by the runs above under this plan. A second read is exploratory, labelled in its plan and in `docs/benchmark.md`, and never replaces the first.
-- The result directory's `notes.md` records the holdout name (`RCAEval holdout TT, RE2-TT`), this plan's path and the run directories behind each merged file, and names no case directory.
+- The result directory's `provenance.tsv` records the holdout name (`TT`, RCAEval holdout TT, RE2-TT), this plan's path and sha256 and the commit, written by `score` from `--holdout` and `--plan`; its `notes.md` names the run directories behind each merged file and any deviation, and names no case directory.
 - Nothing from this read is committed before 2026-12-07. `check-freeze.sh` condition 4 checks holdouts A and B and lab holdout-2 rows, not TT's, so for TT this date is held by this plan, not by the check (an open follow-up of `odd/tasks/m4-plans.md`).
 - Holdout TT on Config 0, 0R and D is never cut (ADR-032). D's 90 TT cases bring D to 75 + 60 + 90 + 90 = 315 ≥ 300.
+
+## Amendments
+
+- **2026-11-07, tooling only, before any holdout read ([`odd/tasks/m4-gaps.md`](../../odd/tasks/m4-gaps.md) T1–T2).** The inline `merge` shell function is replaced by `infra/scripts/merge-summaries.sh`, which also refuses an existing output, one input given twice and a row repeated byte for byte across inputs. The `score` command takes `--holdout TT --plan` this plan, so each writes `provenance.tsv` (holdout, plan path, plan sha256, git commit, UTC time) into its result directory, and refuses holdout rows without them (ADR-015). `notes.md` no longer records the holdout name and plan path; it still names the run directories and any deviation. No case, config, rule, margin, seed or count changes.

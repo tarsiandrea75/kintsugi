@@ -110,19 +110,20 @@ infra/scripts/replay-agent.sh --dataset re2-ss --route cloud --mode decision --s
 
 Each D run makes one repetition's pseudo-cases (30 at the expected count), within `MAX_CLOUD_SAMPLES=60`.
 
-Merge each config's runs into one summary per label, with the same `merge` shell function and header check as `evals/plans/2026-11-06-holdout-a-re2ob.md`, into `$R/merged/` with `R=evals/results/<run date>-holdout-b-re2ss`: `0.tsv`, `0R.tsv`, `A.tsv` (three fault-case runs each), `D1.tsv` (the three fault-case repeat-1 runs) and `D.tsv` (all nine fault-case D runs). The pseudo-case runs go into separate per-config healthy summaries, never into those files: `healthy-0.tsv`, `healthy-0R.tsv`, `healthy-A.tsv` (three pseudo-case runs each) and `healthy-D.tsv` (all nine pseudo-case D runs). The family plan reads them as the H2b-only track `B-healthy`. Then, from `evals/`:
+Merge each config's runs into one summary per label, with `infra/scripts/merge-summaries.sh` as in `evals/plans/2026-11-06-holdout-a-re2ob.md`, from the repository root, into `$R/merged/` with `R=evals/results/<run date>-holdout-b-re2ss`: `0.tsv`, `0R.tsv`, `A.tsv` (three fault-case runs each), `D1.tsv` (the three fault-case repeat-1 runs) and `D.tsv` (all nine fault-case D runs). The pseudo-case runs go into separate per-config healthy summaries, never into those files: `healthy-0.tsv`, `healthy-0R.tsv`, `healthy-A.tsv` (three pseudo-case runs each) and `healthy-D.tsv` (all nine pseudo-case D runs). The family plan reads them as the H2b-only track `B-healthy`. Then, from `evals/`:
 
 ```
 R=../evals/results/<run date>-holdout-b-re2ss
 T=../agent/src/main/resources/topology/re2-ss.json
+P="--holdout B --plan plans/2026-11-06-holdout-b-re2ss.md"
 python3 -m kintsugi_evals escalate --a $R/merged/A.tsv --d $R/merged/D1.tsv --rule k=L2,t=off \
-  --service-only --topology $T --seed 20261106 --out $R
+  --service-only --topology $T --seed 20261106 --out $R $P
 python3 -m kintsugi_evals score --service-only --topology $T --seed 20261106 --iterations 10000 \
   --label 0 $R/merged/0.tsv --label 0R $R/merged/0R.tsv --label A $R/merged/A.tsv \
-  --label D $R/merged/D.tsv --label C $R/C-summary.tsv --out $R
+  --label D $R/merged/D.tsv --label C $R/C-summary.tsv --out $R $P
 python3 -m kintsugi_evals score --service-only --topology $T --seed 20261106 --iterations 10000 \
   --label 0 $R/merged/healthy-0.tsv --label 0R $R/merged/healthy-0R.tsv --label A $R/merged/healthy-A.tsv \
-  --label D $R/merged/healthy-D.tsv --out $R/healthy
+  --label D $R/merged/healthy-D.tsv --out $R/healthy $P
 ```
 
 Check each summary first: one repetition's cases a run (90 rows in `merged/0`, `0R`, `A`, `D1`; 270 in `merged/D`; 90 in `merged/healthy-0`, `healthy-0R`, `healthy-A`; 270 in `merged/healthy-D`), split `holdout`, view `tables`, report `plain`, and the expected `model` and `reportTimeout`. Every row of a `healthy-*` file has fault `healthy` and truth `NONE|NONE`, and no row of the other files does; `verdict` refuses an H2b-only track holding a fault row. The second `score` reports the pseudo-cases' false alarms on its `healthy` line, in `$R/healthy/`.
@@ -130,10 +131,11 @@ Check each summary first: one repetition's cases a run (90 rows in `merged/0`, `
 ## Read once
 
 - Holdout B is read once, by the runs above under this plan. A second read is exploratory, labelled in its plan and in `docs/benchmark.md`, and never replaces the first.
-- The result directory's `notes.md` records the holdout name (`RCAEval holdout B, RE2-SS`), this plan's path and the run directories behind each merged file; `score` and `escalate` do not write them.
+- The result directory's `provenance.tsv` records the holdout name (`B`, RCAEval holdout B, RE2-SS), this plan's path and sha256 and the commit, written by `escalate` and both `score` runs from `--holdout` and `--plan`; its `notes.md` names the run directories behind each merged file and any deviation.
 - Nothing from this read is committed before 2026-12-07: `check-freeze.sh` condition 4 fails on any committed holdout B row dated earlier.
 - Holdout B is never cut (ADR-032). M4's case counts, which do not count the pseudo-cases: A 75 + 60 + 90 = 225 ≥ 200; D 75 + 60 + 90 + 90 = 315 ≥ 300.
 
 ## Amendments
 
 - **2026-11-07, healthy pseudo-cases ([ADR-034](../../docs/adr/ADR-034-rcaeval-healthy-pseudo-cases.md)).** Written before any holdout was read. The track adds holdout B's 90 healthy pseudo-cases (`convert-rcaeval --healthy --allow-holdout B`, the 12 minutes before each injection as two 6-minute windows, truth `NONE|NONE`). Configs 0, 0R, A and D replay them with `--faults healthy`, D as three `--repeats 1` runs per repetition, and their rows are merged into separate per-config healthy summaries (`merged/healthy-<label>.tsv`), which the family plan reads as the H2b-only track `B-healthy`. Revised the same day, still before any holdout read (human decision): the pseudo-cases enter H2b only, not H2c, so they are not merged into the fault-case summaries and `D1.tsv` holds fault cases only. A's CPU time rises by about 16.5 h and D's cost by about $0.32. Nothing else in this plan changes.
+- **2026-11-07, tooling only, before any holdout read ([`odd/tasks/m4-gaps.md`](../../odd/tasks/m4-gaps.md) T1–T2).** The inline `merge` shell function is replaced by `infra/scripts/merge-summaries.sh`, which also refuses an existing output, one input given twice and a row repeated byte for byte across inputs. `escalate` and both `score` commands take `--holdout B --plan` this plan, so each writes `provenance.tsv` (holdout, plan path, plan sha256, git commit, UTC time) into its result directory, and refuses holdout rows without them (ADR-015). `notes.md` no longer records the holdout name and plan path; it still names the run directories and any deviation. No case, config, rule, margin, seed or count changes.
