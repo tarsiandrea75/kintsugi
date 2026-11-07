@@ -91,7 +91,6 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
     - H2b now has 165 healthy cases: 150 pseudo-cases from holdouts A and B, plus holdout-2's 15 lab controls.
     - H2c excludes the pseudo-cases (`verdict --h2b-only`).
     - A's M4 commitment is about 67 CPU hours, about 7 of M4's 20 nights.
-    - Follow-up: `score`'s healthy-only fallback catches a broad `ValueError` (`evals/kintsugi_evals/cli.py`:311-316, review advisory).
 22. M4 tooling gaps: done on `feat/m4-gaps` (`odd/tasks/m4-gaps.md`).
     - `infra/scripts/merge-summaries.sh` merges several runs of one config.
     - `score`, `escalate` and `verdict` write `provenance.tsv` (holdout, plan with its sha256, commit) and refuse a holdout read without `--holdout` and `--plan`.
@@ -99,7 +98,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
     - check-freeze condition 4 covers TT; the BARO TT reproduction is the only, dated exemption.
     - `baro-rcaeval` needs `--allow-holdout TT`.
     - `--check-only` never names prefixes.
-23. **Next:** the human tags `freeze-m3` on 2026-12-01, then the holdout-2 seed, schedule and recording (Dec 1–5); `check-freeze.sh` must pass. Until then the agent may still change. Follow-up: `test-lib.sh` does not run `test-check-freeze.sh`.
+23. **Next:** see the sub-item below. Follow-up: `test-lib.sh` does not run `test-check-freeze.sh`, so run both.
   - On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
 
 ## Local branch chains (not pushed)
