@@ -43,7 +43,7 @@ Out of scope: any holdout read; A on pseudo-cases (decided after the gate, with 
 
 - [x] T1 This document and the dev plan with its decision rule, committed before any run. Route: inline (docs only).
 - [x] T2 Converter `--healthy` and `replay-agent.sh --faults healthy`, with tests first and docs. Route: delegated writer.
-- [ ] T3 The dev run: convert RE2-OB rep 1 healthy, run D ×3, 0 and 0R, score, and commit the results. Route: inline.
+- [x] T3 The dev run: convert RE2-OB rep 1 healthy, run D ×3, 0 and 0R, score, and commit the results. Route: inline.
 - [ ] T4 An ADR recording the gate's outcome. If the pseudo-cases are kept: the H2b tracks in `evals/plans/2026-11-06-h1-h3-verdicts.md`, the sample size and A's CPU cost (a human decision). Route: inline.
 
 ## Acceptance criteria
@@ -63,7 +63,9 @@ Out of scope: any holdout read; A on pseudo-cases (decided after the gate, with 
 - 2026-11-07: explored. 12 minutes of pre-injection data in every case; no agent change needed; the human chose the pseudo-cases with a dev gate on D.
 - 2026-11-07: T1 done. The plan `evals/plans/2026-11-07-rcaeval-healthy-dev.md` gates on D's pooled false-alarm rate of at most 1/3, committed before any run.
 - 2026-11-07: T2 done (delegated writer). RED: 6 failures and 6 errors; GREEN: pytest 547, test-lib PASS 248. A mutation check moved the end 30 s later and failed 5 tests. The fault-case output is pinned byte for byte. Dev smoke: 30 pseudo-cases, all `healthy` `NONE|NONE` `dev`, output timestamps from inject−720 s to inject−5 s. Finding: in all 30 dev pseudo-cases the 6 minutes before injection hold no WARN or ERROR log line, so the log facts are silent. That is a real property of healthy data, and it leans toward fewer false alarms (recorded for T4).
+- 2026-11-07: slice (5a8c701..bfb46ff) native review, four lenses, standing consent: approved, acknowledged, burned.
+- 2026-11-07: T3 done. The gate is KEPT: D pooled 9/90 false alarms (10%, Wilson [5.4%, 17.9%]); per repeat 0, 3 and 6; 0 and 0R gave 0/30 each; D cost $0.105. Deviations: D ran as 3 runs because of `MAX_CLOUD_SAMPLES`; `score` failed on a healthy-only run and was fixed in e8595a5 (test-first). Results in `evals/results/2026-11-07-rcaeval-healthy-dev/`, d69cf65.
 
 ## Next step
 
-T3.
+T4: the sample size of pseudo-cases for A (CPU), a human decision; then ADR-034 and the H1–H3 plan amendment.
