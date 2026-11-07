@@ -49,6 +49,7 @@ The forecast is about 600 lines, so the strategy is `feature-branch-chain`. Slic
 
 - 2026-11-07: created from the STATE item 22 gap list (human go-ahead).
 - 2026-11-07: T1–T3 done (delegated writer). RED: 32 failures plus an ImportError, and test-lib failing on the missing script. GREEN: pytest 603 passed, test-lib PASS 261; `docs/benchmark.md` regenerates unchanged. Deviations: merge-summaries refuses rows repeated byte for byte and inputs given twice, not `(split, recording, sample)`, because separate `--repeats 1` runs all write sample 1. `provenance.tsv` has one row per command and is appended to. The provenance guard exempts inputs read from a committed result's own `inputs/` copy (by path), so the holdout-1 results still regenerate; follow-up: require the file to be git-tracked. Twelve holdout commands in five plans carry `--holdout` and `--plan`; the plans are amended (tooling only, before any holdout read).
+- 2026-11-07: slice 1 (main..b3da366) native review, four lenses, standing consent: approved, acknowledged, burned. Warnings folded into slice 2: awk reads an input name with '=' as an assignment (merge-summaries.sh:79); the committed-copy exemption matches by path only (provenance.py:67-70); score writes provenance after its outputs (cli.py:396-397); benchmark's H1 reading falls back to '-' (benchmark.py:171-173); a missing verdict seed is silent (:183-186); two vacuous test asserts (test_benchmark.py:230, :232).
 
 ## Next step
 
