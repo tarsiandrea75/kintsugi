@@ -7,6 +7,7 @@ python -m kintsugi_evals verdict \
   --input <TRACK> <LABEL> <DIR or summary.tsv> ...   # LABEL is 0R, A or D; repeatable
   --service-only <TRACK> ...                          # RCAEval tracks; repeatable
   --h1-track <TRACK> ...                              # the RCAEval holdouts H1 pools; repeatable
+  --h2b-only <TRACK> ...                              # healthy pseudo-case tracks read by H2b only; repeatable
   --seed <N> --iterations 10000 --out <DIR>
 ```
 
@@ -21,8 +22,8 @@ The verdict MUST test these conditions, each against its margin:
 |---|---|---|---|---|
 | H1 | D − 0R, AC@1 on the service | > 0 | fault cases both ran | `--h1-track` |
 | H2a | A − D, AC@1 | > −10 points | fault cases both ran | tracks with A and D |
-| H2b | false-alarm rate A − D | < +10 points | healthy cases both ran | tracks with A and D |
-| H2c | median of A's time to report | < 15 minutes | every A case | tracks with A |
+| H2b | false-alarm rate A − D | < +10 points | healthy cases both ran | tracks with A and D, including `--h2b-only` |
+| H2c | median of A's time to report | < 15 minutes | every A case | tracks with A, except `--h2b-only` |
 | H3a | C − D, AC@1 | > −5 points | fault cases A and D both ran | tracks with A and D |
 | H3b | C's escalation rate | < 50% | the same cases | tracks with A and D |
 
@@ -92,7 +93,7 @@ The verdict MUST sort the three hypotheses' p-values in ascending order and comp
 - Then no hypothesis holds, though 0.024 is below 0.025
 
 ### REQ-6 Reading and output
-Every condition MUST report its cases, point estimate, two-sided 95% bootstrap percentile CI and unadjusted p-value. Every hypothesis MUST report its intersection-union p-value, its Holm-adjusted p-value and `holds` or `not supported`. H1 MUST also report "rules are enough" when its 95% CI upper bound is below +5 points. The report MUST name the seed, the resamples, C's rule and each input with its sha256.
+Every condition MUST report its cases, point estimate, two-sided 95% bootstrap percentile CI and unadjusted p-value. Every hypothesis MUST report its intersection-union p-value, its Holm-adjusted p-value and `holds` or `not supported`. H1 MUST also report "rules are enough" when its 95% CI upper bound is below +5 points. The report MUST name the seed, the resamples, C's rule, each input with its sha256, the H1 tracks and the H2b-only tracks (or `none`).
 
 The verdict MUST print the report and write `verdict.txt` (the report) and `verdict.tsv` (one row per condition, then one per hypothesis) to `--out`. It MUST refuse, writing nothing, when either file exists. It MUST refuse a label other than 0R, A or D, and a label given twice on one track.
 
@@ -121,3 +122,31 @@ Secondary results (A − 0R, D − 0, A − 0, per-track splits, exact McNemar) 
 - Given `--input lab 0 <dir>`
 - When the verdict runs
 - Then it refuses: Config 0 is scored with `score`
+
+### REQ-9 H2b-only tracks
+A track named by `--h2b-only` MUST enter H2b only, and MUST NOT enter H1, H2a, H2c, H3a or H3b. It holds RCAEval healthy pseudo-cases ([ADR-034](../../../docs/adr/ADR-034-rcaeval-healthy-pseudo-cases.md)): their 6-minute dossiers are lighter than a fault case's, so A's times on them would pull H2c's median down in A's favour. H2b MUST pool it with the other tracks as REQ-2 pools tracks, resampling within it and keeping its size. The verdict MUST refuse, writing nothing, an `--h2b-only` track that holds a fault row under any label, one that is also an `--h1-track`, one that lacks A or D, and an `--h2b-only` name with no `--input`.
+
+#### Scenario: H2c ignores the pseudo-cases
+- Given a lab track whose A cases take 600 s each, and an `--h2b-only` track whose A cases take 60 s each
+- When the verdict runs
+- Then H2c's cases and median are those of the lab track alone
+
+#### Scenario: H2b counts the pseudo-cases
+- Given a lab track with 3 healthy cases and an `--h2b-only` track with 5 healthy pseudo-cases, A and D on both
+- When the verdict runs
+- Then H2b reads 8 cases, and H1, H2a, H3a and H3b are unchanged
+
+#### Scenario: A fault row on an H2b-only track
+- Given `--h2b-only P` and a fault case in P's D summary
+- When the verdict runs
+- Then it refuses and writes nothing
+
+#### Scenario: An H2b-only track named for H1
+- Given `--h2b-only P --h1-track P`
+- When the verdict runs
+- Then it refuses
+
+#### Scenario: The report names the H2b-only tracks
+- Given `--h2b-only P`
+- When the verdict runs
+- Then `verdict.txt` says `H2b-only tracks: P`, H2b only

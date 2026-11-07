@@ -148,6 +148,9 @@ def _parser():
                      help="score this track's AC@1 on the service only (an RCAEval track, ADR-020); repeatable")
     ver.add_argument("--h1-track", action="append", default=[], metavar="TRACK",
                      help="pool this track into H1 (an RCAEval holdout, scored --service-only); repeatable")
+    ver.add_argument("--h2b-only", action="append", default=[], metavar="TRACK",
+                     help="read this track in H2b only (healthy pseudo-cases, ADR-034): not in H1, H2a, H2c, H3a "
+                          "or H3b; it must hold healthy rows only; repeatable")
     ver.add_argument("--out", required=True, help="write verdict.tsv and verdict.txt here")
     ver.add_argument("--seed", type=int, default=DEFAULT_SEED, help="bootstrap seed, as the plan records it")
     ver.add_argument("--iterations", type=_positive, default=DEFAULT_ITERATIONS, help="bootstrap resamples")
@@ -605,7 +608,8 @@ def _verdict_tracks(args):
         if label not in LABELS:
             raise SystemExit(f"verdict: label {label} is not one of {', '.join(LABELS)}: C is computed from A and D, "
                              f"and secondary configs are scored with `score`")
-        track = tracks.setdefault(name, Track(name, {}, service_only=name in args.service_only))
+        track = tracks.setdefault(name, Track(name, {}, service_only=name in args.service_only,
+                                              h2b_only=name in args.h2b_only))
         if label in track.rows:
             raise SystemExit(f"verdict: track {name} has the label {label} twice")
         rows = read_summary(path, label=label, service_only=track.service_only)
@@ -615,9 +619,10 @@ def _verdict_tracks(args):
         if label == "A":
             track.seconds = _read_seconds(path)
         sources.append((name, label, path, hashlib.sha256(summary_path(path).read_bytes()).hexdigest(), len(rows)))
-    unknown = sorted(set(args.service_only) - set(tracks))
-    if unknown:
-        raise SystemExit(f"verdict: --service-only names the track {unknown[0]}, which has no --input")
+    for flag, named in (("--service-only", args.service_only), ("--h2b-only", args.h2b_only)):
+        unknown = sorted(set(named) - set(tracks))
+        if unknown:
+            raise SystemExit(f"verdict: {flag} names the track {unknown[0]}, which has no --input")
     return list(tracks.values()), sources
 
 
@@ -647,6 +652,8 @@ def _verdict_report(result, sources, args, rule):
         scope = "service AC@1" if name in args.service_only else "full-answer AC@1"
         lines.append(f"input {name} {label}: {path} ({rows} rows, {scope}, sha256 {digest})")
     lines.append(f"H1 tracks: {', '.join(args.h1_track) or 'none'}")
+    h2b_only = ", ".join(args.h2b_only)
+    lines.append(f"H2b-only tracks: {h2b_only + ' (H2b only; not in H1, H2a, H2c, H3a, H3b)' if h2b_only else 'none'}")
     lines += [_condition_line(c, s) for c, s in zip(result.conditions, SPECS)]
     for h in result.hypotheses:
         lines.append(f"{h.name} {'holds' if h.holds else 'is not supported'}: intersection-union p = {h.p:.4f} "

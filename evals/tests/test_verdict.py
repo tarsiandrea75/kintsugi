@@ -222,6 +222,50 @@ def test_h2c_case_time_is_the_mean_of_its_repeats():
     assert by_name(verdict([lab], h1_tracks=[], seed=1, iterations=50))[0]["H2c"].estimate == 800.0
 
 
+def pseudo_track(name, alarms_a, alarms_d, seconds=60.0):
+    """An h2b-only track of healthy pseudo-cases: A and D raise a false alarm where the flags say."""
+    a_rows = [row("A", f"p{i}", truth=HEALTHY, reported=WRONG if alarm else UNKNOWN_ANSWER, level="-")
+              for i, alarm in enumerate(alarms_a)]
+    d_rows = [row("D", f"p{i}", truth=HEALTHY, reported=WRONG if alarm else UNKNOWN_ANSWER, level="-")
+              for i, alarm in enumerate(alarms_d)]
+    return Track(name, {"A": a_rows, "D": d_rows}, service_only=True, seconds={r.case: [seconds] for r in a_rows},
+                 h2b_only=True)
+
+
+def test_an_h2b_only_track_enters_h2b_and_nothing_else():
+    lab = lab_track([(True, "L3")] * 4, [(True, None)] * 4, healthy_a=[False] * 3, healthy_d=[False] * 3,
+                    seconds=None)
+    lab.seconds = {case: [600.0] for case in lab.seconds}
+    alone = by_name(verdict([lab], h1_tracks=[], seed=1, iterations=200))[0]
+    # Five fast pseudo-cases, one false alarm by A: H2b gains their cases, H2c's median does not move.
+    pooled = by_name(verdict([lab, pseudo_track("A-healthy", [True] + [False] * 4, [False] * 5)], h1_tracks=[],
+                             seed=1, iterations=200))[0]
+    assert (alone["H2b"].cases, pooled["H2b"].cases) == (3, 8)
+    assert pooled["H2b"].estimate == pytest.approx(1 / 8)
+    assert (pooled["H2c"].cases, pooled["H2c"].estimate) == (alone["H2c"].cases, 600.0) == (7, 600.0)
+    for name in ("H1", "H2a", "H3a", "H3b"):
+        assert (pooled[name].cases, pooled[name].estimate) == (alone[name].cases, alone[name].estimate)
+
+
+def test_an_h2b_only_track_with_a_fault_row_is_refused():
+    pseudo = pseudo_track("A-healthy", [False] * 2, [False] * 2)
+    pseudo.rows["D"].append(row("D", "f0"))
+    with pytest.raises(ValueError, match="H2b-only track A-healthy holds a fault case"):
+        verdict([pseudo], h1_tracks=[], seed=1, iterations=10)
+
+
+def test_an_h2b_only_track_cannot_be_an_h1_track():
+    with pytest.raises(ValueError, match="A-healthy is H2b-only"):
+        verdict([pseudo_track("A-healthy", [False], [False])], h1_tracks=["A-healthy"], seed=1, iterations=10)
+
+
+def test_an_h2b_only_track_needs_a_and_d():
+    pseudo = pseudo_track("A-healthy", [False], [False])
+    del pseudo.rows["A"]
+    with pytest.raises(ValueError, match="H2b track A-healthy has no A"):
+        verdict([pseudo], h1_tracks=[], seed=1, iterations=10)
+
+
 def test_h3b_reads_c_escalation_rate():
     # One of four A answers is below L2, so C escalates 1/4; a resample reaches 50% when it draws it twice or more.
     a = [(True, "L1"), (True, "L3"), (True, "L3"), (True, "L3")]

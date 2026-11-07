@@ -41,7 +41,7 @@ SPECS = (
     Spec("H1", "H1", "D - 0R service AC@1, fault cases", 0.0, True),
     Spec("H2a", "H2", "A - D AC@1, fault cases", -0.10, True),
     Spec("H2b", "H2", "false-alarm rate A - D, healthy cases", 0.10, False),
-    Spec("H2c", "H2", "median A time to report (s), all A cases", MINUTES_15, False),
+    Spec("H2c", "H2", "median A time to report (s), all A cases outside H2b-only tracks", MINUTES_15, False),
     Spec("H3a", "H3", "C - D AC@1, A and D fault cases", -0.05, True),
     Spec("H3b", "H3", "C escalation rate, A and D fault cases", 0.50, False),
 )
@@ -92,6 +92,8 @@ class Track:
     service_only: bool = False
     # A's seconds per case, (split, recording) -> one value per repeat; empty when the track has no A.
     seconds: dict = field(default_factory=dict)
+    # Healthy pseudo-cases that enter H2b only (ADR-034): their lighter dossiers stay out of H2c's median.
+    h2b_only: bool = False
 
 
 def _mean(values):
@@ -198,11 +200,22 @@ def _need(track, label, hypothesis):
     return track.rows[label]
 
 
+def _h2b_only(track):
+    """An H2b-only track's per-case false-alarm differences, A minus D, after refusing any fault row."""
+    for label, rows in sorted(track.rows.items()):
+        fault = next((r for r in rows if not r.healthy), None)
+        if fault is not None:
+            raise ValueError(f"H2b-only track {track.name} holds a fault case under {label}: "
+                             f"{fault.split}/{fault.recording}")
+    return _paired(_need(track, "D", "H2b"), _need(track, "A", "H2b"), _healthy, _false_alarm)
+
+
 def strata(tracks, h1_tracks, rule=FIXED_RULE):
     """Each condition's per-track lists of per-case values, keyed by condition name.
 
     H1 pools the named tracks, each scored on the service. H2 and H3 pool every track that has both A and D;
-    H2c reads A's times on every track that has A.
+    H2c reads A's times on every track that has A. An H2b-only track holds healthy rows only, needs A and D, and
+    enters H2b alone.
     """
     names = {t.name: t for t in tracks}
     values = {spec.name: [] for spec in SPECS}
@@ -210,10 +223,15 @@ def strata(tracks, h1_tracks, rule=FIXED_RULE):
         if name not in names:
             raise ValueError(f"H1 track {name} has no input")
         track = names[name]
+        if track.h2b_only:
+            raise ValueError(f"H1 track {name} is H2b-only: its pseudo-cases are healthy, and H1 reads fault cases")
         if not track.service_only:
             raise ValueError(f"H1 track {name} is not scored on the service: H1 is service AC@1, give --service-only")
         values["H1"].append(_paired(_need(track, "0R", "H1"), _need(track, "D", "H1"), _fault, _correct))
     for track in tracks:
+        if track.h2b_only:
+            values["H2b"].append(_h2b_only(track))
+            continue
         if "A" in track.rows:
             a_cases = {r.case for r in track.rows["A"]}
             missing = sorted(a_cases - set(track.seconds))

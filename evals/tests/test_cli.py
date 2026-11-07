@@ -660,6 +660,53 @@ def test_verdict_refuses_an_h1_track_not_scored_on_the_service(tmp_path, capsys)
         main(args + ["--out", str(tmp_path / "v")])
 
 
+def pseudo_inputs(tmp_path, a_rows=None):
+    """An h2b-only track P: three healthy pseudo-cases, A fast (60 s) and quiet, D quiet."""
+    quiet = [(f"p{i}", "NONE|NONE", "UNKNOWN|UNKNOWN", "60", "-") for i in range(3)]
+    return ["--input", "P", "A", str(v_summary(tmp_path / "P-A.tsv", a_rows or quiet)),
+            "--input", "P", "D", str(v_summary(tmp_path / "P-D.tsv", quiet)),
+            "--service-only", "P", "--h2b-only", "P"]
+
+
+def test_verdict_reads_an_h2b_only_track_in_h2b_alone(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    out = tmp_path / "v"
+    assert main(args + pseudo_inputs(tmp_path) + ["--out", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert "H2b-only tracks: P (H2b only; not in H1, H2a, H2c, H3a, H3b)" in printed
+    with (out / "verdict.tsv").open() as handle:
+        rows = {r["name"]: r for r in csv.DictReader(handle, delimiter="\t") if r["kind"] == "condition"}
+    assert rows["H2b"]["cases"] == "6"
+    # H2c reads the lab's 9 A cases at 300 s, not P's three at 60 s.
+    assert (rows["H2c"]["cases"], rows["H2c"]["estimate"]) == ("9", "300.0000")
+
+
+def test_verdict_names_no_h2b_only_track_when_none_is_given(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    main(args + ["--out", str(tmp_path / "v")])
+    assert "H2b-only tracks: none" in capsys.readouterr().out
+
+
+def test_verdict_refuses_an_h2b_only_track_with_a_fault_case(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    mixed = [("p0", "NONE|NONE", "UNKNOWN|UNKNOWN", "60", "-"), ("c0", C_TRUTH, C_TRUTH, "60", "L3")]
+    with pytest.raises(SystemExit, match="fault case"):
+        main(args + pseudo_inputs(tmp_path, mixed) + ["--out", str(tmp_path / "v")])
+    assert not (tmp_path / "v").exists()
+
+
+def test_verdict_refuses_an_h2b_only_track_that_is_an_h1_track(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    with pytest.raises(SystemExit, match="H2b-only"):
+        main(args + pseudo_inputs(tmp_path) + ["--h1-track", "P", "--out", str(tmp_path / "v")])
+
+
+def test_verdict_refuses_an_h2b_only_track_without_input(tmp_path, capsys):
+    args, _ = verdict_inputs(tmp_path)
+    with pytest.raises(SystemExit, match="--h2b-only names the track Q"):
+        main(args + ["--h2b-only", "Q", "--out", str(tmp_path / "v")])
+
+
 def test_verdict_refuses_an_a_time_that_is_not_a_number(tmp_path, capsys):
     args, files = verdict_inputs(tmp_path)
     v_summary(files[("L", "A")], [("c0", C_TRUTH, C_TRUTH, "-", "L3")])
