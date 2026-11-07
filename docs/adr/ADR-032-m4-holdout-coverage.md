@@ -54,3 +54,7 @@ The check for M4 (vision §8) requires that A covers at least 200 holdout cases 
 - **TT has been seen.** BARO's reproduction read TT's truth labels and BARO's ranks on it (ADR-024). Neither the agent nor the rules were tuned on it, but TT is not as unseen as holdout B. `docs/benchmark-limits.md` states this.
 - **Converter risk.** The converter's holdout and RE2-SS paths are untested (STATE follow-up), and TT's 68 services are new to it. A dry check of headers and counts, with no scoring, runs before 2026-12-07 (`odd/tasks/m4-plans.md` T4).
 - **CPU time.** About 40 CPU hours of A become fixed in M4's three weeks.
+
+## Amendment (2026-11-07)
+
+A's commitment rises to ≈ 67 CPU hours. [ADR-034](ADR-034-rcaeval-healthy-pseudo-cases.md) adds the 150 healthy pseudo-cases of holdouts A and B to H2b, and A runs on all of them: about 27 more hours at ~11 minutes a case. The case counts of Decision 1 and the M4 check do not count the pseudo-cases. Decided before any holdout was read.

@@ -16,12 +16,16 @@ What is already known about these cases: nothing beyond their counts. RE2-SS (So
 
 ## Hypothesis
 
-Descriptive on its own. This track feeds the family plan: H1 (D − 0R, service AC@1), H2a, H2c, H3a and H3b. No decision is taken on holdout B alone. ADR-022 names it the stronger test of 0R's resource rule, since R-RES was motivated by RE2-OB dev.
+Descriptive on its own. This track feeds the family plan: H1 (D − 0R, service AC@1), H2a, H2b (its pseudo-cases, amended 2026-11-07), H2c, H3a and H3b. No decision is taken on holdout B alone. ADR-022 names it the stronger test of 0R's resource rule, since R-RES was motivated by RE2-OB dev.
 
 ## Cases and split
 
 - Split: RCAEval holdout B, RE2-SS repetitions 1, 2 and 3; manifest split `holdout` as the converter writes it.
-- Cases: 90 fault cases over the three repetitions (6 faults: `cpu`, `mem`, `disk`, `delay`, `loss`, `socket`), each repetition's count as `--check-only` prints it. No healthy pseudo-case: the converter produces none.
+- Cases: 90 fault cases over the three repetitions (6 faults: `cpu`, `mem`, `disk`, `delay`, `loss`, `socket`), each repetition's count as `--check-only` prints it.
+- Healthy pseudo-cases (amended 2026-11-07, [ADR-034](../../docs/adr/ADR-034-rcaeval-healthy-pseudo-cases.md)): 90, one per fault case, built by `convert-rcaeval --healthy`.
+  - The windows are `[inject − 12 m, inject − 6 m)` and `[inject − 6 m, inject)`, and the truth is `NONE|NONE`; no row at or after `inject_time` enters them.
+  - Their split is `holdout`, as the fault cases', and their blinded names differ from the fault cases'.
+  - They feed H2b only, as the separate track `B-healthy` (`verdict --h2b-only`). They stay out of H2c, whose median reads A's fault cases (human decision of 2026-11-07).
 - Traffic is empty: Sock Shop has no traces, so the converter writes an empty traffic answer and reads no `traces.csv` (`convert.py` docstring). Every config reads the same empty section.
 - The case is the unit. Recording ids are sha256 of `RE2-SS/<case>/<rep>`, distinct across repetitions.
 - First read of this holdout: yes. Each config reads it once.
@@ -42,16 +46,18 @@ All in decision mode, `tables` view, `plain` report, `--dataset re2-ss`, topolog
 - **D's repeats and the cloud bound.** A cloud run may make at most 60 samples (`MAX_CLOUD_SAMPLES=60`, `replay-agent.sh`:159). D runs each repetition three times with `--repeats 1`, one repetition's cases a run (30 at the expected count): nine runs, repeat r being the r-th run of each repetition. Should a repetition hold more than 60 cases, its run is split by `--faults cpu,mem,disk` and `--faults delay,loss,socket`, and both halves form that repeat.
 - **C for display and C for the verdict.** `escalate` refuses a case present twice on one side (`escalation.py`:77-78), so the C table here uses D's first repeat only. The H3 verdict uses `verdict`'s in-process C, with every D repeat (verdict spec, REQ-7).
 - Cost and time: A takes about 16 h of CPU at RE2-OB dev's median, at most 53 h at the deadline; Sock Shop's dossier size differs, which is why ADR-023 kept a margin. D costs about $0.35 for 90 cases × 3 repeats.
+- Pseudo-cases (ADR-034): every config above runs on them too, as separate runs. A takes about 16.5 h more (90 × ~11 minutes), at most 53 h at the deadline. D runs each repetition's pseudo-cases three times with `--repeats 1`, nine runs at about $0.035 each, about $0.32; a repetition above 60 pseudo-cases is split as its fault cases are. C is not computed on them: `escalate` and `verdict` skip healthy rows.
 
 ## Metric
 
-All on the service only (ADR-020), over the 90 fault cases:
+All on the service only (ADR-020), over the 90 fault cases, and on the 90 pseudo-cases for false alarms:
 
 - AC@1, AC@3, AC@5 and Avg@5, with their chance levels over `re2-ss.json`'s services, each rate with a Wilson 95% CI; per fault and pooled.
 - Abstentions, coverage and selective accuracy; verified-correct and the L1 rate from the `level` column.
 - Paired differences: D − 0R (H1's statistic on this track), A − 0R, D − 0, A − 0, A − D, C − D. Exact two-sided McNemar where both configs have one outcome per case (0, 0R, A, C); the case-level cluster bootstrap 95% interval for any difference with D (ADR-015).
 - C: escalation count and rate (Wilson 95% CI) and each trigger's count, on D's first repeat.
 - A's time to report: median and maximum of `seconds`.
+- False alarms on the 90 pseudo-cases, per config, with a Wilson 95% CI; `score` reports them on its `healthy` line. D's rate is over its 270 runs.
 - All secondary or descriptive; the family's tests run once, in the H1–H3 plan.
 
 ## Decision rule
@@ -81,7 +87,30 @@ infra/scripts/replay-agent.sh --dataset re2-ss --route cloud --mode decision --s
 infra/scripts/replay-agent.sh --dataset re2-ss --route cloud --mode decision --split holdout --repeats 1   # repeat 3
 ```
 
-Merge each config's runs into one summary per label, with the same `merge` shell function and header check as `evals/plans/2026-11-06-holdout-a-re2ob.md`, into `$R/merged/` with `R=evals/results/<run date>-holdout-b-re2ss`: `0.tsv`, `0R.tsv`, `A.tsv` (three runs each), `D1.tsv` (the three repeat-1 runs) and `D.tsv` (all nine D runs). Then, from `evals/`:
+Pseudo-cases (ADR-034). From `evals/`, convert the three repetitions' healthy pseudo-cases into their own directories (the defaults with `--healthy`, `evals/out/rcaeval/re2-ss-rep{1,2,3}-healthy/`, git-ignored; the converter refuses a directory that holds fault cases):
+
+```
+for REP in 1 2 3; do
+  python3 -I -c 'import sys; sys.path.insert(0, "."); from kintsugi_evals.cli import main; sys.exit(main(sys.argv[1:]))' \
+    convert-rcaeval --system re2-ss --rep $REP --healthy --allow-holdout B
+done
+```
+
+From the repository root, for each `REP` in 1, 2 and 3, the same six runs with `--faults healthy`:
+
+```
+export REPLAY_DIR=evals/out/rcaeval/re2-ss-rep$REP-healthy
+infra/scripts/replay-agent.sh --dataset re2-ss --route rules --mode decision --split holdout --faults healthy --rules v1
+infra/scripts/replay-agent.sh --dataset re2-ss --route rules --mode decision --split holdout --faults healthy --rules v2
+infra/scripts/replay-agent.sh --dataset re2-ss --route local --mode decision --split holdout --faults healthy --report-timeout 2100
+infra/scripts/replay-agent.sh --dataset re2-ss --route cloud --mode decision --split holdout --faults healthy --repeats 1   # repeat 1
+infra/scripts/replay-agent.sh --dataset re2-ss --route cloud --mode decision --split holdout --faults healthy --repeats 1   # repeat 2
+infra/scripts/replay-agent.sh --dataset re2-ss --route cloud --mode decision --split holdout --faults healthy --repeats 1   # repeat 3
+```
+
+Each D run makes one repetition's pseudo-cases (30 at the expected count), within `MAX_CLOUD_SAMPLES=60`.
+
+Merge each config's runs into one summary per label, with the same `merge` shell function and header check as `evals/plans/2026-11-06-holdout-a-re2ob.md`, into `$R/merged/` with `R=evals/results/<run date>-holdout-b-re2ss`: `0.tsv`, `0R.tsv`, `A.tsv` (three fault-case runs each), `D1.tsv` (the three fault-case repeat-1 runs) and `D.tsv` (all nine fault-case D runs). The pseudo-case runs go into separate per-config healthy summaries, never into those files: `healthy-0.tsv`, `healthy-0R.tsv`, `healthy-A.tsv` (three pseudo-case runs each) and `healthy-D.tsv` (all nine pseudo-case D runs). The family plan reads them as the H2b-only track `B-healthy`. Then, from `evals/`:
 
 ```
 R=../evals/results/<run date>-holdout-b-re2ss
@@ -91,13 +120,20 @@ python3 -m kintsugi_evals escalate --a $R/merged/A.tsv --d $R/merged/D1.tsv --ru
 python3 -m kintsugi_evals score --service-only --topology $T --seed 20261106 --iterations 10000 \
   --label 0 $R/merged/0.tsv --label 0R $R/merged/0R.tsv --label A $R/merged/A.tsv \
   --label D $R/merged/D.tsv --label C $R/C-summary.tsv --out $R
+python3 -m kintsugi_evals score --service-only --topology $T --seed 20261106 --iterations 10000 \
+  --label 0 $R/merged/healthy-0.tsv --label 0R $R/merged/healthy-0R.tsv --label A $R/merged/healthy-A.tsv \
+  --label D $R/merged/healthy-D.tsv --out $R/healthy
 ```
 
-Check each summary first: one repetition's cases a run (90 rows in `merged/0`, `0R`, `A`, `D1`; 270 in `merged/D`), split `holdout`, view `tables`, report `plain`, and the expected `model` and `reportTimeout`.
+Check each summary first: one repetition's cases a run (90 rows in `merged/0`, `0R`, `A`, `D1`; 270 in `merged/D`; 90 in `merged/healthy-0`, `healthy-0R`, `healthy-A`; 270 in `merged/healthy-D`), split `holdout`, view `tables`, report `plain`, and the expected `model` and `reportTimeout`. Every row of a `healthy-*` file has fault `healthy` and truth `NONE|NONE`, and no row of the other files does; `verdict` refuses an H2b-only track holding a fault row. The second `score` reports the pseudo-cases' false alarms on its `healthy` line, in `$R/healthy/`.
 
 ## Read once
 
 - Holdout B is read once, by the runs above under this plan. A second read is exploratory, labelled in its plan and in `docs/benchmark.md`, and never replaces the first.
 - The result directory's `notes.md` records the holdout name (`RCAEval holdout B, RE2-SS`), this plan's path and the run directories behind each merged file; `score` and `escalate` do not write them.
 - Nothing from this read is committed before 2026-12-07: `check-freeze.sh` condition 4 fails on any committed holdout B row dated earlier.
-- Holdout B is never cut (ADR-032). M4's case counts: A 75 + 60 + 90 = 225 ≥ 200; D 75 + 60 + 90 + 90 = 315 ≥ 300.
+- Holdout B is never cut (ADR-032). M4's case counts, which do not count the pseudo-cases: A 75 + 60 + 90 = 225 ≥ 200; D 75 + 60 + 90 + 90 = 315 ≥ 300.
+
+## Amendments
+
+- **2026-11-07, healthy pseudo-cases ([ADR-034](../../docs/adr/ADR-034-rcaeval-healthy-pseudo-cases.md)).** Written before any holdout was read. The track adds holdout B's 90 healthy pseudo-cases (`convert-rcaeval --healthy --allow-holdout B`, the 12 minutes before each injection as two 6-minute windows, truth `NONE|NONE`). Configs 0, 0R, A and D replay them with `--faults healthy`, D as three `--repeats 1` runs per repetition, and their rows are merged into separate per-config healthy summaries (`merged/healthy-<label>.tsv`), which the family plan reads as the H2b-only track `B-healthy`. Revised the same day, still before any holdout read (human decision): the pseudo-cases enter H2b only, not H2c, so they are not merged into the fault-case summaries and `D1.tsv` holds fault cases only. A's CPU time rises by about 16.5 h and D's cost by about $0.32. Nothing else in this plan changes.

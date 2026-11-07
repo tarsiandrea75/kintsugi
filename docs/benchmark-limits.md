@@ -13,6 +13,13 @@ The limits `docs/benchmark.md` must state next to H1–H3 (vision §7, M4). `ben
 - **One fault at a time, no load generator, no concurrent traffic.** F3's parameter is fixed, and F4 and F8 are not in the agent eval (`odd/tasks/lab-realism-min.md`, by the cut order of vision §7).
 - **Holdout-2's parameters vary for F1 and F2 only**, uniformly per case over declared values, so each value has a few cases, not a fixed count.
 
+- **RCAEval's healthy cases are pseudo-cases.** H2b reads 150 of its 165 healthy cases from the 12 minutes before each RCAEval injection, as two 6-minute windows, kept by a dev gate on D (9/90 false alarms) ([ADR-034](adr/ADR-034-rcaeval-healthy-pseudo-cases.md)).
+  - A 6-minute window holds about 0.6× the events of a 10-minute one, so count floors such as `SLOW_TIMEOUTS` and `COUNT_MIN` fire less often, which leans toward fewer false alarms.
+  - On RE2-OB dev, none of the 30 pre-injection windows held a WARN or ERROR log line, so the log facts were silent on every pseudo-case.
+  - Their false-alarm level is not comparable with the lab's; only the paired A − D difference, on identical windows, is read across both. The pooled H2b weighs each case once, so the pseudo-cases carry about 91% of it.
+  - H2c excludes them: they enter H2b only (`verdict --h2b-only`), because A's times on their smaller dossiers would pull H2c's median down in A's favour. H2c reads A's fault cases and the lab's 15 real healthy controls.
+  - D's repeats varied a lot on dev: 0, 3 and 6 false alarms in 30 from the same prompts.
+
 ## The agent and its tuning
 
 - **The prompt and dossier changes of 2026-11-03 were chosen after diagnosing the same 30 RE2-OB dev cases** they were measured on: the latency pairs, the resource warrant, the ranked report and suspects with an abstention. Every gain on dev is a promise until the holdouts read it once (`odd/tasks/d-abstention.md`, `latency-pairs.md`, `resource-warrant.md`, `ranked-report.md`).

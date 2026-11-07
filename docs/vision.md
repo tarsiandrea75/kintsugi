@@ -83,7 +83,7 @@ RCAEval is MIT-licensed: 735 cases on 3 systems written by others, with 17 publi
 
 - TT has 68 services, beyond the local `num-ctx` of 8192. TT and RE3 run on Config 0, 0R, D and BARO (one of the published baselines) only.
 - Windows: 10 minutes on each side of `inject_time`, as the published baselines get them. The lab keeps hiding the fault's start (ADR-011); the difference is documented.
-- Healthy pseudo-cases come from windows before the injection.
+- Healthy pseudo-cases come from windows before the injection (two 6-minute windows, since RCAEval records 12 minutes before the fault; [ADR-034](adr/ADR-034-rcaeval-healthy-pseudo-cases.md)).
 - The truth never reaches the agent.
 - A Python converter under `evals/` turns the case files into the case dossier the agent reads. [ADR-020](adr/ADR-020-rcaeval-dataset-converter.md) pins the dataset revision, amends ADR-001's boundary for the converter and fixes the category map.
 
