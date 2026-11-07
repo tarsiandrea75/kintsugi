@@ -137,6 +137,8 @@ def _parser():
     bar.add_argument("--system", required=True, choices=["re2-ob", "re2-ss", "re2-tt"])
     bar.add_argument("--rep", required=True, type=_repetition, metavar="N|all",
                      help="the repetition; only RE2-OB repetition 1, and 'all' on RE2-TT, are accepted")
+    bar.add_argument("--allow-holdout", choices=["TT"],
+                     help="read RE2-TT, holdout TT (ADR-032); only a committed plan may pass it")
     bar.add_argument("--out", help="the output directory (default: evals/out/rcaeval/baro-<system>-rep<rep>/)")
     audit = commands.add_parser("audit-latency", help="classify the latency values a run's evidence cites")
     audit.add_argument("--label", nargs=2, action="append", default=[], metavar=("NAME", "DIR"),
@@ -321,14 +323,14 @@ def _paired_unless_healthy_only(first, second, args):
     """The paired AC@1 test, or None when the configs share cases but every shared case is healthy.
 
     A healthy-only run (RCAEval pseudo-cases, ADR-034) has no fault case to pair; configs sharing no case at all
-    are still refused, since that means two different case sets.
+    are still refused, since that means two different case sets. The data decides, before the test runs, so an
+    error inside the test is never taken for a healthy-only run.
     """
-    try:
-        return paired(first, second, seed=args.seed, iterations=args.iterations)
-    except ValueError:
-        if {r.case for r in first} & {r.case for r in second}:
-            return None
-        raise
+    shared = {r.case for r in first} & {r.case for r in second}
+    shared_faults = {r.case for r in first if not r.healthy} & {r.case for r in second if not r.healthy}
+    if shared and not shared_faults:
+        return None
+    return paired(first, second, seed=args.seed, iterations=args.iterations)
 
 
 def _check_names(inputs):
@@ -388,13 +390,15 @@ def _score(args):
                      args.topology, services, policy, levels)
     sys.stdout.write(report)
     if args.out:
+        # The provenance first, so a run that fails to record it leaves no output without one.
+        if found is not None:
+            Path(args.out).mkdir(parents=True, exist_ok=True)
+            provenance.write(Path(args.out), "score", found)
         _write(Path(args.out), inputs, scores, pairs, holm_p, report)
         if ranked:
             _write_ranked(Path(args.out), ranked, services)
         if policy:
             _write_policy(Path(args.out), policy)
-        if found is not None:
-            provenance.write(Path(args.out), "score", found)
     return 0
 
 
@@ -474,7 +478,7 @@ def baro_rcaeval(args):
     root = args.root or os.environ.get("KINTSUGI_RCAEVAL_DIR") or "~/data/rcaeval"
     out = args.out or convert.REPO / "evals" / "out" / "rcaeval" / f"baro-{args.system}-rep{args.rep}"
     try:
-        summary = baro.run(root, args.system, args.rep, out)
+        summary = baro.run(root, args.system, args.rep, out, args.allow_holdout)
     except (convert.HoldoutRefused, ValueError, OSError) as error:
         raise SystemExit(f"baro-rcaeval: {error}") from None
     print(f"ranked {summary.cases} cases of {baro.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
@@ -594,14 +598,15 @@ def _escalate(args):
     report = _escalate_report(args, pairs, evaluations, chosen, cap_fails, services)
     sys.stdout.write(report)
     out.mkdir(parents=True, exist_ok=True)
+    # The provenance first, so a run that fails to record it leaves no output without one.
+    if found is not None:
+        provenance.write(out, "escalate", found)
     _write_grid(out, evaluations, chosen)
     choices = escalation.compose(pairs, chosen.rule)
     _write_tsv(out / "escalation.tsv", ["split", "recording", "source", "trigger"],
                [[*c.case, c.source, c.trigger or "-"] for c in choices])
     _write_c_summary(out, args, choices)
     (out / "escalate.txt").write_text(report)
-    if found is not None:
-        provenance.write(out, "escalate", found)
     return 0
 
 
@@ -728,10 +733,11 @@ def _verdict(args):
     report = _verdict_report(result, sources, args, FIXED_RULE)
     sys.stdout.write(report)
     out.mkdir(parents=True, exist_ok=True)
-    _write_verdict(out, result)
-    (out / "verdict.txt").write_text(report)
+    # The provenance first, so a run that fails to record it leaves no output without one.
     if found is not None:
         provenance.write(out, "verdict", found)
+    _write_verdict(out, result)
+    (out / "verdict.txt").write_text(report)
     return 0
 
 

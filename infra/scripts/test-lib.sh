@@ -946,6 +946,17 @@ expect "re2-ob needs its recordings directory, which has no default" \
     --dataset re2-ob --mode decision 2>&1; echo "exit $?")" \
   "--dataset re2-ob needs REPLAY_DIR, the converter's output directory (convert-rcaeval --out); the recordings stay\
  outside the repository"$'\n'"exit 2"
+# Every dataset's topology is committed, so the refusal of a missing one runs on a copy of the script and lib.sh in a
+# temporary tree with no topology directory: lib.sh sets REPO_DIR from its own place, so the copy reads that tree.
+no_topology="$KEY_DIR/no-topology"
+mkdir -p "$no_topology/infra/scripts"
+cp "$(dirname "${BASH_SOURCE[0]}")/replay-agent.sh" "$(dirname "${BASH_SOURCE[0]}")/lib.sh" \
+  "$no_topology/infra/scripts/"
+expect "a dataset whose topology file is missing exits 2 before anything runs" \
+  "$(REPLAY_DIR="$rcaeval_dir" PATH="$STUB_DIR:$PATH" "$no_topology/infra/scripts/replay-agent.sh" --route local \
+    --dataset re2-tt --mode decision --faults cpu 2>&1; echo "exit $?")" \
+  "--dataset re2-tt needs its topology, agent/src/main/resources/topology/re2-tt.json, which does not exist yet\
+"$'\n'"exit 2"
 expect "re2-ob's default faults are all six, so a directory without them stops the run before Maven" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode decision | grep -vF '....  dataset'; echo "exit $?")" \
   "no decision or dossier recording of mem, disk, delay, loss, socket in split dev of $rcaeval_dir/recordings.tsv\
@@ -1165,6 +1176,22 @@ expect "an input with no rows is refused" \
   "merge-summaries: $merge_dir/r1/empty.tsv holds no rows; nothing written
 exit 1"
 expect "a refused merge leaves no temporary file behind" "$(ls -A "$merge_dir/out")" "D.tsv"
+# awk reads an operand like name=value as an assignment, not a file: a relative input with '=' in its name still merges,
+# and a refusal names it as given. stdin is empty, so a merge that reads it instead of the files fails, never waits.
+mkdir -p "$merge_dir/eq"
+cp "$merge_dir/r1/summary.tsv" "$merge_dir/eq/run=1.tsv"
+cp "$merge_dir/r2/summary.tsv" "$merge_dir/eq/run=2.tsv"
+printf '%s\n' "$summary_header" >"$merge_dir/eq/run=3.tsv"
+expect "relative inputs named with '=' are read as files" \
+  "$(cd "$merge_dir/eq" && "$merge_summaries" merged.tsv run=1.tsv run=2.tsv </dev/null 2>&1; echo "exit $?")" \
+  "merged 4 rows from 2 files into merged.tsv
+exit 0"
+expect "the merge of inputs named with '=' holds their rows" "$(cat "$merge_dir/eq/merged.tsv")" \
+  "$(cat "$merge_dir/r1/summary.tsv"; tail -n +2 "$merge_dir/r2/summary.tsv")"
+expect "a refusal names an input with '=' as it was given" \
+  "$(cd "$merge_dir/eq" && "$merge_summaries" refused.tsv run=1.tsv run=3.tsv </dev/null 2>&1; echo "exit $?")" \
+  "merge-summaries: run=3.tsv holds no rows; nothing written
+exit 1"
 expect "a missing input is refused" \
   "$("$merge_summaries" "$merge_dir/out/m.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/nowhere.tsv" 2>&1; \
     echo "exit $?")" \

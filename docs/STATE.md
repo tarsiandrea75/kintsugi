@@ -92,15 +92,14 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
     - H2c excludes the pseudo-cases (`verdict --h2b-only`).
     - A's M4 commitment is about 67 CPU hours, about 7 of M4's 20 nights.
     - Follow-up: `score`'s healthy-only fallback catches a broad `ValueError` (`evals/kintsugi_evals/cli.py`:311-316, review advisory).
-22. **Next:** the M4 plan gaps, all before 2026-12-07 (`odd/tasks/m4-plans.md` Progress):
-    - a committed summary-merge script;
-    - holdout name and plan path recorded in result directories;
-    - `benchmark` rendering the verdicts;
-    - check-freeze condition 4 covering TT;
-    - healthy pseudo-cases for RCAEval (H2b now rests on 15 lab controls; a human decision);
-    - test-lib coverage of the missing-topology refusal;
-    - `--check-only` never printing an unknown prefix;
-    - `openspec/specs/agent/spec.md`:693.
+22. M4 tooling gaps: done on `feat/m4-gaps` (`odd/tasks/m4-gaps.md`).
+    - `infra/scripts/merge-summaries.sh` merges several runs of one config.
+    - `score`, `escalate` and `verdict` write `provenance.tsv` (holdout, plan with its sha256, commit) and refuse a holdout read without `--holdout` and `--plan`.
+    - `benchmark` renders the H1–H3 verdicts.
+    - check-freeze condition 4 covers TT; the BARO TT reproduction is the only, dated exemption.
+    - `baro-rcaeval` needs `--allow-holdout TT`.
+    - `--check-only` never names prefixes.
+23. **Next:** the human tags `freeze-m3` on 2026-12-01, then the holdout-2 seed, schedule and recording (Dec 1–5); `check-freeze.sh` must pass. Until then the agent may still change. Follow-up: `test-lib.sh` does not run `test-check-freeze.sh`.
   - On 2026-12-01 the human tags `freeze-m3`; then the seed, the schedule and holdout-2's recording (2026-12-01 to 05, `docs/setup.md` "Record holdout-2"), and `check-freeze.sh` must pass. Still the human's: reading the stop rule (vision §7). The holdouts are out until M4.
 
 ## Local branch chains (not pushed)
@@ -122,7 +121,7 @@ Before that (journal `docs/journal/2026-11-02-01.md`), all on local branches, no
 - `feat/evidence-dossier-01` → `-02` → `-03` → `-03b` → `-03c` → `-03d` → `-04a` → `-04b` → `-05a` → `-05b` → `-06`
 - `feat/cloud-route` → `-02` → `-03` → `-04` → `-05`
 - `feat/f3-caller-config` → `feat/evidence-settling` → `feat/replay-harness` → `feat/dossier-latency` → `fix/cloud-cut-report` → `feat/report-length` → `feat/local-dossier-timing` → `feat/local-deadlines` → `feat/evidence-by-reference` → `feat/report-field-order` → `feat/dossier-change-column`
-- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` → `feat/verification-levels` → `-01-line-facts` → `-02-level-checks` → `-03-stored-level` → `-04-level-report` → `-05-latency-change` → `feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`, then from `main`: `fix/f2-repeated-service`, `test/assessed-decoy`, `fix/holdout2-policy-split`, `docs/close-2026-11-06`, `feat/config-c`, `feat/m4-plans` (from `main`), `feat/rcaeval-healthy` (current, from `feat/m4-plans`).
+- Since 2026-10-24, in creation order: `feat/loopback-api-guard`, `feat/decision-instrument`, `feat/service-assessment`, `docs/vision-revision`, `feat/eval-protocol`, `feat/service-assessment-close`, `feat/rules-baseline` (from `b30ae74`; worktree `../kintsugi-worktrees/rules-baseline`), `feat/benchmark-v0` (from `7c1efb4` with `feat/service-assessment-close` merged), `feat/qwen-dev`, `feat/hybrid`, `feat/topology-data` → `-01-call-sites` → `-02-derived`, `feat/rcaeval-converter` → `-01-core` → `-02-replay` → `feat/hybrid-rcaeval` → `feat/resource-facts` → `-01-converter` → `-02-dossier` → `-03-rules` → `feat/rcaeval-dev-baselines` → `-01-baro` → `feat/rcaeval-ranked-metrics` → `feat/rcaeval-baro-reproduction` → `feat/d-abstention` → `feat/latency-pairs` → `feat/resource-warrant` → `feat/ranked-report` → `-01-scorer` → `-02-abstain-suspects` → `feat/check-freeze` → `chore/follow-ups-2026-11-03` → `feat/policy-gate` → `feat/lab-realism-min` → `-01-injector` → `-02-harness` → `-03-healthy-replay` → `feat/verification-levels` → `-01-line-facts` → `-02-level-checks` → `-03-stored-level` → `-04-level-report` → `-05-latency-change` → `feat/hybrid-today` → `feat/context-full` → `feat/l3-callee` → `feat/decoy-categories`, then from `main`: `fix/f2-repeated-service`, `test/assessed-decoy`, `fix/holdout2-policy-split`, `docs/close-2026-11-06`, `feat/config-c`, `feat/m4-plans` (from `main`), `feat/rcaeval-healthy` (from `feat/m4-plans`), `feat/m4-gaps` (current, from `main`).
 
 Since 2026-11-06 `main` holds every chain (fast-forward, no push).
 

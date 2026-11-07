@@ -197,6 +197,25 @@ def test_score_reports_healthy_only_configs_without_a_paired_test(tmp_path, caps
     assert len((tmp_path / "out" / "paired.tsv").read_text().splitlines()) <= 1
 
 
+def test_score_does_not_hide_a_paired_test_error_on_shared_fault_cases(tmp_path, capsys, monkeypatch):
+    # The healthy-only exception is decided by the data, not by catching any ValueError the paired test raises.
+    import kintsugi_evals.cli as cli
+
+    def broken(*args, **kwargs):
+        raise ValueError("bootstrap broke")
+
+    monkeypatch.setattr(cli, "paired", broken)
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    write_tsv(first / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1"),
+                                      ("healthy", "COMPLETED", "NONE|NONE", "UNKNOWN|UNKNOWN", "r1-healthy")])
+    write_tsv(second / "summary.tsv", [("F1", "COMPLETED", TRUTH, TRUTH, "r1-F1"),
+                                       ("healthy", "COMPLETED", "NONE|NONE", "UNKNOWN|UNKNOWN", "r1-healthy")])
+    error = error_of(["score", "--label", "A", str(first), "--label", "D", str(second)], capsys)
+    assert "bootstrap broke" in str(error.code)
+
+
 def test_score_rejects_iterations_below_one_at_parse_time(tmp_path, capsys):
     local, _ = two_runs(tmp_path)
     error = error_of(["score", str(local), "--iterations", "0"], capsys)
@@ -799,6 +818,30 @@ def test_escalate_and_score_into_one_dir_append_one_provenance_row_each(tmp_path
     assert main(escalate_args(a, d, out) + ["--rule", "k=L2,t=off"] + flags) == 0
     assert main(["score", "--label", "C", str(out / "C-summary.tsv"), "--out", str(out)] + flags) == 0
     assert [(r["command"], r["holdout"]) for r in provenance_rows(out)] == [("escalate", "A"), ("score", "A")]
+
+
+def test_score_writes_no_output_when_its_provenance_cannot_be_recorded(tmp_path, capsys):
+    # provenance.tsv is written before the score outputs, so a failed record never leaves outputs without one.
+    local, cloud = holdout_runs(tmp_path)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "provenance.tsv").write_text("something\telse\n")
+    with pytest.raises(SystemExit, match="provenance.tsv does not start with"):
+        main(["score", "--label", "A", str(local), "--label", "D", str(cloud), "--out", str(out_dir),
+              "--holdout", "A", "--plan", str(PLAN)])
+    assert sorted(p.name for p in out_dir.iterdir()) == ["provenance.tsv"]
+
+
+def test_escalate_writes_no_output_when_its_provenance_cannot_be_recorded(tmp_path, capsys):
+    a, d = c_inputs(tmp_path)
+    for path in (a, d):
+        path.write_text(path.read_text().replace("\tdev\t", "\tholdout\t"))
+    out = tmp_path / "c"
+    out.mkdir()
+    (out / "provenance.tsv").write_text("something\telse\n")
+    with pytest.raises(SystemExit, match="provenance.tsv does not start with"):
+        main(escalate_args(a, d, out) + ["--rule", "k=L2,t=off", "--holdout", "A", "--plan", str(PLAN)])
+    assert sorted(p.name for p in out.iterdir()) == ["provenance.tsv"]
 
 
 def test_escalate_on_dev_writes_no_provenance(tmp_path, capsys):

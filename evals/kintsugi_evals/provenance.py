@@ -6,8 +6,8 @@ tool that read the holdout, not by hand. They refuse an input holding a row of a
 
 Why fail closed: a split this module does not know as a non-holdout split (lab dev, stress and probe; RCAEval dev;
 BARO's reference over RE2-TT) counts as a holdout, so a new split name cannot slip a holdout read past the record.
-A committed result's own input copies (evals/results/<result>/inputs/) are exempt: they were read once already, and
-re-scoring them regenerates that result rather than reading the holdout again.
+A committed result's own input copies (evals/results/<result>/inputs/), tracked by git and unchanged since HEAD, are
+exempt: they were read once already, and re-scoring them regenerates that result rather than reading the holdout again.
 """
 
 import csv
@@ -65,9 +65,20 @@ def resolve(holdout, plan):
 
 
 def committed_copy(path):
-    """Whether `path` is an input copy of a committed result, evals/results/<result>/inputs/<label>-summary.tsv."""
+    """Whether `path` is an input copy of a committed result, evals/results/<result>/inputs/<label>-summary.tsv, that
+    git tracks and that is unchanged since HEAD. Fails closed: when git is missing or cannot tell, it is no copy."""
     resolved = summary_path(path).resolve()
-    return resolved.parent.name == "inputs" and resolved.parent.parent.parent == RESULTS
+    if resolved.parent.name != "inputs" or resolved.parent.parent.parent != RESULTS:
+        return False
+    relative = resolved.relative_to(REPO).as_posix()
+    for args in (["ls-files", "--error-unmatch", "--", relative], ["diff", "--quiet", "HEAD", "--", relative]):
+        try:
+            done = subprocess.run(["git", *args], cwd=REPO, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if done.returncode != 0:
+            return False
+    return True
 
 
 def guard(inputs, found):

@@ -450,7 +450,8 @@ def check(root, system, rep, allow_holdout=None, topology=None):
     """Validates repetition `rep` of `system` without converting it: the case directories (counted per fault), the
     files `convert_case` opens, their header columns, the inject time, the metric prefixes against the topology, and
     whether each root cause is a topology service. It reads only directory names, the first line of each CSV and
-    `inject_time.txt`, writes nothing, and refuses a holdout unless named, like `convert`."""
+    `inject_time.txt`, writes nothing, and refuses a holdout unless named, like `convert`. Each anomaly is
+    `(kind, detail, cases)`; unknown metric prefixes are one row whose detail is their number, `<k> distinct`."""
     split = split_of(system, rep, allow_holdout)
     services = set(_services(system, topology))
     system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
@@ -458,7 +459,7 @@ def check(root, system, rep, allow_holdout=None, topology=None):
     stray = sum(1 for p in system_dir.iterdir() if p.is_dir() and not CASE_NAME.match(p.name))
     files = ["simple_metrics.csv", "logs.csv", "inject_time.txt"] + (["traces.csv"] if system in TRACED_SYSTEMS
                                                                      else [])
-    faults, anomalies = Counter(), Counter()
+    faults, anomalies, unknown_prefixes, prefix_cases = Counter(), Counter(), set(), 0
     for case, case_dir in chosen:
         service, fault = CASE_NAME.match(case).group("service", "fault")
         faults[fault] += 1
@@ -480,8 +481,12 @@ def check(root, system, rep, allow_holdout=None, topology=None):
                         anomalies[("missing_column", f"{name}:{column}")] += 1
                 if name == "simple_metrics.csv":
                     prefixes = {normalize(column) for column in header if column != "time"}
-                    for prefix in prefixes - services - EXTRA_PREFIXES:
-                        anomalies[("unknown_metric_prefix", prefix)] += 1
+                    unknown = prefixes - services - EXTRA_PREFIXES
+                    unknown_prefixes |= unknown
+                    prefix_cases += bool(unknown)
+    # An unknown prefix could name a root cause, so only how many there are is reported, never their names.
+    if unknown_prefixes:
+        anomalies[("unknown_metric_prefix", f"{len(unknown_prefixes)} distinct")] = prefix_cases
     rows = sorted((kind, detail, n) for (kind, detail), n in anomalies.items())
     return Check(system, rep, split, HOLDOUTS[system] if split == "holdout" else None, len(chosen), faults, stray,
                  rows)

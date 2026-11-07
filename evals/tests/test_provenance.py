@@ -97,6 +97,56 @@ def test_a_committed_input_copy_regenerates_without_the_provenance():
     provenance.guard([(str(copy), read_summary(copy, label="A"))], None)
 
 
+@pytest.fixture
+def results_repo(tmp_path, monkeypatch):
+    """A throwaway git repository standing in for the real one, with one committed holdout copy at
+    evals/results/r/inputs/A-summary.tsv and the module pointed at it."""
+    repo = tmp_path / "repo"
+    inputs = repo / "evals" / "results" / "r" / "inputs"
+    inputs.mkdir(parents=True)
+    source, _ = rows_of(tmp_path, "holdout")
+    (inputs / "A-summary.tsv").write_bytes((source / "summary.tsv").read_bytes())
+    for args in (["init", "-q"], ["add", "-A"],
+                 ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "result"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    monkeypatch.setattr(provenance, "REPO", repo)
+    monkeypatch.setattr(provenance, "RESULTS", repo / "evals" / "results")
+    return inputs
+
+
+def guard_copy(path):
+    provenance.guard([(str(path), read_summary(path, label="A"))], None)
+
+
+def test_a_tracked_committed_copy_is_exempt(results_repo):
+    guard_copy(results_repo / "A-summary.tsv")
+
+
+def test_an_untracked_file_at_a_committed_copy_path_is_refused(results_repo):
+    # The exemption is for copies git holds, not for any file put where one would be.
+    untracked = results_repo.parent.parent / "s" / "inputs"
+    untracked.mkdir(parents=True)
+    (untracked / "A-summary.tsv").write_bytes((results_repo / "A-summary.tsv").read_bytes())
+    with pytest.raises(ValueError, match="holdout"):
+        guard_copy(untracked / "A-summary.tsv")
+
+
+def test_a_tracked_copy_changed_since_its_commit_is_refused(results_repo):
+    copy = results_repo / "A-summary.tsv"
+    copy.write_text(copy.read_text() + copy.read_text().splitlines()[1].replace("r1-F1", "r2-F1") + "\n")
+    with pytest.raises(ValueError, match="holdout"):
+        guard_copy(copy)
+
+
+def test_the_exemption_fails_closed_without_git(results_repo, monkeypatch):
+    def no_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(provenance.subprocess, "run", no_git)
+    with pytest.raises(ValueError, match="holdout"):
+        guard_copy(results_repo / "A-summary.tsv")
+
+
 def test_write_starts_the_file_with_its_header_and_appends_one_row_per_command(tmp_path):
     found = provenance.resolve("A", str(PLAN))
     provenance.write(tmp_path, "escalate", found)

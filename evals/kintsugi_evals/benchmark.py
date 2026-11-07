@@ -16,20 +16,21 @@ import re
 from pathlib import PurePath
 
 from .cli import _pct, _points
+from .provenance import HEADER as PROVENANCE_COLUMNS
 from .scoring import is_count
 
 FILES = ("inputs.tsv", "scores.tsv", "paired.tsv", "report.txt")
-# Read when present: a result scored before the policy's columns (policy-gate T3) has none and renders as before.
-OPTIONAL = ("policy.tsv",)
-# Read when present, in a score or a verdict directory: the holdout read's record (ADR-015).
-OPTIONAL = OPTIONAL + ("provenance.tsv",)
+# Read when present: policy.tsv, since a result scored before the policy's columns (policy-gate T3) has none and
+# renders as before; provenance.tsv, in a score or a verdict directory, the holdout read's record (ADR-015).
+OPTIONAL = ("policy.tsv", "provenance.tsv")
 VERDICT_FILES = ("verdict.tsv", "verdict.txt")
 SPECIAL = ("pooled", "healthy")
 SEED = re.compile(r"\(seed (\d+), (\d+) resamples\)")
 VERDICT_SEED = re.compile(r"seed (\d+), (\d+) resamples")
 VERDICT_COLUMNS = ("kind", "name", "hypothesis", "statistic", "side", "margin", "cases", "estimate", "ci_low",
                    "ci_high", "p", "holm_p", "decision", "reading")
-PROVENANCE_COLUMNS = ("command", "holdout", "plan", "plan_sha256", "git_commit", "written_utc")
+# H1's reading as verdict writes it: "rules are enough", or "-" when its 95% upper bound is not below +5 pts.
+H1_READINGS = {"rules are enough": "yes", "-": "no"}
 
 
 def parse_tsv(text):
@@ -167,10 +168,11 @@ def _verdict(directory, files):
     for h in hypotheses:
         names = h["statistic"].removeprefix("max of ").split()
         lines.append(_row([h["name"], ", ".join(names), h["p"], h["holm_p"], h["decision"]]))
-    for h in hypotheses:
-        if h["name"] == "H1" and h["reading"]:
-            enough = "yes" if h["reading"] == "rules are enough" else "no"
-            lines += ["", f"H1 rules are enough: {enough} (H1's 95% upper bound below +5 pts)."]
+    h1 = [h for h in hypotheses if h["name"] == "H1"]
+    if len(h1) != 1 or h1[0]["reading"] not in H1_READINGS:
+        raise BenchmarkError(f"{directory}/verdict.tsv: H1 needs one hypothesis row whose reading is "
+                             f"'rules are enough' or '-'")
+    lines += ["", f"H1 rules are enough: {H1_READINGS[h1[0]['reading']]} (H1's 95% upper bound below +5 pts)."]
     header = ["Condition", "Statistic", "Margin", "Cases", "Estimate", "95% CI", "One-sided p (unadjusted)",
               "At 0.025"]
     lines += ["", _row(header), _row(["---"] * len(header))]
@@ -181,9 +183,10 @@ def _verdict(directory, files):
         lines.append(_row([name, c["statistic"], f"{side} {_show(name, c['margin'])}", c["cases"],
                            _show(name, c["estimate"]), interval, c["p"], c["decision"]]))
     seed = VERDICT_SEED.search(files["verdict.txt"])
-    if seed:
-        lines += ["", f"Bootstrap: seed {seed.group(1)}, {seed.group(2)} resamples; alpha 0.025 one-sided, Holm over "
-                      "H1–H3 (ADR-031)."]
+    if not seed:
+        raise BenchmarkError(f"{directory}/verdict.txt: no 'seed N, M resamples' to render the bootstrap from")
+    lines += ["", f"Bootstrap: seed {seed.group(1)}, {seed.group(2)} resamples; alpha 0.025 one-sided, Holm over "
+                  "H1–H3 (ADR-031)."]
     return lines
 
 

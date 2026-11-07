@@ -744,7 +744,7 @@ def test_check_only_counts_cases_per_fault_and_reports_header_anomalies(tmp_path
         ("missing_column", "logs.csv:level", 1),
         ("bad_inject_time", "-", 1),
         ("root_cause_outside_topology", "-", 1),
-        ("unknown_metric_prefix", "ts-mystery-service", 1),
+        ("unknown_metric_prefix", "1 distinct", 1),
     ])
 
 
@@ -754,6 +754,8 @@ def test_check_only_names_no_case_and_no_root_cause(tmp_path):
     result = convert.check(tmp_path, "re2-tt", 1, allow_holdout="TT", topology=topology)
     text = repr(result)
     assert "ts-gone-service" not in text and "_cpu" not in text and "_delay" not in text
+    # An unknown metric prefix could name a root cause, so only their count is reported.
+    assert "ts-mystery-service" not in text and "mystery" not in text
 
 
 def test_check_only_reads_only_headers_and_writes_nothing(tmp_path, monkeypatch):
@@ -824,6 +826,8 @@ def test_the_cli_check_only_prints_counts_and_no_case(tmp_path, capsys):
     assert "4 cases" in printed and "cpu 1" in printed and "loss 1" in printed
     assert "missing_column\tlogs.csv:level\t1" in printed
     assert "ts-gone-service" not in printed and "_cpu" not in printed
+    assert "mystery" not in printed
+    assert "anomaly\tunknown_metric_prefix\t1 distinct\t1" in printed
     with pytest.raises(SystemExit, match="--out"):
         main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1", "--allow-holdout",
               "TT", "--topology", str(topology), "--check-only", "--out", str(tmp_path / "out")])

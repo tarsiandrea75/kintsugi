@@ -65,18 +65,27 @@ for input in "$@"; do
   fi
 done
 
+# awk reads an operand like name=value as an assignment and - as stdin, so each relative input goes to awk as ./name,
+# and stdin is empty. Messages name each input as given, from MERGE_NAMES, one per line in order: every input has a
+# header line, so each one starts a file in awk.
+operands=()
+for input in "$@"; do
+  if [[ "$input" == /* ]]; then operands+=("$input"); else operands+=("./$input"); fi
+done
+names=$(printf '%s\n' "$@")
 # Every row once, in input order; the first repeated row or an input with no rows fails the merge. awk runs END
 # after an exit too, so END checks the last input only when nothing failed before.
 tmp=$(mktemp "$out_dir/.merge-summaries.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
-if ! problem=$(awk '
+if ! problem=$(MERGE_NAMES=$names awk '
   function refuse(message) { print message; failed = 1; exit 1 }
+  BEGIN { split(ENVIRON["MERGE_NAMES"], names, "\n") }
   FNR == 1 { if (NR > 1 && !rows) refuse(previous " holds no rows")
-             rows = 0; previous = FILENAME; if (NR == 1) print > out; next }
-  $0 in first { refuse(FILENAME " line " FNR " repeats " first[$0] " byte for byte: the same sample merged twice") }
-  { first[$0] = FILENAME " line " FNR; rows++; print > out }
+             name = names[++file]; rows = 0; previous = name; if (NR == 1) print > out; next }
+  $0 in first { refuse(name " line " FNR " repeats " first[$0] " byte for byte: the same sample merged twice") }
+  { first[$0] = name " line " FNR; rows++; print > out }
   END { if (!failed && !rows) refuse(previous " holds no rows") }
-' out="$tmp" "$@"); then
+' out="$tmp" "${operands[@]}" </dev/null); then
   fail "$problem"
 fi
 mv "$tmp" "$out"

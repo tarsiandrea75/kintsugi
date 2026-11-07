@@ -1,5 +1,7 @@
 """Tests of `python -m kintsugi_evals benchmark` (openspec/specs/evals REQ-10)."""
 
+import pytest
+
 from kintsugi_evals.cli import main
 
 SCORES = """config	fault	n	correct	abstained	ac1	wilson_low	wilson_high	coverage	selective	false_alarms	false_alarm_rate	fa_wilson_low	fa_wilson_high
@@ -227,8 +229,28 @@ def test_benchmark_refuses_a_verdict_tsv_without_a_column(tmp_path, monkeypatch,
     monkeypatch.chdir(tmp_path)
     broken = "\n".join(line.rsplit("\t", 1)[0] for line in VERDICT.splitlines()) + "\n"
     verdict_dir(tmp_path, "v", verdict=broken)
+    (tmp_path / "b.md").write_text("as before\n")
     assert main(["benchmark", "--out", "b.md", "results/v"]) == 2
-    assert "verdict.tsv" in capsys.readouterr().err and "reading" not in (tmp_path / "b.md").name
+    assert "results/v/verdict.tsv: a row lacks the column reading" in capsys.readouterr().err
+    assert (tmp_path / "b.md").read_text() == "as before\n"
+
+
+@pytest.mark.parametrize("reading", ["", "maybe"])
+def test_benchmark_refuses_an_h1_without_a_known_reading(reading, tmp_path, monkeypatch, capsys):
+    # H1's reading is "rules are enough" or "-" (verdict writes one or the other); anything else is not rendered as "no".
+    monkeypatch.chdir(tmp_path)
+    verdict_dir(tmp_path, "v", verdict=VERDICT.replace("\tholds\t-\n", f"\tholds\t{reading}\n"))
+    assert main(["benchmark", "--out", "b.md", "results/v"]) == 2
+    assert "H1" in capsys.readouterr().err
+    assert not (tmp_path / "b.md").exists()
+
+
+def test_benchmark_refuses_a_verdict_txt_without_its_seed(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (verdict_dir(tmp_path, "v") / "verdict.txt").write_text("H1-H3 verdict (ADR-031)\n")
+    assert main(["benchmark", "--out", "b.md", "results/v"]) == 2
+    err = capsys.readouterr().err
+    assert "results/v/verdict.txt" in err and "seed" in err
     assert not (tmp_path / "b.md").exists()
 
 
