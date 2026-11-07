@@ -1101,4 +1101,79 @@ expect "a manifest without the split column is refused" \
   "$KEY_DIR/replay-6-columns/recordings.tsv does not start with the header fault, mode, route, truth, file,\
  incident, split, case; nothing written"$'\n'"exit 2"
 
+# merge-summaries.sh: one summary.tsv from several runs' summaries of one config, for score, escalate and verdict.
+merge_summaries="$REPO_DIR/infra/scripts/merge-summaries.sh"
+merge_dir="$KEY_DIR/merge"
+mkdir -p "$merge_dir/r1" "$merge_dir/r2" "$merge_dir/r3" "$merge_dir/out"
+summary_header="fault${tab}mode${tab}route${tab}sample${tab}status${tab}seconds${tab}split${tab}recording"
+printf '%s\n' "$summary_header" "F1${tab}decision${tab}cloud${tab}1${tab}COMPLETED${tab}5.1${tab}holdout${tab}case-a" \
+  "F2${tab}decision${tab}cloud${tab}1${tab}COMPLETED${tab}4.0${tab}holdout${tab}case-b" >"$merge_dir/r1/summary.tsv"
+# The same cases repeated in another --repeats 1 run: each run numbers its sample 1, so only the seconds differ.
+printf '%s\n' "$summary_header" "F1${tab}decision${tab}cloud${tab}1${tab}COMPLETED${tab}6.3${tab}holdout${tab}case-a" \
+  "F2${tab}decision${tab}cloud${tab}1${tab}COMPLETED${tab}3.9${tab}holdout${tab}case-b" >"$merge_dir/r2/summary.tsv"
+# A file whose last line has no newline still merges line by line.
+printf '%s\n%s' "$summary_header" "F3${tab}decision${tab}cloud${tab}1${tab}TIMED_OUT${tab}9.0${tab}holdout${tab}case-c" \
+  >"$merge_dir/r3/summary.tsv"
+expect "merge-summaries.sh --help prints its usage" "$("$merge_summaries" --help | head -n 1)" \
+  "Usage: infra/scripts/merge-summaries.sh OUT IN IN..."
+expect "three runs merge into one header and their five rows, in input order" \
+  "$("$merge_summaries" "$merge_dir/out/D.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/r2/summary.tsv" \
+    "$merge_dir/r3/summary.tsv"; echo "exit $?")" \
+  "merged 5 rows from 3 files into $merge_dir/out/D.tsv
+exit 0"
+expect "the merged file is the header, then each input's rows" "$(cat "$merge_dir/out/D.tsv")" \
+  "$(cat "$merge_dir/r1/summary.tsv"; tail -n +2 "$merge_dir/r2/summary.tsv"; tail -n +2 "$merge_dir/r3/summary.tsv")"
+expect "the merged file ends with a newline" "$(tail -c 1 "$merge_dir/out/D.tsv" | od -An -c | tr -d ' ')" '\n'
+expect "an existing OUT is refused and kept" \
+  "$("$merge_summaries" "$merge_dir/out/D.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/r2/summary.tsv" 2>&1; \
+    echo "exit $?"; wc -l <"$merge_dir/out/D.tsv")" \
+  "merge-summaries: $merge_dir/out/D.tsv exists: merge-summaries never overwrites; nothing written
+exit 1
+6"
+expect "one input is a usage error" \
+  "$("$merge_summaries" "$merge_dir/out/one.tsv" "$merge_dir/r1/summary.tsv" >/dev/null 2>&1; echo "exit $?"; \
+    [[ -e "$merge_dir/out/one.tsv" ]] && echo written || echo none)" "exit 2
+none"
+mkdir -p "$merge_dir/other"
+printf '%s\n' "${summary_header}${tab}level" "F1${tab}decision${tab}cloud${tab}1${tab}COMPLETED${tab}5.1${tab}holdout${tab}case-a${tab}L3" \
+  >"$merge_dir/other/summary.tsv"
+expect "inputs with different headers are refused" \
+  "$("$merge_summaries" "$merge_dir/out/h.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/other/summary.tsv" 2>&1; \
+    echo "exit $?"; [[ -e "$merge_dir/out/h.tsv" ]] && echo written || echo none)" \
+  "merge-summaries: $merge_dir/other/summary.tsv has another header than $merge_dir/r1/summary.tsv; nothing written
+exit 1
+none"
+expect "the same input twice is refused" \
+  "$("$merge_summaries" "$merge_dir/out/t.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/r1/../r1/summary.tsv" 2>&1; \
+    echo "exit $?"; [[ -e "$merge_dir/out/t.tsv" ]] && echo written || echo none)" \
+  "merge-summaries: $merge_dir/r1/../r1/summary.tsv is $merge_dir/r1/summary.tsv again; nothing written
+exit 1
+none"
+mkdir -p "$merge_dir/copy"
+cp "$merge_dir/r1/summary.tsv" "$merge_dir/copy/summary.tsv"
+expect "a row repeated byte for byte across inputs is refused, naming the files and lines, not the row" \
+  "$("$merge_summaries" "$merge_dir/out/c.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/copy/summary.tsv" 2>&1; \
+    echo "exit $?"; [[ -e "$merge_dir/out/c.tsv" ]] && echo written || echo none)" \
+  "merge-summaries: $merge_dir/copy/summary.tsv line 2 repeats $merge_dir/r1/summary.tsv line 2 byte for byte:\
+ the same sample merged twice; nothing written
+exit 1
+none"
+printf '%s\n' "$summary_header" >"$merge_dir/r1/empty.tsv"
+expect "an input with no rows is refused" \
+  "$("$merge_summaries" "$merge_dir/out/e.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/r1/empty.tsv" 2>&1; \
+    echo "exit $?")" \
+  "merge-summaries: $merge_dir/r1/empty.tsv holds no rows; nothing written
+exit 1"
+expect "a refused merge leaves no temporary file behind" "$(ls -A "$merge_dir/out")" "D.tsv"
+expect "a missing input is refused" \
+  "$("$merge_summaries" "$merge_dir/out/m.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/nowhere.tsv" 2>&1; \
+    echo "exit $?")" \
+  "merge-summaries: $merge_dir/nowhere.tsv is not a readable file; nothing written
+exit 1"
+expect "an OUT in a missing directory is refused" \
+  "$("$merge_summaries" "$merge_dir/missing/D.tsv" "$merge_dir/r1/summary.tsv" "$merge_dir/r2/summary.tsv" 2>&1; \
+    echo "exit $?")" \
+  "merge-summaries: $merge_dir/missing is not a directory; nothing written
+exit 1"
+
 echo "PASS  $cases cases"
