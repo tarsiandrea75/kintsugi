@@ -42,7 +42,7 @@ Out of scope: any holdout read; A on pseudo-cases (decided after the gate, with 
 ## Tasks
 
 - [x] T1 This document and the dev plan with its decision rule, committed before any run. Route: inline (docs only).
-- [ ] T2 Converter `--healthy` and `replay-agent.sh --faults healthy`, with tests first and docs. Route: delegated writer.
+- [x] T2 Converter `--healthy` and `replay-agent.sh --faults healthy`, with tests first and docs. Route: delegated writer.
 - [ ] T3 The dev run: convert RE2-OB rep 1 healthy, run D ×3, 0 and 0R, score, and commit the results. Route: inline.
 - [ ] T4 An ADR recording the gate's outcome. If the pseudo-cases are kept: the H2b tracks in `evals/plans/2026-11-06-h1-h3-verdicts.md`, the sample size and A's CPU cost (a human decision). Route: inline.
 
@@ -62,7 +62,8 @@ Out of scope: any holdout read; A on pseudo-cases (decided after the gate, with 
 
 - 2026-11-07: explored. 12 minutes of pre-injection data in every case; no agent change needed; the human chose the pseudo-cases with a dev gate on D.
 - 2026-11-07: T1 done. The plan `evals/plans/2026-11-07-rcaeval-healthy-dev.md` gates on D's pooled false-alarm rate of at most 1/3, committed before any run.
+- 2026-11-07: T2 done (delegated writer). RED: 6 failures and 6 errors; GREEN: pytest 547, test-lib PASS 248. A mutation check moved the end 30 s later and failed 5 tests. The fault-case output is pinned byte for byte. Dev smoke: 30 pseudo-cases, all `healthy` `NONE|NONE` `dev`, output timestamps from inject−720 s to inject−5 s. Finding: in all 30 dev pseudo-cases the 6 minutes before injection hold no WARN or ERROR log line, so the log facts are silent. That is a real property of healthy data, and it leans toward fewer false alarms (recorded for T4).
 
 ## Next step
 
-T2.
+T3.

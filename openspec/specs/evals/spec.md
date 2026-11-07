@@ -185,6 +185,8 @@ The truth, `<service>|<category>` by ADR-020's map, MUST appear only in `recordi
 
 The converter MUST write into a staging directory beside `--out` and move the files into `--out` only after the scan below passed, so a run that fails for any reason leaves no recording, manifest or report behind. After writing, the converter MUST scan every recording it wrote. A fault word (cpu, mem, disk, delay, loss, socket, whole word, case-insensitive, `_` breaking words) outside `untrustedText`, or a case directory name or a category anywhere, MUST fail the conversion and remove its recordings. Fault words inside `untrustedText`, the system's own log text, MUST be counted in `converter-report.tsv`, not fail: rewriting a log line would falsify the evidence, and the leak guarded against is the converter's own. The report also lists metric prefixes and log containers outside the topology.
 
+`--healthy` MUST write one healthy pseudo-case per chosen case instead of its fault case (vision §2; `odd/tasks/rcaeval-healthy.md`), with the same calls and rules as above except: the incident window is [inject - 6 min, inject) and the previous window [inject - 12 min, inject - 6 min), since every RCAEval case records 12 minutes before its injection; `sinceMinutes` is 6 and `startedAt` the inject time; the metric calls ask for 12 minutes, resampled to the lab's 13 s step from inject - 720 s; the `traffic_counts` previous call asks for 12 minutes until 6 minutes ago. A metric, log or trace row at or after the inject time MUST NOT enter a pseudo-case. Its `recordings.tsv` row MUST have fault `healthy` and truth `NONE|NONE`, the scorer's healthy truth, with the split and holdout refusal of its fault case. Its file stem and incident id MUST come from sha256 of `RE2-<SYS>/<case>/<N>/healthy`, so they neither collide with nor link to the fault case's. The default `--out` is `evals/out/rcaeval/<system>-rep<N>-healthy/`. The converter MUST refuse, before reading any case file, an `--out` whose `recordings.tsv` holds the other kind of case (fault cases for `--healthy`, pseudo-cases without it). `--check-only` MUST refuse `--healthy`: it checks the files every conversion reads.
+
 #### Scenario: The windows
 - Given a case whose `inject_time.txt` holds 1700000000
 - When it is converted
@@ -234,6 +236,23 @@ The converter MUST write into a staging directory beside `--out` and move the fi
 - Given a run whose second case has no `traces.csv`, or whose recording leaks a fault word
 - When the conversion fails
 - Then neither `--out` nor a staging directory exists afterwards
+
+#### Scenario: A healthy pseudo-case
+- Given a case whose `inject_time.txt` holds 1700000000
+- When it is converted with `--healthy`
+- Then `startedAt` is `2023-11-14T22:13:20Z`, `sinceMinutes` is 6, the latency points run from 1699999280 to 1699999995 every 13 s, 56 points, and the logs and traffic windows end at 1700000000
+- And its row has fault `healthy`, truth `NONE|NONE` and split `dev`, and its file and incident id differ from the fault case's
+
+#### Scenario: No fault-period data enters a pseudo-case
+- Given the fixture cases, and a copy of them with every metric, log and trace row at or after the injection deleted
+- When both are converted with `--healthy`
+- Then the recordings and manifests are byte for byte the same, and every timestamp they hold is before the injection
+
+#### Scenario: Pseudo-cases and fault cases keep apart
+- Given an `--out` that holds converted fault cases
+- When `convert-rcaeval --healthy` runs into it
+- Then it exits naming the fault cases and leaves the directory unchanged
+- And a fault conversion into a directory of pseudo-cases is refused the same way
 
 #### Scenario: The agent replays a converted recording
 - Given the recording `agent/src/test/resources/rcaeval/` holds, converted from the synthetic fixture and checked byte for byte against a fresh conversion

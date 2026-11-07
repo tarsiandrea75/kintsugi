@@ -4,6 +4,7 @@
 import csv
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -73,17 +74,19 @@ def test_the_symptom_is_the_one_fixed_sentence_of_the_system(converted):
 RESOURCE_METRICS = ("processor_usage", "memory_used", "open_files")
 
 
-def gatherer_calls(services):
-    expected = [("service_restarts", {"sinceMinutes": 10}),
-                ("traffic_counts", {"sinceMinutes": 20, "untilMinutesAgo": 10}),
-                ("traffic_counts", {"sinceMinutes": 10})]
-    expected += [("query_metric", {"metric": "latency_avg", "service": s, "sinceMinutes": 20}) for s in services]
-    expected += [("query_metric", {"metric": metric, "service": s, "sinceMinutes": 20})
+def gatherer_calls(services, since=10):
+    expected = [("service_restarts", {"sinceMinutes": since}),
+                ("traffic_counts", {"sinceMinutes": 2 * since, "untilMinutesAgo": since}),
+                ("traffic_counts", {"sinceMinutes": since})]
+    expected += [("query_metric", {"metric": "latency_avg", "service": s, "sinceMinutes": 2 * since})
+                 for s in services]
+    expected += [("query_metric", {"metric": metric, "service": s, "sinceMinutes": 2 * since})
                  for s in services for metric in RESOURCE_METRICS]
     for service in services:
         for level in ("WARN", "ERROR"):
-            expected.append(("count_logs", {"service": service, "level": level, "sinceMinutes": 10}))
-            expected.append(("search_logs", {"service": service, "level": level, "sinceMinutes": 10, "limit": 20}))
+            expected.append(("count_logs", {"service": service, "level": level, "sinceMinutes": since}))
+            expected.append(("search_logs", {"service": service, "level": level, "sinceMinutes": since,
+                                             "limit": 20}))
     return expected
 
 
@@ -825,3 +828,195 @@ def test_the_cli_check_only_prints_counts_and_no_case(tmp_path, capsys):
         main(["convert-rcaeval", "--root", str(tmp_path), "--system", "re2-tt", "--rep", "1", "--allow-holdout",
               "TT", "--topology", str(topology), "--check-only", "--out", str(tmp_path / "out")])
     assert not (tmp_path / "out").exists()
+
+
+# Healthy pseudo-cases (odd/tasks/rcaeval-healthy.md T2; vision §2: "Healthy pseudo-cases come from windows before the
+# injection"). Each case holds 12 minutes before its injection, so a pseudo-case's two windows are 6 minutes each and
+# its incident window ends at the injection.
+
+# The fault-case output on the fixture, pinned before the windows became a parameter: a pseudo-case must not change it.
+FAULT_OUTPUT_SHA256 = {
+    "1644ae3e1ded0834.json": "5a237de19d0c0fdbbe6467168ed303c12b14e81b506673a3a41fbd5394f3b422",
+    "4490c7f4fb1d2bf7.json": "0963de6cfb674cec9035519364a1e849cdf2ceef0365d0051aff522103c893c2",
+    "recordings.tsv": "459fed579fc0a4fcb33e1bdf0122a8c84d8be0a87ce4b7c3dccc07ceed9a8e48",
+    "converter-report.tsv": "2c10986329dae0024aa84598c832f28efdb86c5578792ed3abc801162273b92a",
+}
+
+
+@pytest.fixture(scope="module")
+def healthy(tmp_path_factory):
+    out = tmp_path_factory.mktemp("re2-ob-rep1-healthy")
+    summary = convert.convert(FIXTURE, "re2-ob", 1, out, healthy=True)
+    return out, summary
+
+
+def healthy_recording(out, case):
+    file = convert.blinded("RE2-OB", case, 1, healthy=True)[0] + ".json"
+    return json.loads((out / file).read_text())
+
+
+def test_the_fault_case_output_is_unchanged_byte_for_byte(converted):
+    import hashlib
+    out, _ = converted
+    assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir()} == FAULT_OUTPUT_SHA256
+
+
+def test_a_pseudo_case_starts_at_the_injection_with_six_minute_windows(healthy):
+    out, summary = healthy
+    incident = healthy_recording(out, "checkoutservice_cpu")
+    assert incident["sinceMinutes"] == 6
+    assert incident["startedAt"] == "2023-11-14T22:13:20Z"  # 1700000000 exactly
+    assert incident["symptom"] == convert.SYMPTOMS["re2-ob"]
+    assert set(incident) == {"id", "symptom", "sinceMinutes", "startedAt", "steps"}
+    assert summary.cases == 2
+
+
+def test_a_pseudo_case_holds_the_gatherers_calls_for_six_minutes(healthy):
+    out, _ = healthy
+    incident = healthy_recording(out, "checkoutservice_cpu")
+    made = [(c["tool"], c["args"]) for c in calls(incident)]
+    assert sorted(map(json.dumps, made)) == sorted(map(json.dumps, gatherer_calls(OB_SERVICES, since=6)))
+
+
+def test_a_pseudo_cases_metrics_cover_twelve_minutes_before_the_injection_at_a_13_s_step(healthy):
+    out, _ = healthy
+    incident = healthy_recording(out, "checkoutservice_cpu")
+    result = output(incident, "query_metric", metric="latency_avg", service="frontend", sinceMinutes=12)
+    (series,) = result["items"]
+    times = [t for t, _ in series["points"]]
+    # The lab's step for a 12-minute window: max(5, (720 + 58) // 59) = 13 s, from inject - 720 on.
+    assert convert.step_seconds(12) == 13
+    assert times == list(range(INJECT - 720, INJECT, 13)) and len(times) == 56
+    assert max(times) == INJECT - 5
+    for metric in RESOURCE_METRICS:
+        (series,) = output(incident, "query_metric", metric=metric, service="checkoutservice",
+                           sinceMinutes=12)["items"]
+        assert [t for t, _ in series["points"]] == times
+
+
+def test_a_pseudo_cases_traffic_windows_end_at_the_injection(tmp_path, monkeypatch):
+    seen = []
+    real = traffic.counts
+    monkeypatch.setattr(traffic, "counts", lambda path, services, windows, report:
+                        seen.append(windows) or real(path, services, windows, report))
+    convert.convert(FIXTURE, "re2-ob", 1, tmp_path / "out", cases=["checkoutservice_cpu"], healthy=True)
+    assert seen == [[(INJECT - 720, INJECT - 360), (INJECT - 360, INJECT)]]
+
+
+def test_a_pseudo_cases_logs_window_is_the_six_minutes_before_the_injection(tmp_path):
+    def adservice_warn(root):
+        out = tmp_path / f"out{len(list(tmp_path.glob('out*')))}"
+        convert.convert(root, "re2-ob", 1, out, cases=["checkoutservice_cpu"], healthy=True)
+        incident = healthy_recording(out, "checkoutservice_cpu")
+        return output(incident, "count_logs", service="adservice", level="WARN", sinceMinutes=6)["items"][0]["count"]
+
+    root = tmp_path / "root"
+    shutil.copytree(FIXTURE, root)
+    before = adservice_warn(root)
+    logs = root / "RE2-OB" / "checkoutservice_cpu" / "1" / "logs.csv"
+    lo, hi = (INJECT - 360) * 10**9, INJECT * 10**9
+    lines = [f"00:00,{t},adservice,slow,warning,,,1,slow\n" for t in (lo - 1, lo, hi - 1, hi)]
+    logs.write_text(logs.read_text() + "".join(lines))
+    # lo and hi - 1 are in [inject - 6 min, inject); lo - 1 and hi are not.
+    assert adservice_warn(root) == before + 2
+
+
+def _cut_at_injection(root):
+    """Deletes every metric, log and trace row at or after the injection from each case under `root`."""
+    for case in (root / "RE2-OB").glob("*_*/1"):
+        inject = int((case / "inject_time.txt").read_text())
+        for name, column, unit in (("simple_metrics.csv", "time", 1), ("logs.csv", "timestamp", 10**9),
+                                   ("traces.csv", "startTime", 10**6)):
+            path = case / name
+            with path.open(newline="") as handle:
+                rows = list(csv.reader(handle))
+            index = [c.strip().lower() for c in rows[0]].index(column.lower())
+            # Nanoseconds overflow a float's precision: integers are compared as integers.
+            kept = [rows[0]] + [r for r in rows[1:]
+                                if (int(r[index]) if r[index].isdigit() else float(r[index])) < inject * unit]
+            assert len(kept) < len(rows), f"{name} holds no row at or after the injection to cut"
+            with path.open("w", newline="") as handle:
+                csv.writer(handle, lineterminator="\n").writerows(kept)
+
+
+def test_no_data_at_or_after_the_injection_enters_a_pseudo_case(tmp_path, healthy):
+    out, _ = healthy
+    root = tmp_path / "root"
+    shutil.copytree(FIXTURE, root)
+    _cut_at_injection(root)
+    cut = tmp_path / "cut"
+    convert.convert(root, "re2-ob", 1, cut, healthy=True)
+    names = sorted(p.name for p in out.iterdir() if p.suffix in (".json", ".tsv") and p.name != "converter-report.tsv")
+    for name in names:
+        assert (cut / name).read_bytes() == (out / name).read_bytes(), name
+    # And every timestamp a pseudo-case answers with is before the injection.
+    for case in ("checkoutservice_cpu", "currencyservice_delay"):
+        inject = int((FIXTURE / "RE2-OB" / case / "1" / "inject_time.txt").read_text())
+        for call in calls(healthy_recording(out, case)):
+            for item in json.loads(call["output"])["items"]:
+                for t, _ in item.get("points", []):
+                    assert t < inject
+                if "timestamp" in item:
+                    stamp = datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00"))
+                    assert stamp.timestamp() < inject
+
+
+def test_a_pseudo_cases_manifest_row_is_healthy_with_no_cause(healthy):
+    out, _ = healthy
+    rows = manifest(out)
+    assert (out / "recordings.tsv").read_text().splitlines()[0] == "fault\tmode\troute\ttruth\tfile\tincident\tsplit"
+    assert [(r["fault"], r["mode"], r["route"], r["truth"], r["split"]) for r in rows] == [
+        ("healthy", "decision", "none", "NONE|NONE", "dev")] * 2
+    for row in rows:
+        assert json.loads((out / row["file"]).read_text())["id"] == row["incident"]
+
+
+def test_a_pseudo_case_is_blinded_with_its_own_salt(converted, healthy):
+    fault_out, _ = converted
+    healthy_out, _ = healthy
+    fault_rows, healthy_rows = manifest(fault_out), manifest(healthy_out)
+    assert not {r["file"] for r in fault_rows} & {r["file"] for r in healthy_rows}
+    assert not {r["incident"] for r in fault_rows} & {r["incident"] for r in healthy_rows}
+    assert convert.blinded("RE2-OB", "checkoutservice_cpu", 1, healthy=True) != convert.blinded(
+        "RE2-OB", "checkoutservice_cpu", 1)
+    assert convert.blinded("RE2-OB", "checkoutservice_cpu", 1, healthy=False) == convert.blinded(
+        "RE2-OB", "checkoutservice_cpu", 1)
+
+
+def test_a_holdout_pseudo_case_is_refused_unless_named(tmp_path):
+    with pytest.raises(convert.HoldoutRefused, match="--allow-holdout A"):
+        convert.convert(FIXTURE, "re2-ob", 2, tmp_path / "out", healthy=True)
+    assert not (tmp_path / "out").exists()
+
+
+def test_pseudo_cases_and_fault_cases_never_share_an_out_directory(tmp_path):
+    mixed = tmp_path / "mixed"
+    convert.convert(FIXTURE, "re2-ob", 1, mixed)
+    before = {p.name: p.read_bytes() for p in mixed.iterdir()}
+    with pytest.raises(ValueError, match="fault cases"):
+        convert.convert(FIXTURE, "re2-ob", 1, mixed, healthy=True)
+    assert {p.name: p.read_bytes() for p in mixed.iterdir()} == before
+    pseudo = tmp_path / "pseudo"
+    convert.convert(FIXTURE, "re2-ob", 1, pseudo, healthy=True)
+    with pytest.raises(ValueError, match="pseudo-cases"):
+        convert.convert(FIXTURE, "re2-ob", 1, pseudo)
+    # The same kind again replaces its own output.
+    convert.convert(FIXTURE, "re2-ob", 1, pseudo, healthy=True)
+    assert len(manifest(pseudo)) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["mixed", "pseudo"]
+
+
+def test_the_cli_writes_pseudo_cases_to_their_own_default_directory(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(convert, "REPO", tmp_path)
+    assert main(["convert-rcaeval", "--root", str(FIXTURE), "--system", "re2-ob", "--rep", "1", "--healthy",
+                 "--topology", str(OB_TOPOLOGY)]) == 0
+    out = tmp_path / "evals" / "out" / "rcaeval" / "re2-ob-rep1-healthy"
+    assert {r["fault"] for r in manifest(out)} == {"healthy"}
+    printed = capsys.readouterr().out
+    assert "2 healthy pseudo-cases" in printed and "checkoutservice" not in printed
+
+
+def test_the_cli_refuses_check_only_with_healthy(tmp_path):
+    with pytest.raises(SystemExit, match="--healthy"):
+        main(["convert-rcaeval", "--root", str(FIXTURE), "--system", "re2-ob", "--rep", "1", "--healthy",
+              "--check-only"])

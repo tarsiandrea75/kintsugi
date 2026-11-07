@@ -896,10 +896,26 @@ expect "dossier mode refuses the healthy class, which has no stress recording to
   "$(replay_agent --mode dossier --faults healthy; echo "exit $?")" \
   "--faults healthy applies to decision mode only: a healthy control is a holdout-2 case, with no stress recording\
  to pool"$'\n'"exit 2"
-expect "re2-ob has no healthy class" \
+# re2-* take the healthy class, the converter's pseudo-cases (convert-rcaeval --healthy; odd/tasks/rcaeval-healthy.md),
+# by name only: a directory of fault cases holds none, and the default never asks for it.
+expect "re2-ob's healthy class is refused where the converter wrote no pseudo-case" \
   "$(replay_agent_over "$REPO_DIR/agent/src/test/resources/rcaeval" --dataset re2-ob --mode decision \
-    --faults healthy; echo "exit $?")" \
-  "Unknown fault 'healthy'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"
+    --faults healthy | grep -vF '....  dataset'; echo "exit $?")" \
+  "no decision or dossier recording of healthy in split dev of $REPO_DIR/agent/src/test/resources/rcaeval/\
+recordings.tsv"$'\n'"exit 2"
+pseudo_dir="$KEY_DIR/rcaeval-healthy"
+mkdir -p "$pseudo_dir"
+printf '%s\n' "fault${tab}mode${tab}route${tab}truth${tab}file${tab}incident${tab}split" \
+  "healthy${tab}decision${tab}none${tab}NONE|NONE${tab}a.json${tab}id-a${tab}dev" \
+  "healthy${tab}decision${tab}none${tab}NONE|NONE${tab}b.json${tab}id-b${tab}dev" >"$pseudo_dir/recordings.tsv"
+expect "re2-ob replays the converter's healthy pseudo-cases by name, in decision mode" \
+  "$(replay_agent_over "$pseudo_dir" --dataset re2-ob --mode decision --faults healthy | grep -F '....  decision')" \
+  "....  decision mode, split dev, view tables, report plain: 2 recording(s) of healthy, each replayed 1 time(s): 2\
+ samples"
+expect "re2-ob's default faults leave the healthy class out" \
+  "$(replay_agent_over "$pseudo_dir" --dataset re2-ob --mode decision | grep -vF '....  dataset'; echo "exit $?")" \
+  "no decision or dossier recording of cpu, mem, disk, delay, loss, socket in split dev of\
+ $pseudo_dir/recordings.tsv"$'\n'"exit 2"
 
 # --dataset (odd/tasks/rcaeval-converter.md T5): re2-ob replays the RCAEval converter's recordings, whose faults are
 # RCAEval's, from a recordings directory that must be named, in decision mode only. The committed converter output
@@ -910,7 +926,7 @@ expect "an unknown dataset exits 2 and names the four datasets" \
   "Unknown dataset 're2-xx'; choose lab, re2-ob, re2-ss or re2-tt"$'\n'"exit 2"
 expect "re2-ss takes RCAEval's faults, not the lab's" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-ss --mode decision --faults F1; echo "exit $?")" \
-  "Unknown fault 'F1'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"
+  "Unknown fault 'F1'; choose from cpu mem disk delay loss socket healthy"$'\n'"exit 2"
 expect "re2-tt replays decision mode only" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-tt --mode dossier; echo "exit $?")" \
   "--dataset re2-tt replays decision mode only, not dossier: the converter writes one decision case per RCAEval\
@@ -920,7 +936,7 @@ expect "the lab dataset keeps the lab's faults" \
   "Unknown fault 'cpu'; choose from F1 F2 F3 healthy"$'\n'"exit 2"
 expect "re2-ob takes RCAEval's faults, not the lab's" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode decision --faults F1; echo "exit $?")" \
-  "Unknown fault 'F1'; choose from cpu mem disk delay loss socket"$'\n'"exit 2"
+  "Unknown fault 'F1'; choose from cpu mem disk delay loss socket healthy"$'\n'"exit 2"
 expect "re2-ob replays decision mode only" \
   "$(replay_agent_over "$rcaeval_dir" --dataset re2-ob --mode dossier; echo "exit $?")" \
   "--dataset re2-ob replays decision mode only, not dossier: the converter writes one decision case per RCAEval\

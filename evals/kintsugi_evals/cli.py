@@ -106,7 +106,8 @@ def _parser():
                                     "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
     rca.add_argument("--system", required=True, choices=["re2-ob", "re2-ss", "re2-tt"])
     rca.add_argument("--rep", required=True, type=int, help="the repetition, 1 to 3")
-    rca.add_argument("--out", help="the recordings directory (default: evals/out/rcaeval/<system>-rep<rep>/)")
+    rca.add_argument("--out", help="the recordings directory (default: evals/out/rcaeval/<system>-rep<rep>/, with "
+                                   "--healthy <system>-rep<rep>-healthy/)")
     rca.add_argument("--allow-holdout", metavar="NAME", help="convert holdout NAME (A: RE2-OB repetitions 2-3, "
                                                               "B: RE2-SS, TT: RE2-TT), only under its committed plan")
     rca.add_argument("--case", action="append", dest="cases", metavar="NAME",
@@ -115,6 +116,9 @@ def _parser():
     rca.add_argument("--check-only", action="store_true",
                      help="validate case discovery, file headers and inject times; print counts per fault and "
                           "anomalies, naming no case; write nothing (a holdout still needs --allow-holdout)")
+    rca.add_argument("--healthy", action="store_true",
+                     help="write one healthy pseudo-case per case instead: the 12 minutes before the injection as "
+                          "two 6-minute windows, truth NONE|NONE; never into a directory of fault cases")
     bar = commands.add_parser("baro-rcaeval", help="rank RCAEval RE2 cases with BARO into a summary.tsv")
     bar.add_argument("--root", help="the extracted dataset, holding RE2-OB/, RE2-SS/ and RE2-TT/ "
                                     "(default: $KINTSUGI_RCAEVAL_DIR, else ~/data/rcaeval)")
@@ -389,6 +393,9 @@ def convert_rcaeval(args):
 
     root = args.root or os.environ.get("KINTSUGI_RCAEVAL_DIR") or "~/data/rcaeval"
     if args.check_only:
+        if args.healthy:
+            raise SystemExit("convert-rcaeval: --check-only checks the files every conversion reads and does not "
+                             "depend on --healthy: drop --healthy")
         if args.out or args.cases:
             raise SystemExit("convert-rcaeval: --check-only checks every case and writes nothing: drop --out and --case")
         try:
@@ -398,13 +405,15 @@ def convert_rcaeval(args):
             raise SystemExit(f"convert-rcaeval: {error}") from None
         _print_check(result, convert)
         return 0
-    out = args.out or convert.REPO / "evals" / "out" / "rcaeval" / f"{args.system}-rep{args.rep}"
+    suffix = "-healthy" if args.healthy else ""
+    out = args.out or convert.REPO / "evals" / "out" / "rcaeval" / f"{args.system}-rep{args.rep}{suffix}"
     try:
         summary = convert.convert(root, args.system, args.rep, out, allow_holdout=args.allow_holdout,
-                                  cases=args.cases, topology=args.topology)
+                                  cases=args.cases, topology=args.topology, healthy=args.healthy)
     except (convert.HoldoutRefused, leakage.LeakageError, ValueError, OSError) as error:
         raise SystemExit(f"convert-rcaeval: {error}") from None
-    print(f"converted {summary.cases} cases of {convert.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
+    kind = "healthy pseudo-cases" if summary.healthy else "cases"
+    print(f"converted {summary.cases} {kind} of {convert.SYSTEM_DIRS[summary.system]} repetition {summary.rep} "
           f"(split {summary.split}) to {summary.out}; fault words in untrustedText: {summary.untrusted_hits} "
           f"(converter-report.tsv)")
     return 0

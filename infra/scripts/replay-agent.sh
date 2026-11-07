@@ -26,6 +26,8 @@ recorded tool outputs").
     --report-cap 2048 --report-timeout 1800   # another local model, thinking, with its own report cap and deadline
   REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1 infra/scripts/replay-agent.sh --dataset re2-ob --route rules \
     --mode decision   # Config 0 on the RCAEval converter's RE2-OB recordings
+  REPLAY_DIR=evals/out/rcaeval/re2-ob-rep1-healthy infra/scripts/replay-agent.sh --dataset re2-ob --route rules \
+    --mode decision --faults healthy   # Config 0 on its healthy pseudo-cases (convert-rcaeval --healthy)
 
   --dataset lab|re2-ob|re2-ss|re2-tt
                                  the recorded system (default lab); the re2-* datasets need REPLAY_DIR and
@@ -42,8 +44,9 @@ recorded tool outputs").
   --rules v1|v2                  decision, --route rules or --report hybrid: the rules version (default v1), v1
                                  Config 0 (ADR-016), v2 Config 0R (ADR-021)
   --faults F1,F2,F3              the recorded faults to replay (default: the dataset's, F1,F2,F3 for lab and
-                                 cpu,mem,disk,delay,loss,socket for re2-*); lab also takes healthy, the healthy
-                                 controls, in decision mode, and on --split holdout-2 the default adds it
+                                 cpu,mem,disk,delay,loss,socket for re2-*); lab and re2-* also take healthy, the
+                                 healthy controls, in decision mode, and on lab's --split holdout-2 the default adds
+                                 it
   --model NAME                   local: the Ollama model (default granite4.1:8b, application.yaml)
   --think on|off                 local: send Ollama's think field with this value (default: no think field)
   --report-cap N                 local: the report's answer cap, num_predict, 1 to 99999 tokens (default 512)
@@ -80,7 +83,9 @@ The class healthy (lab-realism-min T7) is the lab's healthy controls: recordings
 NONE|NONE (ADR-015). Each is a decision case like a fault's; only a COMPLETED report naming UNKNOWN|UNKNOWN is a
 MATCH, and a named cause a MISS, which the evals scorer counts as a false alarm. Only holdout-2 records them, so a
 --split holdout-2 run takes healthy by default after F1, F2 and F3, and every other split's default stays F1,F2,F3.
-Explorer and dossier mode refuse it: it has no stress recording to pool.
+Explorer and dossier mode refuse it: it has no stress recording to pool. On the re2-* datasets, healthy is the
+converter's healthy pseudo-cases (convert-rcaeval --healthy; odd/tasks/rcaeval-healthy.md), the 12 minutes before
+each injection, in their own REPLAY_DIR: only --faults healthy asks for them, never a re2-* default.
 
 --view sets kintsugi.agent.decision.view for the run (agent spec, "Decision mode"; odd/tasks/service-assessment.md):
 tables, the default, is the dossier of dossier mode, by data source; sheets writes the same facts as one sheet per
@@ -192,7 +197,9 @@ while (( $# )); do
 done
 case "$dataset" in
   lab) ALL_FAULTS=("${LAB_FAULTS[@]}" "$HEALTHY"); DEFAULT_FAULTS=("${LAB_FAULTS[@]}"); topology=$LAB_TOPOLOGY ;;
-  re2-ob|re2-ss|re2-tt) ALL_FAULTS=("${RE2_FAULTS[@]}"); DEFAULT_FAULTS=("${RE2_FAULTS[@]}")
+  # healthy: the converter's pseudo-cases (convert-rcaeval --healthy), written to a directory of their own, so they
+  # are asked for by name and never by default.
+  re2-ob|re2-ss|re2-tt) ALL_FAULTS=("${RE2_FAULTS[@]}" "$HEALTHY"); DEFAULT_FAULTS=("${RE2_FAULTS[@]}")
     topology=classpath:topology/$dataset.json ;;
   *) echo "Unknown dataset '$dataset'; choose lab, re2-ob, re2-ss or re2-tt" >&2; exit 2 ;;
 esac

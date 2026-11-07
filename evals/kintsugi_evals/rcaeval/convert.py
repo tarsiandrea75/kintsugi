@@ -23,6 +23,11 @@ Choices, with their evidence in the feature document's T3 entry:
   reads Online Boutique's gRPC names and status codes only, so TT's traffic is an empty answer, as Sock Shop's.
 - `check` (`--check-only`) validates discovery and headers without converting: it reads directory names, the first
   line of each CSV and the inject time, prints counts per fault and anomalies with no case name, and writes nothing.
+- `healthy` (`--healthy`) writes one healthy pseudo-case per case instead (vision §2; odd/tasks/rcaeval-healthy.md):
+  every case holds 12 minutes before its injection, so its windows are the 6 minutes before the injection (incident)
+  and the 6 before those (previous), `sinceMinutes` = 6, `startedAt` = the inject time, the fault `healthy` and the
+  truth `NONE|NONE`. No row at or after the inject time enters it. Its file stem and incident id are salted apart
+  from the fault case's, and fault cases and pseudo-cases never share an out directory.
 - A refused holdout reads no data file and writes nothing. A conversion writes into a staging directory beside
   `--out` and moves its files into `--out` only after the leakage scan passed; a run that fails leaves nothing.
 """
@@ -72,7 +77,10 @@ CASE_NAME = re.compile(r"^(?P<service>[a-z0-9-]+)_(?P<fault>" + "|".join(CATEGOR
 # Metric prefixes that name no application component (T2): not services, so not reported as missing ones.
 EXTRA_PREFIXES = {"frontend-external", "istio-init", "rabbitmq-exporter"}
 
-SINCE_MINUTES = 10
+SINCE_MINUTES = 10  # a fault case's windows: [inject - 10 min, inject) and [inject, inject + 10 min)
+HEALTHY_SINCE_MINUTES = 6  # a pseudo-case's: [inject - 12 min, inject - 6 min) and [inject - 6 min, inject)
+HEALTHY_FAULT = "healthy"
+HEALTHY_TRUTH = "NONE|NONE"  # ReplayDriver.HEALTHY_TRUTH, the scorer's (ADR-015)
 LOG_LEVELS = ("WARN", "ERROR")
 LOG_LINES = 20  # DossierGatherer.LOG_LINES, the cap McpLabTools applies to search_logs
 MAX_LINE_LENGTH = 1000  # mcp-tools ObservabilityTools.MAX_LINE_LENGTH
@@ -99,7 +107,7 @@ def step_seconds(since_minutes):
 
 
 LATENCY_WINDOW_SECONDS = 2 * SINCE_MINUTES * 60  # query_metric is asked for both windows at once, every metric
-LATENCY_STEP_SECONDS = step_seconds(2 * SINCE_MINUTES)
+LATENCY_STEP_SECONDS = step_seconds(2 * SINCE_MINUTES)  # a fault case's; a pseudo-case's derive from its minutes
 
 _LEVEL_COLUMN = {"warn": "WARN", "warning": "WARN", "error": "ERROR", "err": "ERROR", "fatal": "ERROR",
                  "critical": "ERROR", "crit": "ERROR", "severe": "ERROR", "panic": "ERROR"}
@@ -121,6 +129,7 @@ class Summary:
     out: Path
     cases: int
     untrusted_hits: int
+    healthy: bool = False
 
 
 def split_of(system, rep, allow_holdout):
@@ -152,9 +161,11 @@ def discover(system_dir, rep, cases=None):
     return [(name, path) for name, path in found if name in cases]
 
 
-def blinded(system_dir_name, case, rep):
-    """The recording's file stem and incident id: both from sha256 of `<RE2-SYS>/<case>/<rep>`."""
-    digest = hashlib.sha256(f"{system_dir_name}/{case}/{rep}".encode()).digest()
+def blinded(system_dir_name, case, rep, healthy=False):
+    """The recording's file stem and incident id: both from sha256 of `<RE2-SYS>/<case>/<rep>`, with `/healthy`
+    appended for a pseudo-case, so that its names neither collide with nor link to the fault case's."""
+    salt = f"{system_dir_name}/{case}/{rep}" + ("/healthy" if healthy else "")
+    digest = hashlib.sha256(salt.encode()).digest()
     return digest.hex()[:16], str(uuid.UUID(bytes=digest[:16], version=4))
 
 
@@ -202,10 +213,12 @@ def _finite(text):
     return value if math.isfinite(value) else None
 
 
-def _metrics(case_dir, services, end, report):
-    """The `query_metric` items per metric of `SERIES` and per service: one series, or none without its column."""
-    start = end - LATENCY_WINDOW_SECONDS
-    count = LATENCY_WINDOW_SECONDS // LATENCY_STEP_SECONDS + 1
+def _metrics(case_dir, services, end, since_minutes, report):
+    """The `query_metric` items per metric of `SERIES` and per service over both windows, `2 * since_minutes` up to
+    `end`: one series, or none without its column."""
+    window, step = 2 * since_minutes * 60, step_seconds(2 * since_minutes)
+    start = end - window
+    count = window // step + 1
     with (case_dir / "simple_metrics.csv").open(newline="", encoding="utf-8") as handle:
         reader = csv.reader(handle)
         header = [name.strip().lower() for name in next(reader)]
@@ -220,7 +233,7 @@ def _metrics(case_dir, services, end, report):
         for row in reader:
             time = int(float(row[time_column]))
             # Point k sits at start + k * step and holds the rows in (its time - step, its time].
-            k = -(-(time - start) // LATENCY_STEP_SECONDS)
+            k = -(-(time - start) // step)
             if not 0 <= k < count:
                 continue
             for (metric, service), column in columns.items():
@@ -236,15 +249,15 @@ def _metrics(case_dir, services, end, report):
             points = []
             for k in range(count):
                 values = buckets[(metric, service)].get(k)
-                points.append([start + k * LATENCY_STEP_SECONDS,
+                points.append([start + k * step,
                                repr(sum(values) / len(values)) if values else "NaN"])
             items[metric][service] = [{"labels": {"service": service, **labels}, "points": points}]
     return items
 
 
-def _logs(case_dir, services, inject, report):
-    """The WARN and ERROR lines per service in the incident window [inject, inject + 10 min), file order."""
-    lo, hi = inject * 10**9, (inject + SINCE_MINUTES * 60) * 10**9
+def _logs(case_dir, services, since, end, report):
+    """The WARN and ERROR lines per service in the incident window [since, end) of epoch seconds, file order."""
+    lo, hi = since * 10**9, end * 10**9
     lines = defaultdict(list)
     unknown = Counter()
     with (case_dir / "logs.csv").open(newline="", encoding="utf-8", errors="replace") as handle:
@@ -281,45 +294,50 @@ def _call(tool, args, output):
     return {"tool": tool, "args": args, "outcome": "OK", "output": output}
 
 
-def convert_case(case_dir, system, case, rep, services):
-    """The incident document, the manifest row (without the split) and the report rows of one case directory."""
+def convert_case(case_dir, system, case, rep, services, healthy=False):
+    """The incident document, the manifest row (without the split) and the report rows of one case directory: its
+    fault case, or with `healthy` its pseudo-case, whose windows end at the inject time."""
     service, fault = CASE_NAME.match(case).group("service", "fault")
     truth_service = normalize(service)
     if truth_service not in services:
         raise ValueError(f"{case}: the root-cause service {truth_service} is not in the topology")
     inject = int((case_dir / "inject_time.txt").read_text(encoding="utf-8").strip())
-    end = inject + SINCE_MINUTES * 60
+    minutes = HEALTHY_SINCE_MINUTES if healthy else SINCE_MINUTES
+    # The incident window [since, end): from the injection on for a fault case, up to it for a pseudo-case.
+    since = inject - minutes * 60 if healthy else inject
+    end = since + minutes * 60
     report = []
-    metrics = _metrics(case_dir, services, end, report)
-    logs = _logs(case_dir, services, inject, report)
+    metrics = _metrics(case_dir, services, end, minutes, report)
+    logs = _logs(case_dir, services, since, end, report)
     previous, current = [], []
     if system in TRACED_SYSTEMS:
-        # The gatherer's previous window [inject - 10 min, inject) and incident window [inject, inject + 10 min).
-        windows = [(inject - SINCE_MINUTES * 60, inject), (inject, end)]
+        # The gatherer's previous window [since - minutes, since) and incident window [since, end).
+        windows = [(since - minutes * 60, since), (since, end)]
         previous, current = traffic.counts(case_dir / "traces.csv", services, windows, report)
-    incident_args = {"sinceMinutes": SINCE_MINUTES}
+    incident_args = {"sinceMinutes": minutes}
     calls = [_call("service_restarts", dict(incident_args), _result([])),
-             _call("traffic_counts", {"sinceMinutes": 2 * SINCE_MINUTES, "untilMinutesAgo": SINCE_MINUTES},
+             _call("traffic_counts", {"sinceMinutes": 2 * minutes, "untilMinutesAgo": minutes},
                    traffic.check_size(_result(previous))),
              _call("traffic_counts", dict(incident_args), traffic.check_size(_result(current)))]
     for s in services:
         calls.append(_call("query_metric", {"metric": LATENCY_METRIC, "service": s,
-                                            "sinceMinutes": 2 * SINCE_MINUTES}, _result(metrics[LATENCY_METRIC][s])))
+                                            "sinceMinutes": 2 * minutes}, _result(metrics[LATENCY_METRIC][s])))
     for s in services:
         for metric in RESOURCE_COLUMNS:
-            calls.append(_call("query_metric", {"metric": metric, "service": s, "sinceMinutes": 2 * SINCE_MINUTES},
+            calls.append(_call("query_metric", {"metric": metric, "service": s, "sinceMinutes": 2 * minutes},
                                _result(metrics[metric][s])))
     for s in services:
         for level in LOG_LEVELS:
             found = logs.get((s, level), [])
-            args = {"service": s, "level": level, "sinceMinutes": SINCE_MINUTES}
+            args = {"service": s, "level": level, "sinceMinutes": minutes}
             calls.append(_call("count_logs", args, _result([{"service": s, "count": len(found)}])))
             calls.append(_call("search_logs", {**args, "limit": LOG_LINES}, _search(s, level, found)))
-    stem, incident_id = blinded(SYSTEM_DIRS[system], case, rep)
-    incident = {"id": incident_id, "symptom": SYMPTOMS[system], "sinceMinutes": SINCE_MINUTES,
+    stem, incident_id = blinded(SYSTEM_DIRS[system], case, rep, healthy)
+    incident = {"id": incident_id, "symptom": SYMPTOMS[system], "sinceMinutes": minutes,
                 "startedAt": instant_text(end * 10**9),
                 "steps": [{"stepNo": 1, "kind": "DOSSIER", "phase": "DOSSIER", "toolOutput": _compact(calls)}]}
-    row = [fault, "decision", "none", f"{truth_service}|{CATEGORIES[fault]}", f"{stem}.json", incident_id]
+    label, truth = (HEALTHY_FAULT, HEALTHY_TRUTH) if healthy else (fault, f"{truth_service}|{CATEGORIES[fault]}")
+    row = [label, "decision", "none", truth, f"{stem}.json", incident_id]
     return incident, row, report
 
 
@@ -335,12 +353,28 @@ def _services(system, topology):
     return json.loads(topology.read_text(encoding="utf-8"))["services"]
 
 
-def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=None):
+def _refuse_other_kind(out, healthy):
+    """Refuses `out` when its `recordings.tsv` holds the other kind of case: fault cases and pseudo-cases never share
+    a directory, so a run cannot replace one's manifest and leave the other's recordings behind."""
+    manifest = Path(out) / "recordings.tsv"
+    if not manifest.is_file():
+        return
+    with manifest.open(newline="", encoding="utf-8") as handle:
+        faults = {row.get("fault") for row in csv.DictReader(handle, delimiter="\t")}
+    other = faults - {HEALTHY_FAULT} if healthy else faults & {HEALTHY_FAULT}
+    if other:
+        held, wanted = ("fault cases", "pseudo-cases") if healthy else ("healthy pseudo-cases", "fault cases")
+        raise ValueError(f"{out} already holds {held}: write the {wanted} to another --out")
+
+
+def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=None, healthy=False):
     """Converts repetition `rep` of `system` under `root` into `out`: one recording per case, `recordings.tsv` and
-    `converter-report.tsv`. Refuses a holdout before reading anything. Everything is written to a staging directory
-    beside `out` and moved into `out` only after the leakage scan passed, so a leak or any other failure leaves no
-    file behind; other files already in `out` are kept."""
+    `converter-report.tsv`; with `healthy`, one healthy pseudo-case per case instead. Refuses a holdout before reading
+    anything, and an `out` that holds the other kind of case. Everything is written to a staging directory beside
+    `out` and moved into `out` only after the leakage scan passed, so a leak or any other failure leaves no file
+    behind; other files already in `out` are kept."""
     split = split_of(system, rep, allow_holdout)
+    _refuse_other_kind(out, healthy)
     system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
     services = _services(system, topology)
     chosen = discover(system_dir, rep, cases)
@@ -351,7 +385,7 @@ def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=Non
     out.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{out.name}.", suffix=".partial", dir=out.parent))
     try:
-        summary = _convert_into(staging, chosen, system, rep, split, services, case_names)
+        summary = _convert_into(staging, chosen, system, rep, split, services, case_names, healthy)
         out.mkdir(exist_ok=True)
         for path in sorted(staging.iterdir()):
             os.replace(path, out / path.name)
@@ -361,11 +395,11 @@ def convert(root, system, rep, out, allow_holdout=None, cases=None, topology=Non
     return summary
 
 
-def _convert_into(out, chosen, system, rep, split, services, case_names):
+def _convert_into(out, chosen, system, rep, split, services, case_names, healthy):
     """Writes the recordings, the manifest and the report of `chosen` into `out`; raises on a leak."""
     rows, report, written = [], [], []
     for case, case_dir in chosen:
-        incident, row, case_report = convert_case(case_dir, system, case, rep, services)
+        incident, row, case_report = convert_case(case_dir, system, case, rep, services, healthy)
         path = out / row[4]
         path.write_text(json.dumps(incident, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
         written.append(path)
@@ -381,7 +415,7 @@ def _convert_into(out, chosen, system, rep, split, services, case_names):
             hits += n
     _write_tsv(out / "recordings.tsv", ["fault", "mode", "route", "truth", "file", "incident", "split"], rows)
     _write_tsv(out / "converter-report.tsv", ["file", "kind", "detail", "count"], report)
-    return Summary(system, rep, split, out, len(rows), hits)
+    return Summary(system, rep, split, out, len(rows), hits, healthy)
 
 
 # The columns `convert_case` reads from each file; traces only for `TRACED_SYSTEMS`.
