@@ -348,8 +348,12 @@ def tt_case(root, case, rep, jumps, columns=TT_COLUMNS):
     return case_dir(root, ["time", *columns], rows, name=f"RE2-TT/{case}/{rep}")
 
 
+TT_FLAG = ["--allow-holdout", "TT"]
+
+
 def run_tt(root, out):
-    assert main(["baro-rcaeval", "--root", str(root), "--system", "re2-tt", "--rep", "all", "--out", str(out)]) == 0
+    assert main(["baro-rcaeval", "--root", str(root), "--system", "re2-tt", "--rep", "all", "--out", str(out),
+                 *TT_FLAG]) == 0
     return out
 
 
@@ -420,7 +424,7 @@ def test_a_case_that_fails_in_any_repetition_writes_nothing(tt_tree, tmp_path):
     (tt_tree / "RE2-TT" / "ts-order-service_delay" / "3" / "inject_time.txt").unlink()
     out = tmp_path / "out"
     with pytest.raises(SystemExit, match="inject_time"):
-        main(["baro-rcaeval", "--root", str(tt_tree), "--system", "re2-tt", "--rep", "all", "--out", str(out)])
+        main(["baro-rcaeval", "--root", str(tt_tree), "--system", "re2-tt", "--rep", "all", "--out", str(out), *TT_FLAG])
     assert not out.exists()
 
 
@@ -438,14 +442,37 @@ def test_rep_all_only_on_re2_tt_and_re2_tt_only_whole(system, rep, message, tmp_
     monkeypatch.setattr(Path, "open", lambda self, *a, **k: opened.append(self) or real_open(self, *a, **k))
     out = tmp_path / "refused"
     with pytest.raises(SystemExit, match=message):
-        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", system, "--rep", rep, "--out", str(out)])
+        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", system, "--rep", rep, "--out", str(out),
+              *(TT_FLAG if system == "re2-tt" else [])])
     assert not out.exists()
     assert not [path for path in opened if "RE2" in str(path)]
 
 
+@pytest.mark.parametrize("rep", ["all", "1"])
+def test_re2_tt_needs_allow_holdout_tt_before_anything_is_read(rep, tt_tree, tmp_path, monkeypatch):
+    # ADR-032 Decision 1: RE2-TT is holdout TT whole, read only behind --allow-holdout TT, as the converter reads it.
+    opened = []
+    real_open = Path.open
+    monkeypatch.setattr(Path, "open", lambda self, *a, **k: opened.append(self) or real_open(self, *a, **k))
+    out = tmp_path / "refused"
+    with pytest.raises(SystemExit, match="--allow-holdout TT"):
+        main(["baro-rcaeval", "--root", str(tt_tree), "--system", "re2-tt", "--rep", rep, "--out", str(out)])
+    assert not out.exists()
+    assert not [path for path in opened if "RE2" in str(path)]
+
+
+@pytest.mark.parametrize("system, rep", [("re2-ob", "1"), ("re2-ob", "2"), ("re2-ss", "1")])
+def test_allow_holdout_tt_opens_no_other_system(system, rep, tmp_path):
+    out = tmp_path / "refused"
+    with pytest.raises(SystemExit, match="--allow-holdout TT"):
+        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", system, "--rep", rep, "--out", str(out), *TT_FLAG])
+    assert not out.exists()
+
+
 def test_a_rep_that_is_neither_a_number_nor_all_is_refused(tmp_path, capsys):
     with pytest.raises(SystemExit):
-        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", "re2-tt", "--rep", "some", "--out", str(tmp_path / "out")])
+        main(["baro-rcaeval", "--root", str(RCAEVAL), "--system", "re2-tt", "--rep", "some", "--out", str(tmp_path / "out"),
+              *TT_FLAG])
     assert "--rep" in capsys.readouterr().err
 
 

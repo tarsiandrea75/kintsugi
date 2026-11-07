@@ -80,4 +80,6 @@ python3 -m kintsugi_evals score --service-only \
   --out results/2026-11-03-baro-re2tt-reproduction
 ```
 
+Amendment (2026-11-07): since ADR-032 RE2-TT is holdout TT, and `baro-rcaeval --system re2-tt` refuses to run without `--allow-holdout TT`. The run above predates it; re-running it today adds `--allow-holdout TT` to the `baro-rcaeval` line, and nothing else changes. `check-freeze.sh` exempts this plan's result directory, and only it, from its holdout TT check.
+
 Then copy `conformance.tsv` and `services.json` into the result's `inputs/`.

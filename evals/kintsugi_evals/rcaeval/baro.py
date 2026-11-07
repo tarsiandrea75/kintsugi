@@ -192,10 +192,18 @@ def rank_case(case_dir):
     return rank(header, rows, inject)
 
 
-def split_of(system, rep):
+def split_of(system, rep, allow_holdout=None):
     """`dev`, `reference`, or a refusal. BARO reads RE2-OB repetition 1 and the whole of RE2-TT, and nothing else until a
-    committed plan names it (ADR-024)."""
+    committed plan names it (ADR-024). RE2-TT is holdout TT since ADR-032, so it is read only when `allow_holdout` is
+    `TT`, and `TT` opens no other system."""
+    tt = convert.HOLDOUTS[REFERENCE_SYSTEM]
+    if allow_holdout is not None and (allow_holdout != tt or system != REFERENCE_SYSTEM):
+        raise convert.HoldoutRefused(f"baro-rcaeval takes only --allow-holdout {tt}, and only with --system "
+                                     f"{REFERENCE_SYSTEM}")
     if system == REFERENCE_SYSTEM:
+        if allow_holdout != tt:
+            raise convert.HoldoutRefused(f"{SYSTEM_DIRS[system]} is holdout {tt} (ADR-032), read only under a committed "
+                                         f"plan: pass --allow-holdout {tt} to read it")
         if rep != ALL_REPETITIONS:
             raise ValueError(f"{SYSTEM_DIRS[system]} is read whole, as upstream pools it: pass --rep {ALL_REPETITIONS}")
         return REFERENCE_SPLIT
@@ -242,11 +250,11 @@ def _summary_row(case, rep, services, system, split):
     return [values.get(column, "-") for column in SUMMARY_COLUMNS]
 
 
-def run(root, system, rep, out):
+def run(root, system, rep, out, allow_holdout=None):
     """Ranks repetition `rep` of `system` under `root`, or every repetition with ALL_REPETITIONS, into `out/summary.tsv`,
     and writes the services ranked over the run to `out/services.json`, the topology `score --topology` asks for. Refuses
     a holdout before reading anything; a case that cannot be ranked fails the run and nothing is written."""
-    split = split_of(system, rep)
+    split = split_of(system, rep, allow_holdout)
     system_dir = Path(root).expanduser() / SYSTEM_DIRS[system]
     if rep == ALL_REPETITIONS:
         chosen = every_repetition(system_dir)

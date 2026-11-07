@@ -427,6 +427,38 @@ out=$(run_check --repo "$repo")
 expect_line "a manifest HEAD does not hold fails condition 4 in one line" "$out" \
   "FAIL  results: cannot read agent/src/test/resources/replay/recordings.tsv at HEAD, so no lab holdout row can be found"
 
+# Condition 4 finds holdout TT (RE2-TT, ADR-032) rows by recording id, and exempts them only in BARO's reproduction.
+repo="$WORK/holdout-tt"
+make_repo "$repo" 2026-12-02T10:00:00Z
+tt=$(blinded RE2-TT ts-auth-service_cpu 2)
+baro=evals/results/2026-11-03-baro-re2tt-reproduction
+mkdir -p "$repo/evals/results/tt-read/inputs" "$repo/$baro/inputs"
+printf '%s\ncpu\tts-auth-service|RESOURCE_EXHAUSTION\tts-auth-service|UNKNOWN\treference\t%s\n' \
+  "$summary_header" "$tt" >"$repo/evals/results/tt-read/inputs/D-summary.tsv"
+cp "$repo/evals/results/tt-read/inputs/D-summary.tsv" "$repo/$baro/inputs/BARO-summary.tsv"
+commit_at "$repo" 2026-11-03T10:00:00Z "BARO on RE2-TT, and a TT read elsewhere"
+commit=$(git -C "$repo" rev-parse --short HEAD)
+out=$(run_check --repo "$repo")
+expect_line "an RE2-TT row before M4 fails condition 4" "$out" \
+  "FAIL  results: evals/results/tt-read/inputs/D-summary.tsv at $commit (2026-11-03): 1 row(s) of RCAEval holdout TT (RE2-TT repetition 2), first $tt"
+expect_no_line "an RE2-TT row in BARO's committed reproduction is exempt (ADR-032)" "$out" "FAIL  results: $baro/"
+git -C "$repo" rm -q -r evals/results/tt-read
+printf '%s\ncpu\tcheckoutservice|RESOURCE_EXHAUSTION\tcheckoutservice|RESOURCE_EXHAUSTION\tholdout\t%s\n' \
+  "$summary_header" "$rep2" >>"$repo/$baro/inputs/BARO-summary.tsv"
+commit_at "$repo" 2026-11-04T10:00:00Z "an RE2-OB repetition 2 row in BARO's reproduction"
+commit=$(git -C "$repo" rev-parse --short HEAD)
+out=$(run_check --repo "$repo")
+expect_line "the exemption covers only RE2-TT rows: an RE2-OB repetition 2 row in BARO's reproduction fails" "$out" \
+  "FAIL  results: $baro/inputs/BARO-summary.tsv at $commit (2026-11-04): 1 row(s) of RCAEval holdout A (RE2-OB repetition 2), first $rep2"
+mkdir -p "$repo/${baro}-copy"
+printf '%s\ncpu\tts-auth-service|RESOURCE_EXHAUSTION\tts-auth-service|UNKNOWN\treference\t%s\n' \
+  "$summary_header" "$tt" >"$repo/${baro}-copy/BARO-summary.tsv"
+commit_at "$repo" 2026-11-05T10:00:00Z "a TT read in a directory that shares the exempt prefix"
+commit=$(git -C "$repo" rev-parse --short HEAD)
+out=$(run_check --repo "$repo")
+expect_line "the exemption covers exactly one directory, not a name that starts like it" "$out" \
+  "FAIL  results: ${baro}-copy/BARO-summary.tsv at $commit (2026-11-05): 1 row(s) of RCAEval holdout TT (RE2-TT repetition 2), first $tt"
+
 # Options.
 out=$(run_check --m4-date 2026-13-01)
 expect_line "a wrong --m4-date exits 2" "$out" "exit 2"

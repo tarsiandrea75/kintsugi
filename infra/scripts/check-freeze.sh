@@ -43,12 +43,15 @@ the file or commit, then a RESULT line:
    commit time and than the schedule's first commit. All are read at HEAD. Commit times are written by the committer,
    so this proves the order of the history as written, not that it was written honestly (ADR-026, amendment).
 4. results: no .tsv under evals/results/, in any commit of HEAD's history before the M4 date, holds a row of lab
-   holdout-2 or of an RCAEval holdout: holdout A (RE2-OB repetitions 2-3) or holdout B (RE2-SS). A row is found by
-   its split (holdout-2; holdout on a recording that is not one of the manifest's holdout-1 files at HEAD), by its
+   holdout-2 or of an RCAEval holdout: holdout A (RE2-OB repetitions 2-3), holdout B (RE2-SS) or holdout TT (RE2-TT,
+   ADR-032). A row is found by its split (holdout-2; holdout on a recording that is not one of the manifest's
+   holdout-1 files at HEAD), by its
    recording (or its file's name with no .json) being one of the manifest's holdout-2 files at HEAD, or by its
    recording id, recomputed from the row's fault and truth as the converter blinds it. Every table with a recording,
    file or split column is read, split column or not. Lab holdout-1 rows (split holdout on one of the manifest's
-   holdout-1 files) are allowed: they were read once in M2 by plan.
+   holdout-1 files) are allowed: they were read once in M2 by plan. RE2-TT rows under
+   evals/results/2026-11-03-baro-re2tt-reproduction/ are allowed: BARO's reproduction read them before ADR-032 made
+   RE2-TT a holdout.
 Exits 0 only when all four hold, 1 when one fails, 2 on a wrong argument or an older python3. Read-only: it never
 writes to the repository. Needs git and python3 3.11 or later.
 EOF
@@ -350,6 +353,14 @@ recordings = manifest_recordings()
 holdout2_recordings, holdout1_recordings = recordings.get(holdout2, set()), recordings.get("holdout", set())
 
 
+# RE2-TT is holdout TT whole (ADR-032 Decision 1), every repetition.
+TT_PREFIX = "RCAEval holdout TT ("
+# 2026-11-07, ADR-032 (Consequences: "TT has been seen"): BARO's reproduction on RE2-TT (ADR-024) was committed on
+# 2026-11-03, before RE2-TT became holdout TT. Its TT rows, in exactly this directory, are not a holdout read. Any other
+# holdout row in it still fails, and no other path is exempt.
+TT_EXEMPT_DIR = "evals/results/2026-11-03-baro-re2tt-reproduction/"
+
+
 def blinded(system, service, fault, rep):
     """The converter's recording id of RCAEval case <service>_<fault> repetition rep
     (evals/kintsugi_evals/rcaeval/convert.py blinded)."""
@@ -370,6 +381,8 @@ def rcaeval_holdout(row):
         for rep in (1, 2, 3):
             if blinded("RE2-SS", name, fault, rep) == recording:
                 return "RCAEval holdout B (RE2-SS repetition %d)" % rep
+            if blinded("RE2-TT", name, fault, rep) == recording:
+                return TT_PREFIX + "RE2-TT repetition %d)" % rep
     return None
 
 
@@ -412,6 +425,8 @@ for short, day, path in versions:
         if not row.get("recording") and row.get("file"):
             row["recording"] = stem(row["file"])
         holdout = holdout_of(row)
+        if holdout and holdout.startswith(TT_PREFIX) and path.startswith(TT_EXEMPT_DIR):
+            continue
         if holdout:
             found.setdefault(holdout, []).append(row.get("recording") or "?")
     for holdout, recordings in found.items():
