@@ -4,7 +4,7 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Updated
 
-2026-11-06 (session 01)
+2026-11-07 (session 01, begun on 2026-11-06)
 
 ## Milestone
 
@@ -16,7 +16,30 @@ Overwritten at the end of every session. History lives in `docs/journal/`.
 
 ## Last action
 
-Latest (journal `docs/journal/2026-11-06-01.md`): `main` fast-forwarded to every chain (it had stayed at `49d55bd`), then three fixes before the freeze, each merged into `main` (now `758f46a`):
+Latest (journal `docs/journal/2026-11-07-01.md`): four features before the freeze, each fast-forwarded into `main` (now `3b3ce01`):
+- **config-c** (ADR-030):
+  - C escalates from A to D on no answer, abstention, a level below `k` or a confidence below `t`, and `(k, t)` is set on dev by a stated rule.
+  - RE2-OB dev selected `k = L2, t = off`: 11/30 escalated, C 22/30 against D 26/30. No grid rule met both H3 conditions on dev.
+- **m4-plans** (ADR-031, ADR-032, ADR-033):
+  - the H1–H3 verdict procedure;
+  - RE2-TT as holdout TT for 0, 0R and D, so D covers 315 cases;
+  - holdout-2 runs 0, 0R, A and D;
+  - holdout B and TT are never cut;
+  - TT's topology drops the seat→travel back edges;
+  - five pre-registered plans.
+- **rcaeval-healthy** (ADR-034):
+  - healthy pseudo-cases from the 12 pre-injection minutes, as two 6-minute windows;
+  - the dev gate kept them: D gave 9/90 false alarms;
+  - H2b has 165 healthy cases, and H2c excludes the pseudo-cases.
+- **m4-gaps:**
+  - `merge-summaries.sh`;
+  - `provenance.tsv`, with holdout reads refused without `--holdout` and `--plan`;
+  - `benchmark` renders the verdicts;
+  - check-freeze covers TT;
+  - `baro-rcaeval` guards TT.
+- **A regression from config-c** broke `LevelRecheckTest`, because only `ReplayDriverTest` had been run. Fixed in `ba093be`; the full agent suite now runs per task.
+
+Before that (journal `docs/journal/2026-11-06-01.md`): `main` fast-forwarded to every chain (it had stayed at `49d55bd`), then three fixes before the freeze, each merged into `main` (now `758f46a`):
 - **repeated-service-first** (`odd/tasks/repeated-service-first.md`, ADR-025 amended, post hoc): an alternative that repeats a service, the cause's included, is dropped and its first occurrence kept, as the scorer already ranks. The three lab F2 `INVALID_REPORT`s (DS r7, DK r3 and r9) all named the right cause.
 - **assessed decoy test:** an assessed report naming NETWORK or CODE_DEFECT is valid (the decoy-categories follow-up).
 - **holdout2-guards** (`odd/tasks/holdout2-guards.md`): the scorer's policy check counts `holdout-2` rows; `check-freeze.sh` condition 4 finds holdout-2 and holdout-1 rows by the manifest, and fails when the manifest cannot be read; `record-replay.sh` refuses a schedule run into `holdout`, `stress` or `probe`.
@@ -136,6 +159,8 @@ Each chain starts from the tip of the previous one. The backup bundle is in `C:\
 
 ## Open questions
 
+- H3 is already in tension on dev: no rule of ADR-030's grid kept C within 5 points of D under the 50% cap. The procedure was kept as pre-registered, and the holdouts decide.
+- RCAEval pseudo-cases are easier than a busy healthy window: their pre-injection logs hold no WARN or ERROR lines (ADR-034). The H2b false-alarm level is not comparable with the lab's.
 - L3's `no-changed-callee` check (2026-11-05) is post hoc on RE2-OB dev, and a cause whose direct callees also slowed cannot reach L3 (`delay/0ed36a9e`). Only a later measurement on unseen cases tests it.
 - Order/payment reconciliation: a future feature, planned with the fault injector. Under F1, payment-service still stores an AUTHORIZED payment after order-service has timed out (observed).
 - Datasource socket timeout. Without one, a database that stops responding keeps the count refresh busy until TCP gives up. The gauges still show NaN after 10 s. A socket timeout would apply to every query, including F4's slow queries.
