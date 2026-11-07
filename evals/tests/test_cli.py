@@ -182,6 +182,19 @@ def test_score_reports_configs_without_a_shared_case(tmp_path, capsys):
     assert "share no fault case" in str(error.code)
 
 
+def test_score_reports_healthy_only_configs_without_a_paired_test(tmp_path, capsys):
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    write_tsv(first / "summary.tsv", [("healthy", "COMPLETED", "NONE|NONE", "UNKNOWN|UNKNOWN", "r1-healthy")])
+    write_tsv(second / "summary.tsv", [("healthy", "COMPLETED", "NONE|NONE", "svc|CPU", "r1-healthy")])
+    main(["score", "--label", "0", str(first), "--label", "D", str(second), "--out", str(tmp_path / "out")])
+    out = capsys.readouterr().out
+    assert "share no fault case" not in out
+    assert (tmp_path / "out" / "scores.tsv").exists()
+    assert len((tmp_path / "out" / "paired.tsv").read_text().splitlines()) <= 1
+
+
 def test_score_rejects_iterations_below_one_at_parse_time(tmp_path, capsys):
     local, _ = two_runs(tmp_path)
     error = error_of(["score", str(local), "--iterations", "0"], capsys)

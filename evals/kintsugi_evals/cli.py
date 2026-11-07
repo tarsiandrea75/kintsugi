@@ -300,6 +300,20 @@ def _write_ranked(out, ranked, services):
                 "services", *(f"chance_ac{k}" for k in RANKED_CUTS), "chance_avg5"], rows)
 
 
+def _paired_unless_healthy_only(first, second, args):
+    """The paired AC@1 test, or None when the configs share cases but every shared case is healthy.
+
+    A healthy-only run (RCAEval pseudo-cases, ADR-034) has no fault case to pair; configs sharing no case at all
+    are still refused, since that means two different case sets.
+    """
+    try:
+        return paired(first, second, seed=args.seed, iterations=args.iterations)
+    except ValueError:
+        if {r.case for r in first} & {r.case for r in second}:
+            return None
+        raise
+
+
 def _check_names(inputs):
     """Two inputs with one label, or one copy name, would merge or overwrite each other."""
     labels, copies = {}, {}
@@ -337,8 +351,8 @@ def _score(args):
     scores = [summarize(rows)[0] if len({r.config for r in rows}) == 1 else None for _, _, rows in inputs]
     if any(s is None for s in scores):
         raise SystemExit("an unlabelled summary.tsv mixes configs; label it with --label")
-    pairs = [paired(inputs[i][2], inputs[j][2], seed=args.seed, iterations=args.iterations)
-             for i in range(len(inputs)) for j in range(i + 1, len(inputs))]
+    pairs = [p for i in range(len(inputs)) for j in range(i + 1, len(inputs))
+             if (p := _paired_unless_healthy_only(inputs[i][2], inputs[j][2], args)) is not None]
     tested = [i for i, p in enumerate(pairs) if p.mcnemar_p is not None]
     holm_p = [None] * len(pairs)
     for i, adjusted in zip(tested, holm([pairs[i].mcnemar_p for i in tested])):
